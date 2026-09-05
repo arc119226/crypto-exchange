@@ -30,3 +30,16 @@ go.work.sum
 # Editor/IDE
 # .idea/
 # .vscode/
+
+# Project
+secrets/
+bin/
+dist/
+web/trade/node_modules/
+web/trade/dist/
+deploy/compose/artifacts/
+infra/contracts/out/
+infra/contracts/cache/
+infra/contracts/broadcast/
+coverage.out
+infra/contracts/artifacts/

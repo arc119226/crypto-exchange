@@ -1,0 +1,18 @@
+# gitleaks (CI lint job): default rules plus allowlists for material that is
+# public by design. Real secrets live in .env and secrets/ (both gitignored).
+title = "crypto-exchange"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Public anvil dev key, fixture addresses, Solidity sources"
+paths = [
+  '''^\.env\.example$''',
+  '''^test/fixtures/.*\.json$''',
+  '''^infra/contracts/.*''',
+]
+regexes = [
+  # anvil account #0 private key — published in Foundry's own documentation
+  '''ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80''',
+]

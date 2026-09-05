@@ -1,0 +1,13 @@
+# oapi-codegen config for the public API server (chi + strict server + models).
+# Regenerate with `make gen`; the output is committed and checked by `make gen-check`.
+package: gen
+output: internal/api/gen/api.gen.go
+generate:
+  chi-server: true
+  strict-server: true
+  models: true
+output-options:
+  skip-prune: true
+  name-normalizer: ToCamelCaseWithInitialisms
+compatibility:
+  always-prefix-enum-values: true
