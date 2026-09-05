@@ -6,7 +6,7 @@
 |---|---|
 | 版本 | v1.0(取代 v0.1;v0.1 自本文件生效日起作廢) |
 | 日期 | 2026-09-05 |
-| 狀態 | 定案,可執行;每完成一個 Phase 回頭修訂並升版(v1.1、v1.2 …) |
+| 狀態 | 定案,可執行;每完成一個 Phase 回頭修訂並升版(v1.1、v1.2 …)。勘誤:2026-09-05 §6.1.4(e)/§6.4.2 提現 `cancel_nonce` 路徑的分錄(`docs/domain.md` E1) |
 | Repo | `github.com/arc119226/crypto-exchange`(目前僅 `README.md` 與 Go 範本 `.gitignore`) |
 | 本文件位置 | `docs/plan-v1.0.md`;重大決策另以 `docs/adr/NNNN-*.md` 記錄 |
 | 語言約定 | 設計文件繁體中文;程式碼、註解、commit、API 文件、事件名、表名一律英文 |
@@ -301,7 +301,8 @@ B 收到 ETH → 手續費 0.4 × 20 bps = 0.0008 ETH;S 收到 USDC → 手續�
 | `approved → funds_locked` | debit `user:B:available:ETH` X / credit `user:B:hold:ETH` X(Hold) |
 | `signed → broadcast` | debit `user:B:hold:ETH` X / credit `pending_withdrawal:ETH` X |
 | `broadcast → confirmed` | debit `pending_withdrawal:ETH` X / credit `custody:hot:ETH` X;另一 entry:debit `gas_expense:ETH` G / credit `custody:hot:ETH` G |
-| `→ failed`(廣播失敗且確認 nonce 未上鏈) | debit `user:B:hold:ETH` X / credit `user:B:available:ETH` X(Release) |
+| `→ failed(broadcast)`(自 `signed`:廣播失敗且確認 nonce 未上鏈) | debit `user:B:hold:ETH` X / credit `user:B:available:ETH` X(Release;資金仍在 hold) |
+| `→ failed(replaced)`(自 `broadcast`:重送耗盡後以 `cancel_nonce` 取代) | debit `pending_withdrawal:ETH` X / credit `user:B:available:ETH` X(資金已在 `pending_withdrawal`);取代交易 gas:debit `gas_expense:ETH` G′ / credit `custody:hot:ETH` G′ |
 | `→ failed`(receipt.status = 0) | gas 分錄照記;X 留在 `pending_withdrawal`,由後台 `resolve` 決定:`refund` = debit `pending_withdrawal` X / credit `user:B:available` X;`retry` = debit `pending_withdrawal` X / credit `user:B:hold` X(回到 `funds_locked`,重新分配 nonce 與簽名) |
 | `rejected` / `policy_check` 拒絕 | 無分錄(尚未鎖資金) |
 
@@ -403,7 +404,7 @@ ERC-20 提現:資產分錄同上(asset = USDC),gas 分錄永遠是 ETH。
 | `signed` | `chain` worker | `broadcast` | `eth_sendRawTransaction`;記 `tx_hash`;分錄 hold → pending_withdrawal;若節點回「nonce too low / already known」則查鏈上是否已有該 tx |
 | `broadcast` | `chain` tracker | `confirmed` / `failed(on_chain)` | 輪詢 receipt;`confirmations ≥ N` 且 `status = 1` → confirmed(分錄 6.1.4 e);`status = 0` → failed(on_chain),gas 入帳,資金留 pending_withdrawal 進人工處置 |
 | `broadcast` | `chain` tracker | `broadcast`(重送) | 超過 `REPLACE_AFTER`(anvil 60 s、Sepolia 3 min)未上鏈,同 nonce 費用 +≥10% 重送,最多 `MAX_REPLACEMENTS` 次後告警轉人工(狀態仍為 `broadcast`,等待 admin `resolve`) |
-| `broadcast`(重送耗盡) | admin `resolve(action=cancel_nonce)` / `resolve(action=bump)` | `failed(broadcast)` / `broadcast` | `cancel_nonce`:以同 nonce 送 0 ETH 自轉(`to = hot`)取代,確認後 Release;`bump`:允許再重送一輪 |
+| `broadcast`(重送耗盡) | admin `resolve(action=cancel_nonce)` / `resolve(action=bump)` | `failed(replaced)` / `broadcast` | `cancel_nonce`:以同 nonce 送 0 ETH 自轉(`to = hot`)取代;取代交易確認後 debit `pending_withdrawal` X / credit `user:available` X(資金此時在 `pending_withdrawal`,**不是** hold,所以不是 `Release`;取代交易的 gas 記 `gas_expense`);`bump`:允許再重送一輪。勘誤 2026-09-05,見 `docs/domain.md` E1 |
 | `signed`(重啟時) | `chain` worker | `broadcast` | 已簽未廣播 → 重播 raw tx(冪等,同 nonce) |
 | `funds_locked` / `signed` | 廣播確定失敗且 `eth_getTransactionCount(hot, latest) ≤ nonce` | `failed(broadcast)` | Release;並由 `NonceManager` **回收 nonce**:若 `nonce == next_nonce − 1` 則 `next_nonce := nonce`;否則以同 nonce 送一筆 0 ETH 自轉(`to = hot`,gas 記 `gas_expense`,寫 `chain.nonce_fills`)填補缺口,填補 tx 走與提現相同的追蹤/重送流程。沒有這步,一次廣播失敗就會讓後續所有提現卡在 `broadcast` |
 
