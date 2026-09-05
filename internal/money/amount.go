@@ -132,6 +132,22 @@ func (a Amount) RoundDown(scale int32) Amount { return Amount{d: a.d.RoundFloor(
 // Truncate rounds towards zero to the given number of fractional digits.
 func (a Amount) Truncate(scale int32) Amount { return Amount{d: a.d.Truncate(scale)} }
 
+// DivRoundDown returns a/b truncated toward zero to scale decimal places
+// (0 <= scale <= 18). It never rounds away from zero, so converting a quote
+// budget into a base quantity (market buys) can never over-buy, and dividing
+// by a step with scale 0 yields the whole number of steps. It returns
+// ErrDivisionByZero when b is zero.
+func (a Amount) DivRoundDown(b Amount, scale int32) (Amount, error) {
+	if b.IsZero() {
+		return Amount{}, ErrDivisionByZero
+	}
+	if scale < 0 || scale > MaxScale {
+		return Amount{}, fmt.Errorf("%w: scale %d out of range", ErrPrecision, scale)
+	}
+	q, _ := a.d.QuoRem(b.d, scale)
+	return Amount{d: q}, nil
+}
+
 // IsMultipleOf reports whether a is an integer multiple of step. A step that
 // is not strictly positive yields false.
 func (a Amount) IsMultipleOf(step Amount) bool {

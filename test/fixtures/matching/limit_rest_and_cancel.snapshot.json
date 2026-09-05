@@ -1,0 +1,44 @@
+{
+  "symbol": "ETH-USDC",
+  "last_seq": 7,
+  "bids": [
+    {
+      "order_id": "B2",
+      "account_id": "B",
+      "side": "buy",
+      "price": "1999",
+      "qty": "0.25",
+      "remaining": "0.25",
+      "filled_qty": "0",
+      "filled_quote": "0",
+      "seq": 3,
+      "ts": "2026-09-05T00:00:03Z"
+    },
+    {
+      "order_id": "B3",
+      "account_id": "C",
+      "side": "buy",
+      "price": "1998.5",
+      "qty": "1",
+      "remaining": "1",
+      "filled_qty": "0",
+      "filled_quote": "0",
+      "seq": 4,
+      "ts": "2026-09-05T00:00:04Z"
+    }
+  ],
+  "asks": [
+    {
+      "order_id": "S1",
+      "account_id": "S",
+      "side": "sell",
+      "price": "2001",
+      "qty": "0.5",
+      "remaining": "0.5",
+      "filled_qty": "0",
+      "filled_quote": "0",
+      "seq": 2,
+      "ts": "2026-09-05T00:00:02Z"
+    }
+  ]
+}

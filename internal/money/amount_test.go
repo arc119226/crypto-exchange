@@ -220,3 +220,34 @@ func TestAsset(t *testing.T) {
 	assert.True(t, usdc.Fits(MustParse("0.796123")))
 	assert.True(t, eth.Fits(v))
 }
+
+func TestDivRoundDown(t *testing.T) {
+	cases := []struct {
+		a, b  string
+		scale int32
+		want  string
+	}{
+		{"1000", "1990", 4, "0.5025"},          // 0.50251... floors, never rounds up
+		{"403", "1995", 4, "0.2020"},           // 0.202005...
+		{"403", "1995", 0, "0"},                // whole steps
+		{"0.5025", "0.0001", 0, "5025"},        // count of steps
+		{"1990", "10000", 18, "0.199"},         // exact division keeps exact value
+		{"796", "0.4", 2, "1990"},              // exact
+		{"7", "3", 3, "2.333"},                 // truncation, not rounding (2.3333...)
+		{"-7", "3", 3, "-2.333"},               // toward zero for negatives
+		{"1", "3", 18, "0.333333333333333333"}, // max scale
+		{"0", "5", 6, "0"},
+	}
+	for _, c := range cases {
+		got, err := MustParse(c.a).DivRoundDown(MustParse(c.b), c.scale)
+		require.NoError(t, err, "%s/%s", c.a, c.b)
+		assert.True(t, got.Equal(MustParse(c.want)), "%s/%s @%d = %s, want %s", c.a, c.b, c.scale, got, c.want)
+		assert.LessOrEqual(t, got.Scale(), c.scale)
+	}
+	_, err := MustParse("1").DivRoundDown(Zero, 2)
+	assert.ErrorIs(t, err, ErrDivisionByZero)
+	_, err = MustParse("1").DivRoundDown(MustParse("3"), 19)
+	assert.ErrorIs(t, err, ErrPrecision)
+	_, err = MustParse("1").DivRoundDown(MustParse("3"), -1)
+	assert.ErrorIs(t, err, ErrPrecision)
+}

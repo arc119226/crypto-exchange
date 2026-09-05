@@ -1,0 +1,8 @@
+{"kind":"accepted","data":{"seq":1,"order_id":"S1","account_id":"S1","side":"sell","type":"limit","time_in_force":"gtc","price":"1990","qty":"0.3","quote_qty":"0"}}
+{"kind":"accepted","data":{"seq":2,"order_id":"S2","account_id":"S2","side":"sell","type":"limit","time_in_force":"gtc","price":"1995","qty":"0.5","quote_qty":"0"}}
+{"kind":"accepted","data":{"seq":3,"order_id":"B","account_id":"B","side":"buy","type":"market","time_in_force":"ioc","price":"0","qty":"0","quote_qty":"1000"}}
+{"kind":"trade","data":{"seq":3,"index":0,"maker_order_id":"S1","taker_order_id":"B","maker_account_id":"S1","taker_account_id":"B","taker_side":"buy","price":"1990","qty":"0.3","quote_qty":"597","maker_remaining":"0"}}
+{"kind":"filled","data":{"seq":3,"order_id":"S1","account_id":"S1","filled_qty":"0.3","filled_quote":"597"}}
+{"kind":"trade","data":{"seq":3,"index":1,"maker_order_id":"S2","taker_order_id":"B","maker_account_id":"S2","taker_account_id":"B","taker_side":"buy","price":"1995","qty":"0.202","quote_qty":"402.99","maker_remaining":"0.298"}}
+{"kind":"updated","data":{"seq":3,"order_id":"S2","account_id":"S2","filled_qty":"0.202","filled_quote":"402.99","remaining_qty":"0.298"}}
+{"kind":"cancelled","data":{"seq":3,"order_id":"B","account_id":"B","reason":"ioc","filled_qty":"0.502","filled_quote":"999.99","remaining_qty":"0","remaining_quote":"0.01"}}

@@ -1,0 +1,7 @@
+{"kind":"accepted","data":{"seq":1,"order_id":"B1","account_id":"B","side":"buy","type":"limit","time_in_force":"gtc","price":"1999","qty":"0.5","quote_qty":"0"}}
+{"kind":"accepted","data":{"seq":2,"order_id":"S1","account_id":"S","side":"sell","type":"limit","time_in_force":"gtc","price":"2001","qty":"0.5","quote_qty":"0"}}
+{"kind":"accepted","data":{"seq":3,"order_id":"B2","account_id":"B","side":"buy","type":"limit","time_in_force":"gtc","price":"1999","qty":"0.25","quote_qty":"0"}}
+{"kind":"accepted","data":{"seq":4,"order_id":"B3","account_id":"C","side":"buy","type":"limit","time_in_force":"gtc","price":"1998.5","qty":"1","quote_qty":"0"}}
+{"kind":"cancelled","data":{"seq":5,"order_id":"B1","account_id":"B","reason":"user","filled_qty":"0","filled_quote":"0","remaining_qty":"0.5","remaining_quote":"0"}}
+{"kind":"cancel_rejected","data":{"seq":6,"order_id":"NOPE","reason":"unknown_order"}}
+{"kind":"cancel_rejected","data":{"seq":7,"order_id":"S1","reason":"not_owner"}}
