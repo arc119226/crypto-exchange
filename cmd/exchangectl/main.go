@@ -1,6 +1,7 @@
 // Command exchangectl is the operator/developer CLI: demo flows, E2E checks,
-// replay and load generation against a running exchange. Phase 0 provides
-// the skeleton; API-backed commands arrive with the OpenAPI client batch.
+// replay and load generation against a running exchange. It talks to the
+// public API only, through the generated client in internal/apiclient, so it
+// doubles as a living example of how customers integrate.
 package main
 
 import (
@@ -26,6 +27,7 @@ func newRootCmd() *cobra.Command {
 	}
 	root.PersistentFlags().String("base-url", envOr("EXCHANGE_API_URL", "http://localhost:8080"), "public API base URL")
 	root.PersistentFlags().String("output", "table", "output format: table|json")
+	root.AddCommand(newMarketsCmd(), newAssetsCmd())
 	root.AddCommand(&cobra.Command{
 		Use:   "version",
 		Short: "Print build information",

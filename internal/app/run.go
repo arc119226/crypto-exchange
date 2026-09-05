@@ -17,6 +17,7 @@ import (
 	"github.com/arc119226/crypto-exchange/internal/platform/natsx"
 	"github.com/arc119226/crypto-exchange/internal/platform/pg"
 	"github.com/arc119226/crypto-exchange/internal/platform/redisx"
+	"github.com/arc119226/crypto-exchange/internal/registry"
 	"github.com/arc119226/crypto-exchange/internal/telemetry"
 )
 
@@ -61,7 +62,7 @@ func Run(ctx context.Context, cfg Config, roles []Role, bi BuildInfo) error {
 	for _, role := range roles {
 		switch role {
 		case RoleAPI:
-			servers = append(servers, newAPIServer(cfg, log, httpMetrics, d))
+			servers = append(servers, newAPIServer(cfg, log, httpMetrics, registry.NewStore(d.pool)))
 		default:
 			log.Info("role not implemented yet, serving ops endpoints only", slog.String("role", string(role)))
 		}

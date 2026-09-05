@@ -1,0 +1,12 @@
+# oapi-codegen config for the Go client used by exchangectl (client + models).
+# Regenerate with `make gen`; the output is committed and checked by `make gen-check`.
+package: apiclient
+output: cmd/exchangectl/internal/apiclient/client.gen.go
+generate:
+  client: true
+  models: true
+output-options:
+  skip-prune: true
+  name-normalizer: ToCamelCaseWithInitialisms
+compatibility:
+  always-prefix-enum-values: true

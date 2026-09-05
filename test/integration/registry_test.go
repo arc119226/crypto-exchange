@@ -5,20 +5,29 @@ package integration
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
+	"io"
+	"log/slog"
 	"math/big"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/arc119226/crypto-exchange/internal/api"
+	"github.com/arc119226/crypto-exchange/internal/api/gen"
 	"github.com/arc119226/crypto-exchange/internal/app"
 	"github.com/arc119226/crypto-exchange/internal/money"
 	"github.com/arc119226/crypto-exchange/internal/platform/pg"
 	"github.com/arc119226/crypto-exchange/internal/registry"
+	"github.com/arc119226/crypto-exchange/internal/telemetry"
 )
 
 const fixtures = "../fixtures/addresses.dev.json"
@@ -102,6 +111,58 @@ func TestMigrateSeedAndRegistry(t *testing.T) {
 	var pgErr *pgconn.PgError
 	require.ErrorAs(t, err, &pgErr)
 	assert.Equal(t, "42501", pgErr.Code, "insufficient_privilege expected")
+
+	// the walking skeleton end to end: HTTP → OpenAPI handler → registry (ex_api) → Postgres
+	router := chi.NewRouter()
+	router.Use(telemetry.CorrelationMiddleware(slog.New(slog.NewTextHandler(io.Discard, nil))))
+	api.Mount(router, api.NewHandler(store, "default"))
+	srv := httptest.NewServer(router)
+	defer srv.Close()
+
+	resp, body := httpGet(t, srv.URL+"/v1/markets", "")
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	assert.Equal(t, "application/json", resp.Header.Get("Content-Type"))
+	assert.Contains(t, string(body), `"price_tick":"0.01"`, "Phase 0 DoD: amounts are JSON strings")
+	var list gen.MarketList
+	require.NoError(t, json.Unmarshal(body, &list))
+	require.Len(t, list.Markets, 1)
+	assert.Equal(t, "ETH-USDC", list.Markets[0].Symbol)
+	assert.Equal(t, "ETH", list.Markets[0].BaseAsset)
+	assert.Equal(t, "USDC", list.Markets[0].QuoteAsset)
+	assert.Equal(t, int32(20), list.Markets[0].TakerBps)
+
+	resp, body = httpGet(t, srv.URL+"/v1/assets", "")
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	var assetList gen.AssetList
+	require.NoError(t, json.Unmarshal(body, &assetList))
+	require.Len(t, assetList.Assets, 2)
+	assert.Nil(t, assetList.Assets[0].ContractAddress)
+	require.NotNil(t, assetList.Assets[1].ContractAddress)
+
+	resp, body = httpGet(t, srv.URL+"/v1/markets/NOPE-USDC", "it-corr-42")
+	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
+	assert.Equal(t, api.ProblemContentType, resp.Header.Get("Content-Type"))
+	assert.Equal(t, "it-corr-42", resp.Header.Get(telemetry.RequestIDHeader))
+	var problem gen.Problem
+	require.NoError(t, json.Unmarshal(body, &problem))
+	assert.Equal(t, "it-corr-42", problem.CorrelationID)
+	assert.Equal(t, http.StatusNotFound, problem.Status)
+	assert.Equal(t, "/v1/markets/NOPE-USDC", problem.Instance)
+}
+
+func httpGet(t *testing.T, url, requestID string) (*http.Response, []byte) {
+	t.Helper()
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, url, nil)
+	require.NoError(t, err)
+	if requestID != "" {
+		req.Header.Set(telemetry.RequestIDHeader, requestID)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	body, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	require.NoError(t, resp.Body.Close())
+	return resp, body
 }
 
 func TestNumericRoundTripAgainstPostgres(t *testing.T) {

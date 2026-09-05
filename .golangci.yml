@@ -147,3 +147,9 @@ formatters:
     goimports:
       local-prefixes:
         - github.com/arc119226/crypto-exchange
+  exclusions:
+    generated: lax
+    paths:
+      - internal/api/gen
+      - internal/registry/sqlcgen
+      - cmd/exchangectl/internal/apiclient

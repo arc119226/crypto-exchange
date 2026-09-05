@@ -1,0 +1,305 @@
+openapi: 3.0.3
+info:
+  title: Exchange Public API
+  version: 1.0.0-phase0
+  description: |
+    Public REST API of the white-label exchange engine (docs/plan-v1.0.md §7.4).
+
+    Conventions
+    - Every monetary value is a decimal **string** (`Amount`); JSON numbers are
+      rejected. Precision per asset is given by `Asset.scale`.
+    - Errors are RFC 7807 `application/problem+json` documents and carry the
+      request's `correlation_id`.
+    - Clients may send `X-Request-Id`; the server echoes it (or generates one)
+      and uses it as the correlation id in logs and problem responses.
+    - Additive changes never bump the version; breaking changes go to `/v2`.
+  contact:
+    name: crypto-exchange
+    url: https://github.com/arc119226/crypto-exchange
+servers:
+  - url: http://localhost:8080
+    description: Local development (`make up-single`)
+tags:
+  - name: registry
+    description: Listed assets and markets (read-only; edited via the admin API)
+
+paths:
+  /v1/assets:
+    get:
+      tags: [registry]
+      operationId: listAssets
+      summary: List assets
+      description: Returns every listed asset, ordered by symbol.
+      responses:
+        "200":
+          description: Asset list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AssetList"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /v1/markets:
+    get:
+      tags: [registry]
+      operationId: listMarkets
+      summary: List markets
+      description: Returns every market that is not delisted, ordered by symbol.
+      responses:
+        "200":
+          description: Market list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MarketList"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /v1/markets/{symbol}:
+    get:
+      tags: [registry]
+      operationId: getMarket
+      summary: Get one market by symbol
+      parameters:
+        - $ref: "#/components/parameters/MarketSymbol"
+      responses:
+        "200":
+          description: Market
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Market"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+components:
+  parameters:
+    MarketSymbol:
+      name: symbol
+      in: path
+      required: true
+      description: Market symbol in `BASE-QUOTE` form, e.g. `ETH-USDC`. Case-sensitive.
+      schema:
+        type: string
+        pattern: '^[A-Z0-9]{2,16}-[A-Z0-9]{2,16}$'
+        example: ETH-USDC
+
+  responses:
+    NotFound:
+      description: The resource does not exist
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+    InternalError:
+      description: Unexpected server error; retry with the same `X-Request-Id` and quote the `correlation_id` when reporting
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+
+  schemas:
+    Amount:
+      type: string
+      description: |
+        Arbitrary-precision decimal serialized as a string, at most 18 integer
+        and 18 fractional digits (Postgres NUMERIC(36,18)). Never a JSON number.
+      pattern: '^-?[0-9]+(\.[0-9]+)?$'
+      example: "1990.00"
+      x-go-type: money.Amount
+      x-go-type-import:
+        path: github.com/arc119226/crypto-exchange/internal/money
+
+    AssetStatus:
+      type: string
+      description: "`disabled` assets are hidden from trading and deposits."
+      enum: [active, disabled]
+
+    Asset:
+      type: object
+      description: A currency the exchange lists.
+      required:
+        - symbol
+        - name
+        - chain_id
+        - contract_address
+        - is_native
+        - scale
+        - display_scale
+        - required_confirmations
+        - min_deposit
+        - min_withdrawal
+        - withdrawal_fee
+        - deposit_enabled
+        - withdraw_enabled
+        - status
+      properties:
+        symbol:
+          type: string
+          example: USDC
+        name:
+          type: string
+          example: USD Coin (mock)
+        chain_id:
+          type: integer
+          format: int64
+          description: EVM chain id the asset lives on (31337 = anvil, 11155111 = Sepolia).
+          example: 31337
+        contract_address:
+          type: string
+          nullable: true
+          description: ERC-20 contract address; `null` for the chain's native coin.
+          pattern: '^0x[0-9a-fA-F]{40}$'
+          example: "0x5FbDB2315678afecb367f032d93F642f64180aa3"
+        is_native:
+          type: boolean
+        scale:
+          type: integer
+          format: int32
+          description: Number of fractional digits carried internally (ETH 18, USDC 6).
+          minimum: 0
+          maximum: 18
+        display_scale:
+          type: integer
+          format: int32
+          description: Suggested number of fractional digits for display.
+          minimum: 0
+          maximum: 18
+        required_confirmations:
+          type: integer
+          format: int32
+          minimum: 1
+        min_deposit:
+          $ref: "#/components/schemas/Amount"
+        min_withdrawal:
+          $ref: "#/components/schemas/Amount"
+        withdrawal_fee:
+          $ref: "#/components/schemas/Amount"
+        deposit_enabled:
+          type: boolean
+        withdraw_enabled:
+          type: boolean
+        status:
+          $ref: "#/components/schemas/AssetStatus"
+
+    AssetList:
+      type: object
+      required: [assets]
+      properties:
+        assets:
+          type: array
+          items:
+            $ref: "#/components/schemas/Asset"
+
+    MarketStatus:
+      type: string
+      description: |
+        - `active`: accepts orders and cancels
+        - `halted`: rejects new orders, keeps resting orders, accepts cancels
+        - `cancel_only`: accepts cancels only
+        - `delisted`: hidden (never returned by this API)
+      enum: [active, halted, cancel_only, delisted]
+
+    SelfTradePolicy:
+      type: string
+      description: What happens when a new order would trade against the same account's resting order. v1 implements `cancel_newest`.
+      enum: [cancel_newest, allow, cancel_oldest]
+
+    Market:
+      type: object
+      description: A spot trading pair with its precision and fee configuration.
+      required:
+        - symbol
+        - base_asset
+        - quote_asset
+        - price_tick
+        - qty_step
+        - min_notional
+        - maker_bps
+        - taker_bps
+        - self_trade_policy
+        - status
+      properties:
+        symbol:
+          type: string
+          example: ETH-USDC
+        base_asset:
+          type: string
+          description: Symbol of the asset being bought or sold.
+          example: ETH
+        quote_asset:
+          type: string
+          description: Symbol of the asset prices are expressed in.
+          example: USDC
+        price_tick:
+          $ref: "#/components/schemas/Amount"
+        qty_step:
+          $ref: "#/components/schemas/Amount"
+        min_notional:
+          $ref: "#/components/schemas/Amount"
+        max_qty:
+          allOf:
+            - $ref: "#/components/schemas/Amount"
+          description: Maximum order quantity; absent when unlimited.
+        max_slippage_bps:
+          type: integer
+          format: int32
+          description: Market-order protection band relative to the best price, in basis points; absent when unlimited.
+          minimum: 1
+          maximum: 10000
+        maker_bps:
+          type: integer
+          format: int32
+          description: Maker fee in basis points, charged in the asset the maker receives.
+          example: 10
+        taker_bps:
+          type: integer
+          format: int32
+          description: Taker fee in basis points, charged in the asset the taker receives.
+          example: 20
+        self_trade_policy:
+          $ref: "#/components/schemas/SelfTradePolicy"
+        status:
+          $ref: "#/components/schemas/MarketStatus"
+
+    MarketList:
+      type: object
+      required: [markets]
+      properties:
+        markets:
+          type: array
+          items:
+            $ref: "#/components/schemas/Market"
+
+    Problem:
+      type: object
+      description: RFC 7807 problem details.
+      required: [type, title, status]
+      properties:
+        type:
+          type: string
+          description: URI reference identifying the problem type; `about:blank` when the HTTP status says it all.
+          example: about:blank
+        title:
+          type: string
+          example: Not Found
+        status:
+          type: integer
+          example: 404
+        detail:
+          type: string
+          x-go-type-skip-optional-pointer: true
+          example: market NOPE-USDC does not exist
+        instance:
+          type: string
+          description: Request path the problem occurred on.
+          x-go-type-skip-optional-pointer: true
+          example: /v1/markets/NOPE-USDC
+        correlation_id:
+          type: string
+          description: Value of `X-Request-Id`; quote it when reporting problems.
+          x-go-type-skip-optional-pointer: true
+          example: 7d5a9c1e0b2f4a6c8e1d3f5a7b9c0d2e
