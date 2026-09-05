@@ -40,7 +40,7 @@ func newMigrateCmd() *cobra.Command {
 			if err != nil {
 				return runtimeErr(err)
 			}
-			return runtimeErr(app.MigrateUp(cmd.Context(), dsn))
+			return runtimeErr(app.MigrateUp(cmd.Context(), dsn, cmd.OutOrStdout()))
 		},
 	}, &cobra.Command{
 		Use:   "status",

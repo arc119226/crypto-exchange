@@ -12,6 +12,7 @@ import (
 func newSeedCmd() *cobra.Command {
 	var fixtures, tenant string
 	var chainID int64
+	var confirmations int32
 	cmd := &cobra.Command{
 		Use:   "seed",
 		Short: "Upsert registry fixtures (assets, markets, fee schedule) from a contract addresses file",
@@ -21,7 +22,7 @@ func newSeedCmd() *cobra.Command {
 			if err != nil {
 				return runtimeErr(err)
 			}
-			return runtimeErr(app.Seed(cmd.Context(), app.SeedOptions{DSN: dsn, FixturesPath: fixtures, TenantID: tenant, ChainID: chainID}))
+			return runtimeErr(app.Seed(cmd.Context(), app.SeedOptions{DSN: dsn, FixturesPath: fixtures, TenantID: tenant, ChainID: chainID, RequiredConfirmations: confirmations}, cmd.OutOrStdout()))
 		},
 	}
 	defaultChain := int64(31337)
@@ -35,6 +36,7 @@ func newSeedCmd() *cobra.Command {
 	cmd.Flags().StringVar(&fixtures, "fixtures", "", "path to addresses.json written by the contract deployer (required)")
 	cmd.Flags().StringVar(&tenant, "tenant", defaultTenant, "tenant id (env TENANT_ID)")
 	cmd.Flags().Int64Var(&chainID, "chain-id", defaultChain, "expected chain id (env ETH_CHAIN_ID)")
+	cmd.Flags().Int32Var(&confirmations, "confirmations", 1, "required confirmations for seeded assets (anvil 1, Sepolia 6+)")
 	_ = cmd.MarkFlagRequired("fixtures")
 	return cmd
 }

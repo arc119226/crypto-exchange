@@ -1,0 +1,132 @@
+//go:build integration
+
+package integration
+
+import (
+	"bytes"
+	"context"
+	"errors"
+	"math/big"
+	"strings"
+	"testing"
+
+	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/arc119226/crypto-exchange/internal/app"
+	"github.com/arc119226/crypto-exchange/internal/money"
+	"github.com/arc119226/crypto-exchange/internal/platform/pg"
+	"github.com/arc119226/crypto-exchange/internal/registry"
+)
+
+const fixtures = "../fixtures/addresses.dev.json"
+
+func TestMigrateSeedAndRegistry(t *testing.T) {
+	h := startPostgres(t)
+	ctx := context.Background()
+
+	// migrate twice: second run is a no-op
+	var out bytes.Buffer
+	require.NoError(t, app.MigrateUp(ctx, h.DSN("ex_migrate"), &out))
+	assert.Contains(t, out.String(), "0001_bootstrap_schemas.sql")
+	assert.Contains(t, out.String(), "0002_registry_core.sql")
+	out.Reset()
+	require.NoError(t, app.MigrateUp(ctx, h.DSN("ex_migrate"), &out))
+	assert.Contains(t, out.String(), "no pending migrations")
+	out.Reset()
+	require.NoError(t, app.MigrateStatus(ctx, h.DSN("ex_migrate"), &out))
+	assert.Equal(t, 2, strings.Count(out.String(), "applied"), out.String())
+
+	// seed twice with the admin role: idempotent, versions stay at 1
+	seedOpts := app.SeedOptions{DSN: h.DSN("ex_admin"), FixturesPath: fixtures, TenantID: "default", ChainID: 31337, RequiredConfirmations: 1}
+	require.NoError(t, app.Seed(ctx, seedOpts, &out))
+	assert.Contains(t, out.String(), "markets=1")
+	require.NoError(t, app.Seed(ctx, seedOpts, &out))
+
+	// wrong chain id is refused before touching the database
+	bad := seedOpts
+	bad.ChainID = 11155111
+	assert.ErrorIs(t, app.Seed(ctx, bad, &out), registry.ErrInvalid)
+
+	// read back with the api role
+	pool, err := pg.Open(ctx, pg.PoolConfig{DSN: h.DSN("ex_api"), MaxConns: 2})
+	require.NoError(t, err)
+	defer pool.Close()
+	store := registry.NewStore(pool)
+
+	markets, err := store.ListMarkets(ctx, "default")
+	require.NoError(t, err)
+	require.Len(t, markets, 1)
+	m := markets[0]
+	assert.Equal(t, "ETH-USDC", m.Symbol)
+	assert.Equal(t, "0.01", m.PriceTick.String())
+	assert.Equal(t, "0.0001", m.QtyStep.String())
+	assert.Equal(t, "5", m.MinNotional.String())
+	assert.Nil(t, m.MaxQty)
+	assert.Equal(t, int32(10), m.MakerBps)
+	assert.Equal(t, int32(20), m.TakerBps)
+	assert.Equal(t, int32(18), m.BaseScale)
+	assert.Equal(t, int32(6), m.QuoteScale)
+	assert.Equal(t, registry.STPCancelNewest, m.SelfTradePolicy)
+	assert.Equal(t, registry.MarketActive, m.Status)
+	assert.Equal(t, int32(1), m.Version, "second seed must not bump the version")
+
+	got, err := store.GetMarket(ctx, "default", "ETH-USDC")
+	require.NoError(t, err)
+	assert.Equal(t, m.ID, got.ID)
+	_, err = store.GetMarket(ctx, "default", "NOPE-USDC")
+	assert.ErrorIs(t, err, registry.ErrNotFound)
+	_, err = store.GetMarket(ctx, "other-tenant", "ETH-USDC")
+	assert.ErrorIs(t, err, registry.ErrNotFound)
+
+	assets, err := store.ListAssets(ctx, "default")
+	require.NoError(t, err)
+	require.Len(t, assets, 2)
+	assert.Equal(t, "ETH", assets[0].Symbol)
+	assert.True(t, assets[0].IsNative)
+	assert.Nil(t, assets[0].ContractAddress)
+	assert.Equal(t, "USDC", assets[1].Symbol)
+	require.NotNil(t, assets[1].ContractAddress)
+	assert.Equal(t, "0x5FbDB2315678afecb367f032d93F642f64180aa3", *assets[1].ContractAddress)
+	assert.Equal(t, int32(1), assets[1].Version)
+
+	cache := registry.NewCache("default")
+	require.NoError(t, cache.Load(ctx, store))
+	_, ok := cache.Market("ETH-USDC")
+	assert.True(t, ok)
+
+	// the api role must not be able to write the registry
+	_, err = pool.Exec(ctx, `INSERT INTO registry.fee_schedules (tenant_id, name, maker_bps, taker_bps) VALUES ('default', 'hack', 0, 0)`)
+	var pgErr *pgconn.PgError
+	require.ErrorAs(t, err, &pgErr)
+	assert.Equal(t, "42501", pgErr.Code, "insufficient_privilege expected")
+}
+
+func TestNumericRoundTripAgainstPostgres(t *testing.T) {
+	h := startPostgres(t)
+	ctx := context.Background()
+	pool, err := pg.Open(ctx, pg.PoolConfig{DSN: h.DSN("exchange"), MaxConns: 2})
+	require.NoError(t, err)
+	defer pool.Close()
+
+	for _, s := range []string{"0", "1", "-1", "1990.5", "1990.00", "0.000000000000000001", "123456789012345678.123456789012345678", "-0.5"} {
+		a := money.MustParse(s)
+		var n pgtype.Numeric
+		require.NoError(t, pool.QueryRow(ctx, `SELECT $1::numeric(36,18)`, pg.NumericFromAmount(a)).Scan(&n), s)
+		back, err := pg.AmountFromNumeric(n)
+		require.NoError(t, err, s)
+		assert.True(t, a.Equal(back), "%s round-tripped as %s (Int=%v Exp=%d)", s, back, n.Int, n.Exp)
+	}
+
+	// 2^256-1 does not fit NUMERIC(36,18); Postgres must reject it.
+	max256 := new(big.Int).Sub(new(big.Int).Lsh(big.NewInt(1), 256), big.NewInt(1))
+	var n pgtype.Numeric
+	err = pool.QueryRow(ctx, `SELECT $1::numeric(36,18)`, pgtype.Numeric{Int: max256, Valid: true}).Scan(&n)
+	require.Error(t, err)
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		assert.Equal(t, "22003", pgErr.Code, "numeric_value_out_of_range")
+	}
+}
