@@ -1,0 +1,149 @@
+# golangci-lint v2 configuration. Module boundaries (depguard) and the
+# no-float rule (forbidigo) are the enforcement of docs/plan-v1.0.md §6.5/§8.
+version: "2"
+
+run:
+  timeout: 5m
+  build-tags:
+    - integration
+
+linters:
+  default: none
+  enable:
+    - depguard
+    - errcheck
+    - forbidigo
+    - gosec
+    - govet
+    - ineffassign
+    - revive
+    - staticcheck
+    - unused
+  settings:
+    depguard:
+      rules:
+        money:
+          list-mode: strict
+          files:
+            - "**/internal/money/**"
+          allow:
+            - $gostd
+            - github.com/shopspring/decimal
+            - github.com/stretchr/testify
+            - pgregory.net/rapid
+        matching:
+          list-mode: strict
+          files:
+            - "**/internal/matching/**"
+          allow:
+            - $gostd
+            - github.com/arc119226/crypto-exchange/internal/money
+            - github.com/stretchr/testify
+            - pgregory.net/rapid
+        telemetry:
+          list-mode: strict
+          files:
+            - "**/internal/telemetry/**"
+          allow:
+            - $gostd
+            - github.com/prometheus/client_golang
+            - github.com/stretchr/testify
+        ledger:
+          files:
+            - "**/internal/ledger/**"
+          deny:
+            - pkg: github.com/arc119226/crypto-exchange/internal/trading
+              desc: ledger must not depend on trading
+            - pkg: github.com/arc119226/crypto-exchange/internal/chain
+              desc: ledger must not depend on chain
+            - pkg: github.com/arc119226/crypto-exchange/internal/api
+              desc: ledger must not depend on api
+            - pkg: github.com/arc119226/crypto-exchange/internal/admin
+              desc: ledger must not depend on admin
+            - pkg: github.com/arc119226/crypto-exchange/internal/registry
+              desc: ledger receives fee parameters via ledger.FeeParams, not registry
+        entrypoints-only-from-app:
+          files:
+            - $all
+            - "!**/internal/app/**"
+            - "!**/internal/api/**"
+            - "!**/internal/admin/**"
+            - "!**/internal/stream/**"
+            - "!**/test/**"
+          deny:
+            - pkg: github.com/arc119226/crypto-exchange/internal/api
+              desc: only internal/app wires internal/api
+            - pkg: github.com/arc119226/crypto-exchange/internal/admin
+              desc: only internal/app wires internal/admin
+            - pkg: github.com/arc119226/crypto-exchange/internal/stream
+              desc: only internal/app wires internal/stream
+        cmd:
+          list-mode: strict
+          files:
+            - "**/cmd/**"
+          allow:
+            - $gostd
+            - github.com/arc119226/crypto-exchange/internal/app
+            - github.com/arc119226/crypto-exchange/internal/telemetry
+            - github.com/arc119226/crypto-exchange/internal/money
+            - github.com/arc119226/crypto-exchange/cmd/exchangectl/internal
+            - github.com/spf13/cobra
+            - github.com/oapi-codegen/runtime
+            - github.com/stretchr/testify
+        nobody-imports-cmd:
+          files:
+            - "**/internal/**"
+          deny:
+            - pkg: github.com/arc119226/crypto-exchange/cmd
+              desc: nothing imports cmd
+    forbidigo:
+      analyze-types: true
+      forbid:
+        - pattern: ^strconv\.ParseFloat$
+          msg: no floating point on money paths (docs/plan-v1.0.md §6.5)
+        - pattern: ^strconv\.FormatFloat$
+          msg: no floating point on money paths
+        - pattern: ^decimal\.NewFromFloat(32)?$
+          msg: construct decimals from strings or integers, never floats
+        - pattern: \.InexactFloat64$
+          msg: no lossy float conversion on money paths
+        - pattern: ^float(32|64)$
+          msg: no float types on money paths
+    revive:
+      rules:
+        - name: exported
+          arguments: ["checkPrivateReceivers", "disableStutteringCheck"]
+        - name: package-comments
+        - name: var-naming
+        - name: error-strings
+        - name: error-return
+        - name: increment-decrement
+        - name: indent-error-flow
+        - name: unexported-return
+        - name: unreachable-code
+        - name: unused-parameter
+  exclusions:
+    generated: lax
+    paths:
+      - internal/api/gen
+      - internal/registry/sqlcgen
+      - cmd/exchangectl/internal/apiclient
+    rules:
+      # forbidigo (no floats) is enforced only in the numeric-sensitive packages
+      - path-except: internal/(money|matching|ledger|trading|chain|marketdata|policy)/
+        linters:
+          - forbidigo
+      - path: _test\.go
+        linters:
+          - gosec
+      - path: _test\.go
+        text: "unused-parameter"
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/arc119226/crypto-exchange

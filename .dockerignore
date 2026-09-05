@@ -1,0 +1,14 @@
+.git
+.github
+secrets/
+docs/
+web/
+deploy/
+infra/
+test/
+bin/
+dist/
+*.md
+.env
+.env.*
+coverage.out
