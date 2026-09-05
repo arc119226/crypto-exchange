@@ -42,3 +42,4 @@ infra/contracts/out/
 infra/contracts/cache/
 infra/contracts/broadcast/
 coverage.out
+infra/contracts/artifacts/

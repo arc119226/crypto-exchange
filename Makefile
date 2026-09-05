@@ -16,9 +16,13 @@ LDFLAGS       := -s -w -X main.version=$(VERSION) -X main.commit=$(COMMIT) -X ma
 IMAGE         ?= ghcr.io/arc119226/crypto-exchange:$(VERSION)
 FUZZ_TIME     ?= 30s
 GOTOOL        := go tool -modfile=$(TOOLS_MOD)
+FOUNDRY_TAG   ?= $(shell sed -n 's/^FOUNDRY_TAG=//p' .env.example)
+FOUNDRY_IMAGE := ghcr.io/foundry-rs/foundry:$(FOUNDRY_TAG)
+ALL_PROFILES  := --profile infra --profile observability --profile app --profile single
 
 .PHONY: help tools gen gen-check fmt tidy lint test test-fuzz test-integration cover-money build image \
-	    up up-single down reset infra-up run migrate seed compose-config gen-dev-secrets demo trace loadgen
+	    up up-single down reset infra-up run migrate seed artifacts compose-config contracts-test \
+	    gen-dev-secrets demo trace loadgen
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
@@ -76,10 +80,11 @@ up-single: ## Start infra + single all-in-one container (+observability unless O
 	$(COMPOSE) --profile infra $(OBS_PROFILE) --profile single up -d --build --wait
 
 down: ## Stop everything (keeps volumes)
-	$(COMPOSE) --profile infra --profile observability --profile app --profile single down
+	$(COMPOSE) $(ALL_PROFILES) down
 
 reset: ## Stop and delete all volumes (postgres, nats, anvil state, contract artifacts)
-	$(COMPOSE) --profile infra --profile observability --profile app --profile single down -v --remove-orphans
+	$(COMPOSE) $(ALL_PROFILES) down -v --remove-orphans
+	rm -rf deploy/compose/artifacts
 
 infra-up: ## Start only postgres/redis/nats/anvil so roles can run with `make run`
 	$(COMPOSE) --profile infra up -d --wait
@@ -96,14 +101,23 @@ migrate: ## Apply migrations to the local Postgres started by infra-up
 	set -a; . ./$(ENV_FILE); set +a; \
 	DATABASE_URL="postgres://ex_migrate:$${POSTGRES_PASSWORD}@localhost:5432/exchange?sslmode=disable" go run ./cmd/exchange migrate up
 
-seed: ## Seed registry fixtures into the local Postgres
+seed: artifacts ## Seed registry fixtures into the local Postgres
 	set -a; . ./$(ENV_FILE); set +a; \
 	DATABASE_URL="postgres://ex_admin:$${POSTGRES_PASSWORD}@localhost:5432/exchange?sslmode=disable" \
 	go run ./cmd/exchange seed --fixtures deploy/compose/artifacts/addresses.json
 
-compose-config: ## Validate compose files (no daemon needed)
-	docker compose -f $(COMPOSE_FILE) --env-file .env.example config -q
+artifacts: ## Copy addresses.json out of the compose artifacts volume (for make seed / cast on the host)
+	mkdir -p deploy/compose/artifacts
+	$(COMPOSE) --profile infra run --rm --no-deps --entrypoint cat contracts-deployer /artifacts/addresses.json > deploy/compose/artifacts/addresses.json
+	@cat deploy/compose/artifacts/addresses.json
+
+compose-config: ## Validate the compose file with every profile (no daemon needed)
+	docker compose -f $(COMPOSE_FILE) --env-file .env.example $(ALL_PROFILES) config -q
 	@echo "compose.yaml OK"
+
+contracts-test: ## forge build + test inside the pinned foundry image (no local foundry needed)
+	docker run --rm -v $(CURDIR)/infra/contracts:/contracts:ro --entrypoint sh $(FOUNDRY_IMAGE) \
+	  -c 'cp -r /contracts /tmp/work && cd /tmp/work && forge build && forge test -vv'
 
 gen-dev-secrets: ## Create .env and dev secrets (idempotent; FORCE=1 to regenerate)
 	scripts/gen-dev-secrets.sh

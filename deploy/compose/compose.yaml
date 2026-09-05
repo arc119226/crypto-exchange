@@ -1,0 +1,322 @@
+# docker compose for development and E2E (docs/plan-v1.0.md §11).
+#
+# Profiles
+#   infra          postgres, redis, nats, anvil, contracts-deployer
+#   app            one container per role (api, engine, chain, signer, stream, admin, worker) + migrate/seed jobs
+#   single         one all-in-one container + migrate/seed jobs
+#   observability  prometheus + grafana (make up adds it unless OBS=0)
+#
+# Run through the Makefile (`make up`, `make up-single`, `make reset`); it passes
+# the right profiles and `--env-file .env` (create it with `make gen-dev-secrets`).
+# Applications retry their dependencies with backoff; depends_on only speeds
+# start-up up, it is not what makes the system correct.
+name: crypto-exchange
+
+# Non-secret settings every role needs. Secrets are injected per service below
+# so each container only sees what it must (docs/plan-v1.0.md §14).
+x-exchange-env: &exchange-env
+  EXCHANGE_ENV: dev
+  TENANT_ID: default
+  NATS_URL: nats://nats:4222
+  REDIS_ADDR: redis:6379
+  ETH_RPC_URL: http://anvil:8545
+  ETH_CHAIN_ID: "31337"
+  OPS_ADDR: ":9100"
+  LOG_LEVEL: ${LOG_LEVEL:-info}
+  JWT_JWKS_URL: http://exchange-api:8080/.well-known/jwks.json
+
+x-exchange: &exchange
+  image: ghcr.io/arc119226/crypto-exchange:${EXCHANGE_TAG:-dev}
+  build: { context: ../.., dockerfile: build/Dockerfile }
+  restart: unless-stopped
+  networks: [exchange-net]
+  volumes:
+    - artifacts:/artifacts:ro          # secrets/ is never mounted globally; roles mount only their own subdirectory
+  healthcheck:                         # distroless image: exec form only, no shell
+    test: ["CMD", "/exchange", "healthcheck", "--url", "http://127.0.0.1:9100/readyz"]
+    interval: 10s
+    timeout: 3s
+    retries: 6
+    start_period: 20s
+
+x-app-deps: &app-deps
+  postgres: { condition: service_healthy }
+  redis: { condition: service_healthy }
+  nats: { condition: service_healthy }
+  migrate: { condition: service_completed_successfully }
+  seed: { condition: service_completed_successfully }
+
+services:
+  postgres:
+    image: postgres:16.4
+    profiles: [infra]
+    environment:
+      POSTGRES_DB: exchange
+      POSTGRES_USER: exchange
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+      - ../../infra/postgres/initdb:/docker-entrypoint-initdb.d:ro   # creates the ex_* login roles on first start
+    ports: ["127.0.0.1:5432:5432"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U exchange -d exchange"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+    networks: [exchange-net]
+
+  redis:
+    image: redis:7.4-alpine
+    profiles: [infra]
+    command: ["redis-server", "--save", "", "--appendonly", "no"]   # cache only; nothing in Redis is a source of truth
+    ports: ["127.0.0.1:6379:6379"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+    networks: [exchange-net]
+
+  nats:
+    image: nats:2.10.22-alpine
+    profiles: [infra]
+    command: ["-js", "-sd", "/data", "-m", "8222"]                  # JetStream with a file store
+    volumes: [nats-data:/data]
+    ports: ["127.0.0.1:4222:4222", "127.0.0.1:8222:8222"]
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8222/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+    networks: [exchange-net]
+
+  anvil:
+    image: ghcr.io/foundry-rs/foundry:${FOUNDRY_TAG}
+    profiles: [infra]
+    # The image's ENTRYPOINT is `/bin/sh -c` and it runs as user `foundry`, which
+    # cannot write the root-owned named volume; a dev chain may run as root.
+    user: "0:0"
+    entrypoint: ["anvil"]
+    command:
+      - --host=0.0.0.0
+      - --chain-id=31337
+      - --block-time=2
+      - --accounts=10
+      - --balance=10000
+      - --state=/data/anvil-state.json   # survives restarts together with pg-data; `make reset` clears both
+      - --state-interval=10
+    volumes: [anvil-data:/data]
+    ports: ["127.0.0.1:8545:8545"]
+    healthcheck:
+      test: ["CMD", "cast", "block-number", "--rpc-url", "http://127.0.0.1:8545"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+    networks: [exchange-net]
+
+  contracts-deployer:
+    image: ghcr.io/foundry-rs/foundry:${FOUNDRY_TAG}
+    profiles: [infra]
+    user: "0:0"                          # writes /artifacts (root-owned volume); see anvil
+    entrypoint: ["sh", "-c"]
+    # The project is copied out of the read-only bind mount so forge's out/,
+    # cache/ and broadcast/ never land in the host checkout. Deploy.s.sol is
+    # idempotent: it skips deployment when MockUSDC already exists and writes
+    # /artifacts/addresses.json for `exchange seed`.
+    command:
+      - >
+        cp -r /contracts /tmp/work && cd /tmp/work &&
+        forge script script/Deploy.s.sol --rpc-url http://anvil:8545 --broadcast
+    environment:
+      ANVIL_DEPLOYER_KEY: ${ANVIL_DEPLOYER_KEY}   # anvil account #0 (public dev key; test chain only)
+      HOT_WALLET_ADDRESS: ${HOT_WALLET_ADDRESS}   # funded with 100 ETH + 1,000,000 USDC
+    volumes:
+      - ../../infra/contracts:/contracts:ro
+      - artifacts:/artifacts
+      - svm-cache:/root/.svm                     # solc download cache
+    depends_on:
+      anvil: { condition: service_healthy }
+    restart: "no"
+    networks: [exchange-net]
+
+  migrate:
+    <<: *exchange
+    profiles: [app, single]
+    command: ["migrate", "up"]
+    environment:
+      <<: *exchange-env
+      DATABASE_URL: postgres://ex_migrate:${POSTGRES_PASSWORD}@postgres:5432/exchange?sslmode=disable
+    depends_on:
+      postgres: { condition: service_healthy }
+    healthcheck: { disable: true }
+    restart: "no"
+
+  seed:
+    <<: *exchange
+    profiles: [app, single]
+    command: ["seed", "--fixtures", "/artifacts/addresses.json"]
+    environment:
+      <<: *exchange-env
+      DATABASE_URL: postgres://ex_admin:${POSTGRES_PASSWORD}@postgres:5432/exchange?sslmode=disable
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      contracts-deployer: { condition: service_completed_successfully }
+    healthcheck: { disable: true }
+    restart: "no"
+
+  exchange-api:
+    <<: *exchange
+    profiles: [app]
+    command: ["serve", "--role=api"]
+    environment:
+      <<: *exchange-env
+      DATABASE_URL: postgres://ex_api:${POSTGRES_PASSWORD}@postgres:5432/exchange?sslmode=disable
+      HTTP_ADDR: ":8080"
+      JWT_PRIVATE_KEY_FILE: /secrets/jwt/ed25519.pem     # the only role holding the JWT private key
+    volumes:
+      - artifacts:/artifacts:ro
+      - ../../secrets/jwt:/secrets/jwt:ro
+    ports: ["8080:8080"]
+    depends_on: *app-deps
+
+  exchange-engine:
+    <<: *exchange
+    profiles: [app]
+    command: ["serve", "--role=engine"]
+    environment:
+      <<: *exchange-env
+      DATABASE_URL: postgres://ex_engine:${POSTGRES_PASSWORD}@postgres:5432/exchange?sslmode=disable
+    depends_on: *app-deps
+
+  exchange-chain:
+    <<: *exchange
+    profiles: [app]
+    command: ["serve", "--role=chain"]
+    environment:
+      <<: *exchange-env
+      DATABASE_URL: postgres://ex_chain:${POSTGRES_PASSWORD}@postgres:5432/exchange?sslmode=disable
+      REQUIRED_CONFIRMATIONS_DEFAULT: "1"
+      SCAN_INTERVAL: 2s
+      SIGNER_SUBJECT: cmd.signer.sign.default            # signing goes over NATS request-reply to exchange-signer
+    depends_on:
+      <<: *app-deps
+      anvil: { condition: service_healthy }
+      exchange-signer: { condition: service_healthy }
+
+  exchange-signer:                                       # the only role that mounts the keystore; no public port
+    <<: *exchange
+    profiles: [app]
+    command: ["serve", "--role=signer"]
+    environment:
+      <<: *exchange-env
+      DATABASE_URL: postgres://ex_signer:${POSTGRES_PASSWORD}@postgres:5432/exchange?sslmode=disable
+      WALLET_KEYSTORE_DIR: /secrets/keystore
+      WALLET_KEYSTORE_PASSPHRASE: ${WALLET_KEYSTORE_PASSPHRASE}
+    volumes:
+      - artifacts:/artifacts:ro
+      - ../../secrets/keystore:/secrets/keystore:ro
+    depends_on: *app-deps
+
+  exchange-stream:
+    <<: *exchange
+    profiles: [app]
+    command: ["serve", "--role=stream"]
+    environment:
+      <<: *exchange-env
+      DATABASE_URL: postgres://ex_stream:${POSTGRES_PASSWORD}@postgres:5432/exchange?sslmode=disable
+      WS_ADDR: ":8081"
+    ports: ["8081:8081"]
+    depends_on: *app-deps
+
+  exchange-admin:
+    <<: *exchange
+    profiles: [app]
+    command: ["serve", "--role=admin"]
+    environment:
+      <<: *exchange-env
+      DATABASE_URL: postgres://ex_admin:${POSTGRES_PASSWORD}@postgres:5432/exchange?sslmode=disable
+      ADMIN_ADDR: ":8082"
+      ADMIN_BOOTSTRAP_EMAIL: ${ADMIN_BOOTSTRAP_EMAIL:-admin@example.com}
+      ADMIN_BOOTSTRAP_PASSWORD: ${ADMIN_BOOTSTRAP_PASSWORD}
+      WEBHOOK_SIGNING_KEY: ${WEBHOOK_SIGNING_KEY}
+    ports: ["127.0.0.1:8082:8082"]
+    depends_on: *app-deps
+
+  exchange-worker:
+    <<: *exchange
+    profiles: [app]
+    command: ["serve", "--role=worker"]
+    environment:
+      <<: *exchange-env
+      DATABASE_URL: postgres://ex_worker:${POSTGRES_PASSWORD}@postgres:5432/exchange?sslmode=disable
+      WEBHOOK_SIGNING_KEY: ${WEBHOOK_SIGNING_KEY}
+    depends_on: *app-deps
+
+  exchange-all:                                          # every role in one process; the signer is an in-process call
+    <<: *exchange
+    profiles: [single]
+    command: ["serve", "--role=all"]
+    environment:
+      <<: *exchange-env
+      DATABASE_URL: postgres://ex_all:${POSTGRES_PASSWORD}@postgres:5432/exchange?sslmode=disable
+      HTTP_ADDR: ":8080"
+      WS_ADDR: ":8081"
+      ADMIN_ADDR: ":8082"
+      JWT_JWKS_URL: http://127.0.0.1:8080/.well-known/jwks.json
+      JWT_PRIVATE_KEY_FILE: /secrets/jwt/ed25519.pem
+      WALLET_KEYSTORE_DIR: /secrets/keystore
+      WALLET_KEYSTORE_PASSPHRASE: ${WALLET_KEYSTORE_PASSPHRASE}
+      WEBHOOK_SIGNING_KEY: ${WEBHOOK_SIGNING_KEY}
+      ADMIN_BOOTSTRAP_EMAIL: ${ADMIN_BOOTSTRAP_EMAIL:-admin@example.com}
+      ADMIN_BOOTSTRAP_PASSWORD: ${ADMIN_BOOTSTRAP_PASSWORD}
+      REQUIRED_CONFIRMATIONS_DEFAULT: "1"
+      SCAN_INTERVAL: 2s
+    volumes:
+      - artifacts:/artifacts:ro
+      - ../../secrets/jwt:/secrets/jwt:ro
+      - ../../secrets/keystore:/secrets/keystore:ro
+    ports: ["8080:8080", "8081:8081", "127.0.0.1:8082:8082"]
+    depends_on:
+      <<: *app-deps
+      anvil: { condition: service_healthy }
+
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    profiles: [observability]
+    volumes:
+      - ../../infra/observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prom-data:/prometheus
+    ports: ["127.0.0.1:9090:9090"]
+    restart: unless-stopped
+    networks: [exchange-net]
+
+  grafana:
+    image: grafana/grafana:11.2.0
+    profiles: [observability]
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+    volumes:
+      - ../../infra/observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ../../infra/observability/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    ports: ["127.0.0.1:3000:3000"]
+    depends_on: [prometheus]
+    restart: unless-stopped
+    networks: [exchange-net]
+
+networks:
+  exchange-net: {}
+
+volumes:
+  pg-data: {}
+  nats-data: {}
+  anvil-data: {}
+  artifacts: {}
+  svm-cache: {}
+  prom-data: {}
+  grafana-data: {}
