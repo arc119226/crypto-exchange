@@ -441,6 +441,41 @@ type CreatedAPIKey struct {
 	Secret string `json:"secret"`
 }
 
+// Deposit defines model for Deposit.
+type Deposit struct {
+	// Address The deposit address the funds arrived at.
+	Address string `json:"address"`
+
+	// Amount Arbitrary-precision decimal serialized as a string, at most 18 integer
+	// and 18 fractional digits (Postgres NUMERIC(36,18)). Never a JSON number.
+	//
+	//
+	// Example: 1990.00
+	Amount Amount `json:"amount"`
+
+	// Asset Example: ETH
+	Asset string `json:"asset"`
+
+	// BlockNumber Where it currently sits; a reorg can change this.
+	BlockNumber   int64      `json:"block_number"`
+	Confirmations int32      `json:"confirmations"`
+	CreatedAt     time.Time  `json:"created_at"`
+	CreditedAt    *time.Time `json:"credited_at,omitempty"`
+	ID            string     `json:"id"`
+
+	// LogIndex ERC-20 log index, or -1 for a native transfer.
+	LogIndex int32 `json:"log_index"`
+
+	// RequiredConfirmations What this asset needs before it is credited.
+	RequiredConfirmations int32 `json:"required_confirmations"`
+
+	// Status detected, confirming, credited, orphaned, dropped or reversed. Open for new states.
+	//
+	// Example: credited
+	Status string `json:"status"`
+	TxHash string `json:"tx_hash"`
+}
+
 // DepositAddress defines model for DepositAddress.
 type DepositAddress struct {
 	// Address EIP-55 checksummed address. Send only assets of this chain to it.
@@ -455,6 +490,11 @@ type DepositAddress struct {
 	//
 	// Example: 31337
 	ChainID int64 `json:"chain_id"`
+}
+
+// DepositList defines model for DepositList.
+type DepositList struct {
+	Deposits []Deposit `json:"deposits"`
 }
 
 // Depth defines model for Depth.
@@ -929,6 +969,13 @@ type GetDepositAddressParams struct {
 	Asset string `form:"asset" json:"asset"`
 }
 
+// ListDepositsParams defines parameters for ListDeposits.
+type ListDepositsParams struct {
+	// Limit Page size (default 100, max 500)
+	Limit  *Limit  `form:"limit,omitempty" json:"limit,omitempty"`
+	Offset *Offset `form:"offset,omitempty" json:"offset,omitempty"`
+}
+
 // ListFillsParams defines parameters for ListFills.
 type ListFillsParams struct {
 	Market  *string `form:"market,omitempty" json:"market,omitempty"`
@@ -1028,6 +1075,9 @@ type ServerInterface interface {
 	// GetDepositAddress The caller's deposit address for an asset
 	// (GET /v1/deposit-address)
 	GetDepositAddress(w http.ResponseWriter, r *http.Request, params GetDepositAddressParams)
+	// ListDeposits The caller's deposits, newest first
+	// (GET /v1/deposits)
+	ListDeposits(w http.ResponseWriter, r *http.Request, params ListDepositsParams)
 	// ListFills The caller's fills (its side of each trade)
 	// (GET /v1/fills)
 	ListFills(w http.ResponseWriter, r *http.Request, params ListFillsParams)
@@ -1133,6 +1183,12 @@ func (_ Unimplemented) ListBalances(w http.ResponseWriter, r *http.Request) {
 // GetDepositAddress The caller's deposit address for an asset
 // (GET /v1/deposit-address)
 func (_ Unimplemented) GetDepositAddress(w http.ResponseWriter, r *http.Request, params GetDepositAddressParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ListDeposits The caller's deposits, newest first
+// (GET /v1/deposits)
+func (_ Unimplemented) ListDeposits(w http.ResponseWriter, r *http.Request, params ListDepositsParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -1395,6 +1451,52 @@ func (siw *ServerInterfaceWrapper) GetDepositAddress(w http.ResponseWriter, r *h
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetDepositAddress(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListDeposits operation middleware
+func (siw *ServerInterfaceWrapper) ListDeposits(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListDepositsParams
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: "int32"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "offset" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "offset", r.URL.Query(), &params.Offset, runtime.BindQueryParameterOptions{Type: "integer", Format: "int32"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "offset"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "offset", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListDeposits(w, r, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -1958,6 +2060,9 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/v1/deposit-address", wrapper.GetDepositAddress)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/v1/deposits", wrapper.ListDeposits)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/v1/assets", wrapper.ListAssets)
@@ -2831,6 +2936,76 @@ func (response GetDepositAddress503ApplicationProblemPlusJSONResponse) VisitGetD
 	return err
 }
 
+type ListDepositsRequestObject struct {
+	Params ListDepositsParams
+}
+
+type ListDepositsResponseObject interface {
+	VisitListDepositsResponse(w http.ResponseWriter) error
+}
+
+type ListDeposits200JSONResponse DepositList
+
+func (response ListDeposits200JSONResponse) VisitListDepositsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListDeposits401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response ListDeposits401ApplicationProblemPlusJSONResponse) VisitListDepositsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListDeposits500ApplicationProblemPlusJSONResponse struct {
+	InternalErrorApplicationProblemPlusJSONResponse
+}
+
+func (response ListDeposits500ApplicationProblemPlusJSONResponse) VisitListDepositsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListDeposits503ApplicationProblemPlusJSONResponse struct {
+	ServiceUnavailableApplicationProblemPlusJSONResponse
+}
+
+func (response ListDeposits503ApplicationProblemPlusJSONResponse) VisitListDepositsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(503)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type ListFillsRequestObject struct {
 	Params ListFillsParams
 }
@@ -3622,6 +3797,9 @@ type StrictServerInterface interface {
 	// GetDepositAddress The caller's deposit address for an asset
 	// (GET /v1/deposit-address)
 	GetDepositAddress(ctx context.Context, request GetDepositAddressRequestObject) (GetDepositAddressResponseObject, error)
+	// ListDeposits The caller's deposits, newest first
+	// (GET /v1/deposits)
+	ListDeposits(ctx context.Context, request ListDepositsRequestObject) (ListDepositsResponseObject, error)
 	// ListFills The caller's fills (its side of each trade)
 	// (GET /v1/fills)
 	ListFills(ctx context.Context, request ListFillsRequestObject) (ListFillsResponseObject, error)
@@ -4013,6 +4191,32 @@ func (sh *strictHandler) GetDepositAddress(w http.ResponseWriter, r *http.Reques
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(GetDepositAddressResponseObject); ok {
 		if err := validResponse.VisitGetDepositAddressResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListDeposits operation middleware
+func (sh *strictHandler) ListDeposits(w http.ResponseWriter, r *http.Request, params ListDepositsParams) {
+	var request ListDepositsRequestObject
+
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListDeposits(ctx, request.(ListDepositsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListDeposits")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListDepositsResponseObject); ok {
+		if err := validResponse.VisitListDepositsResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

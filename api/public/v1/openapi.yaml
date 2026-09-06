@@ -339,6 +339,36 @@ paths:
         "503":
           $ref: "#/components/responses/ServiceUnavailable"
 
+  /v1/deposits:
+    get:
+      tags: [account]
+      operationId: listDeposits
+      summary: The caller's deposits, newest first
+      description: >
+        A deposit is only money once its status is `credited`. `detected` and
+        `confirming` mean it has been seen on chain but not yet posted;
+        `orphaned` means the block carrying it was reorged away and it may
+        still come back; `dropped` means it did not.
+      security:
+        - bearerAuth: []
+        - apiKeyAuth: []
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+      responses:
+        "200":
+          description: Deposits
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DepositList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
   /v1/assets:
     get:
       tags: [registry]
@@ -937,6 +967,50 @@ components:
           description: EIP-55 checksummed address. Send only assets of this chain to it.
           pattern: '^0x[0-9a-fA-F]{40}$'
           example: "0x9858EfFD232B4033E47d90003D41EC34EcaEda94"
+
+    Deposit:
+      type: object
+      required: [id, asset, amount, address, tx_hash, log_index, block_number, confirmations, required_confirmations, status, created_at]
+      properties:
+        id: { type: string }
+        asset: { type: string, example: ETH }
+        amount:
+          $ref: "#/components/schemas/Amount"
+        address:
+          type: string
+          description: The deposit address the funds arrived at.
+        tx_hash: { type: string }
+        log_index:
+          type: integer
+          format: int32
+          description: ERC-20 log index, or -1 for a native transfer.
+        block_number:
+          type: integer
+          format: int64
+          description: Where it currently sits; a reorg can change this.
+        confirmations: { type: integer, format: int32 }
+        required_confirmations:
+          type: integer
+          format: int32
+          description: What this asset needs before it is credited.
+        status:
+          type: string
+          description: detected, confirming, credited, orphaned, dropped or reversed. Open for new states.
+          example: credited
+        credited_at:
+          type: string
+          format: date-time
+          nullable: true
+        created_at: { type: string, format: date-time }
+
+    DepositList:
+      type: object
+      required: [deposits]
+      properties:
+        deposits:
+          type: array
+          items:
+            $ref: "#/components/schemas/Deposit"
 
     BalanceList:
       type: object

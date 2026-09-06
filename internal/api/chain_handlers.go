@@ -70,3 +70,47 @@ func (h *Handler) GetDepositAddress(ctx context.Context, req gen.GetDepositAddre
 		Asset: asset.Symbol, ChainID: asset.ChainID, Address: address,
 	}), nil
 }
+
+// ListDeposits implements GET /v1/deposits: the caller's own deposits only.
+func (h *Handler) ListDeposits(ctx context.Context, req gen.ListDepositsRequestObject) (gen.ListDepositsResponseObject, error) {
+	if h.d.Deposits == nil {
+		return gen.ListDeposits503ApplicationProblemPlusJSONResponse{
+			ServiceUnavailableApplicationProblemPlusJSONResponse: h.unavailable(ctx, "deposits are not enabled on this deployment"),
+		}, nil
+	}
+	p, err := requireScope(ctx, auth.ScopeRead)
+	if err != nil {
+		return gen.ListDeposits401ApplicationProblemPlusJSONResponse{UnauthorizedApplicationProblemPlusJSONResponse: h.unauthorized(ctx)}, nil
+	}
+	limit, offset := page(req.Params.Limit, req.Params.Offset)
+	rows, err := h.d.Deposits.ByAccount(ctx, p.AccountID, limit, offset)
+	if err != nil {
+		return nil, fmt.Errorf("deposits: %w", err)
+	}
+	required := h.requiredConfirmations(ctx)
+	out := make([]gen.Deposit, 0, len(rows))
+	for _, d := range rows {
+		out = append(out, gen.Deposit{
+			ID: d.ID, Asset: d.Asset, Amount: d.Amount, Address: d.Address,
+			TxHash: d.TxHash, LogIndex: d.LogIndex, BlockNumber: d.BlockNumber,
+			Confirmations: d.Confirmations, RequiredConfirmations: required[d.Asset],
+			Status: d.Status, CreditedAt: d.CreditedAt, CreatedAt: d.CreatedAt,
+		})
+	}
+	return gen.ListDeposits200JSONResponse(gen.DepositList{Deposits: out}), nil
+}
+
+// requiredConfirmations reads the registry once per request so a client can
+// render progress without a second call. A registry error is not worth
+// failing the listing over: the deposits themselves are the answer.
+func (h *Handler) requiredConfirmations(ctx context.Context) map[string]int32 {
+	out := map[string]int32{}
+	assets, err := h.d.Registry.ListAssets(ctx, h.d.Tenant)
+	if err != nil {
+		return out
+	}
+	for _, a := range assets {
+		out[a.Symbol] = a.RequiredConfirmations
+	}
+	return out
+}

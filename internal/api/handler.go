@@ -9,6 +9,7 @@ import (
 	"github.com/arc119226/crypto-exchange/internal/api/gen"
 	"github.com/arc119226/crypto-exchange/internal/auth"
 	"github.com/arc119226/crypto-exchange/internal/chain"
+	"github.com/arc119226/crypto-exchange/internal/chain/deposit"
 	"github.com/arc119226/crypto-exchange/internal/ledger"
 	"github.com/arc119226/crypto-exchange/internal/ratelimit"
 	"github.com/arc119226/crypto-exchange/internal/registry"
@@ -33,9 +34,12 @@ type Deps struct {
 	Trading  *trading.Service
 	// Chain assigns deposit addresses; nil switches GET /v1/deposit-address
 	// off with 503. It never derives — the signer role owns the keys.
-	Chain   *chain.Addresses
-	Limiter ratelimit.Limiter // nil = unlimited (tests)
-	Limits  Limits
+	Chain *chain.Addresses
+	// Deposits reads what the chain role recorded; nil switches
+	// GET /v1/deposits off with 503.
+	Deposits *deposit.Reader
+	Limiter  ratelimit.Limiter // nil = unlimited (tests)
+	Limits   Limits
 }
 
 // Handler implements gen.StrictServerInterface for one tenant.

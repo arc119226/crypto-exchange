@@ -112,10 +112,28 @@ type RedisConfig struct {
 	Password telemetry.Secret `env:"PASSWORD"`
 }
 
-// ChainConfig configures the EVM RPC endpoint (Phase 4 uses it).
+// ChainConfig configures the EVM endpoint and the deposit scanner
+// (docs/plan-v1.0.md §6.4.1).
 type ChainConfig struct {
 	RPCURL  string `env:"RPC_URL"`
 	ChainID int64  `env:"CHAIN_ID" envDefault:"31337"`
+	// ScanInterval is how often the chain role polls for new blocks.
+	ScanInterval time.Duration `env:"SCAN_INTERVAL" envDefault:"2s"`
+	// ScanStartBlock is the last block treated as already scanned on a fresh
+	// database, so scanning begins just after it. Useful when pointing at a
+	// chain whose early history cannot contain a deposit of ours.
+	ScanStartBlock uint64 `env:"SCAN_START_BLOCK"`
+	// ScanBatchSize caps the blocks one tick covers while catching up.
+	ScanBatchSize uint64 `env:"SCAN_BATCH_SIZE" envDefault:"200"`
+	// BlockRingDepth is how many block hashes are remembered, and therefore
+	// the deepest reorg resolvable without an operator.
+	BlockRingDepth uint64 `env:"BLOCK_RING_DEPTH" envDefault:"128"`
+	// OrphanExpiryBlocks is how long an orphaned deposit waits to reappear
+	// before it is dropped (anvil 100, Sepolia 1000).
+	OrphanExpiryBlocks uint64 `env:"ORPHAN_EXPIRY_BLOCKS" envDefault:"100"`
+	// RequiredConfirmations applies to an asset whose registry row says 0;
+	// normally the asset decides.
+	RequiredConfirmations int32 `env:"REQUIRED_CONFIRMATIONS_DEFAULT" envDefault:"1"`
 }
 
 // WalletConfig locates the HD seed and sizes the deposit address pool
@@ -226,6 +244,12 @@ func (c Config) Validate() error {
 	if c.Chain.ChainID <= 0 {
 		return fmt.Errorf("config: ETH_CHAIN_ID must be positive")
 	}
+	if c.Chain.ScanInterval <= 0 {
+		return fmt.Errorf("config: ETH_SCAN_INTERVAL must be positive")
+	}
+	if c.Chain.ScanBatchSize == 0 || c.Chain.BlockRingDepth == 0 {
+		return fmt.Errorf("config: ETH_SCAN_BATCH_SIZE and ETH_BLOCK_RING_DEPTH must be positive")
+	}
 	return nil
 }
 
@@ -245,6 +269,11 @@ func (c Config) LogValue() slog.Value {
 		slog.String("redis_addr", c.Redis.Addr),
 		slog.String("eth_rpc_url", c.Chain.RPCURL),
 		slog.Int64("eth_chain_id", c.Chain.ChainID),
+		slog.Duration("eth_scan_interval", c.Chain.ScanInterval),
+		slog.Uint64("eth_scan_batch_size", c.Chain.ScanBatchSize),
+		slog.Uint64("eth_block_ring_depth", c.Chain.BlockRingDepth),
+		slog.Uint64("eth_orphan_expiry_blocks", c.Chain.OrphanExpiryBlocks),
+		slog.Int("eth_required_confirmations_default", int(c.Chain.RequiredConfirmations)),
 		slog.String("wallet_keystore_dir", c.Wallet.KeystoreDir),
 		slog.Bool("wallet_keystore_passphrase_set", c.Wallet.Passphrase.IsSet()),
 		slog.Int("wallet_address_pool_min", c.Wallet.AddressPoolMin),
