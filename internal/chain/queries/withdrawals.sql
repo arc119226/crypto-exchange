@@ -95,3 +95,32 @@ WHERE tenant_id = $1 AND status = ANY(@statuses::text[]);
 SELECT u.kyc_level FROM ledger.accounts a
 JOIN auth.users u ON u.id = a.owner_user_id
 WHERE a.id = $1;
+
+-- name: RequestWithdrawalResolve :one
+-- The admin side of §6.4.2 resolve: record what an operator asked for. It
+-- writes no transaction column and moves no money -- the chain role applies
+-- the request, because it is the only role with a node, a signer and the
+-- grants. resolve_error is cleared so a retried request does not show the
+-- previous attempt's failure.
+UPDATE chain.withdrawals
+SET resolve_action = $3, resolve_note = $4, resolve_requested_by = $5,
+    resolve_requested_at = now(), resolve_error = NULL,
+    version = version + 1, updated_at = now()
+WHERE tenant_id = $1 AND id = $2
+RETURNING *;
+
+-- name: ClaimResolveRequests :many
+-- The chain role's resolve queue, oldest first. SKIP LOCKED for the same
+-- reason ClaimWithdrawals uses it.
+SELECT * FROM chain.withdrawals
+WHERE tenant_id = $1 AND resolve_action IS NOT NULL
+ORDER BY resolve_requested_at
+LIMIT $2
+FOR UPDATE SKIP LOCKED;
+
+-- name: ClearWithdrawalResolve :exec
+-- Applied, or found to be inapplicable. The note and the requester stay: they
+-- are the record of what was asked, and $3 says what came of it.
+UPDATE chain.withdrawals
+SET resolve_action = NULL, resolve_error = $3, updated_at = now()
+WHERE tenant_id = $1 AND id = $2;

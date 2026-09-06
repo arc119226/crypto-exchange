@@ -133,3 +133,61 @@ func (r *Reviewer) Review(ctx context.Context, p ReviewParams) (Record, error) {
 	})
 	return out, err
 }
+
+// RequestResolve records what an operator wants done about a withdrawal the
+// machine could not finish (docs/plan-v1.0.md §6.4.2 resolve).
+//
+// It records the request and stops. Every one of the four actions needs a node
+// and a key — even a refund has to know whether the transaction is really
+// finished — and the admin role has neither, nor the grants on the transaction
+// columns. So this writes the four resolve columns it is allowed to write and
+// the chain worker applies them, exactly as approving a withdrawal marks it
+// for the worker rather than locking the funds here.
+//
+// The legality of the action is checked now so the operator gets a 409 while
+// they are still looking at the screen, and checked again when it is applied,
+// because the withdrawal can move in between.
+func (r *Reviewer) RequestResolve(ctx context.Context, p ResolveParams) (Record, error) {
+	if p.Note == "" {
+		return Record{}, fmt.Errorf("%w: a resolution must say why", ErrInvalid)
+	}
+	var out Record
+	err := inTx(ctx, r.db, func(tx pgx.Tx) error {
+		q := sqlcgen.New(tx)
+		row, err := q.GetWithdrawalForUpdate(ctx, sqlcgen.GetWithdrawalForUpdateParams{TenantID: r.tenant, ID: p.ID})
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrNotFound
+		}
+		if err != nil {
+			return fmt.Errorf("withdrawal: lock %s: %w", p.ID, err)
+		}
+		if err := resolvable(row, p.Action); err != nil {
+			return err
+		}
+		// A request already waiting would be silently replaced, and the
+		// operator would never learn which of the two was applied.
+		if row.ResolveAction != nil {
+			return fmt.Errorf("%w: %s already has a %s waiting to be applied",
+				ErrNotResolvable, p.ID, *row.ResolveAction)
+		}
+		updated, err := q.RequestWithdrawalResolve(ctx, sqlcgen.RequestWithdrawalResolveParams{
+			TenantID: r.tenant, ID: p.ID, ResolveAction: optString(string(p.Action)),
+			ResolveNote: optString(p.Note), ResolveRequestedBy: optString(p.ActorID),
+		})
+		if err != nil {
+			return fmt.Errorf("withdrawal: request resolve %s: %w", p.ID, err)
+		}
+		if err := r.audit.Record(ctx, tx, audit.Event{
+			ActorType: p.ActorType, ActorID: p.ActorID, Action: "withdrawal.resolve_requested",
+			TargetType: "withdrawal", TargetID: p.ID,
+			Before: map[string]any{"status": row.Status, "failure_reason": deref(row.FailureReason)},
+			After:  map[string]any{"resolve_action": string(p.Action), "note": p.Note},
+			IP:     p.IP, CorrelationID: deref(row.CorrelationID),
+		}); err != nil {
+			return fmt.Errorf("withdrawal: audit: %w", err)
+		}
+		out, err = recordFrom(updated)
+		return err
+	})
+	return out, err
+}

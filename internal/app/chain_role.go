@@ -231,6 +231,12 @@ func (c *chainComponents) runSending(ctx context.Context, log *slog.Logger) erro
 		if err := c.sending.Send(ctx); err != nil && ctx.Err() == nil {
 			log.Error("withdrawal send tick failed", slog.String("err", err.Error()))
 		}
+		// Operator resolutions run on the same clock. They are recorded by the
+		// admin role, which has no node and no key, so this is the only place
+		// they can actually happen.
+		if err := c.sending.ApplyResolutions(ctx); err != nil && ctx.Err() == nil {
+			log.Error("withdrawal resolve tick failed", slog.String("err", err.Error()))
+		}
 		select {
 		case <-ctx.Done():
 			return nil

@@ -89,7 +89,31 @@ ALTER TABLE chain.withdrawals
     -- *this* hash to confirm, not the original: until the replacement is
     -- mined the original can still win the race, and refunding early would
     -- credit a user for money that then leaves anyway.
-    ADD COLUMN cancel_tx_hash text CHECK (cancel_tx_hash ~ '^0x[0-9a-f]{64}$');
+    ADD COLUMN cancel_tx_hash text CHECK (cancel_tx_hash ~ '^0x[0-9a-f]{64}$'),
+    -- What an operator asked for on a withdrawal the machine could not finish
+    -- (§6.4.2 resolve). The admin role writes these four and nothing else: it
+    -- has no node, no key and no grant on the transaction columns, so it can
+    -- only ask. The chain role reads the request, applies it and clears the
+    -- action -- which is the same separation the review columns already have,
+    -- and it means an operator's decision survives a chain-role restart
+    -- instead of being lost inside one HTTP request.
+    ADD COLUMN resolve_action text
+        CHECK (resolve_action IN ('bump', 'cancel_nonce', 'refund', 'retry')),
+    ADD COLUMN resolve_note text,
+    ADD COLUMN resolve_requested_by text,
+    ADD COLUMN resolve_requested_at timestamptz,
+    -- Why the last request could not be applied, kept after the action is
+    -- cleared so the operator who asked can see what happened.
+    ADD COLUMN resolve_error text;
+
+-- A request must say who asked and why. One-directional on purpose (the
+-- lesson of 0009): clearing resolve_action leaves the note and the requester
+-- in place as the record of what was asked, and must not trip the CHECK.
+ALTER TABLE chain.withdrawals
+    ADD CONSTRAINT withdrawals_resolve_is_attributed CHECK (
+        resolve_action IS NULL
+        OR (resolve_note IS NOT NULL AND resolve_requested_by IS NOT NULL
+            AND resolve_requested_at IS NOT NULL));
 
 -- Signed means signed: the three things the signer produced must be there
 -- together, and stay there afterwards. This is the schema half of "nonce, raw
@@ -105,6 +129,10 @@ CREATE INDEX withdrawals_broadcast_idx ON chain.withdrawals (tenant_id, broadcas
 -- and what has been signed but not yet sent, which a restart must replay
 CREATE INDEX withdrawals_signed_idx ON chain.withdrawals (tenant_id, created_at)
     WHERE status = 'signed';
+-- The resolve queue: what an operator has asked for and the chain has not yet
+-- applied. Oldest first, so a request cannot be starved by newer ones.
+CREATE INDEX withdrawals_resolve_idx ON chain.withdrawals (tenant_id, resolve_requested_at)
+    WHERE resolve_action IS NOT NULL;
 -- NonceManager's startup scan walks the hot wallet's allocated nonces
 CREATE INDEX withdrawals_nonce_idx ON chain.withdrawals (tenant_id, chain_id, nonce)
     WHERE nonce IS NOT NULL;
@@ -124,15 +152,18 @@ GRANT INSERT, UPDATE ON chain.nonce_fills TO ex_chain, ex_all;
 GRANT INSERT ON chain.signing_log TO ex_signer, ex_all;
 GRANT USAGE ON ALL SEQUENCES IN SCHEMA chain TO ex_chain, ex_signer, ex_all;
 
--- The chain role writes the transaction columns; it still cannot review, and
--- the api still cannot write anything (0010).
-GRANT UPDATE (nonce, raw_tx, tx_hash, broadcast_at, replacements, block_number, gas_cost, cancel_tx_hash)
+-- The chain role writes the transaction columns and clears the resolve
+-- request it has applied; it still cannot review, and the api still cannot
+-- write anything (0010).
+GRANT UPDATE (nonce, raw_tx, tx_hash, broadcast_at, replacements, block_number,
+              gas_cost, cancel_tx_hash, resolve_action, resolve_error)
   ON chain.withdrawals TO ex_chain;
 
--- Admin drives resolve: it may cancel a stuck withdrawal or send one back for
--- another attempt, which needs the same transaction columns. It still cannot
--- sign, and the chain role still cannot review (0010).
-GRANT UPDATE (nonce, raw_tx, tx_hash, broadcast_at, replacements, cancel_tx_hash)
+-- Admin asks for a resolution and nothing more. It is deliberately not given
+-- the transaction columns: a role that could write tx_hash could make a
+-- withdrawal look sent without anything having been signed, and the whole
+-- point of §6.4.2 is that authorising and acting are different roles.
+GRANT UPDATE (resolve_action, resolve_note, resolve_requested_by, resolve_requested_at)
   ON chain.withdrawals TO ex_admin;
 
 -- The signer must read the withdrawal it is asked to sign, to check the

@@ -38,6 +38,39 @@ const (
 // ErrNotResolvable is an action on a withdrawal it does not apply to.
 var ErrNotResolvable = errors.New("withdrawal: not resolvable that way")
 
+// resolvable reports whether an action applies to a withdrawal in this state.
+//
+// Both sides of the split call it: the admin API to answer 409 while the
+// operator is still looking at the screen, and the chain role again before
+// acting, because the withdrawal may have moved on in between — a bump asked
+// for on a broadcast withdrawal that confirmed a second later is no longer a
+// legal thing to do, and the second check is the one that decides.
+func resolvable(row sqlcgen.ChainWithdrawal, action Action) error {
+	switch action {
+	case ActionBump:
+		if row.Status != StatusBroadcast {
+			return fmt.Errorf("%w: %s is %s, so there is nothing in flight to bump", ErrNotResolvable, row.ID, row.Status)
+		}
+		// Bidding against our own cancellation would leave two transactions
+		// competing for the nonce with nobody able to say which wins.
+		if row.CancelTxHash != nil {
+			return fmt.Errorf("%w: %s is already being cancelled", ErrNotResolvable, row.ID)
+		}
+	case ActionCancelNonce:
+		if row.Status != StatusBroadcast {
+			return fmt.Errorf("%w: %s is %s, so there is no nonce to displace", ErrNotResolvable, row.ID, row.Status)
+		}
+	case ActionRefund, ActionRetry:
+		if row.Status != StatusFailed || deref(row.FailureReason) != FailureOnChain {
+			return fmt.Errorf("%w: %s is %s/%s; refund and retry are for a transaction that reverted on chain",
+				ErrNotResolvable, row.ID, row.Status, deref(row.FailureReason))
+		}
+	default:
+		return fmt.Errorf("%w: unknown action %q", ErrNotResolvable, action)
+	}
+	return nil
+}
+
 // ResolveParams is one operator decision.
 type ResolveParams struct {
 	ID     string
@@ -69,36 +102,93 @@ func (w *Worker) Resolve(ctx context.Context, p ResolveParams) (Record, error) {
 	if err != nil {
 		return Record{}, fmt.Errorf("withdrawal: read %s: %w", p.ID, err)
 	}
+	if err := resolvable(row, p.Action); err != nil {
+		return Record{}, err
+	}
 	switch p.Action {
 	case ActionBump:
-		if row.Status != StatusBroadcast {
-			return Record{}, fmt.Errorf("%w: %s is %s, so there is nothing in flight to bump", ErrNotResolvable, p.ID, row.Status)
-		}
-		if row.CancelTxHash != nil {
-			return Record{}, fmt.Errorf("%w: %s is already being cancelled", ErrNotResolvable, p.ID)
-		}
-		if err := w.replace(ctx, row, "operator bump: "+p.Note); err != nil {
-			return Record{}, err
-		}
+		err = w.replace(ctx, row, "operator bump: "+p.Note)
 	case ActionCancelNonce:
-		if row.Status != StatusBroadcast {
-			return Record{}, fmt.Errorf("%w: %s is %s, so there is no nonce to displace", ErrNotResolvable, p.ID, row.Status)
-		}
-		if err := w.cancelNonce(ctx, row, p); err != nil {
-			return Record{}, err
-		}
+		err = w.cancelNonce(ctx, row, p)
 	case ActionRefund, ActionRetry:
-		if row.Status != StatusFailed || deref(row.FailureReason) != FailureOnChain {
-			return Record{}, fmt.Errorf("%w: %s is %s/%s; refund and retry are for a transaction that reverted on chain",
-				ErrNotResolvable, p.ID, row.Status, deref(row.FailureReason))
-		}
-		if err := w.settleFailed(ctx, row, p); err != nil {
-			return Record{}, err
-		}
-	default:
-		return Record{}, fmt.Errorf("%w: unknown action %q", ErrNotResolvable, p.Action)
+		err = w.settleFailed(ctx, row, p)
+	}
+	if err != nil {
+		return Record{}, err
 	}
 	return w.reload(ctx, p.ID)
+}
+
+// ApplyResolutions runs the resolutions operators have asked for.
+//
+// The admin role records the request and stops there: it has no node, no key
+// and no grant on the transaction columns, so it can only ask. This is where
+// the asking becomes doing, and it runs on the chain role's clock — which also
+// means an operator's decision survives a restart of this process instead of
+// being lost inside one HTTP request.
+func (w *Worker) ApplyResolutions(ctx context.Context) error {
+	rows, err := sqlcgen.New(w.db).ClaimResolveRequests(ctx, sqlcgen.ClaimResolveRequestsParams{
+		TenantID: w.cfg.Tenant, Limit: w.cfg.Batch,
+	})
+	if err != nil {
+		return fmt.Errorf("withdrawal: claim resolve requests: %w", err)
+	}
+	var firstErr error
+	for _, row := range rows {
+		if err := w.applyResolution(ctx, row); err != nil {
+			// One request that cannot be applied must not stop the others.
+			w.log.Error("resolve request failed",
+				slog.String("withdrawal_id", row.ID), slog.String("action", deref(row.ResolveAction)),
+				slog.String("err", err.Error()))
+			if firstErr == nil {
+				firstErr = err
+			}
+		}
+	}
+	return firstErr
+}
+
+// applyResolution runs one, and clears the request when there is nothing left
+// to retry.
+//
+// A request that no longer applies is cleared with its reason recorded, so the
+// operator who asked can see what happened. Anything else — an unreachable
+// node, a signer that did not answer — leaves the request standing, because
+// the next tick may well succeed and silently dropping an operator's decision
+// is worse than repeating it.
+func (w *Worker) applyResolution(ctx context.Context, row sqlcgen.ChainWithdrawal) error {
+	action := Action(deref(row.ResolveAction))
+	_, err := w.Resolve(ctx, ResolveParams{
+		ID: row.ID, Action: action, Note: deref(row.ResolveNote),
+		// The admin API is the only writer of resolve_requested_by, and it
+		// authenticates with a static key.
+		ActorType: audit.ActorAPIKey, ActorID: deref(row.ResolveRequestedBy),
+	})
+	q := sqlcgen.New(w.db)
+	if errors.Is(err, ErrNotResolvable) {
+		reason := err.Error()
+		w.log.Warn("resolve request no longer applies",
+			slog.String("withdrawal_id", row.ID), slog.String("action", string(action)),
+			slog.String("reason", reason))
+		if clearErr := q.ClearWithdrawalResolve(ctx, sqlcgen.ClearWithdrawalResolveParams{
+			TenantID: w.cfg.Tenant, ID: row.ID, ResolveError: &reason,
+		}); clearErr != nil {
+			return fmt.Errorf("withdrawal: clear resolve request: %w", clearErr)
+		}
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if err := q.ClearWithdrawalResolve(ctx, sqlcgen.ClearWithdrawalResolveParams{
+		TenantID: w.cfg.Tenant, ID: row.ID,
+	}); err != nil {
+		return fmt.Errorf("withdrawal: clear resolve request: %w", err)
+	}
+	w.log.Info("resolve request applied",
+		slog.String("withdrawal_id", row.ID), slog.String("action", string(action)))
+	w.metrics.resolved.WithLabelValues(string(action)).Inc()
+	return nil
 }
 
 // cancelNonce sends a self-transfer on the stuck transaction's nonce.

@@ -11,6 +11,7 @@ type Metrics struct {
 	pending      prometheus.Gauge
 	replacements *prometheus.CounterVec
 	stuck        *prometheus.CounterVec
+	resolved     *prometheus.CounterVec
 }
 
 // NewMetrics registers the collectors. A nil registerer returns unregistered
@@ -33,9 +34,13 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 			Name: "withdrawals_stuck_total",
 			Help: "Withdrawals that exhausted their fee bumps and are waiting for an operator.",
 		}, []string{"asset"}),
+		resolved: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "withdrawals_resolutions_total",
+			Help: "Operator resolutions applied to stuck withdrawals, by action.",
+		}, []string{"action"}),
 	}
 	if reg != nil {
-		reg.MustRegister(m.decided, m.pending, m.replacements, m.stuck)
+		reg.MustRegister(m.decided, m.pending, m.replacements, m.stuck, m.resolved)
 	}
 	return m
 }

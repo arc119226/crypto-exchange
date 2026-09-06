@@ -87,9 +87,14 @@ type Record struct {
 	ReviewedAt    *time.Time
 	// TxHash is the transaction now representing this withdrawal: the
 	// displacement once one is in flight, otherwise the withdrawal's own.
-	TxHash    string
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	TxHash string
+	// ResolveAction is an operator resolution the chain role has not applied
+	// yet; ResolveError is why the last one could not be applied. Both are
+	// empty on a withdrawal nobody has had to intervene in.
+	ResolveAction Action
+	ResolveError  string
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
 }
 
 // CreateResult is what Create produced. Replayed reports that it returned an
@@ -115,6 +120,8 @@ func recordFrom(row sqlcgen.ChainWithdrawal) (Record, error) {
 	if row.CancelTxHash != nil {
 		rec.TxHash = *row.CancelTxHash
 	}
+	rec.ResolveAction = Action(deref(row.ResolveAction))
+	rec.ResolveError = deref(row.ResolveError)
 	if row.ReviewedAt.Valid {
 		at := row.ReviewedAt.Time
 		rec.ReviewedAt = &at

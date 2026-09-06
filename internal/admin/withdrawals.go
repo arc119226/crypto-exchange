@@ -82,6 +82,57 @@ func (h *Handler) ReviewWithdrawal(ctx context.Context, req gen.ReviewWithdrawal
 	return gen.ReviewWithdrawal200JSONResponse(toAdminWithdrawal(rec)), nil
 }
 
+// ResolveWithdrawal implements POST /admin/v1/withdrawals/{id}/resolve.
+//
+// Like a review, this records an intent and nothing more. All four actions
+// need a node and a key, and this role has neither — the chain worker applies
+// the request on its next tick, which also means the decision survives a
+// restart of that process instead of being lost inside this HTTP request.
+func (h *Handler) ResolveWithdrawal(ctx context.Context, req gen.ResolveWithdrawalRequestObject) (gen.ResolveWithdrawalResponseObject, error) {
+	instance := "/admin/v1/withdrawals/" + req.ID + "/resolve"
+	if h.withdrawals == nil {
+		return nil, errors.New("admin: withdrawals are not enabled on this deployment")
+	}
+	if req.Body == nil {
+		return gen.ResolveWithdrawal400ApplicationProblemPlusJSONResponse{
+			BadRequestApplicationProblemPlusJSONResponse: badRequest(ctx, instance, "an action is required"),
+		}, nil
+	}
+	note := ""
+	if req.Body.Note != nil {
+		note = *req.Body.Note
+	}
+	// Every one of these is a person overriding the machine on someone else's
+	// money. Without a reason the audit trail records that it happened and
+	// nothing about why.
+	if note == "" {
+		return gen.ResolveWithdrawal400ApplicationProblemPlusJSONResponse{
+			BadRequestApplicationProblemPlusJSONResponse: badRequest(ctx, instance, "a resolution must carry a note saying why"),
+		}, nil
+	}
+	rec, err := h.withdrawals.RequestResolve(ctx, withdrawal.ResolveParams{
+		ID: req.ID, Action: withdrawal.Action(req.Body.Action), Note: note,
+		ActorType: audit.ActorAPIKey, ActorID: actorID,
+	})
+	switch {
+	case errors.Is(err, withdrawal.ErrNotFound):
+		return gen.ResolveWithdrawal404ApplicationProblemPlusJSONResponse{
+			NotFoundApplicationProblemPlusJSONResponse: notFound(ctx, instance, "no withdrawal "+req.ID),
+		}, nil
+	case errors.Is(err, withdrawal.ErrInvalid):
+		return gen.ResolveWithdrawal400ApplicationProblemPlusJSONResponse{
+			BadRequestApplicationProblemPlusJSONResponse: badRequest(ctx, instance, err.Error()),
+		}, nil
+	case errors.Is(err, withdrawal.ErrNotResolvable):
+		return gen.ResolveWithdrawal409ApplicationProblemPlusJSONResponse{
+			ConflictApplicationProblemPlusJSONResponse: conflict(ctx, instance, err.Error()),
+		}, nil
+	case err != nil:
+		return nil, fmt.Errorf("resolve withdrawal %s: %w", req.ID, err)
+	}
+	return gen.ResolveWithdrawal200JSONResponse(toAdminWithdrawal(rec)), nil
+}
+
 func conflict(ctx context.Context, instance, detail string) gen.ConflictApplicationProblemPlusJSONResponse {
 	return gen.ConflictApplicationProblemPlusJSONResponse(NewProblem(ctx, http.StatusConflict, "Conflict", detail, instance))
 }
@@ -101,6 +152,9 @@ func toAdminWithdrawal(w withdrawal.Record) gen.AdminWithdrawal {
 	}
 	if w.ReviewedBy != "" {
 		out.ReviewedBy = &w.ReviewedBy
+	}
+	if w.TxHash != "" {
+		out.TxHash = &w.TxHash
 	}
 	return out
 }

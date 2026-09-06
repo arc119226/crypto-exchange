@@ -216,6 +216,30 @@ func (e PostingDirection) Valid() bool {
 	}
 }
 
+// Defines values for WithdrawalResolveRequestAction.
+const (
+	WithdrawalResolveRequestActionBump        WithdrawalResolveRequestAction = "bump"
+	WithdrawalResolveRequestActionCancelNonce WithdrawalResolveRequestAction = "cancel_nonce"
+	WithdrawalResolveRequestActionRefund      WithdrawalResolveRequestAction = "refund"
+	WithdrawalResolveRequestActionRetry       WithdrawalResolveRequestAction = "retry"
+)
+
+// Valid indicates whether the value is a known member of the WithdrawalResolveRequestAction enum.
+func (e WithdrawalResolveRequestAction) Valid() bool {
+	switch e {
+	case WithdrawalResolveRequestActionBump:
+		return true
+	case WithdrawalResolveRequestActionCancelNonce:
+		return true
+	case WithdrawalResolveRequestActionRefund:
+		return true
+	case WithdrawalResolveRequestActionRetry:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for WithdrawalReviewRequestDecision.
 const (
 	WithdrawalReviewRequestDecisionApprove WithdrawalReviewRequestDecision = "approve"
@@ -307,7 +331,10 @@ type AdminWithdrawal struct {
 	ReviewedBy    *string    `json:"reviewed_by,omitempty"`
 	Status        string     `json:"status"`
 	ToAddress     string     `json:"to_address"`
-	UpdatedAt     *time.Time `json:"updated_at,omitempty"`
+
+	// TxHash The transaction now representing this withdrawal: the displacement while a cancellation is in flight, otherwise the withdrawal's own.
+	TxHash    *string    `json:"tx_hash,omitempty"`
+	UpdatedAt *time.Time `json:"updated_at,omitempty"`
 }
 
 // AdminWithdrawalList defines model for AdminWithdrawalList.
@@ -516,6 +543,17 @@ type TrialBalanceLine struct {
 	Diff Amount `json:"diff"`
 }
 
+// WithdrawalResolveRequest defines model for WithdrawalResolveRequest.
+type WithdrawalResolveRequest struct {
+	Action WithdrawalResolveRequestAction `json:"action"`
+
+	// Note Why. Required: every one of these actions is a person overriding the machine, and the audit trail is the only place that reason survives.
+	Note *string `json:"note,omitempty"`
+}
+
+// WithdrawalResolveRequestAction defines model for WithdrawalResolveRequest.Action.
+type WithdrawalResolveRequestAction string
+
 // WithdrawalReviewRequest defines model for WithdrawalReviewRequest.
 type WithdrawalReviewRequest struct {
 	Decision WithdrawalReviewRequestDecision `json:"decision"`
@@ -598,6 +636,9 @@ type CreateAdjustmentJSONRequestBody = AdjustmentRequest
 
 // SetMarketStatusJSONRequestBody defines body for SetMarketStatus for application/json ContentType.
 type SetMarketStatusJSONRequestBody = MarketStatusRequest
+
+// ResolveWithdrawalJSONRequestBody defines body for ResolveWithdrawal for application/json ContentType.
+type ResolveWithdrawalJSONRequestBody = WithdrawalResolveRequest
 
 // ReviewWithdrawalJSONRequestBody defines body for ReviewWithdrawal for application/json ContentType.
 type ReviewWithdrawalJSONRequestBody = WithdrawalReviewRequest
@@ -793,6 +834,36 @@ type ClientInterface interface {
 	//
 	// Corresponds with GET /admin/v1/withdrawals (the `ListWithdrawalsForReview` operationId).
 	ListWithdrawalsForReview(ctx context.Context, params *ListWithdrawalsForReviewParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ResolveWithdrawalWithBody Unstick a withdrawal the machine could not finish
+	//
+	// Four resolutions, and which one is legal depends on where the withdrawal stopped (docs/plan-v1.0.md §6.4.2).
+	//
+	// A `broadcast` withdrawal has a transaction in flight and its amount in `pending_withdrawal`: `bump` re-sends it on the same nonce with a higher fee, past the automatic replacement limit; `cancel_nonce` displaces it with a self-transfer on that nonce. Neither moves money now — the refund for a cancellation happens when the displacement is mined, because until then the original can still win the race.
+	//
+	// A `failed`/`on_chain` withdrawal has a transaction that reverted, gas spent, and its amount still in `pending_withdrawal`: `refund` returns the amount to the user and ends the withdrawal, `retry` puts it back on hold and sends the row round again with a fresh nonce.
+	//
+	// Anything else is 409 — including a bump on a withdrawal already being cancelled, which would bid against our own displacement.
+	//
+	// Takes any type of body and a specified content type.
+	//
+	// Corresponds with POST /admin/v1/withdrawals/{id}/resolve (the `ResolveWithdrawal` operationId).
+	ResolveWithdrawalWithBody(ctx context.Context, id WithdrawalID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ResolveWithdrawal Unstick a withdrawal the machine could not finish
+	//
+	// Four resolutions, and which one is legal depends on where the withdrawal stopped (docs/plan-v1.0.md §6.4.2).
+	//
+	// A `broadcast` withdrawal has a transaction in flight and its amount in `pending_withdrawal`: `bump` re-sends it on the same nonce with a higher fee, past the automatic replacement limit; `cancel_nonce` displaces it with a self-transfer on that nonce. Neither moves money now — the refund for a cancellation happens when the displacement is mined, because until then the original can still win the race.
+	//
+	// A `failed`/`on_chain` withdrawal has a transaction that reverted, gas spent, and its amount still in `pending_withdrawal`: `refund` returns the amount to the user and ends the withdrawal, `retry` puts it back on hold and sends the row round again with a fresh nonce.
+	//
+	// Anything else is 409 — including a bump on a withdrawal already being cancelled, which would bid against our own displacement.
+	//
+	// Takes a body of the `application/json` content type.
+	//
+	// Corresponds with POST /admin/v1/withdrawals/{id}/resolve (the `ResolveWithdrawal` operationId).
+	ResolveWithdrawal(ctx context.Context, id WithdrawalID, body ResolveWithdrawalJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// ReviewWithdrawalWithBody Approve or reject a withdrawal awaiting review
 	//
@@ -1081,6 +1152,56 @@ func (c *Client) SetMarketStatus(ctx context.Context, symbol MarketSymbol, body 
 // Corresponds with GET /admin/v1/withdrawals (the `ListWithdrawalsForReview` operationId).
 func (c *Client) ListWithdrawalsForReview(ctx context.Context, params *ListWithdrawalsForReviewParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewListWithdrawalsForReviewRequest(c.Server, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// ResolveWithdrawalWithBody Unstick a withdrawal the machine could not finish
+//
+// Four resolutions, and which one is legal depends on where the withdrawal stopped (docs/plan-v1.0.md §6.4.2).
+//
+// A `broadcast` withdrawal has a transaction in flight and its amount in `pending_withdrawal`: `bump` re-sends it on the same nonce with a higher fee, past the automatic replacement limit; `cancel_nonce` displaces it with a self-transfer on that nonce. Neither moves money now — the refund for a cancellation happens when the displacement is mined, because until then the original can still win the race.
+//
+// A `failed`/`on_chain` withdrawal has a transaction that reverted, gas spent, and its amount still in `pending_withdrawal`: `refund` returns the amount to the user and ends the withdrawal, `retry` puts it back on hold and sends the row round again with a fresh nonce.
+//
+// Anything else is 409 — including a bump on a withdrawal already being cancelled, which would bid against our own displacement.
+//
+// Takes any type of body and a specified content type.
+//
+// Corresponds with POST /admin/v1/withdrawals/{id}/resolve (the `ResolveWithdrawal` operationId).
+func (c *Client) ResolveWithdrawalWithBody(ctx context.Context, id WithdrawalID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewResolveWithdrawalRequestWithBody(c.Server, id, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// ResolveWithdrawal Unstick a withdrawal the machine could not finish
+//
+// Four resolutions, and which one is legal depends on where the withdrawal stopped (docs/plan-v1.0.md §6.4.2).
+//
+// A `broadcast` withdrawal has a transaction in flight and its amount in `pending_withdrawal`: `bump` re-sends it on the same nonce with a higher fee, past the automatic replacement limit; `cancel_nonce` displaces it with a self-transfer on that nonce. Neither moves money now — the refund for a cancellation happens when the displacement is mined, because until then the original can still win the race.
+//
+// A `failed`/`on_chain` withdrawal has a transaction that reverted, gas spent, and its amount still in `pending_withdrawal`: `refund` returns the amount to the user and ends the withdrawal, `retry` puts it back on hold and sends the row round again with a fresh nonce.
+//
+// Anything else is 409 — including a bump on a withdrawal already being cancelled, which would bid against our own displacement.
+//
+// Takes a body of the `application/json` content type.
+//
+// Corresponds with POST /admin/v1/withdrawals/{id}/resolve (the `ResolveWithdrawal` operationId).
+func (c *Client) ResolveWithdrawal(ctx context.Context, id WithdrawalID, body ResolveWithdrawalJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewResolveWithdrawalRequest(c.Server, id, body)
 	if err != nil {
 		return nil, err
 	}
@@ -1761,6 +1882,53 @@ func NewListWithdrawalsForReviewRequest(server string, params *ListWithdrawalsFo
 	return req, nil
 }
 
+// NewResolveWithdrawalRequest calls the generic ResolveWithdrawal builder with application/json body
+func NewResolveWithdrawalRequest(server string, id WithdrawalID, body ResolveWithdrawalJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewResolveWithdrawalRequestWithBody(server, id, "application/json", bodyReader)
+}
+
+// NewResolveWithdrawalRequestWithBody constructs an http.Request for the ResolveWithdrawal method, with any body, and a specified content type
+func NewResolveWithdrawalRequestWithBody(server string, id WithdrawalID, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "id", id, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/admin/v1/withdrawals/%s/resolve", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
 // NewReviewWithdrawalRequest calls the generic ReviewWithdrawal builder with application/json body
 func NewReviewWithdrawalRequest(server string, id WithdrawalID, body ReviewWithdrawalJSONRequestBody) (*http.Request, error) {
 	var bodyReader io.Reader
@@ -1985,6 +2153,36 @@ type ClientWithResponsesInterface interface {
 	//
 	// Corresponds with GET /admin/v1/withdrawals (the `ListWithdrawalsForReview` operationId).
 	ListWithdrawalsForReviewWithResponse(ctx context.Context, params *ListWithdrawalsForReviewParams, reqEditors ...RequestEditorFn) (*ListWithdrawalsForReviewResponse, error)
+
+	// ResolveWithdrawalWithBodyWithResponse Unstick a withdrawal the machine could not finish
+	//
+	// Four resolutions, and which one is legal depends on where the withdrawal stopped (docs/plan-v1.0.md §6.4.2).
+	//
+	// A `broadcast` withdrawal has a transaction in flight and its amount in `pending_withdrawal`: `bump` re-sends it on the same nonce with a higher fee, past the automatic replacement limit; `cancel_nonce` displaces it with a self-transfer on that nonce. Neither moves money now — the refund for a cancellation happens when the displacement is mined, because until then the original can still win the race.
+	//
+	// A `failed`/`on_chain` withdrawal has a transaction that reverted, gas spent, and its amount still in `pending_withdrawal`: `refund` returns the amount to the user and ends the withdrawal, `retry` puts it back on hold and sends the row round again with a fresh nonce.
+	//
+	// Anything else is 409 — including a bump on a withdrawal already being cancelled, which would bid against our own displacement.
+	//
+	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /admin/v1/withdrawals/{id}/resolve (the `ResolveWithdrawal` operationId).
+	ResolveWithdrawalWithBodyWithResponse(ctx context.Context, id WithdrawalID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ResolveWithdrawalResponse, error)
+
+	// ResolveWithdrawalWithResponse Unstick a withdrawal the machine could not finish
+	//
+	// Four resolutions, and which one is legal depends on where the withdrawal stopped (docs/plan-v1.0.md §6.4.2).
+	//
+	// A `broadcast` withdrawal has a transaction in flight and its amount in `pending_withdrawal`: `bump` re-sends it on the same nonce with a higher fee, past the automatic replacement limit; `cancel_nonce` displaces it with a self-transfer on that nonce. Neither moves money now — the refund for a cancellation happens when the displacement is mined, because until then the original can still win the race.
+	//
+	// A `failed`/`on_chain` withdrawal has a transaction that reverted, gas spent, and its amount still in `pending_withdrawal`: `refund` returns the amount to the user and ends the withdrawal, `retry` puts it back on hold and sends the row round again with a fresh nonce.
+	//
+	// Anything else is 409 — including a bump on a withdrawal already being cancelled, which would bid against our own displacement.
+	//
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /admin/v1/withdrawals/{id}/resolve (the `ResolveWithdrawal` operationId).
+	ResolveWithdrawalWithResponse(ctx context.Context, id WithdrawalID, body ResolveWithdrawalJSONRequestBody, reqEditors ...RequestEditorFn) (*ResolveWithdrawalResponse, error)
 
 	// ReviewWithdrawalWithBodyWithResponse Approve or reject a withdrawal awaiting review
 	//
@@ -2742,6 +2940,82 @@ func (r ListWithdrawalsForReviewResponse) ContentType() string {
 	return ""
 }
 
+type ResolveWithdrawalResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *AdminWithdrawal
+	// ApplicationProblemJSON400 the response for an HTTP 400 `application/problem+json` response
+	ApplicationProblemJSON400 *BadRequest
+	// ApplicationProblemJSON401 the response for an HTTP 401 `application/problem+json` response
+	ApplicationProblemJSON401 *Unauthorized
+	// ApplicationProblemJSON404 the response for an HTTP 404 `application/problem+json` response
+	ApplicationProblemJSON404 *NotFound
+	// ApplicationProblemJSON409 the response for an HTTP 409 `application/problem+json` response
+	ApplicationProblemJSON409 *Conflict
+	// ApplicationProblemJSON500 the response for an HTTP 500 `application/problem+json` response
+	ApplicationProblemJSON500 *InternalError
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r ResolveWithdrawalResponse) GetJSON200() *AdminWithdrawal {
+	return r.JSON200
+}
+
+// GetApplicationProblemJSON400 returns the response for an HTTP 400 `application/problem+json` response
+func (r ResolveWithdrawalResponse) GetApplicationProblemJSON400() *BadRequest {
+	return r.ApplicationProblemJSON400
+}
+
+// GetApplicationProblemJSON401 returns the response for an HTTP 401 `application/problem+json` response
+func (r ResolveWithdrawalResponse) GetApplicationProblemJSON401() *Unauthorized {
+	return r.ApplicationProblemJSON401
+}
+
+// GetApplicationProblemJSON404 returns the response for an HTTP 404 `application/problem+json` response
+func (r ResolveWithdrawalResponse) GetApplicationProblemJSON404() *NotFound {
+	return r.ApplicationProblemJSON404
+}
+
+// GetApplicationProblemJSON409 returns the response for an HTTP 409 `application/problem+json` response
+func (r ResolveWithdrawalResponse) GetApplicationProblemJSON409() *Conflict {
+	return r.ApplicationProblemJSON409
+}
+
+// GetApplicationProblemJSON500 returns the response for an HTTP 500 `application/problem+json` response
+func (r ResolveWithdrawalResponse) GetApplicationProblemJSON500() *InternalError {
+	return r.ApplicationProblemJSON500
+}
+
+// GetBody returns the raw response body bytes
+func (r ResolveWithdrawalResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r ResolveWithdrawalResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ResolveWithdrawalResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r ResolveWithdrawalResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
 type ReviewWithdrawalResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -3046,6 +3320,48 @@ func (c *ClientWithResponses) ListWithdrawalsForReviewWithResponse(ctx context.C
 		return nil, err
 	}
 	return ParseListWithdrawalsForReviewResponse(rsp)
+}
+
+// ResolveWithdrawalWithBodyWithResponse Unstick a withdrawal the machine could not finish
+//
+// Four resolutions, and which one is legal depends on where the withdrawal stopped (docs/plan-v1.0.md §6.4.2).
+//
+// A `broadcast` withdrawal has a transaction in flight and its amount in `pending_withdrawal`: `bump` re-sends it on the same nonce with a higher fee, past the automatic replacement limit; `cancel_nonce` displaces it with a self-transfer on that nonce. Neither moves money now — the refund for a cancellation happens when the displacement is mined, because until then the original can still win the race.
+//
+// A `failed`/`on_chain` withdrawal has a transaction that reverted, gas spent, and its amount still in `pending_withdrawal`: `refund` returns the amount to the user and ends the withdrawal, `retry` puts it back on hold and sends the row round again with a fresh nonce.
+//
+// Anything else is 409 — including a bump on a withdrawal already being cancelled, which would bid against our own displacement.
+//
+// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /admin/v1/withdrawals/{id}/resolve (the `ResolveWithdrawal` operationId).
+func (c *ClientWithResponses) ResolveWithdrawalWithBodyWithResponse(ctx context.Context, id WithdrawalID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ResolveWithdrawalResponse, error) {
+	rsp, err := c.ResolveWithdrawalWithBody(ctx, id, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseResolveWithdrawalResponse(rsp)
+}
+
+// ResolveWithdrawalWithResponse Unstick a withdrawal the machine could not finish
+//
+// Four resolutions, and which one is legal depends on where the withdrawal stopped (docs/plan-v1.0.md §6.4.2).
+//
+// A `broadcast` withdrawal has a transaction in flight and its amount in `pending_withdrawal`: `bump` re-sends it on the same nonce with a higher fee, past the automatic replacement limit; `cancel_nonce` displaces it with a self-transfer on that nonce. Neither moves money now — the refund for a cancellation happens when the displacement is mined, because until then the original can still win the race.
+//
+// A `failed`/`on_chain` withdrawal has a transaction that reverted, gas spent, and its amount still in `pending_withdrawal`: `refund` returns the amount to the user and ends the withdrawal, `retry` puts it back on hold and sends the row round again with a fresh nonce.
+//
+// Anything else is 409 — including a bump on a withdrawal already being cancelled, which would bid against our own displacement.
+//
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /admin/v1/withdrawals/{id}/resolve (the `ResolveWithdrawal` operationId).
+func (c *ClientWithResponses) ResolveWithdrawalWithResponse(ctx context.Context, id WithdrawalID, body ResolveWithdrawalJSONRequestBody, reqEditors ...RequestEditorFn) (*ResolveWithdrawalResponse, error) {
+	rsp, err := c.ResolveWithdrawal(ctx, id, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseResolveWithdrawalResponse(rsp)
 }
 
 // ReviewWithdrawalWithBodyWithResponse Approve or reject a withdrawal awaiting review
@@ -3622,6 +3938,67 @@ func ParseListWithdrawalsForReviewResponse(rsp *http.Response) (*ListWithdrawals
 			return nil, err
 		}
 		response.ApplicationProblemJSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON500 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseResolveWithdrawalResponse parses an HTTP response from a ResolveWithdrawalWithResponse call
+func ParseResolveWithdrawalResponse(rsp *http.Response) (*ResolveWithdrawalResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ResolveWithdrawalResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest AdminWithdrawal
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest BadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest Conflict
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON409 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
 		var dest InternalError

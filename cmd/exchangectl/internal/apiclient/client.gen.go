@@ -971,7 +971,10 @@ type Withdrawal struct {
 	Status string `json:"status"`
 
 	// ToAddress The destination, lower-case.
-	ToAddress string     `json:"to_address"`
+	ToAddress string `json:"to_address"`
+
+	// TxHash The on-chain transaction, once one exists. While a stuck withdrawal is being cancelled this is the displacing transaction, because that is the one whose fate decides the money.
+	TxHash    *string    `json:"tx_hash,omitempty"`
 	UpdatedAt *time.Time `json:"updated_at,omitempty"`
 }
 
