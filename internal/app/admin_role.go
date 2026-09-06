@@ -13,6 +13,7 @@ import (
 
 	"github.com/arc119226/crypto-exchange/internal/admin"
 	"github.com/arc119226/crypto-exchange/internal/audit"
+	"github.com/arc119226/crypto-exchange/internal/chain/withdrawal"
 	"github.com/arc119226/crypto-exchange/internal/ledger"
 	"github.com/arc119226/crypto-exchange/internal/registry"
 	"github.com/arc119226/crypto-exchange/internal/telemetry"
@@ -55,7 +56,11 @@ func newAdminServer(cfg Config, log *slog.Logger, m *telemetry.HTTPMetrics, pool
 	r.MethodNotAllowed(func(w http.ResponseWriter, req *http.Request) {
 		admin.WriteProblem(w, req, http.StatusMethodNotAllowed, "Method Not Allowed", "")
 	})
-	admin.Mount(r, admin.NewHandler(pool, l, registry.NewStore(pool), audit.NewRecorder(cfg.TenantID), cfg.TenantID))
+	rec := audit.NewRecorder(cfg.TenantID)
+	admin.Mount(r, admin.NewHandler(pool, l, registry.NewStore(pool), rec, cfg.TenantID).
+		// The review queue. Approving marks a withdrawal for the chain worker;
+		// this role can neither lock funds nor sign (docs/plan-v1.0.md §6.4.2).
+		WithWithdrawals(withdrawal.NewReviewer(pool, cfg.TenantID, l, rec)))
 	return &http.Server{Addr: cfg.AdminAddr, Handler: r, ReadHeaderTimeout: 5 * time.Second}
 }
 

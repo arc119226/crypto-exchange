@@ -298,3 +298,23 @@ func (w *Worker) withdrawnSince(ctx context.Context, tx pgx.Tx, accountID, asset
 	}
 	return pg.AmountFromNumeric(total)
 }
+
+// PostgresKYC reads the KYC level of the user behind an account.
+type PostgresKYC struct{ db *pgxpool.Pool }
+
+// NewPostgresKYC wraps a pool as a KYCReader.
+func NewPostgresKYC(db *pgxpool.Pool) PostgresKYC { return PostgresKYC{db: db} }
+
+// KYCLevelOf implements KYCReader. An account with no user behind it — a house
+// account, which cannot withdraw anyway — reads as level 0, the level with the
+// tightest limits, so the fallback is the conservative one.
+func (k PostgresKYC) KYCLevelOf(ctx context.Context, accountID string) (int16, error) {
+	level, err := sqlcgen.New(k.db).GetAccountKYCLevel(ctx, accountID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, fmt.Errorf("withdrawal: kyc level of %s: %w", accountID, err)
+	}
+	return level, nil
+}

@@ -23,6 +23,7 @@ tags:
   - name: ledger
   - name: registry
   - name: audit
+  - name: withdrawals
 
 paths:
   /admin/v1/accounts:
@@ -195,6 +196,67 @@ paths:
         "500":
           $ref: "#/components/responses/InternalError"
 
+  /admin/v1/withdrawals:
+    get:
+      tags: [withdrawals]
+      operationId: listWithdrawalsForReview
+      summary: The withdrawal review queue
+      description: >
+        Withdrawals the policy sent to a person, oldest first: whoever has
+        waited longest is served first. A withdrawal is here because it broke a
+        limit, not because it is illegitimate (docs/plan-v1.0.md §6.4.2).
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: Withdrawals awaiting review
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminWithdrawalList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /admin/v1/withdrawals/{id}/review:
+    post:
+      tags: [withdrawals]
+      operationId: reviewWithdrawal
+      summary: Approve or reject a withdrawal awaiting review
+      description: >
+        Approving does **not** move money: it marks the withdrawal for the
+        chain worker, which locks the funds and hands it to the signer. That
+        separation is enforced by the column grants — admin writes the review
+        columns, the chain role writes the hold — so no single role can both
+        authorise a withdrawal and act on it. Only a withdrawal in
+        `pending_review` can be decided; anything else is 409.
+      parameters:
+        - $ref: "#/components/parameters/WithdrawalID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WithdrawalReviewRequest"
+      responses:
+        "200":
+          description: The reviewed withdrawal
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminWithdrawal"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
   /admin/v1/ledger/trial-balance:
     get:
       tags: [ledger]
@@ -359,6 +421,12 @@ components:
         format: int32
         minimum: 0
         default: 0
+    WithdrawalID:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
 
   responses:
     BadRequest:
@@ -379,6 +447,12 @@ components:
         application/problem+json:
           schema:
             $ref: "#/components/schemas/Problem"
+    Conflict:
+      description: The resource is not in a state that allows this
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
     InternalError:
       description: Unexpected server error
       content:
@@ -395,6 +469,46 @@ components:
       x-go-type: money.Amount
       x-go-type-import:
         path: github.com/arc119226/crypto-exchange/internal/money
+
+    AdminWithdrawal:
+      type: object
+      required: [id, account_id, asset, amount, to_address, chain_id, status, created_at]
+      properties:
+        id: { type: string }
+        account_id: { type: string }
+        asset: { type: string }
+        amount:
+          $ref: "#/components/schemas/Amount"
+        to_address: { type: string }
+        chain_id: { type: integer, format: int64 }
+        status: { type: string }
+        failure_reason: { type: string, nullable: true }
+        review_note: { type: string, nullable: true }
+        reviewed_by: { type: string, nullable: true }
+        reviewed_at: { type: string, format: date-time, nullable: true }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    AdminWithdrawalList:
+      type: object
+      required: [withdrawals]
+      properties:
+        withdrawals:
+          type: array
+          items:
+            $ref: "#/components/schemas/AdminWithdrawal"
+
+    WithdrawalReviewRequest:
+      type: object
+      required: [decision]
+      properties:
+        decision:
+          type: string
+          enum: [approve, reject]
+        note:
+          type: string
+          maxLength: 500
+          description: Why. Recorded on the withdrawal and in the audit trail.
 
     AccountKind:
       type: string

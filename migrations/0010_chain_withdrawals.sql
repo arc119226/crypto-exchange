@@ -35,8 +35,11 @@ CREATE TABLE chain.withdrawals (
     -- the rest with the signer.
     failure_reason text       CHECK (failure_reason IN
                       ('insufficient_balance', 'policy', 'broadcast', 'on_chain', 'replaced')),
-    -- who approved or rejected it in the admin queue; a policy rejection has
-    -- no reviewer, so this is not tied to the rejected status
+    -- Who approved or rejected it in the admin queue. Nullable for two
+    -- reasons: a policy rejection has no reviewer at all, and the admin API
+    -- still authenticates with a static key rather than a user session, so
+    -- today there is no user id to record -- the audit trail carries the
+    -- actor instead. Phase 5 gives admins real sessions and fills this in.
     reviewed_by   uuid        REFERENCES auth.users (id),
     reviewed_at   timestamptz,
     review_note   text,
@@ -53,8 +56,11 @@ CREATE TABLE chain.withdrawals (
     -- The biconditional version of this CHECK is what rejected the
     -- orphaned -> dropped transition in 0009; the same shape, avoided here.
     CHECK (status <> 'failed' OR failure_reason IS NOT NULL),
-    -- These two are written in the same statement and never cleared.
-    CHECK ((reviewed_by IS NULL) = (reviewed_at IS NULL)),
+    -- A named reviewer must come with the time they decided. One-directional:
+    -- the reverse would forbid recording *when* a review happened while the
+    -- admin API cannot yet say *who* did it, and losing the timestamp to
+    -- satisfy a constraint would be the wrong trade.
+    CHECK (reviewed_by IS NULL OR reviewed_at IS NOT NULL),
     -- Funds are locked before signing, and stay locked after: every state from
     -- funds_locked onwards must point at the entry that locked them.
     CHECK (status NOT IN ('funds_locked', 'signed', 'broadcast', 'confirmed')
@@ -111,3 +117,10 @@ GRANT UPDATE ON chain.withdrawals TO ex_all;
 -- to add for ex_chain, and column-scoped for the same reason: the api may
 -- advance an account's event sequence and change nothing else about it.
 GRANT UPDATE (next_seq) ON ledger.accounts TO ex_api;
+
+-- The withdrawal policy is per KYC level, and the level lives on the user
+-- behind the account, which the chain role cannot see: 0007 grants SELECT on
+-- auth.users to ex_api, ex_admin and ex_all only. The grant is column-scoped
+-- to the two columns the join needs, so the chain role still cannot read a
+-- password hash, a TOTP secret or an email address.
+GRANT SELECT (id, kyc_level) ON auth.users TO ex_chain;

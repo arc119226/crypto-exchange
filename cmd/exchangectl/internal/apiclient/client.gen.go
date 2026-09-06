@@ -421,6 +421,24 @@ type CreateAPIKeyRequest struct {
 	Scopes      []Scope   `json:"scopes"`
 }
 
+// CreateWithdrawalRequest defines model for CreateWithdrawalRequest.
+type CreateWithdrawalRequest struct {
+	// Amount Arbitrary-precision decimal serialized as a string, at most 18 integer
+	// and 18 fractional digits (Postgres NUMERIC(36,18)). Never a JSON number.
+	//
+	//
+	// Example: 1990.00
+	Amount Amount `json:"amount"`
+
+	// Asset Example: ETH
+	Asset string `json:"asset"`
+
+	// ToAddress Destination address. Any casing; a mixed-case one must pass EIP-55.
+	//
+	// Example: 0x70997970C51812dc3A010C7d01b50e0d17dc79C8
+	ToAddress string `json:"to_address"`
+}
+
 // CreatedAPIKey defines model for CreatedAPIKey.
 type CreatedAPIKey struct {
 	CreatedAt time.Time `json:"created_at"`
@@ -925,6 +943,43 @@ type TradeList struct {
 	Trades []Trade `json:"trades"`
 }
 
+// Withdrawal defines model for Withdrawal.
+type Withdrawal struct {
+	// Amount Arbitrary-precision decimal serialized as a string, at most 18 integer
+	// and 18 fractional digits (Postgres NUMERIC(36,18)). Never a JSON number.
+	//
+	//
+	// Example: 1990.00
+	Amount Amount `json:"amount"`
+
+	// Asset Example: ETH
+	Asset     string    `json:"asset"`
+	ChainID   int64     `json:"chain_id"`
+	CreatedAt time.Time `json:"created_at"`
+
+	// FailureReason Why it failed; null unless the status is failed.
+	FailureReason *string `json:"failure_reason,omitempty"`
+	ID            string  `json:"id"`
+
+	// ReviewNote What the administrator wrote when approving or rejecting.
+	ReviewNote *string `json:"review_note,omitempty"`
+
+	// Status requested, policy_check, auto_approved, pending_review, approved, funds_locked, signed, broadcast, confirmed, rejected or failed. Open for new states.
+	//
+	//
+	// Example: pending_review
+	Status string `json:"status"`
+
+	// ToAddress The destination, lower-case.
+	ToAddress string     `json:"to_address"`
+	UpdatedAt *time.Time `json:"updated_at,omitempty"`
+}
+
+// WithdrawalList defines model for WithdrawalList.
+type WithdrawalList struct {
+	Withdrawals []Withdrawal `json:"withdrawals"`
+}
+
 // Limit defines model for Limit.
 type Limit = int32
 
@@ -1020,6 +1075,18 @@ type ListOrdersParams struct {
 	Offset *Offset `form:"offset,omitempty" json:"offset,omitempty"`
 }
 
+// ListWithdrawalsParams defines parameters for ListWithdrawals.
+type ListWithdrawalsParams struct {
+	// Limit Page size (default 100, max 500)
+	Limit *Limit `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// CreateWithdrawalParams defines parameters for CreateWithdrawal.
+type CreateWithdrawalParams struct {
+	// IdempotencyKey Client-chosen key, unique per request within the account.
+	IdempotencyKey string `json:"Idempotency-Key"`
+}
+
 // CreateAPIKeyJSONRequestBody defines body for CreateAPIKey for application/json ContentType.
 type CreateAPIKeyJSONRequestBody = CreateAPIKeyRequest
 
@@ -1037,6 +1104,9 @@ type RegisterJSONRequestBody = RegisterRequest
 
 // PlaceOrderJSONRequestBody defines body for PlaceOrder for application/json ContentType.
 type PlaceOrderJSONRequestBody = PlaceOrderRequest
+
+// CreateWithdrawalJSONRequestBody defines body for CreateWithdrawal for application/json ContentType.
+type CreateWithdrawalJSONRequestBody = CreateWithdrawalRequest
 
 // RequestEditorFn is the function signature for the RequestEditor callback function
 type RequestEditorFn func(ctx context.Context, req *http.Request) error
@@ -1322,6 +1392,55 @@ type ClientInterface interface {
 	//
 	// Corresponds with GET /v1/orders/{id} (the `GetOrder` operationId).
 	GetOrder(ctx context.Context, id OrderID, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ListWithdrawals The caller's withdrawals, newest first
+	//
+	// A withdrawal's `status` follows docs/plan-v1.0.md §6.4.2. `requested` has only been recorded; `pending_review` is waiting for an administrator; `auto_approved` and `approved` are cleared but not yet funded; `funds_locked` means the amount is held and the withdrawal is queued for signing. `rejected` and `failed` are terminal, and the funds were never or no longer held.
+	//
+	// Corresponds with GET /v1/withdrawals (the `ListWithdrawals` operationId).
+	ListWithdrawals(ctx context.Context, params *ListWithdrawalsParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// CreateWithdrawalWithBody Request a withdrawal
+	//
+	// Records a withdrawal request. Nothing is held and nothing is signed
+	// here: the chain role applies the withdrawal policy next, and either
+	// clears it automatically or queues it for an administrator.
+	//
+	// `Idempotency-Key` is required and scoped to the account. Resending the
+	// same request with the same key returns the original withdrawal with
+	// **200**; reusing the key with a different asset, amount or destination
+	// is **422**. The key never expires — there is no window after which the
+	// same key would create a second withdrawal.
+	//
+	// `to_address` may be given in any casing, but a mixed-case address must
+	// pass its EIP-55 checksum: that casing *is* a checksum, and accepting a
+	// wrong one would send funds to a mistyped address.
+	//
+	// Takes any type of body and a specified content type.
+	//
+	// Corresponds with POST /v1/withdrawals (the `CreateWithdrawal` operationId).
+	CreateWithdrawalWithBody(ctx context.Context, params *CreateWithdrawalParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// CreateWithdrawal Request a withdrawal
+	//
+	// Records a withdrawal request. Nothing is held and nothing is signed
+	// here: the chain role applies the withdrawal policy next, and either
+	// clears it automatically or queues it for an administrator.
+	//
+	// `Idempotency-Key` is required and scoped to the account. Resending the
+	// same request with the same key returns the original withdrawal with
+	// **200**; reusing the key with a different asset, amount or destination
+	// is **422**. The key never expires — there is no window after which the
+	// same key would create a second withdrawal.
+	//
+	// `to_address` may be given in any casing, but a mixed-case address must
+	// pass its EIP-55 checksum: that casing *is* a checksum, and accepting a
+	// wrong one would send funds to a mistyped address.
+	//
+	// Takes a body of the `application/json` content type.
+	//
+	// Corresponds with POST /v1/withdrawals (the `CreateWithdrawal` operationId).
+	CreateWithdrawal(ctx context.Context, params *CreateWithdrawalParams, body CreateWithdrawalJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 }
 
 // GetJWKS Public keys that verify access tokens
@@ -1815,6 +1934,85 @@ func (c *Client) CancelOrder(ctx context.Context, id OrderID, reqEditors ...Requ
 // Corresponds with GET /v1/orders/{id} (the `GetOrder` operationId).
 func (c *Client) GetOrder(ctx context.Context, id OrderID, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewGetOrderRequest(c.Server, id)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// ListWithdrawals The caller's withdrawals, newest first
+//
+// A withdrawal's `status` follows docs/plan-v1.0.md §6.4.2. `requested` has only been recorded; `pending_review` is waiting for an administrator; `auto_approved` and `approved` are cleared but not yet funded; `funds_locked` means the amount is held and the withdrawal is queued for signing. `rejected` and `failed` are terminal, and the funds were never or no longer held.
+//
+// Corresponds with GET /v1/withdrawals (the `ListWithdrawals` operationId).
+func (c *Client) ListWithdrawals(ctx context.Context, params *ListWithdrawalsParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListWithdrawalsRequest(c.Server, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// CreateWithdrawalWithBody Request a withdrawal
+//
+// Records a withdrawal request. Nothing is held and nothing is signed
+// here: the chain role applies the withdrawal policy next, and either
+// clears it automatically or queues it for an administrator.
+//
+// `Idempotency-Key` is required and scoped to the account. Resending the
+// same request with the same key returns the original withdrawal with
+// **200**; reusing the key with a different asset, amount or destination
+// is **422**. The key never expires — there is no window after which the
+// same key would create a second withdrawal.
+//
+// `to_address` may be given in any casing, but a mixed-case address must
+// pass its EIP-55 checksum: that casing *is* a checksum, and accepting a
+// wrong one would send funds to a mistyped address.
+//
+// Takes any type of body and a specified content type.
+//
+// Corresponds with POST /v1/withdrawals (the `CreateWithdrawal` operationId).
+func (c *Client) CreateWithdrawalWithBody(ctx context.Context, params *CreateWithdrawalParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCreateWithdrawalRequestWithBody(c.Server, params, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// CreateWithdrawal Request a withdrawal
+//
+// Records a withdrawal request. Nothing is held and nothing is signed
+// here: the chain role applies the withdrawal policy next, and either
+// clears it automatically or queues it for an administrator.
+//
+// `Idempotency-Key` is required and scoped to the account. Resending the
+// same request with the same key returns the original withdrawal with
+// **200**; reusing the key with a different asset, amount or destination
+// is **422**. The key never expires — there is no window after which the
+// same key would create a second withdrawal.
+//
+// `to_address` may be given in any casing, but a mixed-case address must
+// pass its EIP-55 checksum: that casing *is* a checksum, and accepting a
+// wrong one would send funds to a mistyped address.
+//
+// Takes a body of the `application/json` content type.
+//
+// Corresponds with POST /v1/withdrawals (the `CreateWithdrawal` operationId).
+func (c *Client) CreateWithdrawal(ctx context.Context, params *CreateWithdrawalParams, body CreateWithdrawalJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCreateWithdrawalRequest(c.Server, params, body)
 	if err != nil {
 		return nil, err
 	}
@@ -2871,6 +3069,113 @@ func NewGetOrderRequest(server string, id OrderID) (*http.Request, error) {
 	return req, nil
 }
 
+// NewListWithdrawalsRequest constructs an http.Request for the ListWithdrawals method
+func NewListWithdrawalsRequest(server string, params *ListWithdrawalsParams) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/withdrawals")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		// queryValues collects non-styled parameters (passthrough, JSON)
+		// that are safe to round-trip through url.Values.Encode().
+		queryValues := queryURL.Query()
+		// rawQueryFragments collects pre-encoded query fragments from
+		// styled parameters, preserving literal commas as delimiters
+		// per the OpenAPI spec (e.g. "color=blue,black,brown").
+		var rawQueryFragments []string
+
+		if params.Limit != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "limit", *params.Limit, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "integer", Format: "int32"}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if encoded := queryValues.Encode(); encoded != "" {
+			rawQueryFragments = append(rawQueryFragments, encoded)
+		}
+		queryURL.RawQuery = strings.Join(rawQueryFragments, "&")
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewCreateWithdrawalRequest calls the generic CreateWithdrawal builder with application/json body
+func NewCreateWithdrawalRequest(server string, params *CreateWithdrawalParams, body CreateWithdrawalJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewCreateWithdrawalRequestWithBody(server, params, "application/json", bodyReader)
+}
+
+// NewCreateWithdrawalRequestWithBody constructs an http.Request for the CreateWithdrawal method, with any body, and a specified content type
+func NewCreateWithdrawalRequestWithBody(server string, params *CreateWithdrawalParams, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/withdrawals")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	if params != nil {
+
+		var headerParam0 string
+
+		headerParam0, err = runtime.StyleParamWithOptions("simple", false, "Idempotency-Key", params.IdempotencyKey, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+		if err != nil {
+			return nil, err
+		}
+
+		req.Header.Set("Idempotency-Key", headerParam0)
+
+	}
+
+	return req, nil
+}
+
 func (c *Client) applyEditors(ctx context.Context, req *http.Request, additionalEditors []RequestEditorFn) error {
 	for _, r := range c.RequestEditors {
 		if err := r(ctx, req); err != nil {
@@ -3159,6 +3464,57 @@ type ClientWithResponsesInterface interface {
 	//
 	// Corresponds with GET /v1/orders/{id} (the `GetOrder` operationId).
 	GetOrderWithResponse(ctx context.Context, id OrderID, reqEditors ...RequestEditorFn) (*GetOrderResponse, error)
+
+	// ListWithdrawalsWithResponse The caller's withdrawals, newest first
+	//
+	// A withdrawal's `status` follows docs/plan-v1.0.md §6.4.2. `requested` has only been recorded; `pending_review` is waiting for an administrator; `auto_approved` and `approved` are cleared but not yet funded; `funds_locked` means the amount is held and the withdrawal is queued for signing. `rejected` and `failed` are terminal, and the funds were never or no longer held.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /v1/withdrawals (the `ListWithdrawals` operationId).
+	ListWithdrawalsWithResponse(ctx context.Context, params *ListWithdrawalsParams, reqEditors ...RequestEditorFn) (*ListWithdrawalsResponse, error)
+
+	// CreateWithdrawalWithBodyWithResponse Request a withdrawal
+	//
+	// Records a withdrawal request. Nothing is held and nothing is signed
+	// here: the chain role applies the withdrawal policy next, and either
+	// clears it automatically or queues it for an administrator.
+	//
+	// `Idempotency-Key` is required and scoped to the account. Resending the
+	// same request with the same key returns the original withdrawal with
+	// **200**; reusing the key with a different asset, amount or destination
+	// is **422**. The key never expires — there is no window after which the
+	// same key would create a second withdrawal.
+	//
+	// `to_address` may be given in any casing, but a mixed-case address must
+	// pass its EIP-55 checksum: that casing *is* a checksum, and accepting a
+	// wrong one would send funds to a mistyped address.
+	//
+	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /v1/withdrawals (the `CreateWithdrawal` operationId).
+	CreateWithdrawalWithBodyWithResponse(ctx context.Context, params *CreateWithdrawalParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateWithdrawalResponse, error)
+
+	// CreateWithdrawalWithResponse Request a withdrawal
+	//
+	// Records a withdrawal request. Nothing is held and nothing is signed
+	// here: the chain role applies the withdrawal policy next, and either
+	// clears it automatically or queues it for an administrator.
+	//
+	// `Idempotency-Key` is required and scoped to the account. Resending the
+	// same request with the same key returns the original withdrawal with
+	// **200**; reusing the key with a different asset, amount or destination
+	// is **422**. The key never expires — there is no window after which the
+	// same key would create a second withdrawal.
+	//
+	// `to_address` may be given in any casing, but a mixed-case address must
+	// pass its EIP-55 checksum: that casing *is* a checksum, and accepting a
+	// wrong one would send funds to a mistyped address.
+	//
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /v1/withdrawals (the `CreateWithdrawal` operationId).
+	CreateWithdrawalWithResponse(ctx context.Context, params *CreateWithdrawalParams, body CreateWithdrawalJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateWithdrawalResponse, error)
 }
 
 type GetJWKSResponse struct {
@@ -4615,6 +4971,158 @@ func (r GetOrderResponse) ContentType() string {
 	return ""
 }
 
+type ListWithdrawalsResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *WithdrawalList
+	// ApplicationProblemJSON401 the response for an HTTP 401 `application/problem+json` response
+	ApplicationProblemJSON401 *Unauthorized
+	// ApplicationProblemJSON500 the response for an HTTP 500 `application/problem+json` response
+	ApplicationProblemJSON500 *InternalError
+	// ApplicationProblemJSON503 the response for an HTTP 503 `application/problem+json` response
+	ApplicationProblemJSON503 *ServiceUnavailable
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r ListWithdrawalsResponse) GetJSON200() *WithdrawalList {
+	return r.JSON200
+}
+
+// GetApplicationProblemJSON401 returns the response for an HTTP 401 `application/problem+json` response
+func (r ListWithdrawalsResponse) GetApplicationProblemJSON401() *Unauthorized {
+	return r.ApplicationProblemJSON401
+}
+
+// GetApplicationProblemJSON500 returns the response for an HTTP 500 `application/problem+json` response
+func (r ListWithdrawalsResponse) GetApplicationProblemJSON500() *InternalError {
+	return r.ApplicationProblemJSON500
+}
+
+// GetApplicationProblemJSON503 returns the response for an HTTP 503 `application/problem+json` response
+func (r ListWithdrawalsResponse) GetApplicationProblemJSON503() *ServiceUnavailable {
+	return r.ApplicationProblemJSON503
+}
+
+// GetBody returns the raw response body bytes
+func (r ListWithdrawalsResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r ListWithdrawalsResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListWithdrawalsResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r ListWithdrawalsResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type CreateWithdrawalResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *Withdrawal
+	// JSON201 the response for an HTTP 201 `application/json` response
+	JSON201 *Withdrawal
+	// ApplicationProblemJSON400 the response for an HTTP 400 `application/problem+json` response
+	ApplicationProblemJSON400 *BadRequest
+	// ApplicationProblemJSON401 the response for an HTTP 401 `application/problem+json` response
+	ApplicationProblemJSON401 *Unauthorized
+	// ApplicationProblemJSON403 the response for an HTTP 403 `application/problem+json` response
+	ApplicationProblemJSON403 *Forbidden
+	// ApplicationProblemJSON422 the response for an HTTP 422 `application/problem+json` response
+	ApplicationProblemJSON422 *UnprocessableEntity
+	// ApplicationProblemJSON500 the response for an HTTP 500 `application/problem+json` response
+	ApplicationProblemJSON500 *InternalError
+	// ApplicationProblemJSON503 the response for an HTTP 503 `application/problem+json` response
+	ApplicationProblemJSON503 *ServiceUnavailable
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r CreateWithdrawalResponse) GetJSON200() *Withdrawal {
+	return r.JSON200
+}
+
+// GetJSON201 returns the response for an HTTP 201 `application/json` response
+func (r CreateWithdrawalResponse) GetJSON201() *Withdrawal {
+	return r.JSON201
+}
+
+// GetApplicationProblemJSON400 returns the response for an HTTP 400 `application/problem+json` response
+func (r CreateWithdrawalResponse) GetApplicationProblemJSON400() *BadRequest {
+	return r.ApplicationProblemJSON400
+}
+
+// GetApplicationProblemJSON401 returns the response for an HTTP 401 `application/problem+json` response
+func (r CreateWithdrawalResponse) GetApplicationProblemJSON401() *Unauthorized {
+	return r.ApplicationProblemJSON401
+}
+
+// GetApplicationProblemJSON403 returns the response for an HTTP 403 `application/problem+json` response
+func (r CreateWithdrawalResponse) GetApplicationProblemJSON403() *Forbidden {
+	return r.ApplicationProblemJSON403
+}
+
+// GetApplicationProblemJSON422 returns the response for an HTTP 422 `application/problem+json` response
+func (r CreateWithdrawalResponse) GetApplicationProblemJSON422() *UnprocessableEntity {
+	return r.ApplicationProblemJSON422
+}
+
+// GetApplicationProblemJSON500 returns the response for an HTTP 500 `application/problem+json` response
+func (r CreateWithdrawalResponse) GetApplicationProblemJSON500() *InternalError {
+	return r.ApplicationProblemJSON500
+}
+
+// GetApplicationProblemJSON503 returns the response for an HTTP 503 `application/problem+json` response
+func (r CreateWithdrawalResponse) GetApplicationProblemJSON503() *ServiceUnavailable {
+	return r.ApplicationProblemJSON503
+}
+
+// GetBody returns the raw response body bytes
+func (r CreateWithdrawalResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r CreateWithdrawalResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r CreateWithdrawalResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r CreateWithdrawalResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
 // GetJWKSWithResponse Public keys that verify access tokens
 //
 // Returns a wrapper object for the known response body format(s).
@@ -5032,6 +5540,75 @@ func (c *ClientWithResponses) GetOrderWithResponse(ctx context.Context, id Order
 		return nil, err
 	}
 	return ParseGetOrderResponse(rsp)
+}
+
+// ListWithdrawalsWithResponse The caller's withdrawals, newest first
+//
+// A withdrawal's `status` follows docs/plan-v1.0.md §6.4.2. `requested` has only been recorded; `pending_review` is waiting for an administrator; `auto_approved` and `approved` are cleared but not yet funded; `funds_locked` means the amount is held and the withdrawal is queued for signing. `rejected` and `failed` are terminal, and the funds were never or no longer held.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /v1/withdrawals (the `ListWithdrawals` operationId).
+func (c *ClientWithResponses) ListWithdrawalsWithResponse(ctx context.Context, params *ListWithdrawalsParams, reqEditors ...RequestEditorFn) (*ListWithdrawalsResponse, error) {
+	rsp, err := c.ListWithdrawals(ctx, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListWithdrawalsResponse(rsp)
+}
+
+// CreateWithdrawalWithBodyWithResponse Request a withdrawal
+//
+// Records a withdrawal request. Nothing is held and nothing is signed
+// here: the chain role applies the withdrawal policy next, and either
+// clears it automatically or queues it for an administrator.
+//
+// `Idempotency-Key` is required and scoped to the account. Resending the
+// same request with the same key returns the original withdrawal with
+// **200**; reusing the key with a different asset, amount or destination
+// is **422**. The key never expires — there is no window after which the
+// same key would create a second withdrawal.
+//
+// `to_address` may be given in any casing, but a mixed-case address must
+// pass its EIP-55 checksum: that casing *is* a checksum, and accepting a
+// wrong one would send funds to a mistyped address.
+//
+// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /v1/withdrawals (the `CreateWithdrawal` operationId).
+func (c *ClientWithResponses) CreateWithdrawalWithBodyWithResponse(ctx context.Context, params *CreateWithdrawalParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateWithdrawalResponse, error) {
+	rsp, err := c.CreateWithdrawalWithBody(ctx, params, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCreateWithdrawalResponse(rsp)
+}
+
+// CreateWithdrawalWithResponse Request a withdrawal
+//
+// Records a withdrawal request. Nothing is held and nothing is signed
+// here: the chain role applies the withdrawal policy next, and either
+// clears it automatically or queues it for an administrator.
+//
+// `Idempotency-Key` is required and scoped to the account. Resending the
+// same request with the same key returns the original withdrawal with
+// **200**; reusing the key with a different asset, amount or destination
+// is **422**. The key never expires — there is no window after which the
+// same key would create a second withdrawal.
+//
+// `to_address` may be given in any casing, but a mixed-case address must
+// pass its EIP-55 checksum: that casing *is* a checksum, and accepting a
+// wrong one would send funds to a mistyped address.
+//
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /v1/withdrawals (the `CreateWithdrawal` operationId).
+func (c *ClientWithResponses) CreateWithdrawalWithResponse(ctx context.Context, params *CreateWithdrawalParams, body CreateWithdrawalJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateWithdrawalResponse, error) {
+	rsp, err := c.CreateWithdrawal(ctx, params, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCreateWithdrawalResponse(rsp)
 }
 
 // ParseGetJWKSResponse parses an HTTP response from a GetJWKSWithResponse call
@@ -6167,6 +6744,128 @@ func ParseGetOrderResponse(rsp *http.Response) (*GetOrderResponse, error) {
 			return nil, err
 		}
 		response.ApplicationProblemJSON500 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseListWithdrawalsResponse parses an HTTP response from a ListWithdrawalsWithResponse call
+func ParseListWithdrawalsResponse(rsp *http.Response) (*ListWithdrawalsResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListWithdrawalsResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest WithdrawalList
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON500 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest ServiceUnavailable
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON503 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseCreateWithdrawalResponse parses an HTTP response from a CreateWithdrawalWithResponse call
+func ParseCreateWithdrawalResponse(rsp *http.Response) (*CreateWithdrawalResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &CreateWithdrawalResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest Withdrawal
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 201:
+		var dest Withdrawal
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON201 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest BadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest Forbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest UnprocessableEntity
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON422 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON500 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest ServiceUnavailable
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON503 = &dest
 
 	}
 

@@ -215,6 +215,24 @@ func (e PostingDirection) Valid() bool {
 	}
 }
 
+// Defines values for WithdrawalReviewRequestDecision.
+const (
+	WithdrawalReviewRequestDecisionApprove WithdrawalReviewRequestDecision = "approve"
+	WithdrawalReviewRequestDecisionReject  WithdrawalReviewRequestDecision = "reject"
+)
+
+// Valid indicates whether the value is a known member of the WithdrawalReviewRequestDecision enum.
+func (e WithdrawalReviewRequestDecision) Valid() bool {
+	switch e {
+	case WithdrawalReviewRequestDecisionApprove:
+		return true
+	case WithdrawalReviewRequestDecisionReject:
+		return true
+	default:
+		return false
+	}
+}
+
 // Account defines model for Account.
 type Account struct {
 	CreatedAt time.Time `json:"created_at"`
@@ -269,6 +287,32 @@ type AdjustmentRequest struct {
 
 // AdjustmentRequestDirection credit adds to the user's available balance, debit removes.
 type AdjustmentRequestDirection string
+
+// AdminWithdrawal defines model for AdminWithdrawal.
+type AdminWithdrawal struct {
+	AccountID string `json:"account_id"`
+
+	// Amount Decimal serialized as a string (NUMERIC(36,18)); never a JSON number.
+	//
+	// Example: 1990.00
+	Amount        Amount     `json:"amount"`
+	Asset         string     `json:"asset"`
+	ChainID       int64      `json:"chain_id"`
+	CreatedAt     time.Time  `json:"created_at"`
+	FailureReason *string    `json:"failure_reason,omitempty"`
+	ID            string     `json:"id"`
+	ReviewNote    *string    `json:"review_note,omitempty"`
+	ReviewedAt    *time.Time `json:"reviewed_at,omitempty"`
+	ReviewedBy    *string    `json:"reviewed_by,omitempty"`
+	Status        string     `json:"status"`
+	ToAddress     string     `json:"to_address"`
+	UpdatedAt     *time.Time `json:"updated_at,omitempty"`
+}
+
+// AdminWithdrawalList defines model for AdminWithdrawalList.
+type AdminWithdrawalList struct {
+	Withdrawals []AdminWithdrawal `json:"withdrawals"`
+}
 
 // Amount Decimal serialized as a string (NUMERIC(36,18)); never a JSON number.
 //
@@ -471,6 +515,17 @@ type TrialBalanceLine struct {
 	Diff Amount `json:"diff"`
 }
 
+// WithdrawalReviewRequest defines model for WithdrawalReviewRequest.
+type WithdrawalReviewRequest struct {
+	Decision WithdrawalReviewRequestDecision `json:"decision"`
+
+	// Note Why. Recorded on the withdrawal and in the audit trail.
+	Note *string `json:"note,omitempty"`
+}
+
+// WithdrawalReviewRequestDecision defines model for WithdrawalReviewRequest.Decision.
+type WithdrawalReviewRequestDecision string
+
 // AccountID defines model for AccountID.
 type AccountID = string
 
@@ -483,8 +538,14 @@ type MarketSymbol = string
 // Offset defines model for Offset.
 type Offset = int32
 
+// WithdrawalID defines model for WithdrawalID.
+type WithdrawalID = string
+
 // BadRequest RFC 7807 problem details.
 type BadRequest = Problem
+
+// Conflict RFC 7807 problem details.
+type Conflict = Problem
 
 // InternalError RFC 7807 problem details.
 type InternalError = Problem
@@ -520,6 +581,11 @@ type ListEntriesParams struct {
 	Offset    *Offset `form:"offset,omitempty" json:"offset,omitempty"`
 }
 
+// ListWithdrawalsForReviewParams defines parameters for ListWithdrawalsForReview.
+type ListWithdrawalsForReviewParams struct {
+	Limit *Limit `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
 // CreateAccountJSONRequestBody defines body for CreateAccount for application/json ContentType.
 type CreateAccountJSONRequestBody = CreateAccountRequest
 
@@ -531,6 +597,9 @@ type CreateAdjustmentJSONRequestBody = AdjustmentRequest
 
 // SetMarketStatusJSONRequestBody defines body for SetMarketStatus for application/json ContentType.
 type SetMarketStatusJSONRequestBody = MarketStatusRequest
+
+// ReviewWithdrawalJSONRequestBody defines body for ReviewWithdrawal for application/json ContentType.
+type ReviewWithdrawalJSONRequestBody = WithdrawalReviewRequest
 
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
@@ -567,6 +636,12 @@ type ServerInterface interface {
 	// SetMarketStatus Halt, resume or delist a market
 	// (PUT /admin/v1/markets/{symbol}/status)
 	SetMarketStatus(w http.ResponseWriter, r *http.Request, symbol MarketSymbol)
+	// ListWithdrawalsForReview The withdrawal review queue
+	// (GET /admin/v1/withdrawals)
+	ListWithdrawalsForReview(w http.ResponseWriter, r *http.Request, params ListWithdrawalsForReviewParams)
+	// ReviewWithdrawal Approve or reject a withdrawal awaiting review
+	// (POST /admin/v1/withdrawals/{id}/review)
+	ReviewWithdrawal(w http.ResponseWriter, r *http.Request, id WithdrawalID)
 }
 
 // Unimplemented server implementation that returns http.StatusNotImplemented for each endpoint.
@@ -636,6 +711,18 @@ func (_ Unimplemented) ListMarkets(w http.ResponseWriter, r *http.Request) {
 // SetMarketStatus Halt, resume or delist a market
 // (PUT /admin/v1/markets/{symbol}/status)
 func (_ Unimplemented) SetMarketStatus(w http.ResponseWriter, r *http.Request, symbol MarketSymbol) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ListWithdrawalsForReview The withdrawal review queue
+// (GET /admin/v1/withdrawals)
+func (_ Unimplemented) ListWithdrawalsForReview(w http.ResponseWriter, r *http.Request, params ListWithdrawalsForReviewParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ReviewWithdrawal Approve or reject a withdrawal awaiting review
+// (POST /admin/v1/withdrawals/{id}/review)
+func (_ Unimplemented) ReviewWithdrawal(w http.ResponseWriter, r *http.Request, id WithdrawalID) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -1037,6 +1124,65 @@ func (siw *ServerInterfaceWrapper) SetMarketStatus(w http.ResponseWriter, r *htt
 	handler.ServeHTTP(w, r)
 }
 
+// ListWithdrawalsForReview operation middleware
+func (siw *ServerInterfaceWrapper) ListWithdrawalsForReview(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListWithdrawalsForReviewParams
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: "int32"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListWithdrawalsForReview(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ReviewWithdrawal operation middleware
+func (siw *ServerInterfaceWrapper) ReviewWithdrawal(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id WithdrawalID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ReviewWithdrawal(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 type UnescapedCookieParamError struct {
 	ParamName string
 	Err       error
@@ -1172,6 +1318,12 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Put(options.BaseURL+"/admin/v1/markets/{symbol}/status", wrapper.SetMarketStatus)
 	})
 	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/admin/v1/withdrawals", wrapper.ListWithdrawalsForReview)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/admin/v1/withdrawals/{id}/review", wrapper.ReviewWithdrawal)
+	})
+	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/admin/v1/ledger/trial-balance", wrapper.GetTrialBalance)
 	})
 	r.Group(func(r chi.Router) {
@@ -1188,6 +1340,8 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 }
 
 type BadRequestApplicationProblemPlusJSONResponse Problem
+
+type ConflictApplicationProblemPlusJSONResponse Problem
 
 type InternalErrorApplicationProblemPlusJSONResponse Problem
 
@@ -1961,6 +2115,163 @@ func (response SetMarketStatus500ApplicationProblemPlusJSONResponse) VisitSetMar
 	return err
 }
 
+type ListWithdrawalsForReviewRequestObject struct {
+	Params ListWithdrawalsForReviewParams
+}
+
+type ListWithdrawalsForReviewResponseObject interface {
+	VisitListWithdrawalsForReviewResponse(w http.ResponseWriter) error
+}
+
+type ListWithdrawalsForReview200JSONResponse AdminWithdrawalList
+
+func (response ListWithdrawalsForReview200JSONResponse) VisitListWithdrawalsForReviewResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListWithdrawalsForReview401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response ListWithdrawalsForReview401ApplicationProblemPlusJSONResponse) VisitListWithdrawalsForReviewResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListWithdrawalsForReview500ApplicationProblemPlusJSONResponse struct {
+	InternalErrorApplicationProblemPlusJSONResponse
+}
+
+func (response ListWithdrawalsForReview500ApplicationProblemPlusJSONResponse) VisitListWithdrawalsForReviewResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReviewWithdrawalRequestObject struct {
+	ID   WithdrawalID `json:"id"`
+	Body *ReviewWithdrawalJSONRequestBody
+}
+
+type ReviewWithdrawalResponseObject interface {
+	VisitReviewWithdrawalResponse(w http.ResponseWriter) error
+}
+
+type ReviewWithdrawal200JSONResponse AdminWithdrawal
+
+func (response ReviewWithdrawal200JSONResponse) VisitReviewWithdrawalResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReviewWithdrawal400ApplicationProblemPlusJSONResponse struct {
+	BadRequestApplicationProblemPlusJSONResponse
+}
+
+func (response ReviewWithdrawal400ApplicationProblemPlusJSONResponse) VisitReviewWithdrawalResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReviewWithdrawal401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response ReviewWithdrawal401ApplicationProblemPlusJSONResponse) VisitReviewWithdrawalResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReviewWithdrawal404ApplicationProblemPlusJSONResponse struct {
+	NotFoundApplicationProblemPlusJSONResponse
+}
+
+func (response ReviewWithdrawal404ApplicationProblemPlusJSONResponse) VisitReviewWithdrawalResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReviewWithdrawal409ApplicationProblemPlusJSONResponse struct {
+	ConflictApplicationProblemPlusJSONResponse
+}
+
+func (response ReviewWithdrawal409ApplicationProblemPlusJSONResponse) VisitReviewWithdrawalResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReviewWithdrawal500ApplicationProblemPlusJSONResponse struct {
+	InternalErrorApplicationProblemPlusJSONResponse
+}
+
+func (response ReviewWithdrawal500ApplicationProblemPlusJSONResponse) VisitReviewWithdrawalResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 // StrictServerInterface represents all server handlers.
 type StrictServerInterface interface {
 	// ListAccounts List ledger accounts
@@ -1996,6 +2307,12 @@ type StrictServerInterface interface {
 	// SetMarketStatus Halt, resume or delist a market
 	// (PUT /admin/v1/markets/{symbol}/status)
 	SetMarketStatus(ctx context.Context, request SetMarketStatusRequestObject) (SetMarketStatusResponseObject, error)
+	// ListWithdrawalsForReview The withdrawal review queue
+	// (GET /admin/v1/withdrawals)
+	ListWithdrawalsForReview(ctx context.Context, request ListWithdrawalsForReviewRequestObject) (ListWithdrawalsForReviewResponseObject, error)
+	// ReviewWithdrawal Approve or reject a withdrawal awaiting review
+	// (POST /admin/v1/withdrawals/{id}/review)
+	ReviewWithdrawal(ctx context.Context, request ReviewWithdrawalRequestObject) (ReviewWithdrawalResponseObject, error)
 }
 
 type StrictHandlerFunc func(ctx context.Context, w http.ResponseWriter, r *http.Request, request any) (any, error)
@@ -2336,6 +2653,65 @@ func (sh *strictHandler) SetMarketStatus(w http.ResponseWriter, r *http.Request,
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(SetMarketStatusResponseObject); ok {
 		if err := validResponse.VisitSetMarketStatusResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListWithdrawalsForReview operation middleware
+func (sh *strictHandler) ListWithdrawalsForReview(w http.ResponseWriter, r *http.Request, params ListWithdrawalsForReviewParams) {
+	var request ListWithdrawalsForReviewRequestObject
+
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListWithdrawalsForReview(ctx, request.(ListWithdrawalsForReviewRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListWithdrawalsForReview")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListWithdrawalsForReviewResponseObject); ok {
+		if err := validResponse.VisitListWithdrawalsForReviewResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ReviewWithdrawal operation middleware
+func (sh *strictHandler) ReviewWithdrawal(w http.ResponseWriter, r *http.Request, id WithdrawalID) {
+	var request ReviewWithdrawalRequestObject
+
+	request.ID = id
+
+	var body ReviewWithdrawalJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ReviewWithdrawal(ctx, request.(ReviewWithdrawalRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ReviewWithdrawal")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ReviewWithdrawalResponseObject); ok {
+		if err := validResponse.VisitReviewWithdrawalResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

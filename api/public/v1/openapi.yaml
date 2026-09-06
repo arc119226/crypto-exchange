@@ -369,6 +369,98 @@ paths:
         "503":
           $ref: "#/components/responses/ServiceUnavailable"
 
+  /v1/withdrawals:
+    get:
+      tags: [account]
+      operationId: listWithdrawals
+      summary: The caller's withdrawals, newest first
+      description: >
+        A withdrawal's `status` follows docs/plan-v1.0.md §6.4.2.
+        `requested` has only been recorded; `pending_review` is waiting for an
+        administrator; `auto_approved` and `approved` are cleared but not yet
+        funded; `funds_locked` means the amount is held and the withdrawal is
+        queued for signing. `rejected` and `failed` are terminal, and the funds
+        were never or no longer held.
+      security:
+        - bearerAuth: []
+        - apiKeyAuth: []
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: Withdrawals
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WithdrawalList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+    post:
+      tags: [account]
+      operationId: createWithdrawal
+      summary: Request a withdrawal
+      description: |
+        Records a withdrawal request. Nothing is held and nothing is signed
+        here: the chain role applies the withdrawal policy next, and either
+        clears it automatically or queues it for an administrator.
+
+        `Idempotency-Key` is required and scoped to the account. Resending the
+        same request with the same key returns the original withdrawal with
+        **200**; reusing the key with a different asset, amount or destination
+        is **422**. The key never expires — there is no window after which the
+        same key would create a second withdrawal.
+
+        `to_address` may be given in any casing, but a mixed-case address must
+        pass its EIP-55 checksum: that casing *is* a checksum, and accepting a
+        wrong one would send funds to a mistyped address.
+      security:
+        - bearerAuth: []
+        - apiKeyAuth: []
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: Client-chosen key, unique per request within the account.
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 255
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateWithdrawalRequest"
+      responses:
+        "200":
+          description: The withdrawal this Idempotency-Key already created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Withdrawal"
+        "201":
+          description: Withdrawal recorded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Withdrawal"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
   /v1/assets:
     get:
       tags: [registry]
@@ -1002,6 +1094,61 @@ components:
           format: date-time
           nullable: true
         created_at: { type: string, format: date-time }
+
+    CreateWithdrawalRequest:
+      type: object
+      required: [asset, amount, to_address]
+      properties:
+        asset:
+          type: string
+          example: ETH
+        amount:
+          $ref: "#/components/schemas/Amount"
+        to_address:
+          type: string
+          description: Destination address. Any casing; a mixed-case one must pass EIP-55.
+          example: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"
+
+    Withdrawal:
+      type: object
+      required: [id, asset, amount, to_address, chain_id, status, created_at]
+      properties:
+        id: { type: string }
+        asset: { type: string, example: ETH }
+        amount:
+          $ref: "#/components/schemas/Amount"
+        to_address:
+          type: string
+          description: The destination, lower-case.
+        chain_id:
+          type: integer
+          format: int64
+        status:
+          type: string
+          description: >
+            requested, policy_check, auto_approved, pending_review, approved,
+            funds_locked, signed, broadcast, confirmed, rejected or failed.
+            Open for new states.
+          example: pending_review
+        failure_reason:
+          type: string
+          nullable: true
+          description: Why it failed; null unless the status is failed.
+        review_note:
+          type: string
+          nullable: true
+          description: What the administrator wrote when approving or rejecting.
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    WithdrawalList:
+      type: object
+      required: [withdrawals]
+      properties:
+        withdrawals:
+          type: array
+          items:
+            $ref: "#/components/schemas/Withdrawal"
 
     DepositList:
       type: object

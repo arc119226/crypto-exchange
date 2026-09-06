@@ -87,3 +87,11 @@ WHERE tenant_id = $1 AND account_id = $2 AND asset = $3
 -- waiting for their money, and nothing else in the system notices.
 SELECT count(*) FROM chain.withdrawals
 WHERE tenant_id = $1 AND status = ANY(@statuses::text[]);
+
+-- name: GetAccountKYCLevel :one
+-- The withdrawal policy is per KYC level, and the level lives on the user
+-- behind the account. Reading it costs the chain role a column-scoped SELECT
+-- on auth.users (migration 0010) rather than a dependency on the auth service.
+SELECT u.kyc_level FROM ledger.accounts a
+JOIN auth.users u ON u.id = a.owner_user_id
+WHERE a.id = $1;

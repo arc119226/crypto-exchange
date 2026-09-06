@@ -420,6 +420,24 @@ type CreateAPIKeyRequest struct {
 	Scopes      []Scope   `json:"scopes"`
 }
 
+// CreateWithdrawalRequest defines model for CreateWithdrawalRequest.
+type CreateWithdrawalRequest struct {
+	// Amount Arbitrary-precision decimal serialized as a string, at most 18 integer
+	// and 18 fractional digits (Postgres NUMERIC(36,18)). Never a JSON number.
+	//
+	//
+	// Example: 1990.00
+	Amount Amount `json:"amount"`
+
+	// Asset Example: ETH
+	Asset string `json:"asset"`
+
+	// ToAddress Destination address. Any casing; a mixed-case one must pass EIP-55.
+	//
+	// Example: 0x70997970C51812dc3A010C7d01b50e0d17dc79C8
+	ToAddress string `json:"to_address"`
+}
+
 // CreatedAPIKey defines model for CreatedAPIKey.
 type CreatedAPIKey struct {
 	CreatedAt time.Time `json:"created_at"`
@@ -924,6 +942,43 @@ type TradeList struct {
 	Trades []Trade `json:"trades"`
 }
 
+// Withdrawal defines model for Withdrawal.
+type Withdrawal struct {
+	// Amount Arbitrary-precision decimal serialized as a string, at most 18 integer
+	// and 18 fractional digits (Postgres NUMERIC(36,18)). Never a JSON number.
+	//
+	//
+	// Example: 1990.00
+	Amount Amount `json:"amount"`
+
+	// Asset Example: ETH
+	Asset     string    `json:"asset"`
+	ChainID   int64     `json:"chain_id"`
+	CreatedAt time.Time `json:"created_at"`
+
+	// FailureReason Why it failed; null unless the status is failed.
+	FailureReason *string `json:"failure_reason,omitempty"`
+	ID            string  `json:"id"`
+
+	// ReviewNote What the administrator wrote when approving or rejecting.
+	ReviewNote *string `json:"review_note,omitempty"`
+
+	// Status requested, policy_check, auto_approved, pending_review, approved, funds_locked, signed, broadcast, confirmed, rejected or failed. Open for new states.
+	//
+	//
+	// Example: pending_review
+	Status string `json:"status"`
+
+	// ToAddress The destination, lower-case.
+	ToAddress string     `json:"to_address"`
+	UpdatedAt *time.Time `json:"updated_at,omitempty"`
+}
+
+// WithdrawalList defines model for WithdrawalList.
+type WithdrawalList struct {
+	Withdrawals []Withdrawal `json:"withdrawals"`
+}
+
 // Limit defines model for Limit.
 type Limit = int32
 
@@ -1019,6 +1074,18 @@ type ListOrdersParams struct {
 	Offset *Offset `form:"offset,omitempty" json:"offset,omitempty"`
 }
 
+// ListWithdrawalsParams defines parameters for ListWithdrawals.
+type ListWithdrawalsParams struct {
+	// Limit Page size (default 100, max 500)
+	Limit *Limit `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// CreateWithdrawalParams defines parameters for CreateWithdrawal.
+type CreateWithdrawalParams struct {
+	// IdempotencyKey Client-chosen key, unique per request within the account.
+	IdempotencyKey string `json:"Idempotency-Key"`
+}
+
 // CreateAPIKeyJSONRequestBody defines body for CreateAPIKey for application/json ContentType.
 type CreateAPIKeyJSONRequestBody = CreateAPIKeyRequest
 
@@ -1036,6 +1103,9 @@ type RegisterJSONRequestBody = RegisterRequest
 
 // PlaceOrderJSONRequestBody defines body for PlaceOrder for application/json ContentType.
 type PlaceOrderJSONRequestBody = PlaceOrderRequest
+
+// CreateWithdrawalJSONRequestBody defines body for CreateWithdrawal for application/json ContentType.
+type CreateWithdrawalJSONRequestBody = CreateWithdrawalRequest
 
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
@@ -1108,6 +1178,12 @@ type ServerInterface interface {
 	// GetOrder Get one of the caller's orders with its trades
 	// (GET /v1/orders/{id})
 	GetOrder(w http.ResponseWriter, r *http.Request, id OrderID)
+	// ListWithdrawals The caller's withdrawals, newest first
+	// (GET /v1/withdrawals)
+	ListWithdrawals(w http.ResponseWriter, r *http.Request, params ListWithdrawalsParams)
+	// CreateWithdrawal Request a withdrawal
+	// (POST /v1/withdrawals)
+	CreateWithdrawal(w http.ResponseWriter, r *http.Request, params CreateWithdrawalParams)
 }
 
 // Unimplemented server implementation that returns http.StatusNotImplemented for each endpoint.
@@ -1249,6 +1325,18 @@ func (_ Unimplemented) CancelOrder(w http.ResponseWriter, r *http.Request, id Or
 // GetOrder Get one of the caller's orders with its trades
 // (GET /v1/orders/{id})
 func (_ Unimplemented) GetOrder(w http.ResponseWriter, r *http.Request, id OrderID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ListWithdrawals The caller's withdrawals, newest first
+// (GET /v1/withdrawals)
+func (_ Unimplemented) ListWithdrawals(w http.ResponseWriter, r *http.Request, params ListWithdrawalsParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// CreateWithdrawal Request a withdrawal
+// (POST /v1/withdrawals)
+func (_ Unimplemented) CreateWithdrawal(w http.ResponseWriter, r *http.Request, params CreateWithdrawalParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -1912,6 +2000,84 @@ func (siw *ServerInterfaceWrapper) GetOrder(w http.ResponseWriter, r *http.Reque
 	handler.ServeHTTP(w, r)
 }
 
+// ListWithdrawals operation middleware
+func (siw *ServerInterfaceWrapper) ListWithdrawals(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListWithdrawalsParams
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: "int32"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListWithdrawals(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateWithdrawal operation middleware
+func (siw *ServerInterfaceWrapper) CreateWithdrawal(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params CreateWithdrawalParams
+
+	headers := r.Header
+
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey string
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "Idempotency-Key", Count: n})
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "Idempotency-Key", Err: err})
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	} else {
+		err := fmt.Errorf("Header parameter Idempotency-Key is required, but not found")
+		siw.ErrorHandlerFunc(w, r, &RequiredHeaderError{ParamName: "Idempotency-Key", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateWithdrawal(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 type UnescapedCookieParamError struct {
 	ParamName string
 	Err       error
@@ -2063,6 +2229,12 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/v1/deposits", wrapper.ListDeposits)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/v1/withdrawals", wrapper.ListWithdrawals)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/v1/withdrawals", wrapper.CreateWithdrawal)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/v1/assets", wrapper.ListAssets)
@@ -3759,6 +3931,209 @@ func (response GetOrder500ApplicationProblemPlusJSONResponse) VisitGetOrderRespo
 	return err
 }
 
+type ListWithdrawalsRequestObject struct {
+	Params ListWithdrawalsParams
+}
+
+type ListWithdrawalsResponseObject interface {
+	VisitListWithdrawalsResponse(w http.ResponseWriter) error
+}
+
+type ListWithdrawals200JSONResponse WithdrawalList
+
+func (response ListWithdrawals200JSONResponse) VisitListWithdrawalsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListWithdrawals401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response ListWithdrawals401ApplicationProblemPlusJSONResponse) VisitListWithdrawalsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListWithdrawals500ApplicationProblemPlusJSONResponse struct {
+	InternalErrorApplicationProblemPlusJSONResponse
+}
+
+func (response ListWithdrawals500ApplicationProblemPlusJSONResponse) VisitListWithdrawalsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListWithdrawals503ApplicationProblemPlusJSONResponse struct {
+	ServiceUnavailableApplicationProblemPlusJSONResponse
+}
+
+func (response ListWithdrawals503ApplicationProblemPlusJSONResponse) VisitListWithdrawalsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(503)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateWithdrawalRequestObject struct {
+	Params CreateWithdrawalParams
+	Body   *CreateWithdrawalJSONRequestBody
+}
+
+type CreateWithdrawalResponseObject interface {
+	VisitCreateWithdrawalResponse(w http.ResponseWriter) error
+}
+
+type CreateWithdrawal200JSONResponse Withdrawal
+
+func (response CreateWithdrawal200JSONResponse) VisitCreateWithdrawalResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateWithdrawal201JSONResponse Withdrawal
+
+func (response CreateWithdrawal201JSONResponse) VisitCreateWithdrawalResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateWithdrawal400ApplicationProblemPlusJSONResponse struct {
+	BadRequestApplicationProblemPlusJSONResponse
+}
+
+func (response CreateWithdrawal400ApplicationProblemPlusJSONResponse) VisitCreateWithdrawalResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateWithdrawal401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response CreateWithdrawal401ApplicationProblemPlusJSONResponse) VisitCreateWithdrawalResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateWithdrawal403ApplicationProblemPlusJSONResponse struct {
+	ForbiddenApplicationProblemPlusJSONResponse
+}
+
+func (response CreateWithdrawal403ApplicationProblemPlusJSONResponse) VisitCreateWithdrawalResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateWithdrawal422ApplicationProblemPlusJSONResponse struct {
+	UnprocessableEntityApplicationProblemPlusJSONResponse
+}
+
+func (response CreateWithdrawal422ApplicationProblemPlusJSONResponse) VisitCreateWithdrawalResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(422)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateWithdrawal500ApplicationProblemPlusJSONResponse struct {
+	InternalErrorApplicationProblemPlusJSONResponse
+}
+
+func (response CreateWithdrawal500ApplicationProblemPlusJSONResponse) VisitCreateWithdrawalResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateWithdrawal503ApplicationProblemPlusJSONResponse struct {
+	ServiceUnavailableApplicationProblemPlusJSONResponse
+}
+
+func (response CreateWithdrawal503ApplicationProblemPlusJSONResponse) VisitCreateWithdrawalResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(503)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 // StrictServerInterface represents all server handlers.
 type StrictServerInterface interface {
 	// GetJWKS Public keys that verify access tokens
@@ -3830,6 +4205,12 @@ type StrictServerInterface interface {
 	// GetOrder Get one of the caller's orders with its trades
 	// (GET /v1/orders/{id})
 	GetOrder(ctx context.Context, request GetOrderRequestObject) (GetOrderResponseObject, error)
+	// ListWithdrawals The caller's withdrawals, newest first
+	// (GET /v1/withdrawals)
+	ListWithdrawals(ctx context.Context, request ListWithdrawalsRequestObject) (ListWithdrawalsResponseObject, error)
+	// CreateWithdrawal Request a withdrawal
+	// (POST /v1/withdrawals)
+	CreateWithdrawal(ctx context.Context, request CreateWithdrawalRequestObject) (CreateWithdrawalResponseObject, error)
 }
 
 type StrictHandlerFunc func(ctx context.Context, w http.ResponseWriter, r *http.Request, request any) (any, error)
@@ -4482,6 +4863,65 @@ func (sh *strictHandler) GetOrder(w http.ResponseWriter, r *http.Request, id Ord
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(GetOrderResponseObject); ok {
 		if err := validResponse.VisitGetOrderResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListWithdrawals operation middleware
+func (sh *strictHandler) ListWithdrawals(w http.ResponseWriter, r *http.Request, params ListWithdrawalsParams) {
+	var request ListWithdrawalsRequestObject
+
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListWithdrawals(ctx, request.(ListWithdrawalsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListWithdrawals")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListWithdrawalsResponseObject); ok {
+		if err := validResponse.VisitListWithdrawalsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CreateWithdrawal operation middleware
+func (sh *strictHandler) CreateWithdrawal(w http.ResponseWriter, r *http.Request, params CreateWithdrawalParams) {
+	var request CreateWithdrawalRequestObject
+
+	request.Params = params
+
+	var body CreateWithdrawalJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CreateWithdrawal(ctx, request.(CreateWithdrawalRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CreateWithdrawal")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CreateWithdrawalResponseObject); ok {
+		if err := validResponse.VisitCreateWithdrawalResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

@@ -88,6 +88,22 @@ func (q *Queries) CountWithdrawalsByStatus(ctx context.Context, arg CountWithdra
 	return count, err
 }
 
+const getAccountKYCLevel = `-- name: GetAccountKYCLevel :one
+SELECT u.kyc_level FROM ledger.accounts a
+JOIN auth.users u ON u.id = a.owner_user_id
+WHERE a.id = $1
+`
+
+// The withdrawal policy is per KYC level, and the level lives on the user
+// behind the account. Reading it costs the chain role a column-scoped SELECT
+// on auth.users (migration 0010) rather than a dependency on the auth service.
+func (q *Queries) GetAccountKYCLevel(ctx context.Context, id string) (int16, error) {
+	row := q.db.QueryRow(ctx, getAccountKYCLevel, id)
+	var kyc_level int16
+	err := row.Scan(&kyc_level)
+	return kyc_level, err
+}
+
 const getWithdrawal = `-- name: GetWithdrawal :one
 SELECT id, tenant_id, account_id, asset, amount, to_address, chain_id, idempotency_key, request_hash, status, failure_reason, reviewed_by, reviewed_at, review_note, hold_entry_id, correlation_id, version, created_at, updated_at FROM chain.withdrawals WHERE tenant_id = $1 AND id = $2
 `

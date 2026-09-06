@@ -216,6 +216,24 @@ func (e PostingDirection) Valid() bool {
 	}
 }
 
+// Defines values for WithdrawalReviewRequestDecision.
+const (
+	WithdrawalReviewRequestDecisionApprove WithdrawalReviewRequestDecision = "approve"
+	WithdrawalReviewRequestDecisionReject  WithdrawalReviewRequestDecision = "reject"
+)
+
+// Valid indicates whether the value is a known member of the WithdrawalReviewRequestDecision enum.
+func (e WithdrawalReviewRequestDecision) Valid() bool {
+	switch e {
+	case WithdrawalReviewRequestDecisionApprove:
+		return true
+	case WithdrawalReviewRequestDecisionReject:
+		return true
+	default:
+		return false
+	}
+}
+
 // Account defines model for Account.
 type Account struct {
 	CreatedAt time.Time `json:"created_at"`
@@ -270,6 +288,32 @@ type AdjustmentRequest struct {
 
 // AdjustmentRequestDirection credit adds to the user's available balance, debit removes.
 type AdjustmentRequestDirection string
+
+// AdminWithdrawal defines model for AdminWithdrawal.
+type AdminWithdrawal struct {
+	AccountID string `json:"account_id"`
+
+	// Amount Decimal serialized as a string (NUMERIC(36,18)); never a JSON number.
+	//
+	// Example: 1990.00
+	Amount        Amount     `json:"amount"`
+	Asset         string     `json:"asset"`
+	ChainID       int64      `json:"chain_id"`
+	CreatedAt     time.Time  `json:"created_at"`
+	FailureReason *string    `json:"failure_reason,omitempty"`
+	ID            string     `json:"id"`
+	ReviewNote    *string    `json:"review_note,omitempty"`
+	ReviewedAt    *time.Time `json:"reviewed_at,omitempty"`
+	ReviewedBy    *string    `json:"reviewed_by,omitempty"`
+	Status        string     `json:"status"`
+	ToAddress     string     `json:"to_address"`
+	UpdatedAt     *time.Time `json:"updated_at,omitempty"`
+}
+
+// AdminWithdrawalList defines model for AdminWithdrawalList.
+type AdminWithdrawalList struct {
+	Withdrawals []AdminWithdrawal `json:"withdrawals"`
+}
 
 // Amount Decimal serialized as a string (NUMERIC(36,18)); never a JSON number.
 //
@@ -472,6 +516,17 @@ type TrialBalanceLine struct {
 	Diff Amount `json:"diff"`
 }
 
+// WithdrawalReviewRequest defines model for WithdrawalReviewRequest.
+type WithdrawalReviewRequest struct {
+	Decision WithdrawalReviewRequestDecision `json:"decision"`
+
+	// Note Why. Recorded on the withdrawal and in the audit trail.
+	Note *string `json:"note,omitempty"`
+}
+
+// WithdrawalReviewRequestDecision defines model for WithdrawalReviewRequest.Decision.
+type WithdrawalReviewRequestDecision string
+
 // AccountID defines model for AccountID.
 type AccountID = string
 
@@ -484,8 +539,14 @@ type MarketSymbol = string
 // Offset defines model for Offset.
 type Offset = int32
 
+// WithdrawalID defines model for WithdrawalID.
+type WithdrawalID = string
+
 // BadRequest RFC 7807 problem details.
 type BadRequest = Problem
+
+// Conflict RFC 7807 problem details.
+type Conflict = Problem
 
 // InternalError RFC 7807 problem details.
 type InternalError = Problem
@@ -521,6 +582,11 @@ type ListEntriesParams struct {
 	Offset    *Offset `form:"offset,omitempty" json:"offset,omitempty"`
 }
 
+// ListWithdrawalsForReviewParams defines parameters for ListWithdrawalsForReview.
+type ListWithdrawalsForReviewParams struct {
+	Limit *Limit `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
 // CreateAccountJSONRequestBody defines body for CreateAccount for application/json ContentType.
 type CreateAccountJSONRequestBody = CreateAccountRequest
 
@@ -532,6 +598,9 @@ type CreateAdjustmentJSONRequestBody = AdjustmentRequest
 
 // SetMarketStatusJSONRequestBody defines body for SetMarketStatus for application/json ContentType.
 type SetMarketStatusJSONRequestBody = MarketStatusRequest
+
+// ReviewWithdrawalJSONRequestBody defines body for ReviewWithdrawal for application/json ContentType.
+type ReviewWithdrawalJSONRequestBody = WithdrawalReviewRequest
 
 // RequestEditorFn is the function signature for the RequestEditor callback function
 type RequestEditorFn func(ctx context.Context, req *http.Request) error
@@ -717,6 +786,31 @@ type ClientInterface interface {
 	//
 	// Corresponds with PUT /admin/v1/markets/{symbol}/status (the `SetMarketStatus` operationId).
 	SetMarketStatus(ctx context.Context, symbol MarketSymbol, body SetMarketStatusJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ListWithdrawalsForReview The withdrawal review queue
+	//
+	// Withdrawals the policy sent to a person, oldest first: whoever has waited longest is served first. A withdrawal is here because it broke a limit, not because it is illegitimate (docs/plan-v1.0.md §6.4.2).
+	//
+	// Corresponds with GET /admin/v1/withdrawals (the `ListWithdrawalsForReview` operationId).
+	ListWithdrawalsForReview(ctx context.Context, params *ListWithdrawalsForReviewParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ReviewWithdrawalWithBody Approve or reject a withdrawal awaiting review
+	//
+	// Approving does **not** move money: it marks the withdrawal for the chain worker, which locks the funds and hands it to the signer. That separation is enforced by the column grants — admin writes the review columns, the chain role writes the hold — so no single role can both authorise a withdrawal and act on it. Only a withdrawal in `pending_review` can be decided; anything else is 409.
+	//
+	// Takes any type of body and a specified content type.
+	//
+	// Corresponds with POST /admin/v1/withdrawals/{id}/review (the `ReviewWithdrawal` operationId).
+	ReviewWithdrawalWithBody(ctx context.Context, id WithdrawalID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ReviewWithdrawal Approve or reject a withdrawal awaiting review
+	//
+	// Approving does **not** move money: it marks the withdrawal for the chain worker, which locks the funds and hands it to the signer. That separation is enforced by the column grants — admin writes the review columns, the chain role writes the hold — so no single role can both authorise a withdrawal and act on it. Only a withdrawal in `pending_review` can be decided; anything else is 409.
+	//
+	// Takes a body of the `application/json` content type.
+	//
+	// Corresponds with POST /admin/v1/withdrawals/{id}/review (the `ReviewWithdrawal` operationId).
+	ReviewWithdrawal(ctx context.Context, id WithdrawalID, body ReviewWithdrawalJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 }
 
 // ListAccounts List ledger accounts
@@ -970,6 +1064,61 @@ func (c *Client) SetMarketStatusWithBody(ctx context.Context, symbol MarketSymbo
 // Corresponds with PUT /admin/v1/markets/{symbol}/status (the `SetMarketStatus` operationId).
 func (c *Client) SetMarketStatus(ctx context.Context, symbol MarketSymbol, body SetMarketStatusJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewSetMarketStatusRequest(c.Server, symbol, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// ListWithdrawalsForReview The withdrawal review queue
+//
+// Withdrawals the policy sent to a person, oldest first: whoever has waited longest is served first. A withdrawal is here because it broke a limit, not because it is illegitimate (docs/plan-v1.0.md §6.4.2).
+//
+// Corresponds with GET /admin/v1/withdrawals (the `ListWithdrawalsForReview` operationId).
+func (c *Client) ListWithdrawalsForReview(ctx context.Context, params *ListWithdrawalsForReviewParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListWithdrawalsForReviewRequest(c.Server, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// ReviewWithdrawalWithBody Approve or reject a withdrawal awaiting review
+//
+// Approving does **not** move money: it marks the withdrawal for the chain worker, which locks the funds and hands it to the signer. That separation is enforced by the column grants — admin writes the review columns, the chain role writes the hold — so no single role can both authorise a withdrawal and act on it. Only a withdrawal in `pending_review` can be decided; anything else is 409.
+//
+// Takes any type of body and a specified content type.
+//
+// Corresponds with POST /admin/v1/withdrawals/{id}/review (the `ReviewWithdrawal` operationId).
+func (c *Client) ReviewWithdrawalWithBody(ctx context.Context, id WithdrawalID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewReviewWithdrawalRequestWithBody(c.Server, id, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// ReviewWithdrawal Approve or reject a withdrawal awaiting review
+//
+// Approving does **not** move money: it marks the withdrawal for the chain worker, which locks the funds and hands it to the signer. That separation is enforced by the column grants — admin writes the review columns, the chain role writes the hold — so no single role can both authorise a withdrawal and act on it. Only a withdrawal in `pending_review` can be decided; anything else is 409.
+//
+// Takes a body of the `application/json` content type.
+//
+// Corresponds with POST /admin/v1/withdrawals/{id}/review (the `ReviewWithdrawal` operationId).
+func (c *Client) ReviewWithdrawal(ctx context.Context, id WithdrawalID, body ReviewWithdrawalJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewReviewWithdrawalRequest(c.Server, id, body)
 	if err != nil {
 		return nil, err
 	}
@@ -1558,6 +1707,107 @@ func NewSetMarketStatusRequestWithBody(server string, symbol MarketSymbol, conte
 	return req, nil
 }
 
+// NewListWithdrawalsForReviewRequest constructs an http.Request for the ListWithdrawalsForReview method
+func NewListWithdrawalsForReviewRequest(server string, params *ListWithdrawalsForReviewParams) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/admin/v1/withdrawals")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		// queryValues collects non-styled parameters (passthrough, JSON)
+		// that are safe to round-trip through url.Values.Encode().
+		queryValues := queryURL.Query()
+		// rawQueryFragments collects pre-encoded query fragments from
+		// styled parameters, preserving literal commas as delimiters
+		// per the OpenAPI spec (e.g. "color=blue,black,brown").
+		var rawQueryFragments []string
+
+		if params.Limit != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "limit", *params.Limit, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "integer", Format: "int32"}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if encoded := queryValues.Encode(); encoded != "" {
+			rawQueryFragments = append(rawQueryFragments, encoded)
+		}
+		queryURL.RawQuery = strings.Join(rawQueryFragments, "&")
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewReviewWithdrawalRequest calls the generic ReviewWithdrawal builder with application/json body
+func NewReviewWithdrawalRequest(server string, id WithdrawalID, body ReviewWithdrawalJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewReviewWithdrawalRequestWithBody(server, id, "application/json", bodyReader)
+}
+
+// NewReviewWithdrawalRequestWithBody constructs an http.Request for the ReviewWithdrawal method, with any body, and a specified content type
+func NewReviewWithdrawalRequestWithBody(server string, id WithdrawalID, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "id", id, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/admin/v1/withdrawals/%s/review", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
 func (c *Client) applyEditors(ctx context.Context, req *http.Request, additionalEditors []RequestEditorFn) error {
 	for _, r := range c.RequestEditors {
 		if err := r(ctx, req); err != nil {
@@ -1726,6 +1976,33 @@ type ClientWithResponsesInterface interface {
 	//
 	// Corresponds with PUT /admin/v1/markets/{symbol}/status (the `SetMarketStatus` operationId).
 	SetMarketStatusWithResponse(ctx context.Context, symbol MarketSymbol, body SetMarketStatusJSONRequestBody, reqEditors ...RequestEditorFn) (*SetMarketStatusResponse, error)
+
+	// ListWithdrawalsForReviewWithResponse The withdrawal review queue
+	//
+	// Withdrawals the policy sent to a person, oldest first: whoever has waited longest is served first. A withdrawal is here because it broke a limit, not because it is illegitimate (docs/plan-v1.0.md §6.4.2).
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /admin/v1/withdrawals (the `ListWithdrawalsForReview` operationId).
+	ListWithdrawalsForReviewWithResponse(ctx context.Context, params *ListWithdrawalsForReviewParams, reqEditors ...RequestEditorFn) (*ListWithdrawalsForReviewResponse, error)
+
+	// ReviewWithdrawalWithBodyWithResponse Approve or reject a withdrawal awaiting review
+	//
+	// Approving does **not** move money: it marks the withdrawal for the chain worker, which locks the funds and hands it to the signer. That separation is enforced by the column grants — admin writes the review columns, the chain role writes the hold — so no single role can both authorise a withdrawal and act on it. Only a withdrawal in `pending_review` can be decided; anything else is 409.
+	//
+	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /admin/v1/withdrawals/{id}/review (the `ReviewWithdrawal` operationId).
+	ReviewWithdrawalWithBodyWithResponse(ctx context.Context, id WithdrawalID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ReviewWithdrawalResponse, error)
+
+	// ReviewWithdrawalWithResponse Approve or reject a withdrawal awaiting review
+	//
+	// Approving does **not** move money: it marks the withdrawal for the chain worker, which locks the funds and hands it to the signer. That separation is enforced by the column grants — admin writes the review columns, the chain role writes the hold — so no single role can both authorise a withdrawal and act on it. Only a withdrawal in `pending_review` can be decided; anything else is 409.
+	//
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /admin/v1/withdrawals/{id}/review (the `ReviewWithdrawal` operationId).
+	ReviewWithdrawalWithResponse(ctx context.Context, id WithdrawalID, body ReviewWithdrawalJSONRequestBody, reqEditors ...RequestEditorFn) (*ReviewWithdrawalResponse, error)
 }
 
 type ListAccountsResponse struct {
@@ -2410,6 +2687,137 @@ func (r SetMarketStatusResponse) ContentType() string {
 	return ""
 }
 
+type ListWithdrawalsForReviewResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *AdminWithdrawalList
+	// ApplicationProblemJSON401 the response for an HTTP 401 `application/problem+json` response
+	ApplicationProblemJSON401 *Unauthorized
+	// ApplicationProblemJSON500 the response for an HTTP 500 `application/problem+json` response
+	ApplicationProblemJSON500 *InternalError
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r ListWithdrawalsForReviewResponse) GetJSON200() *AdminWithdrawalList {
+	return r.JSON200
+}
+
+// GetApplicationProblemJSON401 returns the response for an HTTP 401 `application/problem+json` response
+func (r ListWithdrawalsForReviewResponse) GetApplicationProblemJSON401() *Unauthorized {
+	return r.ApplicationProblemJSON401
+}
+
+// GetApplicationProblemJSON500 returns the response for an HTTP 500 `application/problem+json` response
+func (r ListWithdrawalsForReviewResponse) GetApplicationProblemJSON500() *InternalError {
+	return r.ApplicationProblemJSON500
+}
+
+// GetBody returns the raw response body bytes
+func (r ListWithdrawalsForReviewResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r ListWithdrawalsForReviewResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListWithdrawalsForReviewResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r ListWithdrawalsForReviewResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type ReviewWithdrawalResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *AdminWithdrawal
+	// ApplicationProblemJSON400 the response for an HTTP 400 `application/problem+json` response
+	ApplicationProblemJSON400 *BadRequest
+	// ApplicationProblemJSON401 the response for an HTTP 401 `application/problem+json` response
+	ApplicationProblemJSON401 *Unauthorized
+	// ApplicationProblemJSON404 the response for an HTTP 404 `application/problem+json` response
+	ApplicationProblemJSON404 *NotFound
+	// ApplicationProblemJSON409 the response for an HTTP 409 `application/problem+json` response
+	ApplicationProblemJSON409 *Conflict
+	// ApplicationProblemJSON500 the response for an HTTP 500 `application/problem+json` response
+	ApplicationProblemJSON500 *InternalError
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r ReviewWithdrawalResponse) GetJSON200() *AdminWithdrawal {
+	return r.JSON200
+}
+
+// GetApplicationProblemJSON400 returns the response for an HTTP 400 `application/problem+json` response
+func (r ReviewWithdrawalResponse) GetApplicationProblemJSON400() *BadRequest {
+	return r.ApplicationProblemJSON400
+}
+
+// GetApplicationProblemJSON401 returns the response for an HTTP 401 `application/problem+json` response
+func (r ReviewWithdrawalResponse) GetApplicationProblemJSON401() *Unauthorized {
+	return r.ApplicationProblemJSON401
+}
+
+// GetApplicationProblemJSON404 returns the response for an HTTP 404 `application/problem+json` response
+func (r ReviewWithdrawalResponse) GetApplicationProblemJSON404() *NotFound {
+	return r.ApplicationProblemJSON404
+}
+
+// GetApplicationProblemJSON409 returns the response for an HTTP 409 `application/problem+json` response
+func (r ReviewWithdrawalResponse) GetApplicationProblemJSON409() *Conflict {
+	return r.ApplicationProblemJSON409
+}
+
+// GetApplicationProblemJSON500 returns the response for an HTTP 500 `application/problem+json` response
+func (r ReviewWithdrawalResponse) GetApplicationProblemJSON500() *InternalError {
+	return r.ApplicationProblemJSON500
+}
+
+// GetBody returns the raw response body bytes
+func (r ReviewWithdrawalResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r ReviewWithdrawalResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ReviewWithdrawalResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r ReviewWithdrawalResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
 // ListAccountsWithResponse List ledger accounts
 //
 // Returns a wrapper object for the known response body format(s).
@@ -2623,6 +3031,51 @@ func (c *ClientWithResponses) SetMarketStatusWithResponse(ctx context.Context, s
 		return nil, err
 	}
 	return ParseSetMarketStatusResponse(rsp)
+}
+
+// ListWithdrawalsForReviewWithResponse The withdrawal review queue
+//
+// Withdrawals the policy sent to a person, oldest first: whoever has waited longest is served first. A withdrawal is here because it broke a limit, not because it is illegitimate (docs/plan-v1.0.md §6.4.2).
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /admin/v1/withdrawals (the `ListWithdrawalsForReview` operationId).
+func (c *ClientWithResponses) ListWithdrawalsForReviewWithResponse(ctx context.Context, params *ListWithdrawalsForReviewParams, reqEditors ...RequestEditorFn) (*ListWithdrawalsForReviewResponse, error) {
+	rsp, err := c.ListWithdrawalsForReview(ctx, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListWithdrawalsForReviewResponse(rsp)
+}
+
+// ReviewWithdrawalWithBodyWithResponse Approve or reject a withdrawal awaiting review
+//
+// Approving does **not** move money: it marks the withdrawal for the chain worker, which locks the funds and hands it to the signer. That separation is enforced by the column grants — admin writes the review columns, the chain role writes the hold — so no single role can both authorise a withdrawal and act on it. Only a withdrawal in `pending_review` can be decided; anything else is 409.
+//
+// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /admin/v1/withdrawals/{id}/review (the `ReviewWithdrawal` operationId).
+func (c *ClientWithResponses) ReviewWithdrawalWithBodyWithResponse(ctx context.Context, id WithdrawalID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ReviewWithdrawalResponse, error) {
+	rsp, err := c.ReviewWithdrawalWithBody(ctx, id, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseReviewWithdrawalResponse(rsp)
+}
+
+// ReviewWithdrawalWithResponse Approve or reject a withdrawal awaiting review
+//
+// Approving does **not** move money: it marks the withdrawal for the chain worker, which locks the funds and hands it to the signer. That separation is enforced by the column grants — admin writes the review columns, the chain role writes the hold — so no single role can both authorise a withdrawal and act on it. Only a withdrawal in `pending_review` can be decided; anything else is 409.
+//
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /admin/v1/withdrawals/{id}/review (the `ReviewWithdrawal` operationId).
+func (c *ClientWithResponses) ReviewWithdrawalWithResponse(ctx context.Context, id WithdrawalID, body ReviewWithdrawalJSONRequestBody, reqEditors ...RequestEditorFn) (*ReviewWithdrawalResponse, error) {
+	rsp, err := c.ReviewWithdrawal(ctx, id, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseReviewWithdrawalResponse(rsp)
 }
 
 // ParseListAccountsResponse parses an HTTP response from a ListAccountsWithResponse call
@@ -3129,6 +3582,107 @@ func ParseSetMarketStatusResponse(rsp *http.Response) (*SetMarketStatusResponse,
 			return nil, err
 		}
 		response.ApplicationProblemJSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON500 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseListWithdrawalsForReviewResponse parses an HTTP response from a ListWithdrawalsForReviewWithResponse call
+func ParseListWithdrawalsForReviewResponse(rsp *http.Response) (*ListWithdrawalsForReviewResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListWithdrawalsForReviewResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest AdminWithdrawalList
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON500 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseReviewWithdrawalResponse parses an HTTP response from a ReviewWithdrawalWithResponse call
+func ParseReviewWithdrawalResponse(rsp *http.Response) (*ReviewWithdrawalResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ReviewWithdrawalResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest AdminWithdrawal
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest BadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest Conflict
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON409 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
 		var dest InternalError

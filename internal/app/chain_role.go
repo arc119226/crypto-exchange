@@ -10,9 +10,12 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/prometheus/client_golang/prometheus"
 
+	"github.com/arc119226/crypto-exchange/internal/audit"
 	"github.com/arc119226/crypto-exchange/internal/chain/deposit"
 	"github.com/arc119226/crypto-exchange/internal/chain/evm"
+	"github.com/arc119226/crypto-exchange/internal/chain/withdrawal"
 	"github.com/arc119226/crypto-exchange/internal/ledger"
+	"github.com/arc119226/crypto-exchange/internal/policy"
 	"github.com/arc119226/crypto-exchange/internal/registry"
 )
 
@@ -23,6 +26,11 @@ type chainComponents struct {
 	client   *evm.Client
 	scanner  *deposit.Scanner
 	interval time.Duration
+	// withdrawals drives requested -> funds_locked. It runs on its own clock:
+	// scanning follows the chain's block time, a withdrawal only waits on a
+	// policy decision and a ledger write.
+	withdrawals        *withdrawal.Worker
+	withdrawalInterval time.Duration
 	// lastTick records whether the most recent tick succeeded, so readiness
 	// reflects the scanner rather than only the RPC connection.
 	lastErr error
@@ -63,10 +71,22 @@ func newChain(ctx context.Context, cfg Config, log *slog.Logger, db *pgxpool.Poo
 		}
 		return nil, err
 	}
+	store := registry.NewStore(db)
+	worker := withdrawal.NewWorker(db, withdrawal.Config{
+		Tenant: cfg.TenantID, Batch: cfg.Chain.WithdrawalBatchSize,
+	}, store, store, l, withdrawal.NewPostgresKYC(db), policy.Basic{},
+		audit.NewRecorder(cfg.TenantID), log).WithMetrics(withdrawal.NewMetrics(reg))
+
 	log.Info("scanning for deposits",
 		slog.String("rpc", client.LogValue()), slog.Int64("chain_id", cfg.Chain.ChainID),
 		slog.Duration("interval", cfg.Chain.ScanInterval))
-	return &chainComponents{client: client, scanner: scanner, interval: cfg.Chain.ScanInterval}, nil
+	log.Info("driving withdrawals to funds_locked",
+		slog.Duration("interval", cfg.Chain.WithdrawalInterval),
+		slog.Int("batch", int(cfg.Chain.WithdrawalBatchSize)))
+	return &chainComponents{
+		client: client, scanner: scanner, interval: cfg.Chain.ScanInterval,
+		withdrawals: worker, withdrawalInterval: cfg.Chain.WithdrawalInterval,
+	}, nil
 }
 
 // retryStop wraps an error that must end a retry loop rather than be retried.
@@ -91,6 +111,29 @@ func (c *chainComponents) run(ctx context.Context, log *slog.Logger) error {
 			}
 		} else {
 			c.lastErr = nil
+		}
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-tick.C:
+		}
+	}
+}
+
+// runWithdrawals ticks the withdrawal worker until ctx ends.
+//
+// It is a second goroutine rather than a step inside the scan loop because a
+// node outage must not stop withdrawals from being decided and their funds
+// locked: none of that touches the chain, and a user whose withdrawal is stuck
+// in `requested` because an RPC endpoint is down has been failed twice.
+func (c *chainComponents) runWithdrawals(ctx context.Context, log *slog.Logger) error {
+	tick := time.NewTicker(c.withdrawalInterval)
+	defer tick.Stop()
+	for {
+		if err := c.withdrawals.Tick(ctx); err != nil && ctx.Err() == nil {
+			// Already logged per withdrawal by the worker; this is the
+			// batch-level failure (claiming the queue at all).
+			log.Error("withdrawal tick failed", slog.String("err", err.Error()))
 		}
 		select {
 		case <-ctx.Done():

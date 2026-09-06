@@ -10,6 +10,7 @@ import (
 	"github.com/arc119226/crypto-exchange/internal/auth"
 	"github.com/arc119226/crypto-exchange/internal/chain"
 	"github.com/arc119226/crypto-exchange/internal/chain/deposit"
+	"github.com/arc119226/crypto-exchange/internal/chain/withdrawal"
 	"github.com/arc119226/crypto-exchange/internal/ledger"
 	"github.com/arc119226/crypto-exchange/internal/ratelimit"
 	"github.com/arc119226/crypto-exchange/internal/registry"
@@ -38,8 +39,11 @@ type Deps struct {
 	// Deposits reads what the chain role recorded; nil switches
 	// GET /v1/deposits off with 503.
 	Deposits *deposit.Reader
-	Limiter  ratelimit.Limiter // nil = unlimited (tests)
-	Limits   Limits
+	// Withdrawals records requests; nil switches /v1/withdrawals off with
+	// 503. It never locks funds or signs — the chain role does both.
+	Withdrawals *withdrawal.Service
+	Limiter     ratelimit.Limiter // nil = unlimited (tests)
+	Limits      Limits
 }
 
 // Handler implements gen.StrictServerInterface for one tenant.

@@ -59,8 +59,15 @@ func (r *Reviewer) Get(ctx context.Context, id string) (Record, error) {
 
 // ReviewParams is one admin decision.
 type ReviewParams struct {
-	ID      string
+	ID string
+	// AdminID is the reviewing user, when there is one. The admin API still
+	// authenticates with a static key, so it is empty there and the audit
+	// trail carries the actor instead.
 	AdminID string
+	// ActorType and ActorID are what the audit trail records, which is always
+	// filled even when AdminID is not.
+	ActorType audit.ActorType
+	ActorID   string
 	// Approve is the decision itself; a rejection carries the reason in Note.
 	Approve bool
 	Note    string
@@ -99,7 +106,7 @@ func (r *Reviewer) Review(ctx context.Context, p ReviewParams) (Record, error) {
 		}
 		updated, err := q.ReviewWithdrawal(ctx, sqlcgen.ReviewWithdrawalParams{
 			TenantID: r.tenant, ID: p.ID, Status: status, FailureReason: failure,
-			ReviewedBy: &p.AdminID, ReviewNote: optString(p.Note),
+			ReviewedBy: optString(p.AdminID), ReviewNote: optString(p.Note),
 		})
 		if err != nil {
 			return fmt.Errorf("withdrawal: review %s: %w", p.ID, err)
@@ -109,7 +116,7 @@ func (r *Reviewer) Review(ctx context.Context, p ReviewParams) (Record, error) {
 			action = "withdrawal.approve"
 		}
 		if err := r.audit.Record(ctx, tx, audit.Event{
-			ActorType: audit.ActorAdmin, ActorID: p.AdminID, Action: action,
+			ActorType: p.ActorType, ActorID: p.ActorID, Action: action,
 			TargetType: "withdrawal", TargetID: p.ID,
 			Before:        map[string]any{"status": row.Status},
 			After:         map[string]any{"status": status, "note": p.Note},
