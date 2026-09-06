@@ -63,6 +63,47 @@ linters:
               desc: ledger must not depend on admin
             - pkg: github.com/arc119226/crypto-exchange/internal/registry
               desc: ledger receives fee parameters via ledger.FeeParams, not registry
+        eventbus:
+          list-mode: strict
+          files:
+            - "**/internal/eventbus/**"
+          allow:
+            - $gostd
+            - github.com/arc119226/crypto-exchange/internal/eventbus/sqlcgen
+            - github.com/arc119226/crypto-exchange/internal/platform
+            - github.com/jackc/pgx/v5
+            - github.com/nats-io/nats.go
+            - github.com/oklog/ulid/v2
+            - github.com/prometheus/client_golang
+            - github.com/stretchr/testify
+        policy:
+          list-mode: strict
+          files:
+            - "**/internal/policy/**"
+          allow:
+            - $gostd
+            - github.com/arc119226/crypto-exchange/internal/ledger
+            - github.com/arc119226/crypto-exchange/internal/registry
+            - github.com/arc119226/crypto-exchange/internal/money
+            - github.com/stretchr/testify
+        trading:
+          list-mode: strict
+          files:
+            - "**/internal/trading/**"
+          allow:
+            - $gostd
+            - github.com/arc119226/crypto-exchange/internal/trading/sqlcgen
+            - github.com/arc119226/crypto-exchange/internal/matching
+            - github.com/arc119226/crypto-exchange/internal/ledger
+            - github.com/arc119226/crypto-exchange/internal/registry
+            - github.com/arc119226/crypto-exchange/internal/policy
+            - github.com/arc119226/crypto-exchange/internal/eventbus
+            - github.com/arc119226/crypto-exchange/internal/money
+            - github.com/arc119226/crypto-exchange/internal/platform/pg
+            - github.com/jackc/pgx/v5
+            - github.com/prometheus/client_golang
+            - github.com/stretchr/testify
+            - pgregory.net/rapid
         entrypoints-only-from-app:
           files:
             - $all
@@ -133,6 +174,8 @@ linters:
       - internal/registry/sqlcgen
       - internal/ledger/sqlcgen
       - internal/audit/sqlcgen
+      - internal/trading/sqlcgen
+      - internal/eventbus/sqlcgen
       - cmd/exchangectl/internal/apiclient
       - cmd/exchangectl/internal/adminclient
     rules:
@@ -162,5 +205,7 @@ formatters:
       - internal/registry/sqlcgen
       - internal/ledger/sqlcgen
       - internal/audit/sqlcgen
+      - internal/trading/sqlcgen
+      - internal/eventbus/sqlcgen
       - cmd/exchangectl/internal/apiclient
       - cmd/exchangectl/internal/adminclient

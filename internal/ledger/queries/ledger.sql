@@ -127,3 +127,8 @@ SELECT a.house_code, p.asset,
  WHERE a.tenant_id = $1 AND a.kind = 'house'
  GROUP BY a.house_code, p.asset
  ORDER BY a.house_code, p.asset;
+
+-- name: BumpAccountSeq :one
+-- Per-account event sequence for the private stream (docs/plan-v1.0.md §7.1);
+-- called inside the transaction that writes the outbox rows.
+UPDATE ledger.accounts SET next_seq = next_seq + 1 WHERE id = $1 RETURNING next_seq;

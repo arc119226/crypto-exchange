@@ -230,6 +230,10 @@ type JournalEntry struct {
 	CorrelationID  string
 	CreatedAt      time.Time
 	Postings       []Posting
+	// Balances are the spot balances as they stood right after this entry
+	// was posted, in (account, asset) order. Only Post fills them (the
+	// outbox needs them for balance.updated); reads leave them nil.
+	Balances []Balance
 }
 
 // Balance is the cached liability balance of a spot account in one asset.
