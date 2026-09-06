@@ -34,13 +34,26 @@ func (s *KeystoreSigner) sweepTx(ctx context.Context, req Request) (outgoing, er
 	if err != nil {
 		return outgoing{}, err
 	}
-	// A sweep is signed once, at `requested`. Unlike a withdrawal there is no
-	// fee bump: if the transaction sits unmined the balance is still there and
-	// the next tick starts a fresh sweep, so a replacement would be a second
-	// claim on the same money.
-	if row.Status != "requested" {
-		return outgoing{}, fmt.Errorf("%w: sweep %s is %s, which may not be signed", ErrRefused, req.RefID, row.Status)
+	asset, err := s.reg.GetAsset(ctx, s.tenant, row.Asset)
+	if err != nil {
+		return outgoing{}, fmt.Errorf("signer: asset %s: %w", row.Asset, err)
 	}
+	// Which state a sweep may be signed in depends on whether it needed gas
+	// funding: a token sweep is only signable once the address has been given
+	// enough ether to pay for the transfer, a native one from the start.
+	// Signing a token sweep any earlier produces a transaction the sender
+	// cannot afford.
+	wanted := "requested"
+	if !asset.IsNative {
+		wanted = "gas_funded"
+	}
+	if row.Status != wanted {
+		return outgoing{}, fmt.Errorf("%w: sweep %s is %s, and a %s sweep is signed at %s",
+			ErrRefused, req.RefID, row.Status, row.Asset, wanted)
+	}
+	// Unlike a withdrawal there is no fee bump: if the transaction sits unmined
+	// the balance is still there and the next tick starts a fresh sweep, so a
+	// replacement would be a second claim on the same money.
 	if req.Attempt != 0 {
 		return outgoing{}, fmt.Errorf("%w: a sweep has only one attempt, got %d", ErrRefused, req.Attempt)
 	}
@@ -68,10 +81,6 @@ func (s *KeystoreSigner) sweepTx(ctx context.Context, req Request) (outgoing, er
 	path, err := hdwallet.DepositPath(uint32(address.DerivationIndex)) //nolint:gosec // CHECKed >= 0 and bounded by MaxDepositIndex
 	if err != nil {
 		return outgoing{}, fmt.Errorf("%w: %w", ErrRefused, err)
-	}
-	asset, err := s.reg.GetAsset(ctx, s.tenant, row.Asset)
-	if err != nil {
-		return outgoing{}, fmt.Errorf("signer: asset %s: %w", row.Asset, err)
 	}
 	units, err := evm.ToWei(amount, asset.Scale)
 	if err != nil {
