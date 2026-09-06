@@ -14,8 +14,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 COMPOSE_FILE=deploy/compose/compose.yaml
-ENV_FILE=${ENV_FILE:-.env}
-COMPOSE=(docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" --profile infra --profile app)
+COMPOSE=(docker compose -f "$COMPOSE_FILE" --env-file .env --profile infra --profile app)
 KEEP=${KEEP:-0}
 API_URL=${API_URL:-http://localhost:8080}
 ADMIN_URL=${ADMIN_URL:-http://localhost:8082}
@@ -37,25 +36,24 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# The e2e stack needs secrets but not a real wallet: gen-dev-secrets.sh pulls
-# the foundry image only to derive a mnemonic, which no Phase 3 role uses.
-if [ ! -f "$ENV_FILE" ]; then
-  log "generating $ENV_FILE from .env.example"
-  cp .env.example "$ENV_FILE"
-  for var in POSTGRES_PASSWORD WALLET_KEYSTORE_PASSPHRASE WEBHOOK_SIGNING_KEY ADMIN_BOOTSTRAP_PASSWORD ADMIN_API_KEY; do
-    sed -i "s|^$var=.*|$var=$(openssl rand -hex 16)|" "$ENV_FILE"
-  done
-  sed -i "s|^API_KEY_MASTER_KEY=.*|API_KEY_MASTER_KEY=$(openssl rand -hex 32)|" "$ENV_FILE"
-  # .env.example ships the zero address as a "run gen-dev-secrets first" marker,
-  # and Deploy.s.sol refuses it (and the deployer's own address). No Phase 3
-  # role signs with the hot wallet — the signer is still a stub — so the
-  # deployer only needs some address to fund with ETH and mint USDC into.
-  # anvil account #1 is a published dev account, and it is not account #0.
-  # Phase 4 needs a hot wallet that can actually sign: run gen-dev-secrets here.
-  sed -i "s|^HOT_WALLET_ADDRESS=.*|HOT_WALLET_ADDRESS=0x70997970C51812dc3A010C7d01b50e0d17dc79C8|" "$ENV_FILE"
+# The same preparation a developer runs (`make gen-dev-secrets && make up`),
+# so this exercises the documented path rather than a CI-only one. It is
+# idempotent and keeps an existing .env. Hand-rolling it here is what broke
+# the job twice: the stack needs more than random passwords — the api role
+# reads secrets/jwt/ed25519.pem and the contract deployer refuses the zero
+# HOT_WALLET_ADDRESS, both of which this script produces.
+log "preparing dev secrets (.env, JWT key, mnemonic)"
+scripts/gen-dev-secrets.sh
+# shellcheck disable=SC1091
+set -a; . ./.env; set +a
+
+# Without a docker daemon gen-dev-secrets warns and skips the mnemonic, which
+# leaves the placeholder address the deployer rejects. Say so here instead of
+# letting it surface as a Solidity revert inside compose.
+if [ "${HOT_WALLET_ADDRESS:-}" = "0x0000000000000000000000000000000000000000" ]; then
+  echo "HOT_WALLET_ADDRESS is still the placeholder: gen-dev-secrets could not reach docker" >&2
+  exit 1
 fi
-# shellcheck disable=SC1090
-set -a; . "./$ENV_FILE"; set +a
 
 log "building exchangectl"
 go build -o bin/exchangectl ./cmd/exchangectl
