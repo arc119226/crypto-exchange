@@ -27,7 +27,11 @@ func newRootCmd() *cobra.Command {
 	}
 	root.PersistentFlags().String("base-url", envOr("EXCHANGE_API_URL", "http://localhost:8080"), "public API base URL")
 	root.PersistentFlags().String("output", "table", "output format: table|json")
-	root.AddCommand(newMarketsCmd(), newAssetsCmd(), newReplayCmd(), newAdminCmd())
+	root.PersistentFlags().String("token", envOr("EXCHANGE_TOKEN", ""), "session access token (Bearer); env EXCHANGE_TOKEN")
+	root.PersistentFlags().String("api-key", envOr("EXCHANGE_API_KEY", ""), "API key id for HMAC-signed requests; env EXCHANGE_API_KEY")
+	root.PersistentFlags().String("api-secret", envOr("EXCHANGE_API_SECRET", ""), "API key secret; env EXCHANGE_API_SECRET")
+	root.AddCommand(newMarketsCmd(), newAssetsCmd(), newReplayCmd(), newAdminCmd(),
+		newUserCmd(), newAPIKeysCmd(), newOrdersCmd(), newBalancesCmd(), newFillsCmd(), newBookCmd(), newTradesCmd(), newE2ECmd())
 	root.AddCommand(&cobra.Command{
 		Use:   "version",
 		Short: "Print build information",

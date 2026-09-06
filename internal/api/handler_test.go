@@ -80,7 +80,7 @@ func newServer(t *testing.T, reader registry.Reader) *httptest.Server {
 	t.Helper()
 	r := chi.NewRouter()
 	r.Use(telemetry.CorrelationMiddleware(slog.New(slog.NewTextHandler(io.Discard, nil))))
-	api.Mount(r, api.NewHandler(reader, "default"))
+	api.Mount(r, api.NewHandler(api.Deps{Registry: reader, Tenant: "default"}))
 	srv := httptest.NewServer(r)
 	t.Cleanup(srv.Close)
 	return srv

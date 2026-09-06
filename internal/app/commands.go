@@ -19,6 +19,9 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib" // database/sql driver for goose
 	"github.com/pressly/goose/v3"
 
+	"github.com/arc119226/crypto-exchange/internal/audit"
+	"github.com/arc119226/crypto-exchange/internal/auth"
+	"github.com/arc119226/crypto-exchange/internal/ledger"
 	"github.com/arc119226/crypto-exchange/internal/platform/pg"
 	"github.com/arc119226/crypto-exchange/internal/registry"
 	"github.com/arc119226/crypto-exchange/migrations"
@@ -135,6 +138,35 @@ func Seed(ctx context.Context, opts SeedOptions, out io.Writer) error {
 	}
 	_, _ = fmt.Fprintf(out, "seed: tenant=%s chain=%d fee_schedules=%d assets=%d markets=%d (usdc=%s)\n",
 		opts.TenantID, fx.ChainID, res.FeeSchedules, res.Assets, res.Markets, fx.USDC)
+	return nil
+}
+
+// BootstrapAdmin creates the first administrator from ADMIN_BOOTSTRAP_EMAIL /
+// ADMIN_BOOTSTRAP_PASSWORD (idempotent). Run it with the ex_admin role
+// against a migrated database.
+func BootstrapAdmin(ctx context.Context, cfg Config, out io.Writer) error {
+	if cfg.Admin.BootstrapEmail == "" || !cfg.Admin.BootstrapPassword.IsSet() {
+		return fmt.Errorf("admin bootstrap: ADMIN_BOOTSTRAP_EMAIL and ADMIN_BOOTSTRAP_PASSWORD are required")
+	}
+	pool, err := pg.Open(ctx, pg.PoolConfig{DSN: cfg.DB.URL.Reveal(), MaxConns: 2, ApplicationName: "exchange-bootstrap"})
+	if err != nil {
+		return fmt.Errorf("admin bootstrap: %w", err)
+	}
+	defer pool.Close()
+	l := ledger.New(pool, cfg.TenantID)
+	svc, err := auth.New(pool, auth.Config{Tenant: cfg.TenantID, Issuer: cfg.Auth.Issuer}, nil, nil, l, audit.NewRecorder(cfg.TenantID))
+	if err != nil {
+		return err
+	}
+	u, created, err := svc.BootstrapAdmin(ctx, cfg.Admin.BootstrapEmail, cfg.Admin.BootstrapPassword.Reveal())
+	if err != nil {
+		return fmt.Errorf("admin bootstrap: %w", err)
+	}
+	if created {
+		_, _ = fmt.Fprintf(out, "admin bootstrap: created %s (user %s)\n", u.Email, u.ID)
+	} else {
+		_, _ = fmt.Fprintf(out, "admin bootstrap: %s already exists (user %s, role %s); nothing changed\n", u.Email, u.ID, u.Role)
+	}
 	return nil
 }
 

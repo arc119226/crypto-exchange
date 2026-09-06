@@ -46,7 +46,7 @@ func TestMigrateSeedAndRegistry(t *testing.T) {
 	assert.Contains(t, out.String(), "no pending migrations")
 	out.Reset()
 	require.NoError(t, app.MigrateStatus(ctx, h.DSN("ex_migrate"), &out))
-	assert.Equal(t, 6, strings.Count(out.String(), "applied"), out.String()) // 0001 schemas, 0002 registry, 0003 ledger, 0004 audit, 0005 trading, 0006 eventbus
+	assert.Equal(t, 7, strings.Count(out.String(), "applied"), out.String()) // 0001 schemas, 0002 registry, 0003 ledger, 0004 audit, 0005 trading, 0006 eventbus, 0007 auth
 
 	// seed twice with the admin role: idempotent, versions stay at 1
 	seedOpts := app.SeedOptions{DSN: h.DSN("ex_admin"), FixturesPath: fixtures, TenantID: "default", ChainID: 31337, RequiredConfirmations: 1}
@@ -115,7 +115,7 @@ func TestMigrateSeedAndRegistry(t *testing.T) {
 	// the walking skeleton end to end: HTTP → OpenAPI handler → registry (ex_api) → Postgres
 	router := chi.NewRouter()
 	router.Use(telemetry.CorrelationMiddleware(slog.New(slog.NewTextHandler(io.Discard, nil))))
-	api.Mount(router, api.NewHandler(store, "default"))
+	api.Mount(router, api.NewHandler(api.Deps{Tenant: "default", Registry: store}))
 	srv := httptest.NewServer(router)
 	defer srv.Close()
 

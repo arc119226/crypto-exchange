@@ -328,3 +328,27 @@ Phase 3 分三個 PR:3a 引擎與事件(本節)、3b auth + public 交易端點 
 
 **Phase 3a 學到的事**:`timestamptz` 只有微秒精度,命令時間戳要先 `Truncate(time.Microsecond)`,否則重建後的 `RestingOrder.Timestamp` 與記憶體不等;pgx 的 `tx.Begin` 在交易內就是 SAVEPOINT,正好對應「Hold 成功但簿拒單」;Prometheus 的 `float64` 不是錢,以 `metrics.go` 的 helper 集中 `//nolint:forbidigo`。
 
+
+## 13. Phase 3b 程式碼與 §6.7 / §7.4 / §14 的對應(auth + public API + 限流)
+
+3b 讓 §5.2 的路徑第一次從 HTTP 走到引擎:`POST /v1/orders`(JWT 或 API key)→ `api` 驗證、限流 → `trading.Service.PlaceOrder` → 同進程引擎。拆分部署的命令匯流排留給 3c。
+
+| 計畫 | 實作 | 備註 |
+|---|---|---|
+| users / accounts 分表、引擎只認 `account_id`(§6.7) | `migrations/0007_auth_core.sql`:`auth.users`(email 小寫 + 格式 CHECK、`role user\|admin`、`kyc_level 0..2`、`status active\|frozen`、TOTP 欄位預留給 Phase 5)、`auth.refresh_tokens`、`auth.api_keys`;`auth.Service.Register` 在同一交易內 `CreateUser` + `ledger.CreateSpotAccount(owner)` + 審計 | JWT 的 `account_id` claim 由 `ledger.SpotAccountOf(user_id)` 查得;`api` 之後只把 `Principal.AccountID` 交給 trading / ledger,handler 從不碰 email |
+| 密碼(ADR-0006) | argon2id,PHC 字串 `$argon2id$v=19$m=65536,t=3,p=1$…`,參數寫在 hash 內可日後升級;長度 8..128 | 未知 email 也驗一次固定 dummy hash,登入失敗的耗時與帳號存在無關(`TestLoginTimingEqualiser` 級別的保護,不是常數時間承諾) |
+| JWT EdDSA + JWKS(ADR-0006) | `auth.Signer` / `auth.Verifier`(`lestrrat-go/jwx/v3`);`kid` = 公鑰 SHA-256 縮圖;claims `sub / account_id / tenant_id / role / scopes / method / iss / aud / iat / exp`;`aud=exchange`;access 15 min、時鐘偏差 30 s;`GET /.well-known/jwks.json` 只回公鑰 | `aud=internal` 的內部 JWT 已在 `Claims` 定義,鑄造與轉發在 3c 的 NATS 命令匯流排一起做 |
+| refresh 7 天、可撤銷(ADR-0006) | 只存 SHA-256 hash;`Refresh` 輪替:舊列 `revoked_at + replaced_by`,新列一併寫入;**已輪替的舊 token 再被使用 = 洩漏**,同用戶全部 refresh token 立即撤銷並寫審計 `auth.refresh.reuse_detected`;`Logout` 只撤銷不刪列 | 與 ADR「撤銷 = 刪列」不同:保留列才能辨識重放。登出後或家族已撤銷的 token 再送只回 401、不再重複記 reuse |
+| API key HMAC(§14、ADR-0006) | `key_id = ak_<24 hex>`、secret 32 bytes hex 只在建立回應出現一次;secret 以 AES-256-GCM 加密存放,金鑰 `API_KEY_MASTER_KEY`(dev 未設 → 程序生命期的隨機金鑰並警告;非 dev 未設 → API key 停用);canonical string `ts\nMETHOD\nrequestURI\nbody`,`X-API-SIGNATURE = hex(HMAC-SHA256)`,`X-API-TIMESTAMP` 為 unix ms、±30 s;scopes `read\|trade\|withdraw`;IP / CIDR 白名單(不信任 `X-Forwarded-For`,§18);`last_used_at` | 簽章涵蓋 body,中介層先把 body 讀進記憶體(上限 1 MiB)再交給 handler;API key 不能建立 / 撤銷 API key(只能從 session);`docs/api-conventions.md` 有簽章範例 |
+| `RequireUser / RequireScope` 中介層(§8) | `auth.Authenticate`:Bearer 或 `X-API-KEY` 三件組 → `Principal` 進 context;沒有憑證直接放行,由 handler 的 `principal()` / `requireScope()` 決定 401 / 403 | JWT session 持有全部 scope;缺 scope 一律 403 |
+| 限流(§14) | `internal/ratelimit`:整數 token bucket(每 `Window/N` 補一枚);`Redis`(單一 Lua script,原子)、`Memory`、`Fallback`(Redis 失敗退回記憶體並記 warn);登入 per IP `10/1m`(註冊共用同一桶)+ per account `5/1m`,下單 / 取消 per account `20/1s`;可由 `RATELIMIT_*` 調整 | 429 為 problem+json 並帶 `Retry-After`(秒,向上取整);登入每次嘗試都消耗兩個桶,連續失敗會把帳號桶鎖到補滿(DoD:第 6 次 429) |
+| public 端點(§7.4) | `api/public/v1/openapi.yaml`:auth ×4 + JWKS、api-keys ×3、account / balances / ledger entries、registry ×3、orders ×5、fills、depth、trades;`internal/api/{auth,account,trading,marketdata}_handlers.go` | ticker / klines / chain 端點分別留給 Phase 6 / 4 |
+| `client_order_id` 冪等與狀態碼 | 新單 201;相同內容重送 200 + 原單;同 id 不同內容 422;業務拒單是 **201 + `status=rejected`**(拒單是一張單,不是錯誤);參數錯誤 400;市場不存在 404;引擎不在 503 | 3a 的 `PlaceOrderResult.Replayed` 直接對應 201 / 200 |
+| 帳戶資料只看自己的 | `GET /v1/orders/{id}`、`DELETE`、`GET /v1/fills?order_id=` 都以 `(tenant, account_id, id)` 過濾,他人的單一律 404 / 空;`GET /v1/ledger/entries` 只回呼叫者自己的 posting(對手方與 `fee_revenue` 腿不出現) | `ListFillsByAccount` 的 `order_id` 條件同時要求該單是呼叫者自己的 maker / taker 腿(整合測試抓到的漏洞) |
+| 深度(§7.4) | `GET /v1/markets/{symbol}/depth` 直接讀同進程引擎的 `Snapshot`(含 `last_seq`),預設 20 檔、上限 200;沒有引擎回 503 | 3c 拆分部署後由 stream / Redis 快照提供 |
+| `exchange admin bootstrap`(§14) | `auth.Service.BootstrapAdmin`:冪等,已存在則不改密�major;寫審計 `auth.admin.bootstrap`;需 `ADMIN_BOOTSTRAP_EMAIL / PASSWORD` | `exchangectl` 目前沒有 admin 登入(admin TOTP + session 在 Phase 5) |
+| `exchangectl`(§12 Phase 3) | `user register\|login\|logout\|me`、`api-keys create\|list\|revoke`、`orders place\|cancel\|list\|get`、`balances`、`fills`、`book`、`trades`、`e2e`;憑證 `--token` / `EXCHANGE_TOKEN` 或 `--api-key --api-secret` / `EXCHANGE_API_KEY(_SECRET)`,API key 模式對每個請求做 HMAC 簽章 | `e2e` 用 admin API 注資、依 §6.1.4 數字逐項斷言、再驗試算平衡 |
+
+**驗證(整合測試,`test/integration/api_test.go`)**:未帶憑證 401、壞 token 401 + `WWW-Authenticate`;註冊(大小寫不敏感 409、弱密碼 422、格式 400)、登入(錯誤密碼與不存在帳號同為 401)、refresh 輪替 → 舊 token 重放 401 且家族撤銷、登出後 401、登出冪等;§6.1.4 (a)(b)(c) 經 HTTP 逐數字相符(買方 `8004 / 1200`、`0.3992 ETH`、賣方 `795.204`、fee `0.796 USDC` / `0.0008 ETH`、取消後 `9204`);201 / 200 / 422 / 400 / 404;拒單 `insufficient_balance`、`invalid_price_tick` 為 201 + rejected;他人訂單 404;fills 雙方看到同一 `trade_id`;ledger entries 只含自己的 4 條 settle posting;depth / trades;API key 建立、簽 GET 與帶 query、簽 body、篡改 body 401、錯簽 / 過期時間戳 / 錯 secret / 未知 key / 壞 timestamp 皆 401、read key 下單 403、key 不能建 key 403、IP 白名單 403 / 200、撤銷後 401、他人 key 404;第 6 次登入 429 + `Retry-After ≤ 12`;審計計數;admin bootstrap 冪等且 role=admin 可登入。
+
+**Phase 3b 學到的事**:oapi-codegen strict server 不驗 `minLength / minimum`,`client_order_id` 為空與 `depth?limit=0` 要自己處理(前者 400,後者退回預設值);jwx v3 的 `Get` 對陣列 claim 只接受 `[]any`;`gosec` G101 會把名字含 `Token` 的 Lua 常數當成硬編碼憑證,改名即可;fills 的 `order_id` 過濾若只看「該單參與的成交」會讓對手方探測任意 order id 是否與自己成交過。

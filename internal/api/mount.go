@@ -1,6 +1,7 @@
 package api
 
 import (
+	"errors"
 	"log/slog"
 	"net/http"
 
@@ -20,9 +21,13 @@ func Mount(r chi.Router, h *Handler) {
 	badRequest := func(w http.ResponseWriter, r *http.Request, err error) {
 		WriteProblem(w, r, http.StatusBadRequest, "Bad Request", err.Error())
 	}
-	strict := gen.NewStrictHandlerWithOptions(h, nil, gen.StrictHTTPServerOptions{
+	strict := gen.NewStrictHandlerWithOptions(h, []gen.StrictMiddlewareFunc{withRequestInfo}, gen.StrictHTTPServerOptions{
 		RequestErrorHandlerFunc: badRequest,
 		ResponseErrorHandlerFunc: func(w http.ResponseWriter, r *http.Request, err error) {
+			if errors.Is(err, errUnavailable) {
+				WriteProblem(w, r, http.StatusServiceUnavailable, "Service Unavailable", "this endpoint is not served by this role")
+				return
+			}
 			telemetry.Logger(r.Context()).Error("api handler failed",
 				slog.String("method", r.Method), slog.String("path", r.URL.Path), slog.String("err", err.Error()))
 			WriteProblem(w, r, http.StatusInternalServerError, "Internal Server Error", "")

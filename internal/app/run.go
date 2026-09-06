@@ -18,7 +18,6 @@ import (
 	"github.com/arc119226/crypto-exchange/internal/platform/natsx"
 	"github.com/arc119226/crypto-exchange/internal/platform/pg"
 	"github.com/arc119226/crypto-exchange/internal/platform/redisx"
-	"github.com/arc119226/crypto-exchange/internal/registry"
 	"github.com/arc119226/crypto-exchange/internal/telemetry"
 )
 
@@ -77,26 +76,39 @@ func Run(ctx context.Context, cfg Config, roles []Role, bi BuildInfo) error {
 		sharedLedger = l
 		return l, nil
 	}
+	// the engine is built first so an api role in the same process can use
+	// it as the in-process command bus (role=all)
+	if hasRole(roles, RoleEngine) {
+		l, err := ledgerFor()
+		if err != nil {
+			return err
+		}
+		eng.engine = newEngine(cfg, log, d.pool, l, reg)
+		if d.nc != nil {
+			relay, err := newRelay(ctx, cfg, log, d.pool, d.nc, reg)
+			if err != nil {
+				return err
+			}
+			eng.relay = relay
+		} else {
+			log.Warn("engine running without NATS: events stay in the outbox until a relay runs")
+		}
+		checker.Register("engine", true, eng.engine.ReadyCheck)
+	}
 	for _, role := range roles {
 		switch role {
 		case RoleAPI:
-			servers = append(servers, newAPIServer(cfg, log, httpMetrics, registry.NewStore(d.pool)))
-		case RoleEngine:
 			l, err := ledgerFor()
 			if err != nil {
 				return err
 			}
-			eng.engine = newEngine(cfg, log, d.pool, l, reg)
-			if d.nc != nil {
-				relay, err := newRelay(ctx, cfg, log, d.pool, d.nc, reg)
-				if err != nil {
-					return err
-				}
-				eng.relay = relay
-			} else {
-				log.Warn("engine running without NATS: events stay in the outbox until a relay runs")
+			srv, err := newAPIServer(ctx, cfg, log, httpMetrics, d, l, eng.engine)
+			if err != nil {
+				return err
 			}
-			checker.Register("engine", true, eng.engine.ReadyCheck)
+			servers = append(servers, srv)
+		case RoleEngine:
+			// built above
 		case RoleAdmin:
 			if cfg.Admin.APIKey.Reveal() == "" {
 				return fmt.Errorf("config: ADMIN_API_KEY is required for the admin role")

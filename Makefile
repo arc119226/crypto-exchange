@@ -34,7 +34,7 @@ tools: ## Show pinned tool versions (tools/go.mod)
 
 GEN_DIRS := internal/api/gen internal/admin/gen cmd/exchangectl/internal/apiclient cmd/exchangectl/internal/adminclient \
             internal/registry/sqlcgen internal/ledger/sqlcgen internal/audit/sqlcgen \
-            internal/trading/sqlcgen internal/eventbus/sqlcgen
+            internal/trading/sqlcgen internal/eventbus/sqlcgen internal/auth/sqlcgen
 
 gen: ## Regenerate OpenAPI server/client and sqlc code (outputs are committed)
 	$(GOTOOL) oapi-codegen -config internal/api/gen/oapi-codegen.yaml api/public/v1/openapi.yaml

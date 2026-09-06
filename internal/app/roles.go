@@ -83,3 +83,13 @@ func RolesLabel(rs []Role) string {
 	}
 	return joinRoles(rs)
 }
+
+// hasRole reports whether rs contains r.
+func hasRole(rs []Role, r Role) bool {
+	for _, x := range rs {
+		if x == r {
+			return true
+		}
+	}
+	return false
+}

@@ -42,7 +42,7 @@ func TestExitCodes(t *testing.T) {
 }
 
 func TestNotImplementedCommands(t *testing.T) {
-	for _, args := range [][]string{{"admin", "bootstrap"}, {"keys", "import-mnemonic"}} {
+	for _, args := range [][]string{{"keys", "import-mnemonic"}} {
 		_, err := run(t, args...)
 		assert.Equal(t, exitNotImplemented, exitCode(err), "%v", args)
 	}

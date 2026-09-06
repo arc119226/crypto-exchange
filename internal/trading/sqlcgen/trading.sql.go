@@ -324,7 +324,9 @@ SELECT id, tenant_id, market_id, market_symbol, seq, idx, maker_order_id, taker_
 WHERE tenant_id = $1
   AND (maker_account_id = $2 OR taker_account_id = $2)
   AND ($5::text = '' OR market_symbol = $5::text)
-  AND ($6::text = '' OR maker_order_id = $6::text OR taker_order_id = $6::text)
+  AND ($6::text = ''
+       OR (maker_order_id = $6::text AND maker_account_id = $2)
+       OR (taker_order_id = $6::text AND taker_account_id = $2))
 ORDER BY created_at DESC, id DESC
 LIMIT $3 OFFSET $4
 `

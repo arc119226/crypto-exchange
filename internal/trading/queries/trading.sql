@@ -81,7 +81,9 @@ SELECT * FROM trading.trades
 WHERE tenant_id = $1
   AND (maker_account_id = $2 OR taker_account_id = $2)
   AND (sqlc.arg(market_symbol)::text = '' OR market_symbol = sqlc.arg(market_symbol)::text)
-  AND (sqlc.arg(order_id)::text = '' OR maker_order_id = sqlc.arg(order_id)::text OR taker_order_id = sqlc.arg(order_id)::text)
+  AND (sqlc.arg(order_id)::text = ''
+       OR (maker_order_id = sqlc.arg(order_id)::text AND maker_account_id = $2)
+       OR (taker_order_id = sqlc.arg(order_id)::text AND taker_account_id = $2))
 ORDER BY created_at DESC, id DESC
 LIMIT $3 OFFSET $4;
 

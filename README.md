@@ -2,7 +2,7 @@
 
 白牌交易引擎(white-label exchange engine)的商業化原型:現貨撮合、複式記帳帳本、EVM 充提與歸集、行情推播、管理後台,以單一 Go binary 多角色的模組化單體交付,客戶透過 REST / WebSocket / Webhook 與事件契約整合。
 
-**目前狀態:Phase 3a 交易引擎 + 事件(進行中,分 3a/3b/3c 三個 PR)。** 已合併:Phase 0 walking skeleton(單一 module、單一 binary 多角色、`GET /v1/markets`、compose、CI)、Phase 1 `internal/matching`(無 I/O、確定性訂單簿,屬性 / 模糊 / golden 測試,`exchangectl replay`)、Phase 2 `internal/ledger`(複式記帳、凍結即分錄、balances 快取、冪等鍵、deferred trigger、GRANT-only 權限)、`internal/audit`、admin API 與 `exchangectl admin`。Phase 3a 加入 `internal/trading`(訂單狀態機、每市場 runner、一筆 Postgres 交易內完成 Hold → Apply → 成交 / 分錄 / outbox、`client_order_id` 冪等、重啟從 open orders 重建、advisory lock 單實例)與 `internal/eventbus`(事件 envelope、outbox、JetStream relay);`exchange serve --role=engine` 已可運行。3b(auth + public 交易端點 + 限流)與 3c(NATS request-reply 多容器 + compose E2E)接續。
+**目前狀態:Phase 3b 最小 auth + public 交易端點 + 限流(本 PR;Phase 3 分 3a/3b/3c 三個 PR)。** 已合併:Phase 0 walking skeleton(單一 module、單一 binary 多角色、`GET /v1/markets`、compose、CI)、Phase 1 `internal/matching`(無 I/O、確定性訂單簿,屬性 / 模糊 / golden 測試,`exchangectl replay`)、Phase 2 `internal/ledger`(複式記帳、凍結即分錄、balances 快取、冪等鍵、deferred trigger、GRANT-only 權限)、`internal/audit`、admin API 與 `exchangectl admin`、Phase 3a `internal/trading`(訂單狀態機、每市場 runner、一筆 Postgres 交易內完成 Hold → Apply → 成交 / 分錄 / outbox、`client_order_id` 冪等、重啟從 open orders 重建、advisory lock 單實例)與 `internal/eventbus`(事件 envelope、outbox、JetStream relay)。3b 加入 `internal/auth`(argon2id、Ed25519 JWT + JWKS、refresh 輪替與重放偵測、API key HMAC 與 IP 白名單、`exchange admin bootstrap`)、`internal/ratelimit`(Redis / 記憶體 token bucket,登入與下單限流)、public API 的 auth / api-keys / account / orders / fills / depth / trades 端點,以及 `exchangectl user|api-keys|orders|balances|fills|book|trades|e2e`;`exchange serve --role=all` 可從 HTTP 走完註冊 → 注資 → 下單 → 成交 → 取消。3c(NATS request-reply 多容器命令匯流排 + compose E2E job + `docs/events.md`)接續。
 
 ## 產品邊界
 
@@ -30,6 +30,15 @@ export EXCHANGE_ADMIN_URL=http://localhost:8082 EXCHANGE_ADMIN_API_KEY=$(sed -n 
 ACC=$(go run ./cmd/exchangectl admin accounts create)                                   # 開一個現貨帳戶
 go run ./cmd/exchangectl admin fund --account $ACC --asset USDC --amount 10000            # dev faucet(external → available,寫審計)
 go run ./cmd/exchangectl admin balances $ACC && go run ./cmd/exchangectl admin trial-balance   # 每資產 diff = 0
+
+# 交易(public API;JWT session 或 API key HMAC,規格見 docs/api-conventions.md)
+go run ./cmd/exchangectl user register --email alice@example.com --password 'correct horse battery'   # 印出 export EXCHANGE_TOKEN=...
+export EXCHANGE_TOKEN=...                                                                              # 貼上一步的輸出
+go run ./cmd/exchangectl admin fund --account $(go run ./cmd/exchangectl user me --output json | jq -r .account_id) --asset USDC --amount 10000
+go run ./cmd/exchangectl orders place --side buy --price 2000 --qty 0.5    # 201 open;同 --client-order-id 重送 → 200 原單;餘額不足 → 201 rejected
+go run ./cmd/exchangectl book ETH-USDC && go run ./cmd/exchangectl balances && go run ./cmd/exchangectl orders list --open
+go run ./cmd/exchangectl api-keys create --scopes read,trade               # secret 只顯示一次;之後 --api-key/--api-secret 對每個請求 HMAC 簽章
+go run ./cmd/exchangectl e2e --verbose                                     # 兩個用戶走完 docs/plan-v1.0.md §6.1.4 的數字並驗試算平衡
 make artifacts                                  # 把 addresses.json 從 volume 複製到 deploy/compose/artifacts/
 cast call $(jq -r .usdc deploy/compose/artifacts/addresses.json) "decimals()(uint8)" --rpc-url localhost:8545   # 6
 
@@ -48,7 +57,7 @@ make test-fuzz          # 每個 Fuzz* 目標跑 FUZZ_TIME(預設 30s)
 go run ./cmd/exchangectl replay --file test/fixtures/matching/market_buy_two_levels.jsonl   # 重播撮合腳本、印事件與深度
 go test ./internal/matching -run TestGolden -update   # 重新產生 golden(改語意時,diff 要 review)
 make gen && make gen-check   # 重新產生 OpenAPI server/client 與 sqlc 程式碼;產物進 repo,CI 比對
-make test-integration   # testcontainers(需要 Docker):migration、seed、GET /v1/markets、帳本(算例、500 個隨機序列、100 goroutine 併發)、admin API
+make test-integration   # testcontainers(需要 Docker):migration、seed、帳本、admin API、trading 引擎(kill/restart、屬性、併發)、outbox relay、public API(auth、HMAC、限流 429、201/200/422)
 TEST_PG_ADMIN_URL=postgres://exchange:test@127.0.0.1:5433/postgres make test-integration   # 改用現成的本機 Postgres(先跑 infra/postgres/initdb/01-roles.sh),每個測試一個新 database
 TEST_NATS_URL=nats://127.0.0.1:4222 ...                                                    # 同理改用現成的 `nats-server -js`(outbox relay 測試會 purge 它用到的 stream)
 make contracts-test     # 在釘住的 foundry 映像內跑 forge test
@@ -57,14 +66,19 @@ make infra-up && make migrate && make seed && make run ROLE=api   # 只起基礎
 
 契約先行:改 `api/public/v1/openapi.yaml` → `make gen` → 實作 `internal/api` 的 strict server 介面。資料庫改動一律新增 `migrations/NNNN_<module>_<desc>.sql`(goose、只 forward),查詢寫在 `internal/<module>/queries/*.sql` 交給 sqlc。
 
-## Repo 結構(Phase 0)
+## Repo 結構
 
 ```
 cmd/exchange          單一 binary:serve --role=api|engine|chain|signer|stream|admin|worker|all、migrate、seed、healthcheck、keys
 cmd/exchangectl       開發/營運 CLI(產生的 OpenAPI client)
 internal/app          設定、run loop、/healthz /readyz /metrics、SIGTERM drain、依賴退避
-internal/api          public REST(oapi-codegen strict server)+ RFC 7807
+internal/api          public REST(oapi-codegen strict server)+ RFC 7807 + 限流
+internal/auth         最小 auth 參考實作:users、argon2id、Ed25519 JWT / JWKS、refresh 輪替、API key HMAC、Authenticate 中介層
+internal/ratelimit    token bucket(Redis Lua / 記憶體 / Fallback)
 internal/matching     純函式訂單簿(Apply / Restore / Snapshot;無 I/O、無時鐘)
+internal/trading      訂單狀態機、每市場 runner(一筆 PG 交易:Hold → Apply → 成交 / 分錄 / outbox)、client_order_id 冪等、重建
+internal/eventbus     事件 envelope、outbox、JetStream relay / streams
+internal/policy       同步下單規則(市場狀態、帳戶凍結)
 internal/ledger       複式帳本:Post / Hold / Release / Settle / Credit / Adjust、balances 快取、試算平衡(sqlc)
 internal/audit        append-only 稽核紀錄
 internal/admin        admin REST(oapi-codegen strict server)+ X-Admin-Api-Key
@@ -90,10 +104,11 @@ docs                  計畫、審查、ADR、領域文件
 |---|---|
 | [`docs/plan-v1.0.md`](docs/plan-v1.0.md) | **分階段可執行計畫 v1.0**(定位、範圍、領域模型、契約、模組、選型、compose、Phase 0~7、測試/CI、安全、觀測、部署、風險) |
 | [`docs/review/plan-review-2026-09.md`](docs/review/plan-review-2026-09.md) | v0.1 規劃書審查報告(28 條合併後發現、不採納意見、對 v1.0 的結構性要求) |
-| [`docs/domain.md`](docs/domain.md) | 領域文件:科目表、分錄、狀態機、撮合語意的逐項驗算與疑問清單 |
+| [`docs/domain.md`](docs/domain.md) | 領域文件:科目表、分錄、狀態機、撮合語意的逐項驗算與疑問清單;各 Phase 程式碼與計畫的對應表 |
+| [`docs/api-conventions.md`](docs/api-conventions.md) | Public API 慣例:金額字串、problem+json、JWT / API key HMAC 簽章、限流、`client_order_id` 狀態碼(English) |
 | [`docs/adr/`](docs/adr/) | ADR-0000 需求訪談決策(8 輪 32 題);ADR-0001~0008 架構決策(單體、真相來源、租戶、數值、帳本、認證、簽名、工具鏈) |
 | [`docs/archive/plan-v0.1.md`](docs/archive/plan-v0.1.md) | 原始 v0.1 規劃書(已取代,僅供對照) |
 
 ## 下一步
 
-Phase 3(`docs/plan-v1.0.md` §12)分三個 PR:3a `internal/trading` + `internal/eventbus`(本 PR);3b 最小 auth(密碼 + JWT/refresh + API key HMAC)、public 交易 / 帳戶端點、限流、`exchangectl e2e`;3c NATS request-reply 命令匯流排、多容器 compose E2E job、`docs/events.md`。DoD 不過不進下一階段。
+Phase 3(`docs/plan-v1.0.md` §12)分三個 PR:3a `internal/trading` + `internal/eventbus`(已合併);3b 最小 auth(密碼 + JWT/refresh + API key HMAC)、public 交易 / 帳戶端點、限流、`exchangectl e2e`(本 PR);3c NATS request-reply 命令匯流排、多容器 compose E2E job、`api/events/v1/*.json` + `docs/events.md`、`PUT /admin/v1/markets/{id}/status` → engine reload。DoD 不過不進下一階段。

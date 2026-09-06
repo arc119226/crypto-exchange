@@ -104,6 +104,28 @@ linters:
             - github.com/prometheus/client_golang
             - github.com/stretchr/testify
             - pgregory.net/rapid
+        auth:
+          list-mode: strict
+          files:
+            - "**/internal/auth/**"
+          allow:
+            - $gostd
+            - github.com/arc119226/crypto-exchange/internal/auth/sqlcgen
+            - github.com/arc119226/crypto-exchange/internal/ledger
+            - github.com/arc119226/crypto-exchange/internal/audit
+            - github.com/arc119226/crypto-exchange/internal/platform/pg
+            - github.com/jackc/pgx/v5
+            - github.com/lestrrat-go/jwx/v3
+            - golang.org/x/crypto
+            - github.com/stretchr/testify
+        ratelimit:
+          list-mode: strict
+          files:
+            - "**/internal/ratelimit/**"
+          allow:
+            - $gostd
+            - github.com/redis/go-redis/v9
+            - github.com/stretchr/testify
         entrypoints-only-from-app:
           files:
             - $all
@@ -130,6 +152,8 @@ linters:
             - github.com/arc119226/crypto-exchange/internal/money
             # exchangectl replay drives the pure order book directly (no I/O in matching)
             - github.com/arc119226/crypto-exchange/internal/matching
+            # exchangectl signs API-key requests with the same canonical string the server verifies
+            - github.com/arc119226/crypto-exchange/internal/auth
             - github.com/arc119226/crypto-exchange/cmd/exchangectl/internal
             - github.com/spf13/cobra
             - github.com/oapi-codegen/runtime
@@ -176,6 +200,7 @@ linters:
       - internal/audit/sqlcgen
       - internal/trading/sqlcgen
       - internal/eventbus/sqlcgen
+      - internal/auth/sqlcgen
       - cmd/exchangectl/internal/apiclient
       - cmd/exchangectl/internal/adminclient
     rules:
@@ -207,5 +232,6 @@ formatters:
       - internal/audit/sqlcgen
       - internal/trading/sqlcgen
       - internal/eventbus/sqlcgen
+      - internal/auth/sqlcgen
       - cmd/exchangectl/internal/apiclient
       - cmd/exchangectl/internal/adminclient
