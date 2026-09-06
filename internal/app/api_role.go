@@ -16,6 +16,7 @@ import (
 	"github.com/arc119226/crypto-exchange/internal/api"
 	"github.com/arc119226/crypto-exchange/internal/audit"
 	"github.com/arc119226/crypto-exchange/internal/auth"
+	"github.com/arc119226/crypto-exchange/internal/chain"
 	"github.com/arc119226/crypto-exchange/internal/cmdbus"
 	"github.com/arc119226/crypto-exchange/internal/ledger"
 	"github.com/arc119226/crypto-exchange/internal/ratelimit"
@@ -88,6 +89,9 @@ func newAPIServer(ctx context.Context, cfg Config, log *slog.Logger, m *telemetr
 
 	handler := newAPIRouter(log, m, api.Deps{
 		Tenant: cfg.TenantID, Registry: store, Auth: authSvc, Ledger: l, Trading: tradingSvc, Limiter: limiter, Limits: limits,
+		// assignment only: the pool is filled by the signer role, which is the
+		// only process that holds the seed (docs/plan-v1.0.md §6.4.1)
+		Chain: chain.NewAddresses(d.pool, cfg.TenantID, cfg.Chain.ChainID),
 	})
 	srv := &http.Server{Addr: cfg.HTTPAddr, Handler: handler, ReadHeaderTimeout: 5 * time.Second}
 	var refresh *registryRefresher

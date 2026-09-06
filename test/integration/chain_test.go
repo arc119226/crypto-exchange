@@ -4,6 +4,8 @@ package integration
 
 import (
 	"context"
+	"fmt"
+	"net/http"
 	"strings"
 	"testing"
 
@@ -12,6 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/arc119226/crypto-exchange/internal/api/gen"
 	"github.com/arc119226/crypto-exchange/internal/chain"
 	"github.com/arc119226/crypto-exchange/internal/chain/hdwallet"
 	"github.com/arc119226/crypto-exchange/internal/platform/pg"
@@ -224,5 +227,86 @@ func TestDepositAddressPrivileges(t *testing.T) {
 		created, err := hdwallet.NewPool(signerPool, w, "default", testChainID).Ensure(ctx, 20)
 		require.NoError(t, err)
 		assert.Positive(t, created)
+	})
+}
+
+// TestDepositAddressAPI drives GET /v1/deposit-address through the real
+// router, middleware and auth, which is where the account-scoping rule has to
+// hold: the address a caller gets is derived from their token, never from
+// anything in the request.
+func TestDepositAddressAPI(t *testing.T) {
+	h := setupAPI(t)
+	ctx := context.Background()
+
+	w, err := hdwallet.FromMnemonic(testMnemonic)
+	require.NoError(t, err)
+	defer w.Close()
+	signer := hdwallet.NewPool(h.all, w, "default", testChainID)
+	_, err = signer.Ensure(ctx, 4)
+	require.NoError(t, err)
+
+	alice := h.register(t, "deposit-alice@e2e.local")
+	bob := h.register(t, "deposit-bob@e2e.local")
+
+	get := func(t *testing.T, c cred, asset string) adminResp {
+		t.Helper()
+		return h.do(t, http.MethodGet, "/v1/deposit-address?asset="+asset, c, nil)
+	}
+
+	t.Run("returns a checksummed address and repeats it", func(t *testing.T) {
+		r := get(t, bearer(alice), "ETH")
+		require.Equal(t, http.StatusOK, r.status, string(r.body))
+		got := decode[gen.DepositAddress](t, r)
+		assert.Equal(t, "ETH", got.Asset)
+		assert.Equal(t, int64(testChainID), got.ChainID)
+		assert.Regexp(t, `^0x[0-9a-fA-F]{40}$`, got.Address)
+		assert.NotEqual(t, strings.ToLower(got.Address), got.Address, "EIP-55, not lower-case")
+
+		again := decode[gen.DepositAddress](t, get(t, bearer(alice), "ETH"))
+		assert.Equal(t, got.Address, again.Address)
+	})
+
+	t.Run("every asset on the chain shares one address", func(t *testing.T) {
+		eth := decode[gen.DepositAddress](t, get(t, bearer(alice), "ETH"))
+		usdc := decode[gen.DepositAddress](t, get(t, bearer(alice), "USDC"))
+		assert.Equal(t, eth.Address, usdc.Address, "ETH and ERC-20 deposits share the address")
+	})
+
+	t.Run("accounts do not share an address", func(t *testing.T) {
+		a := decode[gen.DepositAddress](t, get(t, bearer(alice), "ETH"))
+		b := decode[gen.DepositAddress](t, get(t, bearer(bob), "ETH"))
+		assert.NotEqual(t, a.Address, b.Address)
+	})
+
+	t.Run("unauthenticated is 401", func(t *testing.T) {
+		r := get(t, cred{}, "ETH")
+		assert.Equal(t, http.StatusUnauthorized, r.status, string(r.body))
+	})
+
+	t.Run("an unknown asset is 404", func(t *testing.T) {
+		r := get(t, bearer(alice), "DOGE")
+		require.Equal(t, http.StatusNotFound, r.status, string(r.body))
+		assert.Contains(t, problemOf(t, r).Detail, "DOGE")
+	})
+
+	t.Run("a missing asset is 400", func(t *testing.T) {
+		r := h.do(t, http.MethodGet, "/v1/deposit-address", bearer(alice), nil)
+		assert.Equal(t, http.StatusBadRequest, r.status, string(r.body))
+	})
+
+	t.Run("an empty pool is 503, not 500", func(t *testing.T) {
+		// drain whatever is left, then ask once more
+		for {
+			free, err := signer.Free(ctx)
+			require.NoError(t, err)
+			if free == 0 {
+				break
+			}
+			s := h.register(t, fmt.Sprintf("drain-%d@e2e.local", free))
+			require.Equal(t, http.StatusOK, get(t, bearer(s), "ETH").status)
+		}
+		r := get(t, bearer(h.register(t, "unlucky@e2e.local")), "ETH")
+		require.Equal(t, http.StatusServiceUnavailable, r.status, string(r.body))
+		assert.Contains(t, problemOf(t, r).Detail, "retry")
 	})
 }
