@@ -442,6 +442,41 @@ type CreatedAPIKey struct {
 	Secret string `json:"secret"`
 }
 
+// Deposit defines model for Deposit.
+type Deposit struct {
+	// Address The deposit address the funds arrived at.
+	Address string `json:"address"`
+
+	// Amount Arbitrary-precision decimal serialized as a string, at most 18 integer
+	// and 18 fractional digits (Postgres NUMERIC(36,18)). Never a JSON number.
+	//
+	//
+	// Example: 1990.00
+	Amount Amount `json:"amount"`
+
+	// Asset Example: ETH
+	Asset string `json:"asset"`
+
+	// BlockNumber Where it currently sits; a reorg can change this.
+	BlockNumber   int64      `json:"block_number"`
+	Confirmations int32      `json:"confirmations"`
+	CreatedAt     time.Time  `json:"created_at"`
+	CreditedAt    *time.Time `json:"credited_at,omitempty"`
+	ID            string     `json:"id"`
+
+	// LogIndex ERC-20 log index, or -1 for a native transfer.
+	LogIndex int32 `json:"log_index"`
+
+	// RequiredConfirmations What this asset needs before it is credited.
+	RequiredConfirmations int32 `json:"required_confirmations"`
+
+	// Status detected, confirming, credited, orphaned, dropped or reversed. Open for new states.
+	//
+	// Example: credited
+	Status string `json:"status"`
+	TxHash string `json:"tx_hash"`
+}
+
 // DepositAddress defines model for DepositAddress.
 type DepositAddress struct {
 	// Address EIP-55 checksummed address. Send only assets of this chain to it.
@@ -456,6 +491,11 @@ type DepositAddress struct {
 	//
 	// Example: 31337
 	ChainID int64 `json:"chain_id"`
+}
+
+// DepositList defines model for DepositList.
+type DepositList struct {
+	Deposits []Deposit `json:"deposits"`
 }
 
 // Depth defines model for Depth.
@@ -930,6 +970,13 @@ type GetDepositAddressParams struct {
 	Asset string `form:"asset" json:"asset"`
 }
 
+// ListDepositsParams defines parameters for ListDeposits.
+type ListDepositsParams struct {
+	// Limit Page size (default 100, max 500)
+	Limit  *Limit  `form:"limit,omitempty" json:"limit,omitempty"`
+	Offset *Offset `form:"offset,omitempty" json:"offset,omitempty"`
+}
+
 // ListFillsParams defines parameters for ListFills.
 type ListFillsParams struct {
 	Market  *string `form:"market,omitempty" json:"market,omitempty"`
@@ -1185,6 +1232,13 @@ type ClientInterface interface {
 	//
 	// Corresponds with GET /v1/deposit-address (the `GetDepositAddress` operationId).
 	GetDepositAddress(ctx context.Context, params *GetDepositAddressParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ListDeposits The caller's deposits, newest first
+	//
+	// A deposit is only money once its status is `credited`. `detected` and `confirming` mean it has been seen on chain but not yet posted; `orphaned` means the block carrying it was reorged away and it may still come back; `dropped` means it did not.
+	//
+	// Corresponds with GET /v1/deposits (the `ListDeposits` operationId).
+	ListDeposits(ctx context.Context, params *ListDepositsParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// ListFills The caller's fills (its side of each trade)
 	//
@@ -1551,6 +1605,23 @@ func (c *Client) ListBalances(ctx context.Context, reqEditors ...RequestEditorFn
 // Corresponds with GET /v1/deposit-address (the `GetDepositAddress` operationId).
 func (c *Client) GetDepositAddress(ctx context.Context, params *GetDepositAddressParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewGetDepositAddressRequest(c.Server, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// ListDeposits The caller's deposits, newest first
+//
+// A deposit is only money once its status is `credited`. `detected` and `confirming` mean it has been seen on chain but not yet posted; `orphaned` means the block carrying it was reorged away and it may still come back; `dropped` means it did not.
+//
+// Corresponds with GET /v1/deposits (the `ListDeposits` operationId).
+func (c *Client) ListDeposits(ctx context.Context, params *ListDepositsParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListDepositsRequest(c.Server, params)
 	if err != nil {
 		return nil, err
 	}
@@ -2157,6 +2228,72 @@ func NewGetDepositAddressRequest(server string, params *GetDepositAddressParams)
 			for _, qp := range strings.Split(queryFrag, "&") {
 				rawQueryFragments = append(rawQueryFragments, qp)
 			}
+		}
+
+		if encoded := queryValues.Encode(); encoded != "" {
+			rawQueryFragments = append(rawQueryFragments, encoded)
+		}
+		queryURL.RawQuery = strings.Join(rawQueryFragments, "&")
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewListDepositsRequest constructs an http.Request for the ListDeposits method
+func NewListDepositsRequest(server string, params *ListDepositsParams) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/deposits")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		// queryValues collects non-styled parameters (passthrough, JSON)
+		// that are safe to round-trip through url.Values.Encode().
+		queryValues := queryURL.Query()
+		// rawQueryFragments collects pre-encoded query fragments from
+		// styled parameters, preserving literal commas as delimiters
+		// per the OpenAPI spec (e.g. "color=blue,black,brown").
+		var rawQueryFragments []string
+
+		if params.Limit != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "limit", *params.Limit, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "integer", Format: "int32"}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.Offset != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "offset", *params.Offset, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "integer", Format: "int32"}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
 		}
 
 		if encoded := queryValues.Encode(); encoded != "" {
@@ -2912,6 +3049,15 @@ type ClientWithResponsesInterface interface {
 	//
 	// Corresponds with GET /v1/deposit-address (the `GetDepositAddress` operationId).
 	GetDepositAddressWithResponse(ctx context.Context, params *GetDepositAddressParams, reqEditors ...RequestEditorFn) (*GetDepositAddressResponse, error)
+
+	// ListDepositsWithResponse The caller's deposits, newest first
+	//
+	// A deposit is only money once its status is `credited`. `detected` and `confirming` mean it has been seen on chain but not yet posted; `orphaned` means the block carrying it was reorged away and it may still come back; `dropped` means it did not.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /v1/deposits (the `ListDeposits` operationId).
+	ListDepositsWithResponse(ctx context.Context, params *ListDepositsParams, reqEditors ...RequestEditorFn) (*ListDepositsResponse, error)
 
 	// ListFillsWithResponse The caller's fills (its side of each trade)
 	//
@@ -3746,6 +3892,68 @@ func (r GetDepositAddressResponse) StatusCode() int {
 
 // ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
 func (r GetDepositAddressResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type ListDepositsResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *DepositList
+	// ApplicationProblemJSON401 the response for an HTTP 401 `application/problem+json` response
+	ApplicationProblemJSON401 *Unauthorized
+	// ApplicationProblemJSON500 the response for an HTTP 500 `application/problem+json` response
+	ApplicationProblemJSON500 *InternalError
+	// ApplicationProblemJSON503 the response for an HTTP 503 `application/problem+json` response
+	ApplicationProblemJSON503 *ServiceUnavailable
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r ListDepositsResponse) GetJSON200() *DepositList {
+	return r.JSON200
+}
+
+// GetApplicationProblemJSON401 returns the response for an HTTP 401 `application/problem+json` response
+func (r ListDepositsResponse) GetApplicationProblemJSON401() *Unauthorized {
+	return r.ApplicationProblemJSON401
+}
+
+// GetApplicationProblemJSON500 returns the response for an HTTP 500 `application/problem+json` response
+func (r ListDepositsResponse) GetApplicationProblemJSON500() *InternalError {
+	return r.ApplicationProblemJSON500
+}
+
+// GetApplicationProblemJSON503 returns the response for an HTTP 503 `application/problem+json` response
+func (r ListDepositsResponse) GetApplicationProblemJSON503() *ServiceUnavailable {
+	return r.ApplicationProblemJSON503
+}
+
+// GetBody returns the raw response body bytes
+func (r ListDepositsResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r ListDepositsResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListDepositsResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r ListDepositsResponse) ContentType() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Header.Get("Content-Type")
 	}
@@ -4644,6 +4852,21 @@ func (c *ClientWithResponses) GetDepositAddressWithResponse(ctx context.Context,
 	return ParseGetDepositAddressResponse(rsp)
 }
 
+// ListDepositsWithResponse The caller's deposits, newest first
+//
+// A deposit is only money once its status is `credited`. `detected` and `confirming` mean it has been seen on chain but not yet posted; `orphaned` means the block carrying it was reorged away and it may still come back; `dropped` means it did not.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /v1/deposits (the `ListDeposits` operationId).
+func (c *ClientWithResponses) ListDepositsWithResponse(ctx context.Context, params *ListDepositsParams, reqEditors ...RequestEditorFn) (*ListDepositsResponse, error) {
+	rsp, err := c.ListDeposits(ctx, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListDepositsResponse(rsp)
+}
+
 // ListFillsWithResponse The caller's fills (its side of each trade)
 //
 // Returns a wrapper object for the known response body format(s).
@@ -5366,6 +5589,53 @@ func ParseGetDepositAddressResponse(rsp *http.Response) (*GetDepositAddressRespo
 			return nil, err
 		}
 		response.ApplicationProblemJSON422 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON500 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest ServiceUnavailable
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON503 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseListDepositsResponse parses an HTTP response from a ListDepositsWithResponse call
+func ParseListDepositsResponse(rsp *http.Response) (*ListDepositsResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListDepositsResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest DepositList
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON401 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
 		var dest InternalError

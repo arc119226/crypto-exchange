@@ -200,8 +200,8 @@ services:
     environment:
       <<: *exchange-env
       DATABASE_URL: postgres://ex_chain:${POSTGRES_PASSWORD}@postgres:5432/exchange?sslmode=disable
-      REQUIRED_CONFIRMATIONS_DEFAULT: "1"
-      SCAN_INTERVAL: 2s
+      ETH_REQUIRED_CONFIRMATIONS_DEFAULT: "1"   # anvil: a deposit in the head block is already confirmed
+      ETH_SCAN_INTERVAL: 2s
       SIGNER_SUBJECT: cmd.signer.sign.default            # signing goes over NATS request-reply to exchange-signer
     depends_on:
       <<: *app-deps
@@ -277,8 +277,8 @@ services:
       ADMIN_API_KEY: ${ADMIN_API_KEY}
       ADMIN_BOOTSTRAP_EMAIL: ${ADMIN_BOOTSTRAP_EMAIL:-admin@example.com}
       ADMIN_BOOTSTRAP_PASSWORD: ${ADMIN_BOOTSTRAP_PASSWORD}
-      REQUIRED_CONFIRMATIONS_DEFAULT: "1"
-      SCAN_INTERVAL: 2s
+      ETH_REQUIRED_CONFIRMATIONS_DEFAULT: "1"   # anvil: a deposit in the head block is already confirmed
+      ETH_SCAN_INTERVAL: 2s
     volumes:
       - artifacts:/artifacts:ro
       - ../../secrets/jwt:/secrets/jwt:ro

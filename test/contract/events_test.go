@@ -20,6 +20,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/arc119226/crypto-exchange/internal/chain/deposit"
 	"github.com/arc119226/crypto-exchange/internal/eventbus"
 	"github.com/arc119226/crypto-exchange/internal/matching"
 	"github.com/arc119226/crypto-exchange/internal/money"
@@ -50,6 +51,12 @@ var (
 		"trade.executed":  "01J8Z2K3M4N5P6Q7R8S9T0V1W7",
 		"balance.updated": "01J8Z2K3M4N5P6Q7R8S9T0V1W8",
 		"market.updated":  "01J8Z2K3M4N5P6Q7R8S9T0V1W9",
+		// the deposit story of docs/plan-v1.0.md §6.4.1, one id per state
+		"deposit.detected": "01J8Z2K3M4N5P6Q7R8S9T0V1X0",
+		"deposit.credited": "01J8Z2K3M4N5P6Q7R8S9T0V1X1",
+		"deposit.orphaned": "01J8Z2K3M4N5P6Q7R8S9T0V1X2",
+		"deposit.dropped":  "01J8Z2K3M4N5P6Q7R8S9T0V1X3",
+		"deposit.reversed": "01J8Z2K3M4N5P6Q7R8S9T0V1X4",
 	}
 )
 
@@ -116,6 +123,29 @@ func sample(t *testing.T, eventType string) eventbus.Envelope {
 		payload = trading.BalanceUpdatedPayload{
 			AccountID: buyer, Asset: "USDC", Available: amt("8004"), Hold: amt("1200"), AccountSeq: 44,
 		}
+	case deposit.EventDetected, deposit.EventCredited, deposit.EventOrphaned,
+		deposit.EventDropped, deposit.EventReversed:
+		// One payload shape for all five: what a consumer needs about a
+		// deposit does not change with the way it moved, and the difference
+		// lives in the event type. The numbers follow one 2 ETH deposit
+		// through the machine.
+		env.AccountID, env.AccountSeq = str(buyer), i64(51)
+		status := map[string]string{
+			deposit.EventDetected: "detected", deposit.EventCredited: "credited",
+			deposit.EventOrphaned: "orphaned", deposit.EventDropped: "dropped",
+			deposit.EventReversed: "reversed",
+		}[eventType]
+		confirmations := int32(2)
+		if eventType == deposit.EventCredited || eventType == deposit.EventReversed {
+			confirmations = 6
+		}
+		payload = deposit.Payload{
+			DepositID: "01J8Z2K3M4N5P6Q7R8S9T0V600", AccountID: buyer, Asset: "ETH", Amount: amt("2"),
+			Address:  "0x9858effd232b4033e47d90003d41ec34ecaeda94",
+			TxHash:   "0x1f4b2c9d8e7a6b5c4d3e2f1a0b9c8d7e6f5a4b3c2d1e0f9a8b7c6d5e4f3a2b1c",
+			LogIndex: -1, BlockNumber: 18234, BlockHash: "0xa1b2c3d4e5f60718293a4b5c6d7e8f901a2b3c4d5e6f708192a3b4c5d6e7f801",
+			Confirmations: confirmations, Status: status, Required: 6,
+		}
 	case registry.EventMarketUpdated:
 		env.MarketID = str(market)
 		payload = registry.MarketUpdatedPayload{
@@ -137,7 +167,8 @@ func ptr[T any](v T) *T { return &v }
 // allEventTypes is every type the producers declare.
 func allEventTypes() []string {
 	out := append([]string{}, trading.EventTypes()...)
-	return append(out, registry.EventTypes()...)
+	out = append(out, registry.EventTypes()...)
+	return append(out, deposit.EventTypes()...)
 }
 
 // TestSchemaFilesMatchEventTypes is the drift guard: a new event type with

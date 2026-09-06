@@ -109,12 +109,25 @@ schema; `planned` means the phase that adds it will add the schema with it.
 | `market.updated` | admin | **engine (reload)**, stream, webhook | shipped |
 | `ledger.posted` | engine, chain, admin | stream (balances), back-office projection | planned (Phase 5) |
 | `asset.updated`, `fee_schedule.updated` | admin | engine (reload), webhook | planned (Phase 5) |
-| `deposit.detected`, `deposit.credited`, `deposit.orphaned`, `deposit.dropped`, `deposit.reversed` | chain | stream, webhook, admin | planned (Phase 4a) |
+| `deposit.detected`, `deposit.credited`, `deposit.orphaned`, `deposit.dropped`, `deposit.reversed` | chain | stream, webhook, admin | shipped |
 | `withdrawal.state_changed` | api, chain, admin | stream, webhook, admin | planned (Phase 4b) |
 | `sweep.completed`, `sweep.failed` | chain | admin | planned (Phase 4c) |
 | `alert.hot_wallet_low` | chain | webhook, admin | planned (Phase 4c) |
 | `reconciliation.break_detected` | worker | webhook, admin | planned (Phase 4c) |
 | `user.kyc_level_updated`, `user.status_updated` | admin | webhook | planned (Phase 5) |
+
+`deposit.*` events all share one payload: what a consumer needs about a
+deposit does not change with the way it moved, and the difference lives in the
+event type. `deposit.detected` is **not** money — nothing is credited until
+`deposit.credited`, and a reorg before that point produces `deposit.orphaned`
+instead. The same deposit can be detected more than once: after an orphan it
+reappears under the same `deposit_id`, with a different `block_number`.
+`deposit.reversed` is an alert rather than a completed reversal — the
+reversing entry is made by hand once an operator confirms it (§6.4.1).
+
+The chain role writes these to the outbox; the **relay that publishes them
+runs in the engine role**, so a deployment without an engine leaves deposit
+events sitting in `eventbus.outbox`.
 
 `order.*` and `trade.executed` carry `seq`; `order.*` and `balance.updated`
 carry `account_seq`. `order.accepted` is emitted for **every** order that was
