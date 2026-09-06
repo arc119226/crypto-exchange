@@ -10,6 +10,44 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+type ChainBlock struct {
+	TenantID   string
+	ChainID    int64
+	Number     int64
+	Hash       string
+	ParentHash string
+	SeenAt     time.Time
+}
+
+type ChainChainState struct {
+	TenantID    string
+	ChainID     int64
+	GenesisHash string
+	CreatedAt   time.Time
+}
+
+type ChainDeposit struct {
+	ID              string
+	TenantID        string
+	ChainID         int64
+	TxHash          string
+	LogIndex        int32
+	Address         string
+	AccountID       string
+	Asset           string
+	Amount          pgtype.Numeric
+	BlockNumber     int64
+	BlockHash       string
+	Confirmations   int32
+	Status          string
+	OrphanedAtBlock *int64
+	CreditedAt      pgtype.Timestamptz
+	CorrelationID   *string
+	Version         int32
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
+}
+
 type ChainDepositAddress struct {
 	ID              string
 	TenantID        string
@@ -19,4 +57,12 @@ type ChainDepositAddress struct {
 	AccountID       *string
 	CreatedAt       time.Time
 	AssignedAt      pgtype.Timestamptz
+}
+
+type ChainScanCursor struct {
+	TenantID         string
+	ChainID          int64
+	LastScannedBlock int64
+	LastBlockHash    string
+	UpdatedAt        time.Time
 }
