@@ -46,6 +46,13 @@ if [ ! -f "$ENV_FILE" ]; then
     sed -i "s|^$var=.*|$var=$(openssl rand -hex 16)|" "$ENV_FILE"
   done
   sed -i "s|^API_KEY_MASTER_KEY=.*|API_KEY_MASTER_KEY=$(openssl rand -hex 32)|" "$ENV_FILE"
+  # .env.example ships the zero address as a "run gen-dev-secrets first" marker,
+  # and Deploy.s.sol refuses it (and the deployer's own address). No Phase 3
+  # role signs with the hot wallet — the signer is still a stub — so the
+  # deployer only needs some address to fund with ETH and mint USDC into.
+  # anvil account #1 is a published dev account, and it is not account #0.
+  # Phase 4 needs a hot wallet that can actually sign: run gen-dev-secrets here.
+  sed -i "s|^HOT_WALLET_ADDRESS=.*|HOT_WALLET_ADDRESS=0x70997970C51812dc3A010C7d01b50e0d17dc79C8|" "$ENV_FILE"
 fi
 # shellcheck disable=SC1090
 set -a; . "./$ENV_FILE"; set +a
