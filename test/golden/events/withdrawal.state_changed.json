@@ -1,0 +1,23 @@
+{
+  "event_id": "01J8Z2K3M4N5P6Q7R8S9T0V1X6",
+  "event_type": "withdrawal.state_changed",
+  "schema_version": 1,
+  "tenant_id": "default",
+  "market_id": null,
+  "account_id": "acct-buyer",
+  "seq": null,
+  "account_seq": 52,
+  "occurred_at": "2026-09-05T08:15:23.412Z",
+  "correlation_id": "req_01J8Z2K2000000000000000000",
+  "payload": {
+    "withdrawal_id": "01J8Z2K3M4N5P6Q7R8S9T0V700",
+    "account_id": "acct-buyer",
+    "asset": "ETH",
+    "amount": "0.5",
+    "to_address": "0x70997970c51812dc3a010c7d01b50e0d17dc79c8",
+    "chain_id": 31337,
+    "status": "pending_review",
+    "previous_status": "requested",
+    "reason": "above_auto_approve_limit"
+  }
+}

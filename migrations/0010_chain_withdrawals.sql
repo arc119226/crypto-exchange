@@ -101,3 +101,13 @@ GRANT UPDATE ON chain.withdrawals TO ex_all;
 
 -- No DELETE for anyone: a withdrawal is a money record. The one DELETE in this
 -- schema remains chain.blocks, the reorg ring (0009).
+
+-- Recording a withdrawal emits withdrawal.requested in the same transaction as
+-- the INSERT -- that is what the outbox is for -- and an account-scoped event
+-- carries account_seq, which NextAccountSeq produces with an
+-- UPDATE ... RETURNING. 0003 gave UPDATE on ledger.accounts to ex_engine,
+-- ex_admin and ex_all only, so the api would fail with 42501 in a split
+-- deployment while every ex_all test passed. Same shape as the grant 0009 had
+-- to add for ex_chain, and column-scoped for the same reason: the api may
+-- advance an account's event sequence and change nothing else about it.
+GRANT UPDATE (next_seq) ON ledger.accounts TO ex_api;

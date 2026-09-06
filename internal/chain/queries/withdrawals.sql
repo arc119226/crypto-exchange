@@ -81,3 +81,9 @@ FROM chain.withdrawals
 WHERE tenant_id = $1 AND account_id = $2 AND asset = $3
   AND created_at >= $4
   AND status NOT IN ('rejected', 'failed');
+
+-- name: CountWithdrawalsByStatus :one
+-- Feeds the review-queue gauge: a withdrawal waiting for a person is a user
+-- waiting for their money, and nothing else in the system notices.
+SELECT count(*) FROM chain.withdrawals
+WHERE tenant_id = $1 AND status = ANY(@statuses::text[]);

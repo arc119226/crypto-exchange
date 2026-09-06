@@ -69,6 +69,25 @@ func (q *Queries) ClaimWithdrawals(ctx context.Context, arg ClaimWithdrawalsPara
 	return items, nil
 }
 
+const countWithdrawalsByStatus = `-- name: CountWithdrawalsByStatus :one
+SELECT count(*) FROM chain.withdrawals
+WHERE tenant_id = $1 AND status = ANY($2::text[])
+`
+
+type CountWithdrawalsByStatusParams struct {
+	TenantID string
+	Statuses []string
+}
+
+// Feeds the review-queue gauge: a withdrawal waiting for a person is a user
+// waiting for their money, and nothing else in the system notices.
+func (q *Queries) CountWithdrawalsByStatus(ctx context.Context, arg CountWithdrawalsByStatusParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countWithdrawalsByStatus, arg.TenantID, arg.Statuses)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const getWithdrawal = `-- name: GetWithdrawal :one
 SELECT id, tenant_id, account_id, asset, amount, to_address, chain_id, idempotency_key, request_hash, status, failure_reason, reviewed_by, reviewed_at, review_note, hold_entry_id, correlation_id, version, created_at, updated_at FROM chain.withdrawals WHERE tenant_id = $1 AND id = $2
 `

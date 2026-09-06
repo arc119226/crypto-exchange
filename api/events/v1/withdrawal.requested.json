@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/arc119226/crypto-exchange/api/events/v1/withdrawal.requested.json",
+  "title": "withdrawal.requested",
+  "description": "A user has asked to withdraw. Nothing is held and nothing is signed yet: the request has only been recorded, and the chain role decides it against the withdrawal policy next.",
+  "type": "object",
+  "required": [
+    "withdrawal_id",
+    "account_id",
+    "asset",
+    "amount",
+    "to_address",
+    "chain_id",
+    "status"
+  ],
+  "properties": {
+    "withdrawal_id": {
+      "type": "string",
+      "description": "Stable id of the withdrawal across every event about it."
+    },
+    "account_id": {
+      "type": "string"
+    },
+    "asset": {
+      "type": "string"
+    },
+    "amount": {
+      "type": "string",
+      "pattern": "^-?\\d{1,18}(\\.\\d{1,18})?$",
+      "description": "Decimal amount in the asset's own units, never wei."
+    },
+    "to_address": {
+      "type": "string",
+      "pattern": "^0x[0-9a-f]{40}$",
+      "description": "The destination the user asked for, lower-case."
+    },
+    "chain_id": {
+      "type": "integer",
+      "description": "EVM chain the withdrawal will be sent on."
+    },
+    "status": {
+      "type": "string",
+      "description": "The withdrawal's status after this event. An open string: the state machine grows with the signer, and a new state must not break a consumer."
+    },
+    "previous_status": {
+      "type": "string",
+      "description": "What the withdrawal moved away from. Absent on withdrawal.requested, which has no previous state."
+    },
+    "reason": {
+      "type": "string",
+      "description": "Why it went where it did: a policy reason, a review note, or a failure reason. Absent when there is nothing to explain."
+    }
+  }
+}

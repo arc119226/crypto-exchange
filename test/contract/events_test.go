@@ -21,6 +21,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/arc119226/crypto-exchange/internal/chain/deposit"
+	"github.com/arc119226/crypto-exchange/internal/chain/withdrawal"
 	"github.com/arc119226/crypto-exchange/internal/eventbus"
 	"github.com/arc119226/crypto-exchange/internal/matching"
 	"github.com/arc119226/crypto-exchange/internal/money"
@@ -57,6 +58,9 @@ var (
 		"deposit.orphaned": "01J8Z2K3M4N5P6Q7R8S9T0V1X2",
 		"deposit.dropped":  "01J8Z2K3M4N5P6Q7R8S9T0V1X3",
 		"deposit.reversed": "01J8Z2K3M4N5P6Q7R8S9T0V1X4",
+		// the withdrawal story of docs/plan-v1.0.md §6.4.2
+		"withdrawal.requested":     "01J8Z2K3M4N5P6Q7R8S9T0V1X5",
+		"withdrawal.state_changed": "01J8Z2K3M4N5P6Q7R8S9T0V1X6",
 	}
 )
 
@@ -146,6 +150,19 @@ func sample(t *testing.T, eventType string) eventbus.Envelope {
 			LogIndex: -1, BlockNumber: 18234, BlockHash: "0xa1b2c3d4e5f60718293a4b5c6d7e8f901a2b3c4d5e6f708192a3b4c5d6e7f801",
 			Confirmations: confirmations, Status: status, Required: 6,
 		}
+	case withdrawal.EventRequested, withdrawal.EventStateChanged:
+		// The same 0.5 ETH withdrawal at two points: recorded, then sent to
+		// the review queue for being over the level-0 auto-approve ceiling.
+		env.AccountID, env.AccountSeq = str(buyer), i64(52)
+		p := withdrawal.Payload{
+			WithdrawalID: "01J8Z2K3M4N5P6Q7R8S9T0V700", AccountID: buyer, Asset: "ETH", Amount: amt("0.5"),
+			ToAddress: "0x70997970c51812dc3a010c7d01b50e0d17dc79c8", ChainID: 31337,
+			Status: "requested",
+		}
+		if eventType == withdrawal.EventStateChanged {
+			p.Status, p.PreviousStatus, p.Reason = "pending_review", "requested", "above_auto_approve_limit"
+		}
+		payload = p
 	case registry.EventMarketUpdated:
 		env.MarketID = str(market)
 		payload = registry.MarketUpdatedPayload{
@@ -168,7 +185,8 @@ func ptr[T any](v T) *T { return &v }
 func allEventTypes() []string {
 	out := append([]string{}, trading.EventTypes()...)
 	out = append(out, registry.EventTypes()...)
-	return append(out, deposit.EventTypes()...)
+	out = append(out, deposit.EventTypes()...)
+	return append(out, withdrawal.EventTypes()...)
 }
 
 // TestSchemaFilesMatchEventTypes is the drift guard: a new event type with
