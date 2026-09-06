@@ -255,6 +255,43 @@ if "$CTL" admin withdrawals resolve "$auto" bump --note "e2e" >/dev/null 2>&1; t
   echo "bumping a confirmed withdrawal was accepted"; exit 1
 fi
 
+# Collection (§6.4.3): the money the user deposited is still sitting on the
+# address it landed on, and the hot wallet has been paying withdrawals out of
+# its own balance. Sweeping is what closes that gap, and the check is that the
+# deposit address really empties while the user's balance does not move.
+log "deposits are collected into the hot wallet"
+user_eth_before=$(balance_of ETH)
+addr_eth_before=$(on_chain balance "$addr")
+[ "$addr_eth_before" != "0" ] || { echo "nothing to sweep: $addr holds no ether"; exit 1; }
+
+swept=0
+for _ in $(seq 1 60); do
+  if "$CTL" admin sweeps list --output json \
+     | jq -e --arg a "$addr" '[.sweeps[] | select(.from_address==$a and .status=="confirmed")] | length > 0' >/dev/null 2>&1; then
+    swept=1; break
+  fi
+  sleep 2
+done
+[ "$swept" = "1" ] || {
+  echo "no confirmed sweep of $addr"
+  "$CTL" admin sweeps list || true
+  "${COMPOSE[@]}" logs --no-color --tail=80 exchange-chain || true
+  exit 1
+}
+
+addr_eth_after=$(on_chain balance "$addr")
+[ "$addr_eth_after" != "$addr_eth_before" ] || { echo "the sweep confirmed but $addr still holds $addr_eth_before wei"; exit 1; }
+user_eth_after=$(balance_of ETH)
+[ "$user_eth_before" = "$user_eth_after" ] || {
+  echo "a sweep moved a user balance: $user_eth_before -> $user_eth_after"; exit 1
+}
+log "the deposit address was emptied and the user balance did not move"
+
+# The trial balance is the invariant the whole ledger rests on, and sweeping is
+# the first thing that writes to two house accounts at once.
+"$CTL" admin trial-balance --output json | jq -e '.balanced == true' >/dev/null \
+  || { echo "the trial balance is not zero after sweeping"; "$CTL" admin trial-balance; exit 1; }
+
 log "a resting order survives kill -9 of the engine"
 session=$("$CTL" user register --email "restart-$STAMP@e2e.local" --password "restart-$STAMP-pw" --output json)
 account=$(echo "$session" | jq -r .account_id)

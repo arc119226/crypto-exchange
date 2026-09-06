@@ -475,7 +475,7 @@ Phase 4 分四段:4a 充值(再拆 4a-1 金鑰與地址、4a-2 掃描與入帳)�
 
 **pin nonce 的理由是一個沒有測試會自己發現的崩潰視窗。** 原本的順序是 allocate → sign → record。行程若死在 sign 與 record 之間,重啟後會配到**另一個** nonce、用 `attempt = 0` 再問一次 signer——而 signing log 會永遠拒絕它,提現就此卡死。現在 nonce 先寫在提現列上並提交,重試問的是同一個意圖,signer 回傳它已經簽出來的那筆交易(`raw_tx` 存在 signing log 裡正是為此)。`TestWithdrawalRecoversFromACrashBetweenSigningAndRecording` 釘住這件事。
 
-**`custody:hot` 會是負的,而且是誠實的。** 錢從 `custody:deposit_addresses` 進來、從 `custody:hot` 出去,中間的歸集是 4c。在那之前熱錢包付出去的比收進來的多,`custody_hot` 這個資產帳戶自然為負。這不會炸:`ledger.balances` 的 `available >= 0` CHECK 只作用在使用者的桶上(`aggregateDeltas` 跳過 house bucket),house 餘額由分錄推導,試算表照樣平衡。
+**`custody:hot` 會是負的,而且是誠實的。** 錢從 `custody:deposit_addresses` 進來、從 `custody:hot` 出去,中間的歸集是 4c。在那之前熱錢包付出去的比收進來的多,`custody_hot` 這個資產帳戶自然為負。這不會炸:`ledger.balances` 的 `available >= 0` CHECK 只作用在使用者的桶上(`aggregateDeltas` 跳過 house bucket),house 餘額由分錄推導,試算表照樣平衡。**4c-1 之後這個缺口會被歸集補起來**(第 19 節)。
 
 **又一個只有拆分部署才看得見的權限缺口**(第五個了):`RequestWithdrawalResolve` 除了四個請求欄還會把 `resolve_error` 清成 NULL——新的請求不該掛著上一次的失敗訊息——而 grant 裡沒有這一欄。手寫 UPDATE 四個欄位的測試會過,真正的查詢在 `ex_admin` 上是 42501。教訓與 3c、4a-2、4b-1 完全一樣:**權限測試要跑真正的那一句 SQL,不是它的近似**。
 
@@ -483,3 +483,34 @@ Phase 4 分四段:4a 充值(再拆 4a-1 金鑰與地址、4a-2 掃描與入帳)�
 
 1. `evm.ToWei` 用「小數位數」而不是「小數的值」判斷精度,於是從 `NUMERIC(36,18)` 讀回來的金額對任何非 18 位的資產都顯得過度精確——**這會拒絕掉每一筆 ERC-20 提現**。50 USDC 從資料庫回來是 `50.000000000000000000`,而十二個零不是丟失的精度。
 2. `UpsertHotWallet` 每次啟動都覆寫存起來的位址,於是「這是另一個錢包」那條拒絕永遠不可能觸發——拿錯種子的部署會繼續照著陌生人的計數配 nonce。改成不覆寫,那個比對才有東西可比。
+
+---
+
+## 19. Phase 4c-1 程式碼與 §6.4.3 / §6.1.4(f) 的對應(歸集)
+
+4a 讓錢進來、4b 讓錢出去,但兩邊從來沒有相接:充值落在每個帳戶自己的地址上,提現從熱錢包出去。從 4b-2 開始 `custody:hot` 每一筆提現都更負一點——熱錢包一直在付一筆不是從它這裡收進來的錢。歸集就是把這個缺口接起來的那一步。
+
+**歸集永遠不動使用者餘額。** 它在兩個 house 帳戶之間搬錢並記 gas;被清空地址的那個帳戶,餘額一分都不會變。這是每一個測試最後都會斷言的事。
+
+| 計畫 | 實作 | 備註 |
+|---|---|---|
+| 掃 `deposit_addresses` 餘額 | `Worker.plan`,每個 tick 一次 | 自己的時鐘(`ETH_SWEEP_INTERVAL`,預設 60s):沒有人在等歸集,而每次掃描是「地址數 × 資產數」次餘額查詢 |
+| ETH:`balance ≥ sweep_threshold` → 轉 `balance − gas` | `planOne`,gas 用**費用上限**而非當下價格編列 | 見下:這不是保守,是「不這樣做就會卡死」 |
+| ERC-20 兩段式 | `fundGas` → `trackGasFunding` → `send` → `track` | 只收過代幣的地址一滴 ETH 都沒有,付不起任何交易——這就是要兩筆的唯一理由 |
+| `requested → gas_funded → broadcast → confirmed | failed` | `chain.sweeps` 的狀態機 | `gas_funded` 只有代幣會經過;原生資產從 `requested` 直接簽 |
+| nonce 取 `PendingNonceAt(address)` | `signSweep`,但**簽名前先釘在列上** | 計畫寫「直接取」;直接取在崩潰視窗裡會拿到不同的 nonce,見下 |
+| 分錄(§6.1.4 f) | `confirm`:資產 `custody:deposit_addresses → custody:hot`;gas 由**實際送出交易的那個地址**付 | 代幣歸集的 gas 記在 `custody:deposit_addresses`(地址自己付),補 gas 那筆記在 `custody:hot`(熱錢包付)。這個不對稱正是它們必須是兩筆分錄的原因 |
+| 簽名(§6.6) | `signer.KindSweep` / `KindGasFund` | **第一次有熱錢包以外的金鑰簽東西**:歸集是充值地址自己送出的 |
+| 權限(§14) | chain 擁有整個機器;signer 只有 SELECT;admin 只有讀 | 和提現不同,這裡沒有「授權」這一步:歸集是交易所在自己的兩個科目之間搬自己的錢,沒有東西需要第二個角色核准 |
+| 指標(§15) | `sweeps_planned_total`、`sweeps_confirmed_total`、`sweeps_failed_total{reason}` | `failed` 值得告警:充值堆在熱錢包花不到的地址上,第一個看得見的症狀會是「一筆提現付不出來」 |
+
+**兩條規則決定什麼可以歸集**,兩條都是為了讓 `custody:deposit_addresses` 誠實,而不是為了保守而保守:
+
+1. **有還沒入帳的充值的地址,整個跳過。** 現在歸集會和「即將發生的入帳」對撞:帳本還沒記錄這筆錢到過那個地址,卻要記錄它離開了。
+2. **歸集金額上限是帳本真的入過帳的數。** 鏈上餘額可以合法地更高——掃描器看不到的合約內部轉帳(§4 列為不做,但沒有東西阻止它發生),或還在確認的充值。把超出的部分掃走,等於讓 `custody:deposit_addresses` 為一筆它從來沒收到的轉帳背書。多出來的錢就留在鏈上,4c-2 的對帳會看到它——那才是它該出現的地方。
+
+**gas 用費用上限編列,不是用當下價格。** 原生歸集要留下足夠付自己的錢。如果 base fee 在送出後上漲,一筆變得付不起的交易**沒辦法加價**——加價需要的餘額正是這個地址沒有的。編列高一點會留下一點灰塵,那是「永遠不會卡死」的價錢。
+
+**nonce 一樣要先釘。** §6.4.3 寫「nonce 直接取 `PendingNonceAt(address)`」。單獨這樣做會踩到 4b-2 找到的同一個崩潰視窗:簽完但還沒記錄就死掉,重啟後 `PendingNonceAt` 可能已經算進了那筆進了 mempool 的交易,於是重試會用**另一個** nonce 簽第二筆——兩筆有效交易,一筆錢。所以 nonce 在簽名前就寫進 `chain.sweeps` 並提交,重試問的是同一個意圖。充值地址不需要 nonce 缺口管理(它只有 sweeper 在用,沒送出去就什麼都沒發生),但釘住這件事還是要做。
+
+**Phase 4c-1 學到的事**:把腳本鏈改成「真的記餘額、挖礦時真的搬動」之後,它立刻抓到 4b-2 的代幣提現測試一直在送熱錢包從來沒有的 USDC——測試通過,只因為假鏈不記帳。同一個改動也逼出 signer 的一個真 bug:`sweepTx` 只接受 `requested`,而代幣歸集是在 `gas_funded` 才簽的(地址要先拿到 ETH 才付得起),於是**每一筆代幣歸集都會被自己的 signer 拒絕**。教訓和前面幾次同一個方向:假的東西越像真的,越早撞到真的問題。
