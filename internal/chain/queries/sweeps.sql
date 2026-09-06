@@ -76,12 +76,21 @@ WHERE tenant_id = $1 AND id = $2
 RETURNING *;
 
 -- name: SweptFromAddress :one
--- How much of this address's asset the ledger has already moved to the hot
--- wallet. Only confirmed sweeps count: one still in flight has not moved
--- anything, and one that failed never will.
-SELECT COALESCE(SUM(amount + COALESCE(gas_cost, 0)), 0)::numeric(36,18) AS total
+-- How much of this asset has already left this address. Only confirmed sweeps
+-- count: one still in flight has not moved anything, and one that failed never
+-- will.
+--
+-- The gas is added only when the asset swept *is* the native coin, because
+-- that is the only case where the gas came out of the same balance. A token
+-- sweep burns ether and moves USDC; adding one to the other would be adding
+-- two different currencies.
+SELECT COALESCE(SUM(
+    amount + CASE WHEN sqlc.arg(asset)::text = sqlc.arg(native_asset)::text
+                  THEN COALESCE(gas_cost, 0) ELSE 0 END
+), 0)::numeric(36,18) AS total
 FROM chain.sweeps
-WHERE tenant_id = $1 AND address_id = $2 AND asset = $3 AND status = 'confirmed';
+WHERE tenant_id = sqlc.arg(tenant_id) AND address_id = sqlc.arg(address_id)
+  AND asset = sqlc.arg(asset)::text AND status = 'confirmed';
 
 -- name: CreditedToAddress :one
 -- How much of this asset the ledger believes arrived at this address: the sum

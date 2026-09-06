@@ -50,9 +50,14 @@ CREATE TABLE chain.sweeps (
     CONSTRAINT sweeps_broadcast_has_tx CHECK (
         status NOT IN ('broadcast', 'confirmed')
         OR (nonce IS NOT NULL AND raw_tx IS NOT NULL AND tx_hash IS NOT NULL)),
-    -- gas_funded is only reachable with a funding transaction to point at
-    CONSTRAINT sweeps_gas_funded_has_tx CHECK (
-        status <> 'gas_funded' OR gas_funding_tx_hash IS NOT NULL),
+    -- A recorded funding hash always has the bytes that produced it, so a
+    -- restart re-sends the same transaction rather than signing a second one.
+    -- Deliberately NOT "gas_funded implies a funding transaction": an address
+    -- that already holds enough ether from an earlier sweep is funded with no
+    -- transaction at all, and sending it a zero transfer to satisfy a CHECK
+    -- would cost 21000 gas to say nothing.
+    CONSTRAINT sweeps_funding_hash_has_bytes CHECK (
+        gas_funding_tx_hash IS NULL OR gas_funding_raw_tx IS NOT NULL),
 
     correlation_id text,
     version      integer     NOT NULL DEFAULT 1,

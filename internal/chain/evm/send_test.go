@@ -16,6 +16,13 @@ func TestTransferSelectorIsTheOneEveryERC20Uses(t *testing.T) {
 	assert.Equal(t, "a9059cbb", common.Bytes2Hex(transferSelector))
 }
 
+// Same reasoning for the read side. A wrong selector here returns whatever
+// some other function happens to answer, and the sweeper would decide how much
+// money to move from it.
+func TestBalanceOfSelectorIsTheOneEveryERC20Uses(t *testing.T) {
+	assert.Equal(t, "70a08231", common.Bytes2Hex(balanceOfSelector))
+}
+
 func TestTransferCalldataLaysOutSelectorThenTwoWords(t *testing.T) {
 	to := common.HexToAddress("0x70997970c51812dc3a010c7d01b50e0d17dc79c8")
 	data, err := TransferCalldata(to, big.NewInt(250500000))
