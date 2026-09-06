@@ -8,9 +8,14 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/nats-io/nats.go"
 	"github.com/prometheus/client_golang/prometheus"
 
+	"github.com/arc119226/crypto-exchange/internal/audit"
 	"github.com/arc119226/crypto-exchange/internal/chain/hdwallet"
+	"github.com/arc119226/crypto-exchange/internal/chain/signer"
+	"github.com/arc119226/crypto-exchange/internal/registry"
+	"github.com/arc119226/crypto-exchange/internal/signerbus"
 )
 
 // signerComponents is the signer role: the one process that holds the HD seed
@@ -22,6 +27,10 @@ type signerComponents struct {
 	min      int
 	interval time.Duration
 	metrics  *signerMetrics
+	// keystore is the Signer implementation. A chain role in the same process
+	// uses it directly; a split deployment reaches it over NATS through bus.
+	keystore *signer.KeystoreSigner
+	bus      *signerbus.Server
 }
 
 type signerMetrics struct {
@@ -50,7 +59,7 @@ func newSignerMetrics(reg prometheus.Registerer) *signerMetrics {
 // than one that does not start: the pool silently stops refilling, and the
 // first user to ask for a deposit address after the pool drains gets a 503
 // with nothing in the logs pointing at the cause.
-func newSigner(cfg Config, log *slog.Logger, db *pgxpool.Pool, reg prometheus.Registerer) (*signerComponents, error) {
+func newSigner(cfg Config, log *slog.Logger, db *pgxpool.Pool, reg prometheus.Registerer, nc *nats.Conn) (*signerComponents, error) {
 	if cfg.Wallet.KeystoreDir == "" {
 		return nil, errors.New("config: WALLET_KEYSTORE_DIR is required for the signer role")
 	}
@@ -77,6 +86,27 @@ func newSigner(cfg Config, log *slog.Logger, db *pgxpool.Pool, reg prometheus.Re
 	// confirm the signer opened the seed they meant to install: it must match
 	// HOT_WALLET_ADDRESS, which scripts/gen-dev-secrets.sh derives separately
 	// with `cast wallet address`.
+	ks, err := signer.NewKeystoreSigner(db, cfg.TenantID, cfg.Chain.ChainID, w,
+		registry.NewStore(db), audit.NewRecorder(cfg.TenantID), log)
+	if err != nil {
+		w.Close()
+		return nil, err
+	}
+	s.keystore = ks
+	// Without NATS the signer can only serve a chain role in this same
+	// process. That is the single-binary case, not a broken one, so it is a
+	// warning rather than a refusal.
+	if nc != nil {
+		bus, err := signerbus.Serve(nc, ks, cfg.TenantID, cfg.Wallet.SignerSubjectPrefix, log)
+		if err != nil {
+			w.Close()
+			return nil, err
+		}
+		s.bus = bus
+		log.Info("signer answering on NATS", slog.String("subject", bus.Subject()))
+	} else {
+		log.Warn("signer running without NATS: only a chain role in this process can reach it")
+	}
 	log.Info("signer keystore opened",
 		slog.String("hot_wallet", hot),
 		slog.Int64("chain_id", cfg.Chain.ChainID),
@@ -137,7 +167,23 @@ func (s *signerComponents) ready(ctx context.Context) error {
 }
 
 func (s *signerComponents) close() {
-	if s != nil && s.wallet != nil {
+	if s == nil {
+		return
+	}
+	if s.bus != nil {
+		_ = s.bus.Close()
+	}
+	if s.wallet != nil {
 		s.wallet.Close()
 	}
+}
+
+// localSigner is the in-process Signer, or nil when this process runs no
+// signer role. A nil receiver is deliberate: the caller passes whatever the
+// role loop produced without having to check first.
+func (s *signerComponents) localSigner() signer.Signer {
+	if s == nil || s.keystore == nil {
+		return nil
+	}
+	return s.keystore
 }

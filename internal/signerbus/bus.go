@@ -17,6 +17,7 @@ import (
 	"log/slog"
 	"math/big"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -41,6 +42,11 @@ const queueGroup = "signer"
 // fees as decimal strings too, because a JSON number cannot hold either
 // without loss (docs/plan-v1.0.md §6.5).
 type wireRequest struct {
+	// Op is "sign" (or empty, the default) or "hot_wallet". The address query
+	// exists so the chain role learns the hot wallet from the only process
+	// that can derive it, rather than from a config value that could disagree
+	// with the key actually signing.
+	Op      string      `json:"op,omitempty"`
 	Kind    signer.Kind `json:"kind"`
 	RefID   string      `json:"ref_id"`
 	Attempt int32       `json:"attempt"`
@@ -57,11 +63,12 @@ type wireRequest struct {
 // wireResponse is Result or a failure. RawTx is base64 because JSON has no
 // bytes; it is the signed transaction and never leaves this pair of roles.
 type wireResponse struct {
-	RawTx  string     `json:"raw_tx,omitempty"`
-	TxHash string     `json:"tx_hash,omitempty"`
-	From   string     `json:"from,omitempty"`
-	Nonce  uint64     `json:"nonce,omitempty"`
-	Error  *wireError `json:"error,omitempty"`
+	Address string     `json:"address,omitempty"`
+	RawTx   string     `json:"raw_tx,omitempty"`
+	TxHash  string     `json:"tx_hash,omitempty"`
+	From    string     `json:"from,omitempty"`
+	Nonce   uint64     `json:"nonce,omitempty"`
+	Error   *wireError `json:"error,omitempty"`
 }
 
 // wireError classifies a failure so the caller can rebuild the sentinel it
@@ -72,6 +79,12 @@ type wireError struct {
 	Kind    string `json:"kind"`
 	Message string `json:"message"`
 }
+
+// Operations.
+const (
+	opSign      = "sign"
+	opHotWallet = "hot_wallet"
+)
 
 const (
 	errRefused       = "refused"
@@ -85,7 +98,9 @@ type Client struct {
 	nc      *nats.Conn
 	subject string
 	timeout time.Duration
-	hot     common.Address
+
+	mu  sync.Mutex
+	hot common.Address
 }
 
 var _ signer.Signer = (*Client)(nil)
@@ -95,10 +110,6 @@ type ClientConfig struct {
 	Tenant        string
 	SubjectPrefix string
 	Timeout       time.Duration
-	// HotWallet is the address the signer will sign from. The chain role needs
-	// it to read nonces and balances, and asking for it over NATS on every
-	// call would make the node's own queries depend on the signer being up.
-	HotWallet common.Address
 }
 
 // NewClient builds a remote signer client.
@@ -115,27 +126,61 @@ func NewClient(nc *nats.Conn, cfg ClientConfig) (*Client, error) {
 	if cfg.Timeout <= 0 {
 		cfg.Timeout = 5 * time.Second
 	}
-	return &Client{nc: nc, subject: cfg.SubjectPrefix + "." + cfg.Tenant, timeout: cfg.Timeout, hot: cfg.HotWallet}, nil
+	return &Client{nc: nc, subject: cfg.SubjectPrefix + "." + cfg.Tenant, timeout: cfg.Timeout}, nil
 }
 
 // Subject is the subject requests go to.
 func (c *Client) Subject() string { return c.subject }
 
-// HotWallet implements Signer.
-func (c *Client) HotWallet(context.Context) (common.Address, error) { return c.hot, nil }
+// HotWallet implements Signer by asking the signer role, once.
+//
+// The address is not configured on this side on purpose. A config value that
+// disagreed with the key actually signing would track nonces for one address
+// while another sent the transactions, and nothing would notice until the
+// chain rejected everything.
+func (c *Client) HotWallet(ctx context.Context) (common.Address, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.hot != (common.Address{}) {
+		return c.hot, nil
+	}
+	resp, err := c.roundTrip(ctx, wireRequest{Op: opHotWallet})
+	if err != nil {
+		return common.Address{}, err
+	}
+	if !common.IsHexAddress(resp.Address) {
+		return common.Address{}, fmt.Errorf("signer: %q is not an address", resp.Address)
+	}
+	c.hot = common.HexToAddress(resp.Address)
+	return c.hot, nil
+}
 
 // Sign implements Signer by asking the signer role.
 func (c *Client) Sign(ctx context.Context, req signer.Request) (signer.Result, error) {
 	if err := req.Validate(); err != nil {
 		return signer.Result{}, err
 	}
-	body, err := json.Marshal(wireRequest{
-		Kind: req.Kind, RefID: req.RefID, Attempt: req.Attempt, ChainID: req.ChainID,
+	resp, err := c.roundTrip(ctx, wireRequest{
+		Op: opSign, Kind: req.Kind, RefID: req.RefID, Attempt: req.Attempt, ChainID: req.ChainID,
 		To: strings.ToLower(req.To.Hex()), Asset: req.Asset, Value: req.Value.String(),
 		Nonce: req.Nonce, Gas: req.Gas, TipCap: req.TipCap.String(), FeeCap: req.FeeCap.String(),
 	})
 	if err != nil {
-		return signer.Result{}, fmt.Errorf("signer: marshal request: %w", err)
+		return signer.Result{}, err
+	}
+	raw, err := base64.StdEncoding.DecodeString(resp.RawTx)
+	if err != nil {
+		return signer.Result{}, fmt.Errorf("signer: decode signed tx: %w", err)
+	}
+	return signer.Result{RawTx: raw, TxHash: resp.TxHash, From: resp.From, Nonce: resp.Nonce}, nil
+}
+
+// roundTrip sends one request and rebuilds the failure the caller would have
+// seen in-process.
+func (c *Client) roundTrip(ctx context.Context, req wireRequest) (wireResponse, error) {
+	body, err := json.Marshal(req)
+	if err != nil {
+		return wireResponse{}, fmt.Errorf("signer: marshal request: %w", err)
 	}
 	msg := nats.NewMsg(c.subject)
 	msg.Data = body
@@ -148,20 +193,16 @@ func (c *Client) Sign(ctx context.Context, req signer.Request) (signer.Result, e
 	if err != nil {
 		// A signer that cannot be reached has not signed anything, so the
 		// caller may safely try again later with the same attempt number.
-		return signer.Result{}, fmt.Errorf("signer: request: %w", err)
+		return wireResponse{}, fmt.Errorf("signer: request: %w", err)
 	}
 	var resp wireResponse
 	if err := json.Unmarshal(reply.Data, &resp); err != nil {
-		return signer.Result{}, fmt.Errorf("signer: decode reply: %w", err)
+		return wireResponse{}, fmt.Errorf("signer: decode reply: %w", err)
 	}
 	if resp.Error != nil {
-		return signer.Result{}, rebuild(resp.Error)
+		return wireResponse{}, rebuild(resp.Error)
 	}
-	raw, err := base64.StdEncoding.DecodeString(resp.RawTx)
-	if err != nil {
-		return signer.Result{}, fmt.Errorf("signer: decode signed tx: %w", err)
-	}
-	return signer.Result{RawTx: raw, TxHash: resp.TxHash, From: resp.From, Nonce: resp.Nonce}, nil
+	return resp, nil
 }
 
 func rebuild(e *wireError) error {
@@ -224,6 +265,15 @@ func (s *Server) handle(msg *nats.Msg) {
 	var req wireRequest
 	if err := json.Unmarshal(msg.Data, &req); err != nil {
 		s.reply(msg, wireResponse{Error: &wireError{Kind: errRefused, Message: "malformed request"}})
+		return
+	}
+	if req.Op == opHotWallet {
+		addr, err := s.s.HotWallet(ctx)
+		if err != nil {
+			s.reply(msg, wireResponse{Error: &wireError{Kind: classify(err), Message: err.Error()}})
+			return
+		}
+		s.reply(msg, wireResponse{Address: strings.ToLower(addr.Hex())})
 		return
 	}
 	value, err := money.ParseAmount(req.Value)

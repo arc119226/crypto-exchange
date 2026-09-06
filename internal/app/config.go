@@ -6,6 +6,7 @@ package app
 import (
 	"fmt"
 	"log/slog"
+	"math/big"
 	"os"
 	"strings"
 	"time"
@@ -141,6 +142,28 @@ type ChainConfig struct {
 	WithdrawalInterval time.Duration `env:"WITHDRAWAL_INTERVAL" envDefault:"1s"`
 	// WithdrawalBatchSize caps how many withdrawals one tick claims.
 	WithdrawalBatchSize int32 `env:"WITHDRAWAL_BATCH_SIZE" envDefault:"50"`
+	// ReplaceAfter is how long a broadcast transaction may sit unmined before
+	// it is re-sent with a higher fee (§6.4.2: anvil 60 s, Sepolia 3 min).
+	ReplaceAfter time.Duration `env:"REPLACE_AFTER" envDefault:"60s"`
+	// MaxReplacements caps the automatic fee bumps before an operator is
+	// asked. Past it the withdrawal waits rather than bidding forever.
+	MaxReplacements int32 `env:"MAX_REPLACEMENTS" envDefault:"3"`
+	// MaxFeePerGas is the operator's stop-loss on the fee market, in wei.
+	// Empty means no ceiling; a transaction that would exceed it waits.
+	MaxFeePerGas string `env:"MAX_FEE_PER_GAS"`
+}
+
+// MaxFee parses MaxFeePerGas. An unset ceiling is nil, which every caller
+// reads as "no limit".
+func (c ChainConfig) MaxFee() (*big.Int, error) {
+	if strings.TrimSpace(c.MaxFeePerGas) == "" {
+		return nil, nil //nolint:nilnil // "no ceiling" is a value, not an error
+	}
+	v, ok := new(big.Int).SetString(strings.TrimSpace(c.MaxFeePerGas), 10)
+	if !ok || v.Sign() < 0 {
+		return nil, fmt.Errorf("config: ETH_MAX_FEE_PER_GAS %q is not a non-negative wei amount", c.MaxFeePerGas)
+	}
+	return v, nil
 }
 
 // WalletConfig locates the HD seed and sizes the deposit address pool
@@ -155,6 +178,12 @@ type WalletConfig struct {
 	AddressPoolMin int `env:"ADDRESS_POOL_MIN" envDefault:"50"`
 	// AddressPoolInterval is how often the signer tops the pool up.
 	AddressPoolInterval time.Duration `env:"ADDRESS_POOL_INTERVAL" envDefault:"30s"`
+	// SignerSubjectPrefix is the first tokens of the signer's NATS subject;
+	// the full subject is <prefix>.<tenant> (docs/plan-v1.0.md §5.1).
+	SignerSubjectPrefix string `env:"SIGNER_SUBJECT_PREFIX" envDefault:"cmd.signer"`
+	// SignerTimeout bounds one signing round trip. Signing is CPU-cheap; the
+	// budget is for the signer being busy or restarting, not for the maths.
+	SignerTimeout time.Duration `env:"SIGNER_TIMEOUT" envDefault:"10s"`
 }
 
 // JWTConfig locates the signing key (api role only) and the JWKS URL.
@@ -278,6 +307,9 @@ func (c Config) LogValue() slog.Value {
 		slog.Int64("eth_chain_id", c.Chain.ChainID),
 		slog.Duration("eth_scan_interval", c.Chain.ScanInterval),
 		slog.Duration("eth_withdrawal_interval", c.Chain.WithdrawalInterval),
+		slog.Duration("eth_replace_after", c.Chain.ReplaceAfter),
+		slog.Int("eth_max_replacements", int(c.Chain.MaxReplacements)),
+		slog.String("eth_max_fee_per_gas", c.Chain.MaxFeePerGas),
 		slog.Uint64("eth_scan_batch_size", c.Chain.ScanBatchSize),
 		slog.Uint64("eth_block_ring_depth", c.Chain.BlockRingDepth),
 		slog.Uint64("eth_orphan_expiry_blocks", c.Chain.OrphanExpiryBlocks),

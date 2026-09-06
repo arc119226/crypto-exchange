@@ -160,7 +160,8 @@ func sample(t *testing.T, eventType string) eventbus.Envelope {
 			Status: "requested",
 		}
 		if eventType == withdrawal.EventStateChanged {
-			p.Status, p.PreviousStatus, p.Reason = "pending_review", "requested", "above_auto_approve_limit"
+			p.Status, p.PreviousStatus, p.Reason = "broadcast", "signed", ""
+			p.TxHash = "0x2c9d8e7a6b5c4d3e2f1a0b9c8d7e6f5a4b3c2d1e0f9a8b7c6d5e4f3a2b1c1f4b"
 		}
 		payload = p
 	case registry.EventMarketUpdated:

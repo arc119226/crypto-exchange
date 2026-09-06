@@ -97,6 +97,18 @@ func Run(ctx context.Context, cfg Config, roles []Role, bi BuildInfo) error {
 		}
 		checker.Register("engine", true, eng.engine.ReadyCheck)
 	}
+	// The signer is built before the loop for the same reason the engine is:
+	// a chain role in this process signs through it directly rather than
+	// bouncing its own signatures through NATS (role=all).
+	if hasRole(roles, RoleSigner) {
+		s, err := newSigner(cfg, log, d.pool, reg, d.nc)
+		if err != nil {
+			return err
+		}
+		signer = s
+		defer signer.close()
+		checker.Register("keystore", true, signer.ready)
+	}
 	for _, role := range roles {
 		switch role {
 		case RoleAPI:
@@ -127,7 +139,7 @@ func Run(ctx context.Context, cfg Config, roles []Role, bi BuildInfo) error {
 			if err != nil {
 				return err
 			}
-			c, err := newChain(ctx, cfg, log, d.pool, l, reg)
+			c, err := newChain(ctx, cfg, log, d.pool, l, reg, d.nc, signer.localSigner())
 			if err != nil {
 				return err
 			}
@@ -135,13 +147,7 @@ func Run(ctx context.Context, cfg Config, roles []Role, bi BuildInfo) error {
 			defer chainRole.close()
 			checker.Register("chain", true, chainRole.ready)
 		case RoleSigner:
-			s, err := newSigner(cfg, log, d.pool, reg)
-			if err != nil {
-				return err
-			}
-			signer = s
-			defer signer.close()
-			checker.Register("keystore", true, signer.ready)
+			// built above
 		default:
 			log.Info("role not implemented yet, serving ops endpoints only", slog.String("role", string(role)))
 		}
@@ -161,6 +167,7 @@ func Run(ctx context.Context, cfg Config, roles []Role, bi BuildInfo) error {
 	if chainRole != nil {
 		g.Go(func() error { return chainRole.run(gctx, log) })
 		g.Go(func() error { return chainRole.runWithdrawals(gctx, log) })
+		g.Go(func() error { return chainRole.runSending(gctx, log) })
 	}
 	if apiRefresh != nil {
 		g.Go(func() error { return apiRefresh.run(gctx) })

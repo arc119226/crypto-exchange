@@ -99,6 +99,10 @@ func (w *Worker) WithSending(c Chain, s signer.Signer, n Nonces, cfg SendConfig)
 	return w
 }
 
+// Sends reports whether this worker can sign and broadcast, or only decide and
+// lock.
+func (w *Worker) Sends() bool { return w.chain != nil }
+
 // WithMetrics attaches Prometheus collectors.
 func (w *Worker) WithMetrics(m *Metrics) *Worker {
 	if m != nil {

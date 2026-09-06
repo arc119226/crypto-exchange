@@ -16,8 +16,8 @@
     "amount": "0.5",
     "to_address": "0x70997970c51812dc3a010c7d01b50e0d17dc79c8",
     "chain_id": 31337,
-    "status": "pending_review",
-    "previous_status": "requested",
-    "reason": "above_auto_approve_limit"
+    "status": "broadcast",
+    "previous_status": "signed",
+    "tx_hash": "0x2c9d8e7a6b5c4d3e2f1a0b9c8d7e6f5a4b3c2d1e0f9a8b7c6d5e4f3a2b1c1f4b"
   }
 }
