@@ -135,6 +135,13 @@ the length of the machine for consumers that subscribe to all of them anyway.
 `withdrawal.requested` is the one event the **api** role produces; every other
 transition comes from `chain` or `admin`.
 
+`tx_hash` appears on `withdrawal.state_changed` once a transaction exists. It
+is the transaction *now representing* the withdrawal, which is not always the
+withdrawal's own: while a stuck withdrawal is being cancelled with a same-nonce
+transfer, this is the displacing transaction, because that is the one whose
+fate decides the money. A consumer that wants to show a user "your withdrawal
+is on chain" should link this hash and no other.
+
 The chain role writes these to the outbox; the **relay that publishes them
 runs in the engine role**, so a deployment without an engine leaves deposit
 and withdrawal events sitting in `eventbus.outbox`.
