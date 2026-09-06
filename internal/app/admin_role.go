@@ -14,6 +14,7 @@ import (
 	"github.com/arc119226/crypto-exchange/internal/admin"
 	"github.com/arc119226/crypto-exchange/internal/audit"
 	"github.com/arc119226/crypto-exchange/internal/ledger"
+	"github.com/arc119226/crypto-exchange/internal/registry"
 	"github.com/arc119226/crypto-exchange/internal/telemetry"
 )
 
@@ -54,7 +55,7 @@ func newAdminServer(cfg Config, log *slog.Logger, m *telemetry.HTTPMetrics, pool
 	r.MethodNotAllowed(func(w http.ResponseWriter, req *http.Request) {
 		admin.WriteProblem(w, req, http.StatusMethodNotAllowed, "Method Not Allowed", "")
 	})
-	admin.Mount(r, admin.NewHandler(pool, l, audit.NewRecorder(cfg.TenantID)))
+	admin.Mount(r, admin.NewHandler(pool, l, registry.NewStore(pool), audit.NewRecorder(cfg.TenantID), cfg.TenantID))
 	return &http.Server{Addr: cfg.AdminAddr, Handler: r, ReadHeaderTimeout: 5 * time.Second}
 }
 

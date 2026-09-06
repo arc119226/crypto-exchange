@@ -352,3 +352,24 @@ Phase 3 分三個 PR:3a 引擎與事件(本節)、3b auth + public 交易端點 
 **驗證(整合測試,`test/integration/api_test.go`)**:未帶憑證 401、壞 token 401 + `WWW-Authenticate`;註冊(大小寫不敏感 409、弱密碼 422、格式 400)、登入(錯誤密碼與不存在帳號同為 401)、refresh 輪替 → 舊 token 重放 401 且家族撤銷、登出後 401、登出冪等;§6.1.4 (a)(b)(c) 經 HTTP 逐數字相符(買方 `8004 / 1200`、`0.3992 ETH`、賣方 `795.204`、fee `0.796 USDC` / `0.0008 ETH`、取消後 `9204`);201 / 200 / 422 / 400 / 404;拒單 `insufficient_balance`、`invalid_price_tick` 為 201 + rejected;他人訂單 404;fills 雙方看到同一 `trade_id`;ledger entries 只含自己的 4 條 settle posting;depth / trades;API key 建立、簽 GET 與帶 query、簽 body、篡改 body 401、錯簽 / 過期時間戳 / 錯 secret / 未知 key / 壞 timestamp 皆 401、read key 下單 403、key 不能建 key 403、IP 白名單 403 / 200、撤銷後 401、他人 key 404;第 6 次登入 429 + `Retry-After ≤ 12`;審計計數;admin bootstrap 冪等且 role=admin 可登入。
 
 **Phase 3b 學到的事**:oapi-codegen strict server 不驗 `minLength / minimum`,`client_order_id` 為空與 `depth?limit=0` 要自己處理(前者 400,後者退回預設值);jwx v3 的 `Get` 對陣列 claim 只接受 `[]any`;`gosec` G101 會把名字含 `Token` 的 Lua 常數當成硬編碼憑證,改名即可;fills 的 `order_id` 過濾若只看「該單參與的成交」會讓對手方探測任意 order id 是否與自己成交過。
+
+## 14. Phase 3c 程式碼與 §5.2 / §6.6 / §7 的對應(拆分部署、事件契約)
+
+3a 讓引擎在一筆交易內完成整條命令,3b 讓 HTTP 走得到引擎——但兩者都只在**同一個 process 內**成立。3c 讓 `docs/plan-v1.0.md` §5.2 的路徑在拆分部署下真的成立:`api`、`engine`、`admin` 各一個容器,命令走 NATS。
+
+| 計畫 | 實作 | 備註 |
+|---|---|---|
+| 命令匯流排(§5.2 步驟 3) | `internal/cmdbus`:`Client` 實作 `trading.CommandBus`、`Serve` 是引擎端;subject `cmd.trading.{tenant}.{market}`;`role=all` 仍然是 in-process(零延遲、不鑄 token) | 放在 `trading` 之外是刻意的:`trading` 只定義介面,不該相依 NATS 與 `auth` |
+| 錯誤語意跨容器保持不變 | wire 的 `error.kind` 把 `trading` 的 sentinel 原樣還原(`invalid_request`、`market_not_found`、`order_not_found`、`client_order_id_mismatch`、`unavailable`、`rejected`);`remoteError` 同時保留原訊息與 `errors.Is` | 沒有這層,3b 精心對應的 404 / 422 / 503 會在跨容器時全部塌成 500。這是本套件最重要的一件事,單元測試逐一往返每個 sentinel |
+| 引擎不可達 | `nats.ErrNoResponders`、逾時、caller 取消 → `trading.ErrEngineUnavailable` → 503(而不是 500) | 503 是誠實的:引擎可能仍會套用該命令,客戶端以同一個 `client_order_id` 重試即可 |
+| 身分傳遞(§14) | `api` 以同一把 Ed25519 私鑰鑄 5 分鐘、`aud=internal` 的 JWT(claims 取自已驗證的 `Principal`);`engine` 以 JWKS 驗證、要求 `trade` scope、並比對 **token 的 account 與命令的 account** | 引擎信任 token,不信任 body 裡的 `account_id`。整合測試涵蓋:拿 A 的 token 動 B 的錢、read-only token 下單、無 token、過期、`aud=exchange` 全部被拒且餘額不變 |
+| JWKS 取得 | `auth.RemoteVerifier`:**惰性**抓取(第一次驗證時才抓),遇未知 kid 最多每 30 秒重抓一次(輪替),抓取失敗時沿用舊金鑰 | 不能在啟動時抓:compose 沒有 `engine → api` 的 `depends_on`,啟動時抓會讓引擎相依於 api 先起來 |
+| 訂閱策略 | 一個 wildcard 訂閱 `cmd.trading.{tenant}.*` + queue group `engine` | 偏離計畫的「每個 market 一個訂閱」:reload 新增市場後不需要補訂閱,而 subject 版面仍是每市場,日後要分片也不必改客戶端 |
+| 消費端(§7.3 處理型) | `eventbus.Subscribe`:durable consumer + 顯式 ack + `NakWithDelay` 退避;無法解碼的訊息直接 ack(毒訊息不該永久卡住 consumer) | 扇出型(Phase 6 的 WS)**不可**用它:共用 durable consumer 是 work queue,每個副本只會收到一部分事件。這點寫進 `docs/events.md` |
+| 市場熱載入(§6.6) | `engine-registry` consumer 訂 `EX_REGISTRY` 的 market/asset/fee_schedule,呼叫 `Engine.Reload`;runner 每個命令重讀 `registry.Cache`,所以狀態改變對**下一張單**就生效 | 突發合併不用 timer:每則事件檢查「是否已有一次 reload 在它發布之後開始」,是就 ack、否則 reload。這讓 ack 保持誠實——reload 失敗會 nak 重送 |
+| `PUT /admin/v1/markets/{symbol}/status`(§7.4) | 一筆交易內完成 registry 寫入 + 審計 + outbox `market.updated`;狀態沒變就什麼都不寫 | 路徑參數用 **symbol** 而非 §7.4 寫的 `{id}`,與 public 的 `GET /v1/markets/{symbol}` 一致 |
+| api role 的 registry 快取 | 沒有同進程引擎時,以 `REGISTRY_REFRESH_INTERVAL`(預設 30 s)重讀 | api 不能自己開 durable consumer:1..n 副本會把事件分掉。引擎才是判斷市場狀態的地方,api 的快取只影響 `delisted` 的擋單 |
+| 事件契約(§7.1、§7.2) | `api/events/v1/` envelope + 8 個型別的 JSON Schema;`docs/events.md` 全 catalog(未實作標 planned);`test/contract` 以 golden 檔鎖住序列化並用 schema 驗證,另檢查「schema 檔集合 == 已發布事件型別集合」 | `reject_reason` 刻意留成開放字串:新增一個理由不該讓消費者掛掉 |
+| 多容器 E2E(§13.3) | `scripts/e2e.sh`(CI job `e2e` 與 `make e2e` 共用):compose `infra + app` 起 api/engine/admin 各一容器 → `exchangectl e2e` → kill -9 引擎後訂單簿一致 → 停牌後下一張單被拒 | api 與 engine 不同 process,交易只能走 NATS,**e2e 通過本身就是命令匯流排的證明** |
+
+**Phase 3c 學到的事**:`--admin-url` / `--admin-key` 是 `admin` 與 `e2e` 子命令的 flag,不是 root flag,所以 e2e 腳本改用 `EXCHANGE_*` 環境變數才能一個前綴通用(這個 bug 是把腳本實際跑一次才發現的);`TimeInForce` 零值序列化成 `""`、反序列化回 `GTC`,語意與 `effectiveTIF()` 一致所以跨線安全;JetStream 的 durable consumer 對扇出是錯的選擇,契約文件必須寫清楚,否則 Phase 6 會踩到;`audit.audit_events` 是唯一一張「寫入者只有 INSERT、沒有 SELECT」的表,而 `INSERT … RETURNING` 需要 SELECT,所以它的 insert 不能有 `RETURNING`——既有測試一律以 `ex_all`(擁有全部角色的權限)連線,這讓缺陷一路躲到「一個角色一個容器」才現形,因此新增 `TestAPIRolePrivileges` 以 `ex_api` 連線跑註冊與登入,並反向斷言它讀不到審計軌跡。

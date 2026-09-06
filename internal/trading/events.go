@@ -26,6 +26,17 @@ const (
 // changing a field's meaning bumps it (docs/plan-v1.0.md §7.1).
 const schemaVersion = 1
 
+// EventTypes lists what the engine publishes. It is the contract's index:
+// api/events/v1 must hold exactly one schema per entry, and test/contract
+// fails if the two drift apart. Add a constant above, add it here, add its
+// schema and its golden file.
+func EventTypes() []string {
+	return []string{
+		EventOrderAccepted, EventOrderUpdated, EventOrderFilled, EventOrderCancelled, EventOrderRejected,
+		EventTradeExecuted, EventBalanceUpdated,
+	}
+}
+
 // Payloads. Amounts serialize as decimal strings (money.Amount).
 
 // OrderAcceptedPayload is order.accepted: emitted for every non-rejected

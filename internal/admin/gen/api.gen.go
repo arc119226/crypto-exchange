@@ -152,6 +152,30 @@ func (e HouseCode) Valid() bool {
 	}
 }
 
+// Defines values for MarketStatus.
+const (
+	MarketStatusActive     MarketStatus = "active"
+	MarketStatusCancelOnly MarketStatus = "cancel_only"
+	MarketStatusDelisted   MarketStatus = "delisted"
+	MarketStatusHalted     MarketStatus = "halted"
+)
+
+// Valid indicates whether the value is a known member of the MarketStatus enum.
+func (e MarketStatus) Valid() bool {
+	switch e {
+	case MarketStatusActive:
+		return true
+	case MarketStatusCancelOnly:
+		return true
+	case MarketStatusDelisted:
+		return true
+	case MarketStatusHalted:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for PostingBucket.
 const (
 	PostingBucketAvailable PostingBucket = "available"
@@ -342,6 +366,54 @@ type JournalEntryList struct {
 	Entries []JournalEntry `json:"entries"`
 }
 
+// Market defines model for Market.
+type Market struct {
+	BaseAsset string `json:"base_asset"`
+	ID        string `json:"id"`
+	MakerBps  int32  `json:"maker_bps"`
+
+	// MinNotional Decimal serialized as a string (NUMERIC(36,18)); never a JSON number.
+	//
+	// Example: 1990.00
+	MinNotional Amount `json:"min_notional"`
+
+	// PriceTick Decimal serialized as a string (NUMERIC(36,18)); never a JSON number.
+	//
+	// Example: 1990.00
+	PriceTick Amount `json:"price_tick"`
+
+	// QtyStep Decimal serialized as a string (NUMERIC(36,18)); never a JSON number.
+	//
+	// Example: 1990.00
+	QtyStep         Amount `json:"qty_step"`
+	QuoteAsset      string `json:"quote_asset"`
+	SelfTradePolicy string `json:"self_trade_policy"`
+
+	// Status active takes orders and cancels; halted and cancel_only take cancels only; delisted requires an empty book (docs/plan-v1.0.md 6.6).
+	Status MarketStatus `json:"status"`
+
+	// Symbol Example: ETH-USDC
+	Symbol   string `json:"symbol"`
+	TakerBps int32  `json:"taker_bps"`
+	Version  int32  `json:"version"`
+}
+
+// MarketList defines model for MarketList.
+type MarketList struct {
+	Markets []Market `json:"markets"`
+}
+
+// MarketStatus active takes orders and cancels; halted and cancel_only take cancels only; delisted requires an empty book (docs/plan-v1.0.md 6.6).
+type MarketStatus string
+
+// MarketStatusRequest defines model for MarketStatusRequest.
+type MarketStatusRequest struct {
+	Reason string `json:"reason"`
+
+	// Status active takes orders and cancels; halted and cancel_only take cancels only; delisted requires an empty book (docs/plan-v1.0.md 6.6).
+	Status MarketStatus `json:"status"`
+}
+
 // Posting defines model for Posting.
 type Posting struct {
 	AccountID string `json:"account_id"`
@@ -405,6 +477,9 @@ type AccountID = string
 // Limit defines model for Limit.
 type Limit = int32
 
+// MarketSymbol Example: ETH-USDC
+type MarketSymbol = string
+
 // Offset defines model for Offset.
 type Offset = int32
 
@@ -454,6 +529,9 @@ type SetAccountStatusJSONRequestBody = AccountStatusRequest
 // CreateAdjustmentJSONRequestBody defines body for CreateAdjustment for application/json ContentType.
 type CreateAdjustmentJSONRequestBody = AdjustmentRequest
 
+// SetMarketStatusJSONRequestBody defines body for SetMarketStatus for application/json ContentType.
+type SetMarketStatusJSONRequestBody = MarketStatusRequest
+
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
 	// ListAccounts List ledger accounts
@@ -483,6 +561,12 @@ type ServerInterface interface {
 	// GetTrialBalance Trial balance per asset (must be zero) and house account balances
 	// (GET /admin/v1/ledger/trial-balance)
 	GetTrialBalance(w http.ResponseWriter, r *http.Request)
+	// ListMarkets Markets of the tenant
+	// (GET /admin/v1/markets)
+	ListMarkets(w http.ResponseWriter, r *http.Request)
+	// SetMarketStatus Halt, resume or delist a market
+	// (PUT /admin/v1/markets/{symbol}/status)
+	SetMarketStatus(w http.ResponseWriter, r *http.Request, symbol MarketSymbol)
 }
 
 // Unimplemented server implementation that returns http.StatusNotImplemented for each endpoint.
@@ -540,6 +624,18 @@ func (_ Unimplemented) ListEntries(w http.ResponseWriter, r *http.Request, param
 // GetTrialBalance Trial balance per asset (must be zero) and house account balances
 // (GET /admin/v1/ledger/trial-balance)
 func (_ Unimplemented) GetTrialBalance(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ListMarkets Markets of the tenant
+// (GET /admin/v1/markets)
+func (_ Unimplemented) ListMarkets(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// SetMarketStatus Halt, resume or delist a market
+// (PUT /admin/v1/markets/{symbol}/status)
+func (_ Unimplemented) SetMarketStatus(w http.ResponseWriter, r *http.Request, symbol MarketSymbol) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -901,6 +997,46 @@ func (siw *ServerInterfaceWrapper) GetTrialBalance(w http.ResponseWriter, r *htt
 	handler.ServeHTTP(w, r)
 }
 
+// ListMarkets operation middleware
+func (siw *ServerInterfaceWrapper) ListMarkets(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListMarkets(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SetMarketStatus operation middleware
+func (siw *ServerInterfaceWrapper) SetMarketStatus(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "symbol" -------------
+	var symbol MarketSymbol
+
+	err = runtime.BindStyledParameterWithOptions("simple", "symbol", chi.URLParam(r, "symbol"), &symbol, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "symbol", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SetMarketStatus(w, r, symbol)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 type UnescapedCookieParamError struct {
 	ParamName string
 	Err       error
@@ -1028,6 +1164,12 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/admin/v1/accounts/{id}/balances", wrapper.GetAccountBalances)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/admin/v1/markets", wrapper.ListMarkets)
+	})
+	r.Group(func(r chi.Router) {
+		r.Put(options.BaseURL+"/admin/v1/markets/{symbol}/status", wrapper.SetMarketStatus)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/admin/v1/ledger/trial-balance", wrapper.GetTrialBalance)
@@ -1679,6 +1821,146 @@ func (response GetTrialBalance500ApplicationProblemPlusJSONResponse) VisitGetTri
 	return err
 }
 
+type ListMarketsRequestObject struct {
+}
+
+type ListMarketsResponseObject interface {
+	VisitListMarketsResponse(w http.ResponseWriter) error
+}
+
+type ListMarkets200JSONResponse MarketList
+
+func (response ListMarkets200JSONResponse) VisitListMarketsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListMarkets401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response ListMarkets401ApplicationProblemPlusJSONResponse) VisitListMarketsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListMarkets500ApplicationProblemPlusJSONResponse struct {
+	InternalErrorApplicationProblemPlusJSONResponse
+}
+
+func (response ListMarkets500ApplicationProblemPlusJSONResponse) VisitListMarketsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetMarketStatusRequestObject struct {
+	Symbol MarketSymbol `json:"symbol"`
+	Body   *SetMarketStatusJSONRequestBody
+}
+
+type SetMarketStatusResponseObject interface {
+	VisitSetMarketStatusResponse(w http.ResponseWriter) error
+}
+
+type SetMarketStatus200JSONResponse Market
+
+func (response SetMarketStatus200JSONResponse) VisitSetMarketStatusResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetMarketStatus400ApplicationProblemPlusJSONResponse struct {
+	BadRequestApplicationProblemPlusJSONResponse
+}
+
+func (response SetMarketStatus400ApplicationProblemPlusJSONResponse) VisitSetMarketStatusResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetMarketStatus401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response SetMarketStatus401ApplicationProblemPlusJSONResponse) VisitSetMarketStatusResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetMarketStatus404ApplicationProblemPlusJSONResponse struct {
+	NotFoundApplicationProblemPlusJSONResponse
+}
+
+func (response SetMarketStatus404ApplicationProblemPlusJSONResponse) VisitSetMarketStatusResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetMarketStatus500ApplicationProblemPlusJSONResponse struct {
+	InternalErrorApplicationProblemPlusJSONResponse
+}
+
+func (response SetMarketStatus500ApplicationProblemPlusJSONResponse) VisitSetMarketStatusResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 // StrictServerInterface represents all server handlers.
 type StrictServerInterface interface {
 	// ListAccounts List ledger accounts
@@ -1708,6 +1990,12 @@ type StrictServerInterface interface {
 	// GetTrialBalance Trial balance per asset (must be zero) and house account balances
 	// (GET /admin/v1/ledger/trial-balance)
 	GetTrialBalance(ctx context.Context, request GetTrialBalanceRequestObject) (GetTrialBalanceResponseObject, error)
+	// ListMarkets Markets of the tenant
+	// (GET /admin/v1/markets)
+	ListMarkets(ctx context.Context, request ListMarketsRequestObject) (ListMarketsResponseObject, error)
+	// SetMarketStatus Halt, resume or delist a market
+	// (PUT /admin/v1/markets/{symbol}/status)
+	SetMarketStatus(ctx context.Context, request SetMarketStatusRequestObject) (SetMarketStatusResponseObject, error)
 }
 
 type StrictHandlerFunc func(ctx context.Context, w http.ResponseWriter, r *http.Request, request any) (any, error)
@@ -1991,6 +2279,63 @@ func (sh *strictHandler) GetTrialBalance(w http.ResponseWriter, r *http.Request)
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(GetTrialBalanceResponseObject); ok {
 		if err := validResponse.VisitGetTrialBalanceResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListMarkets operation middleware
+func (sh *strictHandler) ListMarkets(w http.ResponseWriter, r *http.Request) {
+	var request ListMarketsRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListMarkets(ctx, request.(ListMarketsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListMarkets")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListMarketsResponseObject); ok {
+		if err := validResponse.VisitListMarketsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// SetMarketStatus operation middleware
+func (sh *strictHandler) SetMarketStatus(w http.ResponseWriter, r *http.Request, symbol MarketSymbol) {
+	var request SetMarketStatusRequestObject
+
+	request.Symbol = symbol
+
+	var body SetMarketStatusJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.SetMarketStatus(ctx, request.(SetMarketStatusRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "SetMarketStatus")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(SetMarketStatusResponseObject); ok {
+		if err := validResponse.VisitSetMarketStatusResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

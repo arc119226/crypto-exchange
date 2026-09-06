@@ -19,6 +19,7 @@ import (
 	"github.com/arc119226/crypto-exchange/internal/admin"
 	"github.com/arc119226/crypto-exchange/internal/admin/gen"
 	"github.com/arc119226/crypto-exchange/internal/audit"
+	"github.com/arc119226/crypto-exchange/internal/registry"
 	"github.com/arc119226/crypto-exchange/internal/telemetry"
 )
 
@@ -29,7 +30,7 @@ func adminServer(t *testing.T, h ledgerHarness) *httptest.Server {
 	r := chi.NewRouter()
 	r.Use(telemetry.CorrelationMiddleware(slog.New(slog.NewTextHandler(io.Discard, nil))))
 	r.Use(admin.RequireAPIKey(adminKey))
-	admin.Mount(r, admin.NewHandler(h.all, h.svc, audit.NewRecorder("default")))
+	admin.Mount(r, admin.NewHandler(h.all, h.svc, registry.NewStore(h.all), audit.NewRecorder("default"), "default"))
 	srv := httptest.NewServer(r)
 	t.Cleanup(srv.Close)
 	return srv

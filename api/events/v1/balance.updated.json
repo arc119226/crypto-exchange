@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/arc119226/crypto-exchange/api/events/v1/balance.updated.json",
+  "title": "balance.updated",
+  "description": "The account's balance in one asset after the command. available + hold is the total; both are derived from the ledger, never set directly.",
+  "type": "object",
+  "required": [
+    "account_id",
+    "asset",
+    "available",
+    "hold",
+    "account_seq"
+  ],
+  "properties": {
+    "account_id": {
+      "type": "string"
+    },
+    "asset": {
+      "type": "string"
+    },
+    "available": {
+      "type": "string",
+      "pattern": "^-?\\d{1,18}(\\.\\d{1,18})?$",
+      "description": "Spendable balance."
+    },
+    "hold": {
+      "type": "string",
+      "pattern": "^-?\\d{1,18}(\\.\\d{1,18})?$",
+      "description": "Frozen by open orders and pending withdrawals."
+    },
+    "account_seq": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Per-account sequence; order balance events by this."
+    }
+  }
+}

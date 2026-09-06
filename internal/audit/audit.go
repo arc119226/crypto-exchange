@@ -38,7 +38,7 @@ type Event struct {
 	CorrelationID string
 }
 
-// Record is a persisted audit event.
+// Record is a persisted audit event, as returned by List.
 type Record struct {
 	ID            int64
 	TenantID      string
@@ -64,32 +64,35 @@ func NewRecorder(tenantID string) *Recorder { return &Recorder{tenant: tenantID}
 
 // Record appends one event using db (a pgx.Tx to make it atomic with the
 // audited change, or a pool).
-func (r *Recorder) Record(ctx context.Context, db sqlcgen.DBTX, e Event) (Record, error) {
+//
+// It returns nothing but an error: the writers of this table hold INSERT
+// without SELECT (migration 0004), so the row cannot be read back — see the
+// note on sqlcgen.InsertAuditEvent.
+func (r *Recorder) Record(ctx context.Context, db sqlcgen.DBTX, e Event) error {
 	if e.Action == "" {
-		return Record{}, fmt.Errorf("audit: action required")
+		return fmt.Errorf("audit: action required")
 	}
 	switch e.ActorType {
 	case ActorUser, ActorAdmin, ActorSystem, ActorAPIKey:
 	default:
-		return Record{}, fmt.Errorf("audit: unknown actor type %q", e.ActorType)
+		return fmt.Errorf("audit: unknown actor type %q", e.ActorType)
 	}
 	before, err := marshalNullable(e.Before)
 	if err != nil {
-		return Record{}, fmt.Errorf("audit: before: %w", err)
+		return fmt.Errorf("audit: before: %w", err)
 	}
 	after, err := marshalNullable(e.After)
 	if err != nil {
-		return Record{}, fmt.Errorf("audit: after: %w", err)
+		return fmt.Errorf("audit: after: %w", err)
 	}
-	row, err := sqlcgen.New(db).InsertAuditEvent(ctx, sqlcgen.InsertAuditEventParams{
+	if err := sqlcgen.New(db).InsertAuditEvent(ctx, sqlcgen.InsertAuditEventParams{
 		TenantID: r.tenant, ActorType: string(e.ActorType), ActorID: optString(e.ActorID), Action: e.Action,
 		TargetType: optString(e.TargetType), TargetID: optString(e.TargetID), Before: before, After: after,
 		Ip: optString(e.IP), CorrelationID: optString(e.CorrelationID),
-	})
-	if err != nil {
-		return Record{}, fmt.Errorf("audit: insert: %w", err)
+	}); err != nil {
+		return fmt.Errorf("audit: insert: %w", err)
 	}
-	return recordFromRow(row), nil
+	return nil
 }
 
 // Filter selects audit events; empty strings match anything.

@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/arc119226/crypto-exchange/api/events/v1/order.rejected.json",
+  "title": "order.rejected",
+  "description": "The engine refused the order. A rejection is a persisted order, not an error, and it occupies its client_order_id.",
+  "type": "object",
+  "required": [
+    "order_id",
+    "client_order_id",
+    "account_id",
+    "market",
+    "reason"
+  ],
+  "properties": {
+    "order_id": {
+      "type": "string"
+    },
+    "client_order_id": {
+      "type": "string"
+    },
+    "account_id": {
+      "type": "string"
+    },
+    "market": {
+      "type": "string"
+    },
+    "reason": {
+      "type": "string",
+      "description": "Why the engine refused the order. Known values: invalid_order, invalid_price_tick, invalid_qty_step, below_min_notional, above_max_qty, duplicate_order_id, empty_book, quote_qty_too_small, market_not_active, insufficient_balance, account_frozen, policy_denied. Left open on purpose: a new reason is an addition, not a breaking change."
+    },
+    "seq": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 0,
+      "description": "Null when the order was refused before it reached the book."
+    }
+  }
+}

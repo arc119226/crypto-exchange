@@ -1,0 +1,86 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/arc119226/crypto-exchange/api/events/v1/trade.executed.json",
+  "title": "trade.executed",
+  "description": "One fill. The price is always the maker's; fees are charged in the asset each side received (docs/plan-v1.0.md 6.1.4 b).",
+  "type": "object",
+  "required": [
+    "trade_id",
+    "market",
+    "maker_order_id",
+    "taker_order_id",
+    "maker_account_id",
+    "taker_account_id",
+    "taker_side",
+    "price",
+    "qty",
+    "quote_qty",
+    "maker_fee",
+    "maker_fee_asset",
+    "taker_fee",
+    "taker_fee_asset",
+    "seq"
+  ],
+  "properties": {
+    "trade_id": {
+      "type": "string"
+    },
+    "market": {
+      "type": "string"
+    },
+    "maker_order_id": {
+      "type": "string"
+    },
+    "taker_order_id": {
+      "type": "string"
+    },
+    "maker_account_id": {
+      "type": "string"
+    },
+    "taker_account_id": {
+      "type": "string"
+    },
+    "taker_side": {
+      "enum": [
+        "buy",
+        "sell"
+      ]
+    },
+    "price": {
+      "type": "string",
+      "pattern": "^-?\\d{1,18}(\\.\\d{1,18})?$",
+      "description": "Maker's price."
+    },
+    "qty": {
+      "type": "string",
+      "pattern": "^-?\\d{1,18}(\\.\\d{1,18})?$",
+      "description": "Base traded."
+    },
+    "quote_qty": {
+      "type": "string",
+      "pattern": "^-?\\d{1,18}(\\.\\d{1,18})?$",
+      "description": "Quote traded."
+    },
+    "maker_fee": {
+      "type": "string",
+      "pattern": "^-?\\d{1,18}(\\.\\d{1,18})?$",
+      "description": "Charged in maker_fee_asset."
+    },
+    "maker_fee_asset": {
+      "type": "string"
+    },
+    "taker_fee": {
+      "type": "string",
+      "pattern": "^-?\\d{1,18}(\\.\\d{1,18})?$",
+      "description": "Charged in taker_fee_asset."
+    },
+    "taker_fee_asset": {
+      "type": "string"
+    },
+    "seq": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Per-market engine sequence of the command that produced this event."
+    }
+  }
+}

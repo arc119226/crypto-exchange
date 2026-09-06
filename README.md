@@ -2,7 +2,7 @@
 
 白牌交易引擎(white-label exchange engine)的商業化原型:現貨撮合、複式記帳帳本、EVM 充提與歸集、行情推播、管理後台,以單一 Go binary 多角色的模組化單體交付,客戶透過 REST / WebSocket / Webhook 與事件契約整合。
 
-**目前狀態:Phase 3b 最小 auth + public 交易端點 + 限流(本 PR;Phase 3 分 3a/3b/3c 三個 PR)。** 已合併:Phase 0 walking skeleton(單一 module、單一 binary 多角色、`GET /v1/markets`、compose、CI)、Phase 1 `internal/matching`(無 I/O、確定性訂單簿,屬性 / 模糊 / golden 測試,`exchangectl replay`)、Phase 2 `internal/ledger`(複式記帳、凍結即分錄、balances 快取、冪等鍵、deferred trigger、GRANT-only 權限)、`internal/audit`、admin API 與 `exchangectl admin`、Phase 3a `internal/trading`(訂單狀態機、每市場 runner、一筆 Postgres 交易內完成 Hold → Apply → 成交 / 分錄 / outbox、`client_order_id` 冪等、重啟從 open orders 重建、advisory lock 單實例)與 `internal/eventbus`(事件 envelope、outbox、JetStream relay)。3b 加入 `internal/auth`(argon2id、Ed25519 JWT + JWKS、refresh 輪替與重放偵測、API key HMAC 與 IP 白名單、`exchange admin bootstrap`)、`internal/ratelimit`(Redis / 記憶體 token bucket,登入與下單限流)、public API 的 auth / api-keys / account / orders / fills / depth / trades 端點,以及 `exchangectl user|api-keys|orders|balances|fills|book|trades|e2e`;`exchange serve --role=all` 可從 HTTP 走完註冊 → 注資 → 下單 → 成交 → 取消。3c(NATS request-reply 多容器命令匯流排 + compose E2E job + `docs/events.md`)接續。
+**目前狀態:Phase 3 完成(3a 引擎 + 3b auth/API + 3c 拆分部署與事件契約;本 PR 為 3c)。** 已合併:Phase 0 walking skeleton、Phase 1 `internal/matching`(無 I/O、確定性訂單簿)、Phase 2 `internal/ledger`(複式記帳、凍結即分錄、冪等鍵)與 admin API、Phase 3a `internal/trading` + `internal/eventbus`(每市場 runner、一筆交易內 Hold → Apply → 成交 / 分錄 / outbox、重啟重建、JetStream relay)、Phase 3b `internal/auth` + `internal/ratelimit` + public API(JWT / refresh / API key HMAC、限流、`client_order_id` 冪等)。3c 讓拆分部署真的能交易:`internal/cmdbus`(NATS request-reply 命令匯流排,跨容器仍保持 404 / 422 / 503 的錯誤語意,命令帶 `aud=internal` JWT)、`eventbus` 消費端與引擎的`market.updated` 熱載入、`PUT /admin/v1/markets/{symbol}/status`、`api/events/v1/*.json` + `docs/events.md` 事件契約(golden + JSON Schema 測試),以及每個 PR 都跑的多容器 `make e2e`。下一步 Phase 4:鏈上(HD 充值地址、確認數與 reorg、提現狀態機與 nonce、歸集、對帳)。
 
 ## 產品邊界
 
@@ -39,6 +39,11 @@ go run ./cmd/exchangectl orders place --side buy --price 2000 --qty 0.5    # 201
 go run ./cmd/exchangectl book ETH-USDC && go run ./cmd/exchangectl balances && go run ./cmd/exchangectl orders list --open
 go run ./cmd/exchangectl api-keys create --scopes read,trade               # secret 只顯示一次;之後 --api-key/--api-secret 對每個請求 HMAC 簽章
 go run ./cmd/exchangectl e2e --verbose                                     # 兩個用戶走完 docs/plan-v1.0.md §6.1.4 的數字並驗試算平衡
+
+# 拆分部署(api / engine / admin 各一容器,命令走 NATS)
+make up                    # infra + app profile;--role=api 的交易端點此時由 NATS 命令匯流排送到引擎
+make e2e                   # 上面那條路徑的完整驗證:exchangectl e2e、kill -9 引擎後訂單簿一致、停牌後下一張單被拒
+go run ./cmd/exchangectl admin markets set-status ETH-USDC halted --reason "maintenance"   # 引擎熱載入,無需重啟
 make artifacts                                  # 把 addresses.json 從 volume 複製到 deploy/compose/artifacts/
 cast call $(jq -r .usdc deploy/compose/artifacts/addresses.json) "decimals()(uint8)" --rpc-url localhost:8545   # 6
 
@@ -77,7 +82,8 @@ internal/auth         最小 auth 參考實作:users、argon2id、Ed25519 JWT / 
 internal/ratelimit    token bucket(Redis Lua / 記憶體 / Fallback)
 internal/matching     純函式訂單簿(Apply / Restore / Snapshot;無 I/O、無時鐘)
 internal/trading      訂單狀態機、每市場 runner(一筆 PG 交易:Hold → Apply → 成交 / 分錄 / outbox)、client_order_id 冪等、重建
-internal/eventbus     事件 envelope、outbox、JetStream relay / streams
+internal/eventbus     事件 envelope、outbox、JetStream relay / streams、durable consumer
+internal/cmdbus       api → engine 的 NATS request-reply 命令匯流排(含 aud=internal JWT)
 internal/policy       同步下單規則(市場狀態、帳戶凍結)
 internal/ledger       複式帳本:Post / Hold / Release / Settle / Credit / Adjust、balances 快取、試算平衡(sqlc)
 internal/audit        append-only 稽核紀錄
@@ -106,9 +112,10 @@ docs                  計畫、審查、ADR、領域文件
 | [`docs/review/plan-review-2026-09.md`](docs/review/plan-review-2026-09.md) | v0.1 規劃書審查報告(28 條合併後發現、不採納意見、對 v1.0 的結構性要求) |
 | [`docs/domain.md`](docs/domain.md) | 領域文件:科目表、分錄、狀態機、撮合語意的逐項驗算與疑問清單;各 Phase 程式碼與計畫的對應表 |
 | [`docs/api-conventions.md`](docs/api-conventions.md) | Public API 慣例:金額字串、problem+json、JWT / API key HMAC 簽章、限流、`client_order_id` 狀態碼(English) |
+| [`docs/events.md`](docs/events.md) | 事件契約:envelope、subject 與 stream、排序與去重、consumer 型別、catalog、相容規則(English);schema 在 [`api/events/v1/`](api/events/v1) |
 | [`docs/adr/`](docs/adr/) | ADR-0000 需求訪談決策(8 輪 32 題);ADR-0001~0008 架構決策(單體、真相來源、租戶、數值、帳本、認證、簽名、工具鏈) |
 | [`docs/archive/plan-v0.1.md`](docs/archive/plan-v0.1.md) | 原始 v0.1 規劃書(已取代,僅供對照) |
 
 ## 下一步
 
-Phase 3(`docs/plan-v1.0.md` §12)分三個 PR:3a `internal/trading` + `internal/eventbus`(已合併);3b 最小 auth(密碼 + JWT/refresh + API key HMAC)、public 交易 / 帳戶端點、限流、`exchangectl e2e`(本 PR);3c NATS request-reply 命令匯流排、多容器 compose E2E job、`api/events/v1/*.json` + `docs/events.md`、`PUT /admin/v1/markets/{id}/status` → engine reload。DoD 不過不進下一階段。
+Phase 3(`docs/plan-v1.0.md` §12)分三個 PR,3a 與 3b 已合併,3c 為本 PR;完成後 Phase 3 的 DoD 全數滿足。下一階段 Phase 4 鏈上分 4a 充值、4b 提現、4c 歸集與對帳、4d Sepolia 驗證。DoD 不過不進下一階段。

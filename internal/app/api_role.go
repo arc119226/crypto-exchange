@@ -4,16 +4,19 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/arc119226/crypto-exchange/internal/api"
 	"github.com/arc119226/crypto-exchange/internal/audit"
 	"github.com/arc119226/crypto-exchange/internal/auth"
+	"github.com/arc119226/crypto-exchange/internal/cmdbus"
 	"github.com/arc119226/crypto-exchange/internal/ledger"
 	"github.com/arc119226/crypto-exchange/internal/ratelimit"
 	"github.com/arc119226/crypto-exchange/internal/registry"
@@ -29,25 +32,40 @@ import (
 // engine is the in-process command bus when the engine role runs in the
 // same process (role=all); nil leaves the trading endpoints answering 503
 // until the NATS request-reply bus arrives (Phase 3c).
-func newAPIServer(ctx context.Context, cfg Config, log *slog.Logger, m *telemetry.HTTPMetrics, d *deps, l *ledger.Service, engine *trading.Engine) (*http.Server, error) {
+func newAPIServer(ctx context.Context, cfg Config, log *slog.Logger, m *telemetry.HTTPMetrics, reg prometheus.Registerer, d *deps, l *ledger.Service, engine *trading.Engine) (*http.Server, *registryRefresher, error) {
 	store := registry.NewStore(d.pool)
 	authSvc, err := newAuthService(cfg, log, d, l)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	var (
 		cache *registry.Cache
 		bus   trading.CommandBus
 	)
-	if engine != nil {
+	switch {
+	case engine != nil:
+		// role=all: the engine is the bus, so commands never leave the process
 		cache, bus = engine.Registry(), engine
-	} else {
+	default:
 		cache = registry.NewCache(cfg.TenantID)
 		if err := retryUntil(ctx, log, "registry", func(ctx context.Context) error { return cache.Load(ctx, store) }); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
-		log.Warn("api running without an in-process engine: trading endpoints answer 503 until a command bus is configured")
+		if d.nc != nil {
+			client, err := cmdbus.NewClient(d.nc, cmdbus.Config{
+				Tenant: cfg.TenantID, SubjectPrefix: cfg.Engine.CommandSubjectPrefix, Timeout: cfg.Engine.CommandTimeout,
+				Token: internalTokenSource(authSvc.Signer(), cfg.TenantID, cfg.Engine.InternalTokenTTL), Metrics: cmdbus.NewMetrics(reg),
+			})
+			if err != nil {
+				return nil, nil, err
+			}
+			bus = client
+			log.Info("trading commands go to the engine over NATS",
+				slog.String("subject", client.Subject("<market>")), slog.Duration("timeout", cfg.Engine.CommandTimeout))
+		} else {
+			log.Warn("api running without an in-process engine and without NATS: trading endpoints answer 503")
+		}
 	}
 	var tradingSvc *trading.Service
 	if bus != nil {
@@ -56,7 +74,7 @@ func newAPIServer(ctx context.Context, cfg Config, log *slog.Logger, m *telemetr
 
 	limits, err := parseLimits(cfg.RateLimit)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	var limiter ratelimit.Limiter = ratelimit.NewMemory()
 	if d.rdb != nil {
@@ -71,7 +89,12 @@ func newAPIServer(ctx context.Context, cfg Config, log *slog.Logger, m *telemetr
 	handler := newAPIRouter(log, m, api.Deps{
 		Tenant: cfg.TenantID, Registry: store, Auth: authSvc, Ledger: l, Trading: tradingSvc, Limiter: limiter, Limits: limits,
 	})
-	return &http.Server{Addr: cfg.HTTPAddr, Handler: handler, ReadHeaderTimeout: 5 * time.Second}, nil
+	srv := &http.Server{Addr: cfg.HTTPAddr, Handler: handler, ReadHeaderTimeout: 5 * time.Second}
+	var refresh *registryRefresher
+	if engine == nil {
+		refresh = &registryRefresher{cache: cache, store: store, interval: cfg.Registry.RefreshInterval, log: log}
+	}
+	return srv, refresh, nil
 }
 
 // newAPIRouter assembles the middleware chain and the OpenAPI routes. A nil
@@ -187,5 +210,55 @@ func recoverer() func(http.Handler) http.Handler {
 			}()
 			next.ServeHTTP(w, r)
 		})
+	}
+}
+
+// internalTokenSource mints the aud=internal JWT that travels with every
+// command on the NATS bus (docs/plan-v1.0.md §14). The engine trusts this
+// token, never the account id in the command body, so the api role signs
+// exactly what it authenticated: the caller's own principal.
+func internalTokenSource(signer *auth.Signer, tenant string, ttl time.Duration) cmdbus.TokenSource {
+	return func(ctx context.Context) (string, error) {
+		p, ok := auth.PrincipalFrom(ctx)
+		if !ok {
+			return "", errors.New("api: no authenticated caller for an engine command")
+		}
+		if p.TenantID == "" {
+			p.TenantID = tenant
+		}
+		return signer.Issue(auth.Claims{
+			UserID: p.UserID, AccountID: p.AccountID, TenantID: p.TenantID, Role: p.Role,
+			Scopes: p.Scopes, Method: p.Method, Audience: auth.AudienceInternal,
+		}, time.Now().UTC(), ttl)
+	}
+}
+
+// registryRefresher keeps the registry cache of a role without an engine
+// close to the database. The engine reloads on market.updated, but an api
+// role in another container has no consumer of its own (a durable one would
+// split the stream between replicas), so it re-reads on a timer instead.
+type registryRefresher struct {
+	cache    *registry.Cache
+	store    registry.Reader
+	interval time.Duration
+	log      *slog.Logger
+}
+
+func (r *registryRefresher) run(ctx context.Context) error {
+	if r == nil || r.interval <= 0 {
+		<-ctx.Done()
+		return nil
+	}
+	tick := time.NewTicker(r.interval)
+	defer tick.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-tick.C:
+			if err := r.cache.Load(ctx, r.store); err != nil && ctx.Err() == nil {
+				r.log.Warn("registry refresh failed", slog.String("err", err.Error()))
+			}
+		}
 	}
 }

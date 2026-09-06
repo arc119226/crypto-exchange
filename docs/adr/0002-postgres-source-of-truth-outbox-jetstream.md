@@ -31,3 +31,4 @@ v0.1 把成交→記帳、充值→入帳放在無持久化的 NATS core 上(at-
 - 需要守住的事:`account_seq` 在寫 outbox 的同一交易內 `UPDATE ledger.accounts SET next_seq = next_seq + 1`,**不可用 outbox 的 BIGSERIAL 當序號**(取號單調但提交順序不保證)。
 - Phase 0 已落地的部分:migration 以 goose 管理、`registry` 表為 admin 可編輯的 DB 真相、`eventbus` schema 已預留。
 - Phase 3a 落地:`internal/trading`(每市場 runner、savepoint 包住 Hold + Apply、守衛式 seq、`hold_remaining` 不變量、advisory lock 單實例、重啟重建)、`internal/eventbus`(envelope、outbox、LISTEN/NOTIFY relay、`Nats-Msg-Id` 去重、streams 宣告、`processed_events`);對應表與驗證見 `docs/domain.md` §12。
+- Phase 3c 落地消費端與契約:`eventbus.Subscribe`(durable consumer + 顯式 ack + nak 退避)、引擎的 `engine-registry` consumer 讓 `market.updated` 觸發熱載入(§6.6)、`api/events/v1/*.json` 與 `docs/events.md` 成為版本化的對外契約、`test/contract` 以 golden 檔加 JSON Schema 驗證鎖住序列化。無法解碼的訊息直接 ack 而不是無限重送——毒訊息不該卡住整個 consumer。**扇出型與處理型的差別寫進了 `docs/events.md`**:共用 durable consumer 是 work queue,Phase 6 的多副本 WS 若誤用會讓每台只收到一部分事件。對應表見 `docs/domain.md` §14。

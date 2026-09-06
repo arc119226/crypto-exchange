@@ -15,6 +15,7 @@ import (
 	"github.com/arc119226/crypto-exchange/internal/admin/gen"
 	"github.com/arc119226/crypto-exchange/internal/audit"
 	"github.com/arc119226/crypto-exchange/internal/ledger"
+	"github.com/arc119226/crypto-exchange/internal/registry"
 	"github.com/arc119226/crypto-exchange/internal/telemetry"
 )
 
@@ -23,18 +24,23 @@ const actorID = "admin-api-key"
 
 // Handler implements gen.StrictServerInterface.
 type Handler struct {
-	pool   *pgxpool.Pool
-	ledger *ledger.Service
-	audit  *audit.Recorder
+	pool     *pgxpool.Pool
+	ledger   *ledger.Service
+	audit    *audit.Recorder
+	registry *registry.Store
+	tenant   string
 }
 
 var _ gen.StrictServerInterface = (*Handler)(nil)
 
-// NewHandler wires the admin API to the ledger and the audit trail. The
-// pool must carry a role allowed to write the ledger and the audit log
-// (ex_admin or ex_all).
-func NewHandler(pool *pgxpool.Pool, l *ledger.Service, a *audit.Recorder) *Handler {
-	return &Handler{pool: pool, ledger: l, audit: a}
+// NewHandler wires the admin API to the ledger, the registry and the audit
+// trail. The pool must carry a role allowed to write all three (ex_admin or
+// ex_all).
+func NewHandler(pool *pgxpool.Pool, l *ledger.Service, r *registry.Store, a *audit.Recorder, tenant string) *Handler {
+	if tenant == "" {
+		tenant = "default"
+	}
+	return &Handler{pool: pool, ledger: l, registry: r, audit: a, tenant: tenant}
 }
 
 func (h *Handler) inTx(ctx context.Context, fn func(tx pgx.Tx) error) error {
@@ -98,7 +104,7 @@ func (h *Handler) CreateAccount(ctx context.Context, req gen.CreateAccountReques
 			return err
 		}
 		created = a
-		_, err = h.audit.Record(ctx, tx, audit.Event{
+		err = h.audit.Record(ctx, tx, audit.Event{
 			ActorType: audit.ActorAPIKey, ActorID: actorID, Action: "account.create", TargetType: "account", TargetID: a.ID,
 			After: toAccount(a), CorrelationID: telemetry.CorrelationID(ctx),
 		})
@@ -139,7 +145,7 @@ func (h *Handler) SetAccountStatus(ctx context.Context, req gen.SetAccountStatus
 		if err != nil {
 			return err
 		}
-		_, err = h.audit.Record(ctx, tx, audit.Event{
+		err = h.audit.Record(ctx, tx, audit.Event{
 			ActorType: audit.ActorAPIKey, ActorID: actorID, Action: "account.status.update", TargetType: "account", TargetID: req.ID,
 			Before: map[string]any{"status": before.Status, "reason": nil}, After: map[string]any{"status": after.Status, "reason": req.Body.Reason},
 			CorrelationID: telemetry.CorrelationID(ctx),
@@ -241,7 +247,7 @@ func (h *Handler) CreateAdjustment(ctx context.Context, req gen.CreateAdjustment
 		if err != nil || replayed {
 			return err
 		}
-		_, err = h.audit.Record(ctx, tx, audit.Event{
+		err = h.audit.Record(ctx, tx, audit.Event{
 			ActorType: audit.ActorAPIKey, ActorID: actorID, Action: "ledger.adjustment.create", TargetType: "journal_entry", TargetID: fmt.Sprint(entry.ID),
 			After:         map[string]any{"account_id": b.AccountID, "asset": b.Asset, "amount": b.Amount, "direction": b.Direction, "reason": b.Reason, "idempotency_key": key},
 			CorrelationID: telemetry.CorrelationID(ctx),

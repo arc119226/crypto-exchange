@@ -1,0 +1,25 @@
+{
+  "event_id": "01J8Z2K3M4N5P6Q7R8S9T0V1W2",
+  "event_type": "order.accepted",
+  "schema_version": 1,
+  "tenant_id": "default",
+  "market_id": "ETH-USDC",
+  "account_id": "acct-buyer",
+  "seq": 18234,
+  "account_seq": 41,
+  "occurred_at": "2026-09-05T08:15:23.412Z",
+  "correlation_id": "req_01J8Z2K2000000000000000000",
+  "payload": {
+    "order_id": "01J8Z2K3M4N5P6Q7R8S9T0V100",
+    "client_order_id": "b1",
+    "account_id": "acct-buyer",
+    "market": "ETH-USDC",
+    "side": "buy",
+    "type": "limit",
+    "time_in_force": "gtc",
+    "price": "2000",
+    "qty": "1",
+    "quote_qty": null,
+    "seq": 18234
+  }
+}

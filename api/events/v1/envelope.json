@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/arc119226/crypto-exchange/api/events/v1/envelope.json",
+  "title": "Event envelope",
+  "description": "Every event published by the exchange has this shape; payload is the type-specific body described by the sibling schema named after event_type. Fields are only ever added: a change in meaning bumps schema_version and adds a new file (docs/events.md).",
+  "type": "object",
+  "required": ["event_id", "event_type", "schema_version", "tenant_id", "occurred_at", "payload"],
+  "properties": {
+    "event_id": {
+      "type": "string",
+      "description": "ULID, unique per event. Consumers deduplicate on it.",
+      "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
+    },
+    "event_type": {
+      "type": "string",
+      "description": "<domain>.<type>; neither part contains a dot, so it maps onto the NATS subject.",
+      "pattern": "^[a-z_]+\\.[a-z_]+$"
+    },
+    "schema_version": {"type": "integer", "minimum": 1},
+    "tenant_id": {"type": "string", "pattern": "^[A-Za-z0-9_-]+$"},
+    "market_id": {
+      "type": ["string", "null"],
+      "description": "Market symbol for market-domain events, null otherwise."
+    },
+    "account_id": {
+      "type": ["string", "null"],
+      "description": "Account the event belongs to, null for market-only events."
+    },
+    "seq": {
+      "type": ["integer", "null"],
+      "minimum": 0,
+      "description": "Per-market engine sequence. Order market-domain events by this, never by arrival."
+    },
+    "account_seq": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Per-account sequence. Order account-domain events by this; a gap means events were missed."
+    },
+    "occurred_at": {"type": "string", "format": "date-time"},
+    "correlation_id": {"type": "string"},
+    "causation_id": {"type": "string"},
+    "payload": {"type": "object"}
+  }
+}
