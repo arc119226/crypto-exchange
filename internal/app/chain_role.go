@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/nats-io/nats.go"
 	"github.com/prometheus/client_golang/prometheus"
@@ -134,8 +135,17 @@ func attachSigning(ctx context.Context, cfg Config, log *slog.Logger, db *pgxpoo
 	// Ask the signer which address it signs from. Configuring it here instead
 	// would let a wrong value track nonces for one address while another sent
 	// the transactions.
-	hot, err := s.HotWallet(ctx)
-	if err != nil {
+	//
+	// Retried rather than fatal: over NATS this is a request to another
+	// process that may still be starting, and a chain role that refuses to
+	// come up because the signer was a second late is a worse failure than
+	// waiting for it.
+	var hot common.Address
+	if err := retryUntil(ctx, log, "signer hot wallet", func(ctx context.Context) error {
+		var err error
+		hot, err = s.HotWallet(ctx)
+		return err
+	}); err != nil {
 		return fmt.Errorf("chain: the signer would not name its hot wallet: %w", err)
 	}
 	maxFee, err := cfg.Chain.MaxFee()
@@ -145,7 +155,8 @@ func attachSigning(ctx context.Context, cfg Config, log *slog.Logger, db *pgxpoo
 	nonces := hotwallet.New(db, cfg.TenantID, cfg.Chain.ChainID, hot, client, s, log)
 	// Fatal by design (§6.4.2): a nonce manager that cannot reconcile with the
 	// chain would allocate nonces that collide with transactions already in
-	// flight, and ErrForeignTransaction means someone else holds the key.
+	// flight, and ErrForeignTransaction means someone else holds the key. It
+	// is the one startup error that must not be retried into submission.
 	if err := nonces.Start(ctx); err != nil {
 		return err
 	}
