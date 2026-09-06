@@ -420,3 +420,26 @@ Phase 4 分四段:4a 充值(再拆 4a-1 金鑰與地址、4a-2 掃描與入帳)�
 **驗證分工**:`test/integration/deposit_scripted_test.go` 用**腳本化的鏈**跑 reorg 形狀、失敗交易、ERC-20 scale、以及「已入帳的充值不會被 reorg 收回」;`deposit_test.go` 用 **anvil testcontainer** 跑同一套確認數與 reorg 故事(沒有 docker 就 skip,CI 會跑);ERC-20 對**真的部署出來的** MockUSDC 的路徑歸 `scripts/e2e.sh`。
 
 **Phase 4a-2 學到的事**:為了能在沒有 docker 的機器上真的執行 reorg 邏輯,把節點抽成 `deposit.Chain` 介面——這不是為抽象而抽象,是因為替代方案是把整包最容易寫錯的東西**沒跑過就推上去**,而 3c 的 e2e 已經示範過那要付四輪的代價。腳本化的鏈立刻抓到兩個真缺陷:**等高的 reorg 完全看不見**(`Tick` 只在 `cursor < head` 時對帳,所以把區塊 N 換成另一個區塊 N 之後,來自被丟棄分支的充值看起來還是真的;鏈變短更是永遠不會發現),以及 `orphaned → dropped` 這個轉換**違反它自己的 CHECK**(`orphaned_at_block` 被雙向綁在 `orphaned` 狀態上,但被 drop 的充值必須留著當初是在哪一塊被孤立的)。另外 `money.Amount` 是 NUMERIC(36,18),放不下接近 2^256 的 uint256,所以 `FromWei` 對這種值回 error 而不是截斷——一個壞掉或惡意的 token 真的會發出那種 Transfer。
+
+## 17. Phase 4b-1 程式碼與 §6.4.2 / §14 的對應(提現到「鎖定資金」為止)
+
+4a 讓錢進得來,4b 讓錢出得去。這一半不碰鏈、也不碰任何私鑰:api 記錄請求,chain 依政策判定並在帳本鎖定資金,admin 審核政策擋下來的。簽名、廣播、追蹤由 signer 從 `funds_locked` 接手。
+
+| 計畫 | 實作 | 備註 |
+|---|---|---|
+| 冪等(`Idempotency-Key`) | key 存在 `chain.withdrawals` 上,配 UNIQUE `(tenant_id, account_id, idempotency_key)` + `request_hash` | **刻意偏離** §6.4.2 的「key → response 快取 + 24h TTL」,見下 |
+| 基本驗證 | `Service.Create`:資產可提、位址格式、`amount ≥ min_withdrawal`、available 預檢 | 預檢是善意而非權威——真正的權威是後面的 `Hold` |
+| `requested → policy_check → …` | `Worker.decide` + `policy.Basic.Withdraw` | 只有「凍結、資產不可提、低於最低額」直接 reject;**所有限額超標一律進 `pending_review`** |
+| 每日限額 | `SumWithdrawnSince` + 滾動 24 小時 | 用滾動視窗而非日曆日:午夜前後兩分鐘可以提兩天的量 |
+| `pending_review → approved` | `Reviewer.Review`(admin role) | 核准**不動錢**,只是標記給 chain worker |
+| `approved → funds_locked` | `Worker.lockFunds`:`ledger.Hold("hold:withdrawal:{id}")` + 狀態 + outbox,**同一筆交易** | 兩半分開都是錯的:只有 hold 會鎖住一筆永遠不前進的提現;只有狀態會讓 signer 花掉帳本仍稱為 available 的錢 |
+| 餘額不足 | `failed(insufficient_balance)` | 請求與鎖定之間餘額會動,所以這是正常路徑而非例外 |
+| 事件(§7.2) | `withdrawal.requested`(api 發)+ `withdrawal.state_changed`(其餘每次轉移) | 不做「一狀態一型別」:狀態機還會長(signer 再加三個),而訂閱者本來就全訂 |
+| 權限(§14) | api 只有 INSERT;chain 可寫 `status/failure_reason/hold_entry_id`;admin 可寫 review 三欄 | 沒有任何角色同時能「核准」與「執行」 |
+| 指標(§15) | `withdrawals_transitions_total{asset,status}`、`withdrawals_pending_review` | 後者值得告警:等人審的提現就是等錢的使用者,系統其他部分不會注意到 |
+
+**一處刻意偏離**:§6.4.2 描述的冪等是「存 key → request hash → response,TTL 24 h」。實作改成把 key 放在提現列上、走 UNIQUE index,重放回傳那一列(200),同 key 不同內容回 422——與 3a 的 `client_order_id` 同一套語意。兩個好處:**沒有 24 小時後同一把 key 會悄悄再開一筆提現的視窗**,而且重放拿到的是提現的**當前狀態**,不是第一次回應的凍結副本。
+
+**兩個只有拆分部署才看得見的權限缺口**(這已經是第三、第四個同類):`withdrawal.requested` 與 INSERT 同一筆交易寫進 outbox,而 account-scoped 事件要 `NextAccountSeq`(`UPDATE … RETURNING`),所以 api 需要 `UPDATE (next_seq) ON ledger.accounts`;政策依 KYC 等級,而等級在帳戶背後的 user 上,所以 chain 需要 `SELECT (id, kyc_level) ON auth.users`。兩個都是欄位級:api 只能推進序號、chain 只能讀等級,讀不到密碼雜湊、TOTP 種子或 email。`TestWithdrawalRolePrivileges` 用真的 `ex_api` / `ex_chain` / `ex_admin` 連線跑完整條路徑釘住這件事,並且**在補上 grant 之前先確認它會紅**。
+
+**Phase 4b-1 學到的事**:測試預期「粉塵金額應被拒絕」卻看著它通過,才發現兩個資產的 `min_withdrawal` 一直是 0——因為在提現政策出現之前沒有任何東西會讀它。真鏈上這代表接受一筆 gas 比金額還貴的 1 wei 提現。`min_deposit` 則刻意留 0:目前沒有程式碼執行它,而**一個沒有程式碼遵守的 registry 值比沒有這個值更糟**。
