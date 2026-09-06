@@ -13,7 +13,7 @@ import (
 )
 
 const claimWithdrawals = `-- name: ClaimWithdrawals :many
-SELECT id, tenant_id, account_id, asset, amount, to_address, chain_id, idempotency_key, request_hash, status, failure_reason, reviewed_by, reviewed_at, review_note, hold_entry_id, correlation_id, version, created_at, updated_at, nonce, raw_tx, tx_hash, broadcast_at, replacements, block_number, gas_cost FROM chain.withdrawals
+SELECT id, tenant_id, account_id, asset, amount, to_address, chain_id, idempotency_key, request_hash, status, failure_reason, reviewed_by, reviewed_at, review_note, hold_entry_id, correlation_id, version, created_at, updated_at, nonce, raw_tx, tx_hash, broadcast_at, replacements, block_number, gas_cost, cancel_tx_hash FROM chain.withdrawals
 WHERE tenant_id = $1 AND status = ANY($3::text[])
 ORDER BY created_at
 LIMIT $2
@@ -65,6 +65,7 @@ func (q *Queries) ClaimWithdrawals(ctx context.Context, arg ClaimWithdrawalsPara
 			&i.Replacements,
 			&i.BlockNumber,
 			&i.GasCost,
+			&i.CancelTxHash,
 		); err != nil {
 			return nil, err
 		}
@@ -112,7 +113,7 @@ func (q *Queries) GetAccountKYCLevel(ctx context.Context, id string) (int16, err
 }
 
 const getWithdrawal = `-- name: GetWithdrawal :one
-SELECT id, tenant_id, account_id, asset, amount, to_address, chain_id, idempotency_key, request_hash, status, failure_reason, reviewed_by, reviewed_at, review_note, hold_entry_id, correlation_id, version, created_at, updated_at, nonce, raw_tx, tx_hash, broadcast_at, replacements, block_number, gas_cost FROM chain.withdrawals WHERE tenant_id = $1 AND id = $2
+SELECT id, tenant_id, account_id, asset, amount, to_address, chain_id, idempotency_key, request_hash, status, failure_reason, reviewed_by, reviewed_at, review_note, hold_entry_id, correlation_id, version, created_at, updated_at, nonce, raw_tx, tx_hash, broadcast_at, replacements, block_number, gas_cost, cancel_tx_hash FROM chain.withdrawals WHERE tenant_id = $1 AND id = $2
 `
 
 type GetWithdrawalParams struct {
@@ -150,12 +151,13 @@ func (q *Queries) GetWithdrawal(ctx context.Context, arg GetWithdrawalParams) (C
 		&i.Replacements,
 		&i.BlockNumber,
 		&i.GasCost,
+		&i.CancelTxHash,
 	)
 	return i, err
 }
 
 const getWithdrawalByIdempotencyKey = `-- name: GetWithdrawalByIdempotencyKey :one
-SELECT id, tenant_id, account_id, asset, amount, to_address, chain_id, idempotency_key, request_hash, status, failure_reason, reviewed_by, reviewed_at, review_note, hold_entry_id, correlation_id, version, created_at, updated_at, nonce, raw_tx, tx_hash, broadcast_at, replacements, block_number, gas_cost FROM chain.withdrawals
+SELECT id, tenant_id, account_id, asset, amount, to_address, chain_id, idempotency_key, request_hash, status, failure_reason, reviewed_by, reviewed_at, review_note, hold_entry_id, correlation_id, version, created_at, updated_at, nonce, raw_tx, tx_hash, broadcast_at, replacements, block_number, gas_cost, cancel_tx_hash FROM chain.withdrawals
 WHERE tenant_id = $1 AND account_id = $2 AND idempotency_key = $3
 `
 
@@ -197,12 +199,13 @@ func (q *Queries) GetWithdrawalByIdempotencyKey(ctx context.Context, arg GetWith
 		&i.Replacements,
 		&i.BlockNumber,
 		&i.GasCost,
+		&i.CancelTxHash,
 	)
 	return i, err
 }
 
 const getWithdrawalForUpdate = `-- name: GetWithdrawalForUpdate :one
-SELECT id, tenant_id, account_id, asset, amount, to_address, chain_id, idempotency_key, request_hash, status, failure_reason, reviewed_by, reviewed_at, review_note, hold_entry_id, correlation_id, version, created_at, updated_at, nonce, raw_tx, tx_hash, broadcast_at, replacements, block_number, gas_cost FROM chain.withdrawals
+SELECT id, tenant_id, account_id, asset, amount, to_address, chain_id, idempotency_key, request_hash, status, failure_reason, reviewed_by, reviewed_at, review_note, hold_entry_id, correlation_id, version, created_at, updated_at, nonce, raw_tx, tx_hash, broadcast_at, replacements, block_number, gas_cost, cancel_tx_hash FROM chain.withdrawals
 WHERE tenant_id = $1 AND id = $2
 FOR UPDATE
 `
@@ -245,6 +248,7 @@ func (q *Queries) GetWithdrawalForUpdate(ctx context.Context, arg GetWithdrawalF
 		&i.Replacements,
 		&i.BlockNumber,
 		&i.GasCost,
+		&i.CancelTxHash,
 	)
 	return i, err
 }
@@ -254,7 +258,7 @@ INSERT INTO chain.withdrawals (
     tenant_id, account_id, asset, amount, to_address, chain_id,
     idempotency_key, request_hash, status, correlation_id
 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'requested', $9)
-RETURNING id, tenant_id, account_id, asset, amount, to_address, chain_id, idempotency_key, request_hash, status, failure_reason, reviewed_by, reviewed_at, review_note, hold_entry_id, correlation_id, version, created_at, updated_at, nonce, raw_tx, tx_hash, broadcast_at, replacements, block_number, gas_cost
+RETURNING id, tenant_id, account_id, asset, amount, to_address, chain_id, idempotency_key, request_hash, status, failure_reason, reviewed_by, reviewed_at, review_note, hold_entry_id, correlation_id, version, created_at, updated_at, nonce, raw_tx, tx_hash, broadcast_at, replacements, block_number, gas_cost, cancel_tx_hash
 `
 
 type InsertWithdrawalParams struct {
@@ -309,12 +313,13 @@ func (q *Queries) InsertWithdrawal(ctx context.Context, arg InsertWithdrawalPara
 		&i.Replacements,
 		&i.BlockNumber,
 		&i.GasCost,
+		&i.CancelTxHash,
 	)
 	return i, err
 }
 
 const listWithdrawalsByAccount = `-- name: ListWithdrawalsByAccount :many
-SELECT id, tenant_id, account_id, asset, amount, to_address, chain_id, idempotency_key, request_hash, status, failure_reason, reviewed_by, reviewed_at, review_note, hold_entry_id, correlation_id, version, created_at, updated_at, nonce, raw_tx, tx_hash, broadcast_at, replacements, block_number, gas_cost FROM chain.withdrawals
+SELECT id, tenant_id, account_id, asset, amount, to_address, chain_id, idempotency_key, request_hash, status, failure_reason, reviewed_by, reviewed_at, review_note, hold_entry_id, correlation_id, version, created_at, updated_at, nonce, raw_tx, tx_hash, broadcast_at, replacements, block_number, gas_cost, cancel_tx_hash FROM chain.withdrawals
 WHERE tenant_id = $1 AND account_id = $2
 ORDER BY created_at DESC
 LIMIT $3
@@ -362,6 +367,7 @@ func (q *Queries) ListWithdrawalsByAccount(ctx context.Context, arg ListWithdraw
 			&i.Replacements,
 			&i.BlockNumber,
 			&i.GasCost,
+			&i.CancelTxHash,
 		); err != nil {
 			return nil, err
 		}
@@ -374,7 +380,7 @@ func (q *Queries) ListWithdrawalsByAccount(ctx context.Context, arg ListWithdraw
 }
 
 const listWithdrawalsByStatus = `-- name: ListWithdrawalsByStatus :many
-SELECT id, tenant_id, account_id, asset, amount, to_address, chain_id, idempotency_key, request_hash, status, failure_reason, reviewed_by, reviewed_at, review_note, hold_entry_id, correlation_id, version, created_at, updated_at, nonce, raw_tx, tx_hash, broadcast_at, replacements, block_number, gas_cost FROM chain.withdrawals
+SELECT id, tenant_id, account_id, asset, amount, to_address, chain_id, idempotency_key, request_hash, status, failure_reason, reviewed_by, reviewed_at, review_note, hold_entry_id, correlation_id, version, created_at, updated_at, nonce, raw_tx, tx_hash, broadcast_at, replacements, block_number, gas_cost, cancel_tx_hash FROM chain.withdrawals
 WHERE tenant_id = $1 AND status = ANY($3::text[])
 ORDER BY created_at
 LIMIT $2
@@ -424,6 +430,7 @@ func (q *Queries) ListWithdrawalsByStatus(ctx context.Context, arg ListWithdrawa
 			&i.Replacements,
 			&i.BlockNumber,
 			&i.GasCost,
+			&i.CancelTxHash,
 		); err != nil {
 			return nil, err
 		}
@@ -439,7 +446,7 @@ const lockWithdrawalFunds = `-- name: LockWithdrawalFunds :one
 UPDATE chain.withdrawals
 SET status = 'funds_locked', hold_entry_id = $3, version = version + 1, updated_at = now()
 WHERE tenant_id = $1 AND id = $2
-RETURNING id, tenant_id, account_id, asset, amount, to_address, chain_id, idempotency_key, request_hash, status, failure_reason, reviewed_by, reviewed_at, review_note, hold_entry_id, correlation_id, version, created_at, updated_at, nonce, raw_tx, tx_hash, broadcast_at, replacements, block_number, gas_cost
+RETURNING id, tenant_id, account_id, asset, amount, to_address, chain_id, idempotency_key, request_hash, status, failure_reason, reviewed_by, reviewed_at, review_note, hold_entry_id, correlation_id, version, created_at, updated_at, nonce, raw_tx, tx_hash, broadcast_at, replacements, block_number, gas_cost, cancel_tx_hash
 `
 
 type LockWithdrawalFundsParams struct {
@@ -480,6 +487,7 @@ func (q *Queries) LockWithdrawalFunds(ctx context.Context, arg LockWithdrawalFun
 		&i.Replacements,
 		&i.BlockNumber,
 		&i.GasCost,
+		&i.CancelTxHash,
 	)
 	return i, err
 }
@@ -489,7 +497,7 @@ UPDATE chain.withdrawals
 SET status = $3, failure_reason = $4, reviewed_by = $5, reviewed_at = now(),
     review_note = $6, version = version + 1, updated_at = now()
 WHERE tenant_id = $1 AND id = $2
-RETURNING id, tenant_id, account_id, asset, amount, to_address, chain_id, idempotency_key, request_hash, status, failure_reason, reviewed_by, reviewed_at, review_note, hold_entry_id, correlation_id, version, created_at, updated_at, nonce, raw_tx, tx_hash, broadcast_at, replacements, block_number, gas_cost
+RETURNING id, tenant_id, account_id, asset, amount, to_address, chain_id, idempotency_key, request_hash, status, failure_reason, reviewed_by, reviewed_at, review_note, hold_entry_id, correlation_id, version, created_at, updated_at, nonce, raw_tx, tx_hash, broadcast_at, replacements, block_number, gas_cost, cancel_tx_hash
 `
 
 type ReviewWithdrawalParams struct {
@@ -540,6 +548,7 @@ func (q *Queries) ReviewWithdrawal(ctx context.Context, arg ReviewWithdrawalPara
 		&i.Replacements,
 		&i.BlockNumber,
 		&i.GasCost,
+		&i.CancelTxHash,
 	)
 	return i, err
 }
@@ -579,7 +588,7 @@ const updateWithdrawalStatus = `-- name: UpdateWithdrawalStatus :one
 UPDATE chain.withdrawals
 SET status = $3, failure_reason = $4, version = version + 1, updated_at = now()
 WHERE tenant_id = $1 AND id = $2
-RETURNING id, tenant_id, account_id, asset, amount, to_address, chain_id, idempotency_key, request_hash, status, failure_reason, reviewed_by, reviewed_at, review_note, hold_entry_id, correlation_id, version, created_at, updated_at, nonce, raw_tx, tx_hash, broadcast_at, replacements, block_number, gas_cost
+RETURNING id, tenant_id, account_id, asset, amount, to_address, chain_id, idempotency_key, request_hash, status, failure_reason, reviewed_by, reviewed_at, review_note, hold_entry_id, correlation_id, version, created_at, updated_at, nonce, raw_tx, tx_hash, broadcast_at, replacements, block_number, gas_cost, cancel_tx_hash
 `
 
 type UpdateWithdrawalStatusParams struct {
@@ -626,6 +635,7 @@ func (q *Queries) UpdateWithdrawalStatus(ctx context.Context, arg UpdateWithdraw
 		&i.Replacements,
 		&i.BlockNumber,
 		&i.GasCost,
+		&i.CancelTxHash,
 	)
 	return i, err
 }

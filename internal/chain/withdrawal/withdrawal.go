@@ -85,8 +85,11 @@ type Record struct {
 	ReviewNote    string
 	ReviewedBy    string
 	ReviewedAt    *time.Time
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
+	// TxHash is the transaction now representing this withdrawal: the
+	// displacement once one is in flight, otherwise the withdrawal's own.
+	TxHash    string
+	CreatedAt time.Time
+	UpdatedAt time.Time
 }
 
 // CreateResult is what Create produced. Replayed reports that it returned an
@@ -106,8 +109,11 @@ func recordFrom(row sqlcgen.ChainWithdrawal) (Record, error) {
 		ID: row.ID, AccountID: row.AccountID, Asset: row.Asset, Amount: amount,
 		ToAddress: row.ToAddress, ChainID: row.ChainID, Status: row.Status,
 		FailureReason: deref(row.FailureReason), ReviewNote: deref(row.ReviewNote),
-		ReviewedBy: deref(row.ReviewedBy),
-		CreatedAt:  row.CreatedAt, UpdatedAt: row.UpdatedAt,
+		ReviewedBy: deref(row.ReviewedBy), TxHash: deref(row.TxHash),
+		CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt,
+	}
+	if row.CancelTxHash != nil {
+		rec.TxHash = *row.CancelTxHash
 	}
 	if row.ReviewedAt.Valid {
 		at := row.ReviewedAt.Time

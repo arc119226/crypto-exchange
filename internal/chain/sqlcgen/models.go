@@ -129,4 +129,5 @@ type ChainWithdrawal struct {
 	Replacements   int32
 	BlockNumber    *int64
 	GasCost        pgtype.Numeric
+	CancelTxHash   *string
 }

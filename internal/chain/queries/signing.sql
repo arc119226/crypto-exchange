@@ -113,3 +113,30 @@ UPDATE chain.withdrawals
 SET nonce = $3, version = version + 1, updated_at = now()
 WHERE tenant_id = $1 AND id = $2
 RETURNING *;
+
+-- name: MarkWithdrawalCancelling :one
+-- Records the same-nonce transaction sent to displace a stuck withdrawal. The
+-- withdrawal stays broadcast: it is not resolved until the cancellation is
+-- mined.
+UPDATE chain.withdrawals
+SET cancel_tx_hash = $3, version = version + 1, updated_at = now()
+WHERE tenant_id = $1 AND id = $2
+RETURNING *;
+
+-- name: RetryWithdrawal :one
+-- Sends a failed withdrawal back for another attempt: the transaction columns
+-- are cleared so a fresh nonce is allocated, and the replacement counter is
+-- advanced so the new signature has a signing-log key of its own.
+UPDATE chain.withdrawals
+SET status = 'funds_locked', failure_reason = NULL,
+    nonce = NULL, raw_tx = NULL, tx_hash = NULL, broadcast_at = NULL,
+    block_number = NULL, cancel_tx_hash = NULL,
+    replacements = replacements + 1, version = version + 1, updated_at = now()
+WHERE tenant_id = $1 AND id = $2
+RETURNING *;
+
+-- name: ListCancellingWithdrawals :many
+SELECT * FROM chain.withdrawals
+WHERE tenant_id = $1 AND status = 'broadcast' AND cancel_tx_hash IS NOT NULL
+ORDER BY updated_at
+LIMIT $2;

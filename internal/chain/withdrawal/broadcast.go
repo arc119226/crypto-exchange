@@ -158,7 +158,9 @@ func (w *Worker) sign(ctx context.Context, row sqlcgen.ChainWithdrawal) error {
 		return err
 	}
 	res, err := w.signer.Sign(ctx, signer.Request{
-		Kind: signer.KindWithdrawal, RefID: row.ID, Attempt: 0, ChainID: row.ChainID,
+		// The attempt is the replacement counter, which resolve(retry)
+		// advances: a retry must not collide with the signature that failed.
+		Kind: signer.KindWithdrawal, RefID: row.ID, Attempt: row.Replacements, ChainID: row.ChainID,
 		To: to, Asset: row.Asset, Value: amount, Nonce: nonce, Gas: gas,
 		TipCap: fees.TipCap, FeeCap: fees.FeeCap,
 	})
@@ -335,8 +337,24 @@ func (w *Worker) track(ctx context.Context, row sqlcgen.ChainWithdrawal) error {
 	if row.TxHash == nil {
 		return fmt.Errorf("withdrawal: %s is broadcast without a hash", row.ID)
 	}
-	receipt, err := w.chain.Receipt(ctx, *row.TxHash)
+	// A cancellation in flight changes what "mined" means for this withdrawal:
+	// the answer is whichever of the two transactions takes the nonce. Watch
+	// the displacement, and fall back to the original when the node says the
+	// displacement is not there — the original may have won.
+	watch := *row.TxHash
+	cancelling := row.CancelTxHash != nil
+	if cancelling {
+		watch = *row.CancelTxHash
+	}
+	receipt, err := w.chain.Receipt(ctx, watch)
+	if cancelling && errors.Is(err, evm.ErrNotFound) {
+		receipt, err = w.chain.Receipt(ctx, *row.TxHash)
+		cancelling = false
+	}
 	if errors.Is(err, evm.ErrNotFound) {
+		if row.CancelTxHash != nil {
+			return nil // both are still in flight; wait rather than bid again
+		}
 		return w.maybeReplace(ctx, row)
 	}
 	if err != nil {
@@ -356,6 +374,10 @@ func (w *Worker) track(ctx context.Context, row sqlcgen.ChainWithdrawal) error {
 		return nil
 	}
 	gas := gasCost(receipt)
+	if cancelling {
+		// The displacement won the nonce, so the withdrawal never happened.
+		return w.settleCancelled(ctx, row, gas)
+	}
 	if receipt.Status == types.ReceiptStatusSuccessful {
 		return w.confirm(ctx, row, block, gas)
 	}

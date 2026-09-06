@@ -83,7 +83,13 @@ ALTER TABLE chain.withdrawals
     -- the block it was mined in, once a receipt says so
     ADD COLUMN block_number bigint  CHECK (block_number >= 0),
     -- gas actually paid, in the chain's native asset
-    ADD COLUMN gas_cost     numeric(36,18) CHECK (gas_cost >= 0);
+    ADD COLUMN gas_cost     numeric(36,18) CHECK (gas_cost >= 0),
+    -- Set when an operator cancels a stuck withdrawal with a same-nonce
+    -- self-transfer (§6.4.2 resolve(cancel_nonce)). The refund waits for
+    -- *this* hash to confirm, not the original: until the replacement is
+    -- mined the original can still win the race, and refunding early would
+    -- credit a user for money that then leaves anyway.
+    ADD COLUMN cancel_tx_hash text CHECK (cancel_tx_hash ~ '^0x[0-9a-f]{64}$');
 
 -- Signed means signed: the three things the signer produced must be there
 -- together, and stay there afterwards. This is the schema half of "nonce, raw
@@ -120,8 +126,14 @@ GRANT USAGE ON ALL SEQUENCES IN SCHEMA chain TO ex_chain, ex_signer, ex_all;
 
 -- The chain role writes the transaction columns; it still cannot review, and
 -- the api still cannot write anything (0010).
-GRANT UPDATE (nonce, raw_tx, tx_hash, broadcast_at, replacements, block_number, gas_cost)
+GRANT UPDATE (nonce, raw_tx, tx_hash, broadcast_at, replacements, block_number, gas_cost, cancel_tx_hash)
   ON chain.withdrawals TO ex_chain;
+
+-- Admin drives resolve: it may cancel a stuck withdrawal or send one back for
+-- another attempt, which needs the same transaction columns. It still cannot
+-- sign, and the chain role still cannot review (0010).
+GRANT UPDATE (nonce, raw_tx, tx_hash, broadcast_at, replacements, cancel_tx_hash)
+  ON chain.withdrawals TO ex_admin;
 
 -- The signer must read the withdrawal it is asked to sign, to check the
 -- amount, asset and destination against the request (§6.6). 0010 already

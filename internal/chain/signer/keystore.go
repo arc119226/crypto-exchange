@@ -141,19 +141,26 @@ func (s *KeystoreSigner) withdrawalTx(ctx context.Context, req Request) (common.
 	if err != nil {
 		return common.Address{}, nil, nil, fmt.Errorf("signer: read withdrawal %s: %w", req.RefID, err)
 	}
-	// Only funds_locked may be signed for the first time. A replacement is
-	// signed while the withdrawal is already broadcast, which is the one case
-	// where a later state is legitimate — and it is only reachable with an
-	// attempt above zero, which the unique key ties to a real replacement.
+	// The attempt number is not free: it must be the one this withdrawal is
+	// actually on, so that "attempt > 0" is never an open licence to re-sign.
+	//
+	// funds_locked expects attempt == replacements. That is 0 for a fresh
+	// withdrawal and higher for one an operator sent back with resolve(retry),
+	// which is what gives the retry a signing-log key of its own instead of
+	// colliding with the signature that already failed.
+	//
+	// broadcast expects attempt == replacements + 1: a fee bump, which must
+	// also reuse the original nonce or it would be a second transaction rather
+	// than a replacement for the first.
 	switch {
-	case req.Attempt == 0 && row.Status != "funds_locked":
-		return common.Address{}, nil, nil, fmt.Errorf("%w: withdrawal %s is %s, not funds_locked", ErrRefused, req.RefID, row.Status)
-	case req.Attempt > 0 && row.Status != "broadcast":
-		return common.Address{}, nil, nil, fmt.Errorf("%w: withdrawal %s is %s, so there is nothing to replace", ErrRefused, req.RefID, row.Status)
-	case req.Attempt > 0 && int32(req.Attempt) != row.Replacements+1:
+	case row.Status == "funds_locked" && req.Attempt != row.Replacements:
+		return common.Address{}, nil, nil, fmt.Errorf("%w: withdrawal %s is on attempt %d, not %d", ErrRefused, req.RefID, row.Replacements, req.Attempt)
+	case row.Status == "broadcast" && req.Attempt != row.Replacements+1:
 		return common.Address{}, nil, nil, fmt.Errorf("%w: withdrawal %s is on replacement %d, not %d", ErrRefused, req.RefID, row.Replacements, req.Attempt)
-	case req.Attempt > 0 && (row.Nonce == nil || uint64(*row.Nonce) != req.Nonce): //nolint:gosec // CHECKed >= 0
+	case row.Status == "broadcast" && (row.Nonce == nil || uint64(*row.Nonce) != req.Nonce): //nolint:gosec // CHECKed >= 0
 		return common.Address{}, nil, nil, fmt.Errorf("%w: a replacement must reuse the original nonce", ErrRefused)
+	case row.Status != "funds_locked" && row.Status != "broadcast":
+		return common.Address{}, nil, nil, fmt.Errorf("%w: withdrawal %s is %s, which may not be signed", ErrRefused, req.RefID, row.Status)
 	}
 	amount, err := pg.AmountFromNumeric(row.Amount)
 	if err != nil {
