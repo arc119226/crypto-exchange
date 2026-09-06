@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # Creates the development secrets (docs/plan-v1.0.md §11, §14):
-#   .env                      from .env.example, CHANGE_ME values replaced with random hex
-#   secrets/jwt/ed25519.pem   JWT signing key (exchange keys gen-jwt)
-#   secrets/dev-mnemonic.txt  fresh BIP-39 mnemonic from `cast wallet new-mnemonic`
-#   HOT_WALLET_ADDRESS        m/44'/60'/1'/0/0 of that mnemonic, written into .env
+#   .env                        from .env.example, CHANGE_ME values replaced with random hex
+#   secrets/jwt/ed25519.pem     JWT signing key (exchange keys gen-jwt)
+#   secrets/dev-mnemonic.txt    fresh BIP-39 mnemonic from `cast wallet new-mnemonic`
+#   HOT_WALLET_ADDRESS          m/44'/60'/1'/0/0 of that mnemonic, written into .env
+#   secrets/keystore/hd-seed.json  that mnemonic encrypted for the signer role
 # Idempotent: existing files are kept; FORCE=1 regenerates everything.
 # Requires bash, openssl, go; docker is needed for the mnemonic step (foundry image).
 set -euo pipefail
@@ -78,4 +79,29 @@ hot="$(cast wallet address --mnemonic "$(<secrets/dev-mnemonic.txt)" --mnemonic-
 [[ "$hot" =~ ^0x[0-9a-fA-F]{40}$ ]] || { log "unexpected address from cast: $hot"; exit 1; }
 set_var .env HOT_WALLET_ADDRESS "$hot"
 log "HOT_WALLET_ADDRESS=$hot (m/44'/60'/1'/0/0)"
+
+# 4. HD seed keystore for the signer role
+# Two independent derivations of m/44'/60'/1'/0/0 meet here: `cast` above and
+# our own BIP-44 code below. They must agree, or the signer is opening a
+# different seed than the deployer funded.
+passphrase="$(sed -n 's/^WALLET_KEYSTORE_PASSPHRASE=//p' .env)"
+[[ -n "$passphrase" ]] || { log "WALLET_KEYSTORE_PASSPHRASE missing from .env"; exit 1; }
+if [[ -f secrets/keystore/hd-seed.json && "$FORCE" != 1 ]]; then
+  log "secrets/keystore/hd-seed.json exists, keeping it"
+else
+  out="$(WALLET_KEYSTORE_PASSPHRASE="$passphrase" go run ./cmd/exchange keys import-mnemonic \
+    --from secrets/dev-mnemonic.txt --keystore-dir secrets/keystore --force)"
+  derived="$(printf '%s' "$out" | sed -n 's/^hot wallet: //p' | tr -d '[:space:]')"
+  if [[ "$derived" != "$hot" ]]; then
+    log "hot wallet mismatch: cast says $hot, the keystore derives $derived"
+    exit 1
+  fi
+  log "wrote secrets/keystore/hd-seed.json (hot wallet matches cast)"
+fi
+# Same reason as the JWT key above: the signer container runs as distroless
+# nonroot (uid 65532) and bind mounts this directory, so a 0600 file owned by
+# whoever ran this script is unreadable to it. Development seed, gitignored.
+chmod 0755 secrets/keystore
+chmod 0644 secrets/keystore/hd-seed.json
+
 log "done — next: make up-single"
