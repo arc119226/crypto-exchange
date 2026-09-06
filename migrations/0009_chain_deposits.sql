@@ -27,7 +27,7 @@ CREATE TABLE chain.deposits (
     status        text        NOT NULL CHECK (status IN
                       ('detected', 'confirming', 'credited', 'orphaned', 'dropped', 'reversed')),
     -- the block the deposit was orphaned at, so ORPHAN_EXPIRY_BLOCKS can be
-    -- measured without a second clock
+    -- measured without a second clock; cleared when it reappears
     orphaned_at_block bigint,
     credited_at   timestamptz,
     correlation_id text,
@@ -35,7 +35,12 @@ CREATE TABLE chain.deposits (
     created_at    timestamptz NOT NULL DEFAULT now(),
     updated_at    timestamptz NOT NULL DEFAULT now(),
     CHECK ((status = 'credited') = (credited_at IS NOT NULL)),
-    CHECK ((status = 'orphaned') = (orphaned_at_block IS NOT NULL))
+    -- An orphan that is later dropped keeps the height it was orphaned at:
+    -- that is how the expiry was measured, and losing it would make the row
+    -- unexplainable. So the requirement is one-directional — these two states
+    -- must know when — rather than a biconditional that would reject the
+    -- orphaned -> dropped transition itself.
+    CHECK (status NOT IN ('orphaned', 'dropped') OR orphaned_at_block IS NOT NULL)
 );
 CREATE UNIQUE INDEX deposits_txid_uniq ON chain.deposits (tenant_id, chain_id, tx_hash, log_index);
 -- the scanner's two hot queries: what is still maturing, and what a reorg of
