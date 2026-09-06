@@ -63,6 +63,21 @@ var (
 	seedMinNotional = money.MustParse("5")
 )
 
+// Withdrawal limits per asset and KYC level (docs/plan-v1.0.md §6.4.2). The
+// table has been in the schema since 0002 with nothing to fill it; without
+// rows the policy sends every withdrawal to manual review, which would make a
+// dev stack look broken. The level-0 ceilings are deliberately low so that the
+// same dev chain exercises both branches: a small withdrawal auto-approves, a
+// larger one queues for a person.
+var seedWithdrawalLimits = []WithdrawalLimitInput{
+	{Asset: "ETH", KYCLevel: 0, AutoApproveLimit: money.MustParse("0.1"), DailyLimit: money.MustParse("1")},
+	{Asset: "ETH", KYCLevel: 1, AutoApproveLimit: money.MustParse("1"), DailyLimit: money.MustParse("10")},
+	{Asset: "ETH", KYCLevel: 2, AutoApproveLimit: money.MustParse("10"), DailyLimit: money.MustParse("100")},
+	{Asset: "USDC", KYCLevel: 0, AutoApproveLimit: money.MustParse("200"), DailyLimit: money.MustParse("2000")},
+	{Asset: "USDC", KYCLevel: 1, AutoApproveLimit: money.MustParse("2000"), DailyLimit: money.MustParse("20000")},
+	{Asset: "USDC", KYCLevel: 2, AutoApproveLimit: money.MustParse("20000"), DailyLimit: money.MustParse("200000")},
+}
+
 // SeedOptions parameterise Seed.
 type SeedOptions struct {
 	TenantID              string
@@ -74,6 +89,7 @@ type SeedResult struct {
 	FeeSchedules int
 	Assets       int
 	Markets      int
+	Limits       int
 }
 
 // Seed upserts the default fee schedule, ETH, USDC and the ETH-USDC market
@@ -119,6 +135,15 @@ func Seed(ctx context.Context, pool *pgxpool.Pool, fx Fixtures, opts SeedOptions
 		return res, err
 	}
 	res.Markets++
+
+	// After the assets: the upsert resolves the asset by symbol, so the row
+	// has to exist first.
+	for _, in := range seedWithdrawalLimits {
+		if _, err := store.UpsertWithdrawalLimit(ctx, tx, opts.TenantID, in); err != nil {
+			return res, err
+		}
+		res.Limits++
+	}
 
 	if err := tx.Commit(ctx); err != nil {
 		return res, fmt.Errorf("seed: commit: %w", err)

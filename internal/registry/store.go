@@ -223,3 +223,56 @@ func (s *Store) SetMarketStatus(ctx context.Context, tx pgx.Tx, tenantID, symbol
 	m, err := marketFromRow(sqlcgen.ListMarketsRow(after))
 	return m, true, err
 }
+
+// ListWithdrawalLimits returns every configured limit of the tenant.
+func (s *Store) ListWithdrawalLimits(ctx context.Context, tenantID string) ([]WithdrawalLimit, error) {
+	rows, err := s.q.ListWithdrawalLimits(ctx, tenantID)
+	if err != nil {
+		return nil, fmt.Errorf("registry: list withdrawal limits: %w", err)
+	}
+	out := make([]WithdrawalLimit, 0, len(rows))
+	for _, r := range rows {
+		l, err := withdrawalLimitFromRow(r)
+		if err != nil {
+			return nil, fmt.Errorf("registry: withdrawal limit %s/%d: %w", r.AssetSymbol, r.KycLevel, err)
+		}
+		out = append(out, l)
+	}
+	return out, nil
+}
+
+// GetWithdrawalLimit returns the limit for one asset at one KYC level, or
+// ErrNotFound. A missing row is not "no limit": the caller must decide, and
+// the withdrawal policy treats it as review-everything.
+func (s *Store) GetWithdrawalLimit(ctx context.Context, tenantID, symbol string, kycLevel int16) (WithdrawalLimit, error) {
+	r, err := s.q.GetWithdrawalLimit(ctx, sqlcgen.GetWithdrawalLimitParams{TenantID: tenantID, Symbol: symbol, KycLevel: kycLevel})
+	if err != nil {
+		return WithdrawalLimit{}, mapErr(fmt.Sprintf("withdrawal limit %s/%d", symbol, kycLevel), err)
+	}
+	return withdrawalLimitFromRow(sqlcgen.ListWithdrawalLimitsRow(r))
+}
+
+// UpsertWithdrawalLimit writes one limit. Like the other upserts it only bumps
+// the version when a value actually changed, so re-seeding is a no-op.
+func (s *Store) UpsertWithdrawalLimit(ctx context.Context, tx pgx.Tx, tenantID string, in WithdrawalLimitInput) (WithdrawalLimit, error) {
+	if err := ValidateWithdrawalLimit(in); err != nil {
+		return WithdrawalLimit{}, err
+	}
+	q := s.q
+	if tx != nil {
+		q = s.q.WithTx(tx)
+	}
+	if err := q.UpsertWithdrawalLimit(ctx, sqlcgen.UpsertWithdrawalLimitParams{
+		TenantID: tenantID, Symbol: in.Asset, KycLevel: in.KYCLevel,
+		AutoApproveLimit:    pg.NumericFromAmount(in.AutoApproveLimit),
+		DailyLimit:          pg.NumericFromAmount(in.DailyLimit),
+		RequireManualReview: in.RequireManualReview,
+	}); err != nil {
+		return WithdrawalLimit{}, fmt.Errorf("registry: upsert withdrawal limit %s/%d: %w", in.Asset, in.KYCLevel, err)
+	}
+	r, err := q.GetWithdrawalLimit(ctx, sqlcgen.GetWithdrawalLimitParams{TenantID: tenantID, Symbol: in.Asset, KycLevel: in.KYCLevel})
+	if err != nil {
+		return WithdrawalLimit{}, mapErr(fmt.Sprintf("withdrawal limit %s/%d", in.Asset, in.KYCLevel), err)
+	}
+	return withdrawalLimitFromRow(sqlcgen.ListWithdrawalLimitsRow(r))
+}
