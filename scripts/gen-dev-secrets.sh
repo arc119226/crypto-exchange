@@ -47,6 +47,15 @@ else
   go run ./cmd/exchange keys gen-jwt --out secrets/jwt/ed25519.pem --force >/dev/null
   log "wrote secrets/jwt/ed25519.pem"
 fi
+# `keys gen-jwt` writes 0600, which is right for a real deployment where the
+# key arrives as a K8s Secret owned by the process user. Here the file is bind
+# mounted into containers that run as distroless nonroot (uid 65532), so a
+# 0600 file owned by whoever ran this script is unreadable to them and the api
+# role exits with "read jwt key: permission denied". This key only signs
+# development sessions and secrets/ is gitignored. Phase 4 will need the same
+# for secrets/keystore/hd-seed.json once the signer reads it.
+chmod 0755 secrets/jwt
+chmod 0644 secrets/jwt/ed25519.pem
 
 # 3. mnemonic + hot wallet address (needs docker for the foundry image)
 if ! docker info >/dev/null 2>&1; then
