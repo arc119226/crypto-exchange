@@ -33,7 +33,9 @@ func startNATS(t *testing.T) string {
 		return url
 	}
 	ctx := context.Background()
-	ctr, err := tcnats.Run(ctx, natsImage, tcnats.WithArgument("js", ""))
+	// the module's default command is `-DV -js`, so JetStream is already on;
+	// WithArgument("js", "") would append `--js ""` and crash the server
+	ctr, err := tcnats.Run(ctx, natsImage)
 	if err != nil {
 		if os.Getenv("CI") == "" {
 			t.Skipf("docker not available, skipping NATS integration test: %v", err)
