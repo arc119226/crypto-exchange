@@ -44,34 +44,3 @@ type RegistryFeeSchedule struct {
 	CreatedAt     time.Time
 	UpdatedAt     time.Time
 }
-
-type RegistryMarket struct {
-	ID              string
-	TenantID        string
-	Symbol          string
-	BaseAssetID     string
-	QuoteAssetID    string
-	PriceTick       pgtype.Numeric
-	QtyStep         pgtype.Numeric
-	MinNotional     pgtype.Numeric
-	MaxQty          pgtype.Numeric
-	MaxSlippageBps  *int32
-	FeeScheduleID   string
-	SelfTradePolicy string
-	Status          string
-	Version         int32
-	CreatedAt       time.Time
-	UpdatedAt       time.Time
-}
-
-type RegistryWithdrawalLimit struct {
-	TenantID            string
-	AssetID             string
-	KycLevel            int16
-	AutoApproveLimit    pgtype.Numeric
-	DailyLimit          pgtype.Numeric
-	RequireManualReview bool
-	Version             int32
-	CreatedAt           time.Time
-	UpdatedAt           time.Time
-}
