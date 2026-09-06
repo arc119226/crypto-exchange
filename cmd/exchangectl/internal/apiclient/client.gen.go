@@ -442,6 +442,22 @@ type CreatedAPIKey struct {
 	Secret string `json:"secret"`
 }
 
+// DepositAddress defines model for DepositAddress.
+type DepositAddress struct {
+	// Address EIP-55 checksummed address. Send only assets of this chain to it.
+	//
+	// Example: 0x9858EfFD232B4033E47d90003D41EC34EcaEda94
+	Address string `json:"address"`
+
+	// Asset Example: ETH
+	Asset string `json:"asset"`
+
+	// ChainID EVM chain the address lives on.
+	//
+	// Example: 31337
+	ChainID int64 `json:"chain_id"`
+}
+
 // Depth defines model for Depth.
 type Depth struct {
 	// Asks Best (lowest) ask first
@@ -908,6 +924,12 @@ type Unauthorized = Problem
 // UnprocessableEntity RFC 7807 problem details.
 type UnprocessableEntity = Problem
 
+// GetDepositAddressParams defines parameters for GetDepositAddress.
+type GetDepositAddressParams struct {
+	// Asset Asset symbol, used to pick the chain and to check deposits are open.
+	Asset string `form:"asset" json:"asset"`
+}
+
 // ListFillsParams defines parameters for ListFills.
 type ListFillsParams struct {
 	Market  *string `form:"market,omitempty" json:"market,omitempty"`
@@ -1156,6 +1178,13 @@ type ClientInterface interface {
 	//
 	// Corresponds with GET /v1/balances (the `ListBalances` operationId).
 	ListBalances(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetDepositAddress The caller's deposit address for an asset
+	//
+	// Returns the address to send deposits to. One address per account per chain: every asset on the same chain, native and ERC-20 alike, shares it, and repeated calls return the same address. Addresses are pre-generated, so a 503 means the pool is momentarily empty and the call should be retried.
+	//
+	// Corresponds with GET /v1/deposit-address (the `GetDepositAddress` operationId).
+	GetDepositAddress(ctx context.Context, params *GetDepositAddressParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// ListFills The caller's fills (its side of each trade)
 	//
@@ -1505,6 +1534,23 @@ func (c *Client) Register(ctx context.Context, body RegisterJSONRequestBody, req
 // Corresponds with GET /v1/balances (the `ListBalances` operationId).
 func (c *Client) ListBalances(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewListBalancesRequest(c.Server)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// GetDepositAddress The caller's deposit address for an asset
+//
+// Returns the address to send deposits to. One address per account per chain: every asset on the same chain, native and ERC-20 alike, shares it, and repeated calls return the same address. Addresses are pre-generated, so a 503 means the pool is momentarily empty and the call should be retried.
+//
+// Corresponds with GET /v1/deposit-address (the `GetDepositAddress` operationId).
+func (c *Client) GetDepositAddress(ctx context.Context, params *GetDepositAddressParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetDepositAddressRequest(c.Server, params)
 	if err != nil {
 		return nil, err
 	}
@@ -2067,6 +2113,56 @@ func NewListBalancesRequest(server string) (*http.Request, error) {
 	queryURL, err := serverURL.Parse(operationPath)
 	if err != nil {
 		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewGetDepositAddressRequest constructs an http.Request for the GetDepositAddress method
+func NewGetDepositAddressRequest(server string, params *GetDepositAddressParams) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/deposit-address")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		// queryValues collects non-styled parameters (passthrough, JSON)
+		// that are safe to round-trip through url.Values.Encode().
+		queryValues := queryURL.Query()
+		// rawQueryFragments collects pre-encoded query fragments from
+		// styled parameters, preserving literal commas as delimiters
+		// per the OpenAPI spec (e.g. "color=blue,black,brown").
+		var rawQueryFragments []string
+
+		if queryFrag, err := runtime.StyleParamWithOptions("form", true, "asset", params.Asset, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+			return nil, err
+		} else {
+			for _, qp := range strings.Split(queryFrag, "&") {
+				rawQueryFragments = append(rawQueryFragments, qp)
+			}
+		}
+
+		if encoded := queryValues.Encode(); encoded != "" {
+			rawQueryFragments = append(rawQueryFragments, encoded)
+		}
+		queryURL.RawQuery = strings.Join(rawQueryFragments, "&")
 	}
 
 	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
@@ -2807,6 +2903,15 @@ type ClientWithResponsesInterface interface {
 	//
 	// Corresponds with GET /v1/balances (the `ListBalances` operationId).
 	ListBalancesWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*ListBalancesResponse, error)
+
+	// GetDepositAddressWithResponse The caller's deposit address for an asset
+	//
+	// Returns the address to send deposits to. One address per account per chain: every asset on the same chain, native and ERC-20 alike, shares it, and repeated calls return the same address. Addresses are pre-generated, so a 503 means the pool is momentarily empty and the call should be retried.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /v1/deposit-address (the `GetDepositAddress` operationId).
+	GetDepositAddressWithResponse(ctx context.Context, params *GetDepositAddressParams, reqEditors ...RequestEditorFn) (*GetDepositAddressResponse, error)
 
 	// ListFillsWithResponse The caller's fills (its side of each trade)
 	//
@@ -3565,6 +3670,82 @@ func (r ListBalancesResponse) StatusCode() int {
 
 // ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
 func (r ListBalancesResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type GetDepositAddressResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *DepositAddress
+	// ApplicationProblemJSON401 the response for an HTTP 401 `application/problem+json` response
+	ApplicationProblemJSON401 *Unauthorized
+	// ApplicationProblemJSON404 the response for an HTTP 404 `application/problem+json` response
+	ApplicationProblemJSON404 *NotFound
+	// ApplicationProblemJSON422 the response for an HTTP 422 `application/problem+json` response
+	ApplicationProblemJSON422 *UnprocessableEntity
+	// ApplicationProblemJSON500 the response for an HTTP 500 `application/problem+json` response
+	ApplicationProblemJSON500 *InternalError
+	// ApplicationProblemJSON503 the response for an HTTP 503 `application/problem+json` response
+	ApplicationProblemJSON503 *ServiceUnavailable
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r GetDepositAddressResponse) GetJSON200() *DepositAddress {
+	return r.JSON200
+}
+
+// GetApplicationProblemJSON401 returns the response for an HTTP 401 `application/problem+json` response
+func (r GetDepositAddressResponse) GetApplicationProblemJSON401() *Unauthorized {
+	return r.ApplicationProblemJSON401
+}
+
+// GetApplicationProblemJSON404 returns the response for an HTTP 404 `application/problem+json` response
+func (r GetDepositAddressResponse) GetApplicationProblemJSON404() *NotFound {
+	return r.ApplicationProblemJSON404
+}
+
+// GetApplicationProblemJSON422 returns the response for an HTTP 422 `application/problem+json` response
+func (r GetDepositAddressResponse) GetApplicationProblemJSON422() *UnprocessableEntity {
+	return r.ApplicationProblemJSON422
+}
+
+// GetApplicationProblemJSON500 returns the response for an HTTP 500 `application/problem+json` response
+func (r GetDepositAddressResponse) GetApplicationProblemJSON500() *InternalError {
+	return r.ApplicationProblemJSON500
+}
+
+// GetApplicationProblemJSON503 returns the response for an HTTP 503 `application/problem+json` response
+func (r GetDepositAddressResponse) GetApplicationProblemJSON503() *ServiceUnavailable {
+	return r.ApplicationProblemJSON503
+}
+
+// GetBody returns the raw response body bytes
+func (r GetDepositAddressResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r GetDepositAddressResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetDepositAddressResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r GetDepositAddressResponse) ContentType() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Header.Get("Content-Type")
 	}
@@ -4448,6 +4629,21 @@ func (c *ClientWithResponses) ListBalancesWithResponse(ctx context.Context, reqE
 	return ParseListBalancesResponse(rsp)
 }
 
+// GetDepositAddressWithResponse The caller's deposit address for an asset
+//
+// Returns the address to send deposits to. One address per account per chain: every asset on the same chain, native and ERC-20 alike, shares it, and repeated calls return the same address. Addresses are pre-generated, so a 503 means the pool is momentarily empty and the call should be retried.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /v1/deposit-address (the `GetDepositAddress` operationId).
+func (c *ClientWithResponses) GetDepositAddressWithResponse(ctx context.Context, params *GetDepositAddressParams, reqEditors ...RequestEditorFn) (*GetDepositAddressResponse, error) {
+	rsp, err := c.GetDepositAddress(ctx, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetDepositAddressResponse(rsp)
+}
+
 // ListFillsWithResponse The caller's fills (its side of each trade)
 //
 // Returns a wrapper object for the known response body format(s).
@@ -5123,6 +5319,67 @@ func ParseListBalancesResponse(rsp *http.Response) (*ListBalancesResponse, error
 			return nil, err
 		}
 		response.ApplicationProblemJSON500 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetDepositAddressResponse parses an HTTP response from a GetDepositAddressWithResponse call
+func ParseGetDepositAddressResponse(rsp *http.Response) (*GetDepositAddressResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetDepositAddressResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest DepositAddress
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest UnprocessableEntity
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON422 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON500 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest ServiceUnavailable
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON503 = &dest
 
 	}
 

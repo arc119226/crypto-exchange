@@ -104,6 +104,34 @@ linters:
             - github.com/prometheus/client_golang
             - github.com/stretchr/testify
             - pgregory.net/rapid
+        chain:
+          list-mode: strict
+          files:
+            - "**/internal/chain/**"
+          allow:
+            - $gostd
+            - github.com/arc119226/crypto-exchange/internal/chain
+            - github.com/arc119226/crypto-exchange/internal/ledger
+            - github.com/arc119226/crypto-exchange/internal/registry
+            - github.com/arc119226/crypto-exchange/internal/eventbus
+            - github.com/arc119226/crypto-exchange/internal/money
+            - github.com/arc119226/crypto-exchange/internal/telemetry
+            - github.com/arc119226/crypto-exchange/internal/platform/pg
+            - github.com/btcsuite/btcd
+            - github.com/cosmos/go-bip39
+            - github.com/ethereum/go-ethereum
+            - github.com/jackc/pgx/v5
+            - github.com/prometheus/client_golang
+            - github.com/stretchr/testify
+            - golang.org/x/crypto
+        # docs/plan-v1.0.md §8: the api role imports the address-assignment
+        # half of chain, so that half must never reach key derivation.
+        chain-assignment:
+          files:
+            - "**/internal/chain/*.go"
+          deny:
+            - pkg: github.com/arc119226/crypto-exchange/internal/chain/hdwallet
+              desc: address assignment must not import key derivation
         cmdbus:
           list-mode: strict
           files:

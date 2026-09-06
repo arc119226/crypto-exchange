@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgconn"
@@ -21,6 +22,7 @@ import (
 
 	"github.com/arc119226/crypto-exchange/internal/audit"
 	"github.com/arc119226/crypto-exchange/internal/auth"
+	"github.com/arc119226/crypto-exchange/internal/chain/hdwallet"
 	"github.com/arc119226/crypto-exchange/internal/ledger"
 	"github.com/arc119226/crypto-exchange/internal/platform/pg"
 	"github.com/arc119226/crypto-exchange/internal/registry"
@@ -189,6 +191,70 @@ func Healthcheck(ctx context.Context, url string, timeout time.Duration) error {
 		return fmt.Errorf("healthcheck: %s returned %d: %s", url, resp.StatusCode, string(body))
 	}
 	return nil
+}
+
+// ImportMnemonicOptions configures the HD seed import (docs/plan-v1.0.md
+// §14, ADR-0007).
+type ImportMnemonicOptions struct {
+	// From is the file holding the BIP-39 mnemonic, one line.
+	From string
+	// KeystoreDir receives hd-seed.json.
+	KeystoreDir string
+	// Passphrase encrypts it; normally WALLET_KEYSTORE_PASSPHRASE.
+	Passphrase string
+	// Force overwrites an existing keystore. Without it the command refuses,
+	// because replacing the seed orphans every address already handed out.
+	Force bool
+	// Scrypt overrides the KDF work factors. The zero value means
+	// hdwallet.DefaultScrypt; tests lower it so `make test` does not pay
+	// 256 MiB and a second of scrypt under -race.
+	Scrypt hdwallet.ScryptParams
+}
+
+// ImportMnemonic encrypts a BIP-39 mnemonic into the HD seed keystore and
+// returns the path plus the hot wallet address it derives.
+//
+// The address is returned so the caller can check it: scripts/gen-dev-secrets.sh
+// computes the same m/44'/60'/1'/0/0 with `cast wallet address` and writes it
+// to HOT_WALLET_ADDRESS, so a mismatch means this import read a different
+// mnemonic than the rest of the stack expects.
+func ImportMnemonic(opts ImportMnemonicOptions) (path, hotWallet string, err error) {
+	if opts.From == "" || opts.KeystoreDir == "" {
+		return "", "", errors.New("keys: --from and --keystore-dir are required")
+	}
+	if opts.Passphrase == "" {
+		return "", "", errors.New("keys: WALLET_KEYSTORE_PASSPHRASE is required to encrypt the seed")
+	}
+	target := filepath.Join(opts.KeystoreDir, hdwallet.SeedFileName)
+	if _, err := os.Stat(target); err == nil && !opts.Force {
+		return "", "", fmt.Errorf("keys: %s already exists (use --force to replace the seed, which orphans every address already handed out)", target)
+	}
+	raw, err := os.ReadFile(opts.From) //nolint:gosec // an operator-supplied path
+	if err != nil {
+		return "", "", fmt.Errorf("keys: read mnemonic: %w", err)
+	}
+	mnemonic := strings.Join(strings.Fields(string(raw)), " ")
+
+	// Derive before writing: an unusable seed should fail here, not at the
+	// signer's next start.
+	w, err := hdwallet.FromMnemonic(mnemonic)
+	if err != nil {
+		return "", "", err
+	}
+	defer w.Close()
+	addr, err := w.Address(hdwallet.HotWalletPath())
+	if err != nil {
+		return "", "", err
+	}
+	kdf := opts.Scrypt
+	if kdf.N == 0 {
+		kdf = hdwallet.DefaultScrypt()
+	}
+	path, err = hdwallet.Save(opts.KeystoreDir, mnemonic, opts.Passphrase, kdf)
+	if err != nil {
+		return "", "", err
+	}
+	return path, addr.Hex(), nil
 }
 
 // GenerateJWTKey writes a new Ed25519 private key as PKCS#8 PEM with mode

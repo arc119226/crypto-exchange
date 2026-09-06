@@ -94,3 +94,14 @@ sql:
         emit_empty_slices: true
         emit_pointers_for_null_types: true
         omit_unused_structs: true
+  - engine: postgresql
+    schema: migrations
+    queries: internal/chain/queries
+    gen:
+      go:
+        package: sqlcgen
+        out: internal/chain/sqlcgen
+        sql_package: pgx/v5
+        emit_empty_slices: true
+        emit_pointers_for_null_types: true
+        omit_unused_structs: true

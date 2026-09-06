@@ -2,7 +2,9 @@
 
 白牌交易引擎(white-label exchange engine)的商業化原型:現貨撮合、複式記帳帳本、EVM 充提與歸集、行情推播、管理後台,以單一 Go binary 多角色的模組化單體交付,客戶透過 REST / WebSocket / Webhook 與事件契約整合。
 
-**目前狀態:Phase 3 完成(3a 引擎 + 3b auth/API + 3c 拆分部署與事件契約;本 PR 為 3c)。** 已合併:Phase 0 walking skeleton、Phase 1 `internal/matching`(無 I/O、確定性訂單簿)、Phase 2 `internal/ledger`(複式記帳、凍結即分錄、冪等鍵)與 admin API、Phase 3a `internal/trading` + `internal/eventbus`(每市場 runner、一筆交易內 Hold → Apply → 成交 / 分錄 / outbox、重啟重建、JetStream relay)、Phase 3b `internal/auth` + `internal/ratelimit` + public API(JWT / refresh / API key HMAC、限流、`client_order_id` 冪等)。3c 讓拆分部署真的能交易:`internal/cmdbus`(NATS request-reply 命令匯流排,跨容器仍保持 404 / 422 / 503 的錯誤語意,命令帶 `aud=internal` JWT)、`eventbus` 消費端與引擎的`market.updated` 熱載入、`PUT /admin/v1/markets/{symbol}/status`、`api/events/v1/*.json` + `docs/events.md` 事件契約(golden + JSON Schema 測試),以及每個 PR 都跑的多容器 `make e2e`。下一步 Phase 4:鏈上(HD 充值地址、確認數與 reorg、提現狀態機與 nonce、歸集、對帳)。
+**目前狀態:Phase 4a-1 進行中(HD 金鑰與充值地址池;本 PR)。Phase 3 已完成。** 已合併:Phase 0 walking skeleton、Phase 1 `internal/matching`(無 I/O、確定性訂單簿)、Phase 2 `internal/ledger`(複式記帳、凍結即分錄、冪等鍵)與 admin API、Phase 3a `internal/trading` + `internal/eventbus`(每市場 runner、一筆交易內 Hold → Apply → 成交 / 分錄 / outbox、重啟重建、JetStream relay)、Phase 3b `internal/auth` + `internal/ratelimit` + public API(JWT / refresh / API key HMAC、限流、`client_order_id` 冪等)。3c 讓拆分部署真的能交易:`internal/cmdbus`(NATS request-reply 命令匯流排,跨容器仍保持 404 / 422 / 503 的錯誤語意,命令帶 `aud=internal` JWT)、`eventbus` 消費端與引擎的`market.updated` 熱載入、`PUT /admin/v1/markets/{symbol}/status`、`api/events/v1/*.json` + `docs/events.md` 事件契約(golden + JSON Schema 測試),以及每個 PR 都跑的多容器 `make e2e`。
+
+本 PR(4a-1)開始 Phase 4 鏈上:`internal/chain/hdwallet`(BIP-44 派生、scrypt + AES-256-GCM 的 `hd-seed.json`)、`exchange keys import-mnemonic`、signer role 維護的**預生成充值地址池**,以及 `GET /v1/deposit-address`——api role 只認領地址,永遠拿不到金鑰。掃描、確認數、reorg 與入帳在 4a-2。
 
 ## 產品邊界
 
@@ -17,7 +19,9 @@
 需求:Go 1.26(`go.mod` 釘住 toolchain,會自動下載)、Docker Desktop 或 Docker Engine + Compose v2、`make`、`openssl`。
 
 ```sh
-make gen-dev-secrets    # .env(隨機密鑰)、secrets/jwt/ed25519.pem、新的 BIP-39 助記詞與 HOT_WALLET_ADDRESS
+make gen-dev-secrets    # .env(隨機密鑰)、secrets/jwt/ed25519.pem、新的 BIP-39 助記詞與 HOT_WALLET_ADDRESS、
+                        # secrets/keystore/hd-seed.json(signer 的加密種子)
+                        # 4a-1 之前跑過的人要再跑一次,否則 signer 沒有種子起不來
 make up-single          # postgres / redis / nats / anvil / MockUSDC 部署 / migrate / seed / exchange-all / prometheus / grafana
 
 curl -s localhost:8080/v1/markets | jq          # seed 進去的 ETH-USDC,金額一律字串("price_tick": "0.01")
@@ -118,4 +122,4 @@ docs                  計畫、審查、ADR、領域文件
 
 ## 下一步
 
-Phase 3(`docs/plan-v1.0.md` §12)分三個 PR,3a 與 3b 已合併,3c 為本 PR;完成後 Phase 3 的 DoD 全數滿足。下一階段 Phase 4 鏈上分 4a 充值、4b 提現、4c 歸集與對帳、4d Sepolia 驗證。DoD 不過不進下一階段。
+Phase 3(`docs/plan-v1.0.md` §12)分三個 PR 全數合併,DoD 全滿足。Phase 4 鏈上分 4a 充值、4b 提現、4c 歸集與對帳、4d Sepolia 驗證;4a 再拆 4a-1(金鑰與地址,本 PR)與 4a-2(掃描與入帳)。DoD 不過不進下一階段。

@@ -373,3 +373,26 @@ Phase 3 分三個 PR:3a 引擎與事件(本節)、3b auth + public 交易端點 
 | 多容器 E2E(§13.3) | `scripts/e2e.sh`(CI job `e2e` 與 `make e2e` 共用):compose `infra + app` 起 api/engine/admin 各一容器 → `exchangectl e2e` → kill -9 引擎後訂單簿一致 → 停牌後下一張單被拒 | api 與 engine 不同 process,交易只能走 NATS,**e2e 通過本身就是命令匯流排的證明** |
 
 **Phase 3c 學到的事**:`--admin-url` / `--admin-key` 是 `admin` 與 `e2e` 子命令的 flag,不是 root flag,所以 e2e 腳本改用 `EXCHANGE_*` 環境變數才能一個前綴通用(這個 bug 是把腳本實際跑一次才發現的);`TimeInForce` 零值序列化成 `""`、反序列化回 `GTC`,語意與 `effectiveTIF()` 一致所以跨線安全;JetStream 的 durable consumer 對扇出是錯的選擇,契約文件必須寫清楚,否則 Phase 6 會踩到;`audit.audit_events` 是唯一一張「寫入者只有 INSERT、沒有 SELECT」的表,而 `INSERT … RETURNING` 需要 SELECT,所以它的 insert 不能有 `RETURNING`——既有測試一律以 `ex_all`(擁有全部角色的權限)連線,這讓缺陷一路躲到「一個角色一個容器」才現形,因此新增 `TestAPIRolePrivileges` 以 `ex_api` 連線跑註冊與登入,並反向斷言它讀不到審計軌跡。
+
+---
+
+## 15. Phase 4a-1 程式碼與 §6.4.1 / §14 的對應(HD 金鑰與充值地址池)
+
+Phase 4 分四段:4a 充值(再拆 4a-1 金鑰與地址、4a-2 掃描與入帳)、4b 提現、4c 歸集與對帳、4d Sepolia。本節是 4a-1:**完全不碰鏈**,只處理金鑰與地址。
+
+| 計畫 | 實作 | 備註 |
+|---|---|---|
+| 預生成地址池(§6.4.1) | `chain.deposit_addresses` + `hdwallet.Pool.Ensure`(signer 每 `WALLET_ADDRESS_POOL_INTERVAL` 補到 `WALLET_ADDRESS_POOL_MIN`) | 權限就是設計:`INSERT` 只給 `ex_signer`,`ex_api` 只有 `UPDATE (account_id, assigned_at)` 的**欄位級**授權,所以 api 能認領一列但改不了地址;無人有 `DELETE` |
+| `api` 不碰金鑰(§6.4.1、§8) | `internal/chain`(指派)與 `internal/chain/hdwallet`(派生)分成兩個套件,`.golangci.yml` 的 `chain-assignment` 規則禁止前者 import 後者 | api role 只連結得到前者 |
+| 指派 SQL | `ClaimDepositAddress`:`FOR UPDATE SKIP LOCKED` 的單一 UPDATE 語句;先查該帳戶既有地址所以冪等 | 競態:同帳戶兩個首次呼叫都會嘗試認領,`(tenant, chain, account_id)` 的 unique index 只讓一個過,輸的那個**讀回贏家的地址**而不是報錯——單一語句失敗不會動到任何列,所以池子不會漏 |
+| 派生路徑(§14) | `m/44'/60'/0'/0/{i}` 充值、`m/44'/60'/1'/0/0` 熱錢包;index 由 `chain.deposit_address_index_seq` 明確取號(signer 得先知道 index 才能算地址,所以不能用欄位 DEFAULT) | 拒絕 ≥ 2^31 的 index:那與 hardened index 0 是同一個 32-bit 值,會讓兩列派生出同一個地址 |
+| 種子儲存(§14、ADR-0007) | `secrets/keystore/hd-seed.json`:scrypt(N=2^18)+ AES-256-GCM;header(版本、KDF 參數、cipher)綁進 GCM 的 AAD | 有 AAD 才擋得住「改小 N、留著 ciphertext」;`validate()` 另外把 N 上限鎖在 2^20,免得有人塞 2^30 讓 signer OOM |
+| `exchange keys import-mnemonic` | 讀助記詞 → 先派生熱錢包確認種子可用 → 才寫檔;印出熱錢包地址 | 印出來是為了對帳:`gen-dev-secrets.sh` 用 `cast wallet address` 算同一條路徑寫進 `HOT_WALLET_ADDRESS`,`scripts/e2e.sh` 再拿 signer log 裡的 `hot_wallet` 比一次——**兩套獨立的 BIP-44 實作必須同意** |
+| `GET /v1/deposit-address`(§7.4) | `internal/api/chain_handlers.go`;帳號一律取自已驗證的 principal | 未知資產 404、停用或非本鏈資產 422、**池空 503(不是 500)**;一個地址服務該鏈上所有資產 |
+| 不記錄金鑰(§14) | `Wallet` 的 `LogValue` / `String` / `GoString` 都回 `[redacted]`;config 只記 `wallet_keystore_passphrase_set` | `scripts/e2e.sh` 結尾以 `.env` 與 `secrets/dev-mnemonic.txt` 的**已知字串**掃所有容器 log;計畫明講不能用「不含 0x + 64 hex」這種斷言,因為 tx hash 本來就長那樣 |
+
+**驗證(`test/integration/chain_test.go`)**:`Ensure` 補到 min 且重跑補 0;8 個併發帳戶拿到互不相同的地址;同帳戶 6 個併發首次呼叫拿到同一個地址且 DB 只有一列;池空回 `ErrPoolEmpty`、補池後立刻可用;以 `ex_api` 連線能認領、`INSERT` 與改 address 都是 42501、`ex_all` 也不能 `DELETE`;HTTP 層 7 個子測試涵蓋 401 / 404 / 400 / 503 與「ETH 與 USDC 同一個地址」。
+
+**派生正確性有兩個獨立 oracle**:anvil 啟動時會印出 `m/44'/60'/0'/0/` 的私鑰,本套件對同一助記詞算出的三把金鑰與 CI e2e job 裡 anvil 印的完全相同;另外標準測試向量 `abandon … about` 的前三個地址也與公開值相符。
+
+**Phase 4a-1 學到的事**:寫測試時抓到兩個真缺陷——`cosmos/go-bip39` 的 `IsMnemonicValid` **不驗 BIP-39 checksum**(只看字數與字在不在字典裡),所以一個字打錯會靜默派生出完全不同的錢包,必須改用 `NewSeedWithErrorChecking`;`DepositPath` 原本接受 hardened 範圍的 index,會讓兩列共用一個地址。另外兩件事跟功能無關但值得記:生產用的 scrypt 參數(N=2^18)讓一個走 CLI 的測試把 `make test` 從 15 秒拉到 25 秒,所以 KDF 成本做成可注入、happy path 移到 `internal/app`;`ecdsa.PrivateKey.D` 在 Go 1.26 已 deprecated,想「抹除私鑰」反而可能產生無效金鑰,與其做安全劇場不如老實承認 Go 做不到並把力氣放在「金鑰不離開套件、不進 log」。

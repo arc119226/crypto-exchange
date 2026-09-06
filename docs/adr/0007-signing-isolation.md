@@ -31,4 +31,11 @@ v0.1 讓 wallet-service 與 withdrawal-worker 都持有私鑰並各自簽名,且
 - 正面:簽名審計單點;KMS / HSM 只是換 `Signer` 實作;`chain` 被攻破也拿不到金鑰。
 - 負面:多一個必須健康的 role;request-reply 多一跳延遲(提現不是延遲敏感路徑)。
 - 限制:加密 keystore + passphrase 只適合測試資產與封閉 beta;生產必須換 KMS / HSM / MPC,熱錢包資金管理與冷錢包流程不在 v1(`docs/plan-v1.0.md` §18)。
-- Phase 0 已落地:`signer` role 骨架(ops server + 健康檢查)、compose 中的 `exchange-signer`、`secrets/keystore` 掛載、`exchange keys import-mnemonic` 佔位(exit 3);實作在 Phase 4a/4b。
+- Phase 0 已落地:`signer` role 骨架(ops server + 健康檢查)、compose 中的 `exchange-signer`、`secrets/keystore` 掛載、`exchange keys import-mnemonic` 佔位(exit 3)。
+- **Phase 4a-1 已落地**:`internal/chain/hdwallet`(BIP-44 派生 + keystore)、`exchange keys import-mnemonic`、signer role 的補池迴圈、`internal/chain`(只做指派)、`GET /v1/deposit-address`。簽名本身(`SignRequest`、`chain.signing_log`、NATS request-reply)仍在 4b——4a 完全不需要簽任何東西,補池是 signer 自己寫 DB,所以拆分部署下也不需要跨容器呼叫。
+
+## 實作時修正的三件事(Phase 4a-1)
+
+1. **函式庫**:計畫寫 `miguelmota/go-ethereum-hdwallet`,實際採 `btcsuite/btcd/btcutil/hdkeychain` + `cosmos/go-bip39`(前者只是後兩者的薄封裝,維護度低;`tyler-smith/go-bip39` 原庫已不可靠)。公鑰 → 地址用 go-ethereum 的 `crypto.PubkeyToAddress`。
+2. **加密的是助記詞而非 entropy**:`cosmos/go-bip39` 沒有 `EntropyFromMnemonic`,其 `MnemonicToByteArray` 回傳的是位移過的 entropy‖checksum,要還原 raw entropy 得自己做 BIP-39 的位元運算——那是最不該有細微錯誤的一段路徑。助記詞是同一個秘密,而且維運人員打開檔案時拿到的是可以直接貼進錢包的東西。
+3. **不嘗試抹除派生出來的私鑰**:Go 無法可靠做到(scalar 存在 `big.Int`,runtime 可自由複製),而且 Go 1.25 起 `ecdsa.PrivateKey.D` 已標為 deprecated,理由正是「修改它可能產生無效金鑰」。能保證的是金鑰不離開套件、且 `Wallet` 經 slog 與 fmt 都印成 `[redacted]`。

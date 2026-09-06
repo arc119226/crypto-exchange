@@ -71,13 +71,36 @@ log "the engine serves the command bus"
 "${COMPOSE[@]}" logs --no-color exchange-engine | grep -q "command bus listening" \
   || { echo "engine did not start the command bus"; exit 1; }
 
+# Two independent BIP-44 implementations must agree on m/44'/60'/1'/0/0: the
+# `cast` in gen-dev-secrets that produced HOT_WALLET_ADDRESS (and so decided
+# which address the contract deployer funded), and the signer's own derivation
+# from the encrypted seed. A mismatch means the signer opened a different
+# wallet than the stack was set up for.
+log "the signer opened the seed the deployer funded"
+signer_hot=$("${COMPOSE[@]}" logs --no-color exchange-signer \
+  | sed -n 's/.*"hot_wallet":"\([^"]*\)".*/\1/p' | tail -1)
+if [ "$signer_hot" != "$HOT_WALLET_ADDRESS" ]; then
+  echo "hot wallet mismatch: .env has $HOT_WALLET_ADDRESS, the signer derived ${signer_hot:-<none>}"
+  exit 1
+fi
+
 log "exchangectl e2e (api -> NATS -> engine)"
 "$CTL" e2e --verbose
+
+log "the api hands out a deposit address from the signer's pool"
+export EXCHANGE_TOKEN
+EXCHANGE_TOKEN=$("$CTL" user register --email "deposit-$STAMP@e2e.local" --password "deposit-$STAMP-pw" --output json | jq -r .access_token)
+addr=$("$CTL" deposit-address --asset ETH --output json | jq -r .address)
+echo "$addr" | grep -Eq '^0x[0-9a-fA-F]{40}$' || { echo "not an address: $addr"; exit 1; }
+# one address per account per chain: the ERC-20 must return the same one
+usdc=$("$CTL" deposit-address --asset USDC --output json | jq -r .address)
+[ "$addr" = "$usdc" ] || { echo "ETH and USDC gave different addresses: $addr vs $usdc"; exit 1; }
+# and it must not be the hot wallet, which is a different BIP-44 account
+[ "$addr" != "$HOT_WALLET_ADDRESS" ] || { echo "handed out the hot wallet as a deposit address"; exit 1; }
 
 log "a resting order survives kill -9 of the engine"
 session=$("$CTL" user register --email "restart-$STAMP@e2e.local" --password "restart-$STAMP-pw" --output json)
 account=$(echo "$session" | jq -r .account_id)
-export EXCHANGE_TOKEN
 EXCHANGE_TOKEN=$(echo "$session" | jq -r .access_token)
 "$CTL" admin fund --account "$account" --asset USDC --amount 5000 --reason "e2e restart check" >/dev/null
 "$CTL" orders place --side buy --price 1000 --qty 0.5 --client-order-id "restart-$STAMP" >/dev/null
@@ -112,4 +135,26 @@ for id in $("$CTL" orders list --open --output json | jq -r '.orders[].id'); do
   "$CTL" orders cancel "$id" >/dev/null
 done
 "$CTL" admin markets set-status ETH-USDC active --reason "e2e resume"
+
+# docs/plan-v1.0.md §14: the known development secrets must not appear in any
+# container log. The strings are known here because gen-dev-secrets made them,
+# which is the only way to assert this honestly — tx and block hashes are hex
+# too, so "no 64 hex characters" would be both wrong and useless.
+log "no key material in the container logs"
+all_logs=$("${COMPOSE[@]}" logs --no-color)
+leaked=0
+check_absent() { # name value
+  [ -n "$2" ] || return 0
+  if printf '%s' "$all_logs" | grep -qF -- "$2"; then echo "LEAK: $1 appears in a container log"; leaked=1; fi
+}
+check_absent WALLET_KEYSTORE_PASSPHRASE "$WALLET_KEYSTORE_PASSPHRASE"
+check_absent API_KEY_MASTER_KEY "$API_KEY_MASTER_KEY"
+check_absent POSTGRES_PASSWORD "$POSTGRES_PASSWORD"
+if [ -f secrets/dev-mnemonic.txt ]; then
+  mnemonic=$(tr -d '\n' <secrets/dev-mnemonic.txt)
+  check_absent "the dev mnemonic" "$mnemonic"
+  check_absent "the dev mnemonic (first three words)" "$(echo "$mnemonic" | cut -d' ' -f1-3)"
+fi
+[ "$leaked" = "0" ] || exit 1
+
 log "e2e OK"
