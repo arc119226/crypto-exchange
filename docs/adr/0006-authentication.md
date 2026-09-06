@@ -30,4 +30,5 @@
 - 正面:私鑰單點、驗證多點;客戶換 IdP 只換驗證器設定;admin 攻擊面與用戶 JWT 分離。
 - 負面:兩套認證機制(JWT、session)要各自測;API key HMAC 需要客戶端正確處理時間偏移。
 - Phase 0 已落地:`exchange keys gen-jwt` 產 Ed25519 PKCS#8 PEM(0600);`JWT_PRIVATE_KEY_FILE` / `JWT_JWKS_URL` 已在 `app.Config`。實作在 Phase 3(用戶)與 Phase 5(admin TOTP)。
-- 待決:jwx 版本鎖定與 JWKS 金鑰輪替流程(Phase 7 runbook)。
+- Phase 3b 已落地(`internal/auth`、`internal/ratelimit`、`migrations/0007_auth_core.sql`;對應表見 `docs/domain.md` §13):register / login / refresh / logout、argon2id、Ed25519 JWT(`lestrrat-go/jwx/v3`,計畫 §9 寫 v2,採用時 v3 已是穩定版)、JWKS、API key HMAC(scopes、IP 白名單)、`auth.Authenticate` 中介層、`exchange admin bootstrap`、登入 / 下單限流。與本 ADR 文字的兩處差異:(1) refresh token **撤銷不刪列**,保留 `revoked_at + replaced_by` 才能辨識「已輪替的 token 被重放」並撤銷整個家族;(2) API key 的 secret 以 AES-256-GCM 加密存放,金鑰 `API_KEY_MASTER_KEY`(api role 持有;dev 未設則為程序生命期的隨機金鑰,非 dev 未設則停用 API key),而非只存 hash——HMAC 驗證需要明文 secret。`aud=internal` 的內部 JWT 鑄造與轉發隨 3c 的 NATS 命令匯流排實作;admin TOTP + session 在 Phase 5。
+- 待決:JWKS 金鑰輪替流程(Phase 7 runbook)。

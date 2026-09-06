@@ -1,28 +1,92 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/spf13/cobra"
 
 	"github.com/arc119226/crypto-exchange/cmd/exchangectl/internal/apiclient"
+	"github.com/arc119226/crypto-exchange/internal/auth"
 	"github.com/arc119226/crypto-exchange/internal/telemetry"
 )
 
 const requestTimeout = 10 * time.Second
 
+// credentials are the two ways exchangectl authenticates: a session access
+// token (--token / EXCHANGE_TOKEN) or an API key pair (--api-key /
+// --api-secret, EXCHANGE_API_KEY / EXCHANGE_API_SECRET) that signs every
+// request the way docs/plan-v1.0.md §14 / ADR-0006 specify.
+type credentials struct {
+	token     string
+	apiKey    string
+	apiSecret string
+}
+
+func credentialsFrom(cmd *cobra.Command) (credentials, error) {
+	var c credentials
+	var err error
+	if c.token, err = cmd.Flags().GetString("token"); err != nil {
+		return c, err
+	}
+	if c.apiKey, err = cmd.Flags().GetString("api-key"); err != nil {
+		return c, err
+	}
+	if c.apiSecret, err = cmd.Flags().GetString("api-secret"); err != nil {
+		return c, err
+	}
+	if (c.apiKey == "") != (c.apiSecret == "") {
+		return c, errors.New("--api-key and --api-secret must be given together")
+	}
+	return c, nil
+}
+
+// editor returns the request editor that attaches the credential.
+func (c credentials) editor() apiclient.RequestEditorFn {
+	return func(_ context.Context, req *http.Request) error {
+		switch {
+		case c.token != "":
+			req.Header.Set("Authorization", "Bearer "+c.token)
+		case c.apiKey != "":
+			var body []byte
+			if req.Body != nil && req.Body != http.NoBody {
+				b, err := io.ReadAll(req.Body)
+				if err != nil {
+					return err
+				}
+				body = b
+				req.Body = io.NopCloser(bytes.NewReader(b))
+				req.GetBody = func() (io.ReadCloser, error) { return io.NopCloser(bytes.NewReader(b)), nil }
+			}
+			ts := strconv.FormatInt(time.Now().UnixMilli(), 10)
+			req.Header.Set(auth.HeaderAPIKey, c.apiKey)
+			req.Header.Set(auth.HeaderAPITimestamp, ts)
+			req.Header.Set(auth.HeaderAPISignature, auth.SignRequest(c.apiSecret, ts, req.Method, req.URL.RequestURI(), body))
+		}
+		return nil
+	}
+}
+
 // newClient builds the generated API client from --base-url. Every request
 // carries an X-Request-Id so `make trace ID=...` can follow it through the
-// server logs; the id is printed on failures.
+// server logs; the id is printed on failures. Credentials, when given, are
+// attached to every request.
 func newClient(cmd *cobra.Command) (*apiclient.ClientWithResponses, string, error) {
 	base, err := cmd.Flags().GetString("base-url")
+	if err != nil {
+		return nil, "", err
+	}
+	creds, err := credentialsFrom(cmd)
 	if err != nil {
 		return nil, "", err
 	}
@@ -34,6 +98,7 @@ func newClient(cmd *cobra.Command) (*apiclient.ClientWithResponses, string, erro
 			}
 			return nil
 		}),
+		apiclient.WithRequestEditorFn(creds.editor()),
 	)
 	if err != nil {
 		return nil, "", fmt.Errorf("invalid --base-url %q: %w", base, err)
@@ -73,4 +138,14 @@ func apiError(resp *http.Response, problem *apiclient.Problem) error {
 		return fmt.Errorf("%s (HTTP %d, correlation_id=%s)", msg, resp.StatusCode, cid)
 	}
 	return fmt.Errorf("unexpected HTTP %d from %s (correlation_id=%s)", resp.StatusCode, resp.Request.URL, cid)
+}
+
+// problemError renders any non-2xx response from its raw body (works for
+// every status the generated client may not have a typed field for).
+func problemError(resp *http.Response, body []byte) error {
+	var p apiclient.Problem
+	if err := json.Unmarshal(body, &p); err == nil && p.Title != "" {
+		return apiError(resp, &p)
+	}
+	return apiError(resp, nil)
 }
