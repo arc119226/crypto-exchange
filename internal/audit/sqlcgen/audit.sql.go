@@ -9,10 +9,9 @@ import (
 	"context"
 )
 
-const insertAuditEvent = `-- name: InsertAuditEvent :one
+const insertAuditEvent = `-- name: InsertAuditEvent :exec
 INSERT INTO audit.audit_events (tenant_id, actor_type, actor_id, action, target_type, target_id, before, after, ip, correlation_id)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-RETURNING id, tenant_id, actor_type, actor_id, action, target_type, target_id, before, after, ip, correlation_id, created_at
 `
 
 type InsertAuditEventParams struct {
@@ -28,8 +27,12 @@ type InsertAuditEventParams struct {
 	CorrelationID *string
 }
 
-func (q *Queries) InsertAuditEvent(ctx context.Context, arg InsertAuditEventParams) (AuditAuditEvent, error) {
-	row := q.db.QueryRow(ctx, insertAuditEvent,
+// Deliberately no RETURNING: migration 0004 grants writers INSERT but not
+// SELECT, and `INSERT … RETURNING` needs SELECT on the columns it returns.
+// Adding one makes every role but ex_admin and ex_all fail with 42501 as
+// soon as they run in their own container (see TestAPIRolePrivileges).
+func (q *Queries) InsertAuditEvent(ctx context.Context, arg InsertAuditEventParams) error {
+	_, err := q.db.Exec(ctx, insertAuditEvent,
 		arg.TenantID,
 		arg.ActorType,
 		arg.ActorID,
@@ -41,22 +44,7 @@ func (q *Queries) InsertAuditEvent(ctx context.Context, arg InsertAuditEventPara
 		arg.Ip,
 		arg.CorrelationID,
 	)
-	var i AuditAuditEvent
-	err := row.Scan(
-		&i.ID,
-		&i.TenantID,
-		&i.ActorType,
-		&i.ActorID,
-		&i.Action,
-		&i.TargetType,
-		&i.TargetID,
-		&i.Before,
-		&i.After,
-		&i.Ip,
-		&i.CorrelationID,
-		&i.CreatedAt,
-	)
-	return i, err
+	return err
 }
 
 const listAuditEvents = `-- name: ListAuditEvents :many

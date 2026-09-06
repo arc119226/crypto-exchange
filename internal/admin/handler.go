@@ -104,7 +104,7 @@ func (h *Handler) CreateAccount(ctx context.Context, req gen.CreateAccountReques
 			return err
 		}
 		created = a
-		_, err = h.audit.Record(ctx, tx, audit.Event{
+		err = h.audit.Record(ctx, tx, audit.Event{
 			ActorType: audit.ActorAPIKey, ActorID: actorID, Action: "account.create", TargetType: "account", TargetID: a.ID,
 			After: toAccount(a), CorrelationID: telemetry.CorrelationID(ctx),
 		})
@@ -145,7 +145,7 @@ func (h *Handler) SetAccountStatus(ctx context.Context, req gen.SetAccountStatus
 		if err != nil {
 			return err
 		}
-		_, err = h.audit.Record(ctx, tx, audit.Event{
+		err = h.audit.Record(ctx, tx, audit.Event{
 			ActorType: audit.ActorAPIKey, ActorID: actorID, Action: "account.status.update", TargetType: "account", TargetID: req.ID,
 			Before: map[string]any{"status": before.Status, "reason": nil}, After: map[string]any{"status": after.Status, "reason": req.Body.Reason},
 			CorrelationID: telemetry.CorrelationID(ctx),
@@ -247,7 +247,7 @@ func (h *Handler) CreateAdjustment(ctx context.Context, req gen.CreateAdjustment
 		if err != nil || replayed {
 			return err
 		}
-		_, err = h.audit.Record(ctx, tx, audit.Event{
+		err = h.audit.Record(ctx, tx, audit.Event{
 			ActorType: audit.ActorAPIKey, ActorID: actorID, Action: "ledger.adjustment.create", TargetType: "journal_entry", TargetID: fmt.Sprint(entry.ID),
 			After:         map[string]any{"account_id": b.AccountID, "asset": b.Asset, "amount": b.Amount, "direction": b.Direction, "reason": b.Reason, "idempotency_key": key},
 			CorrelationID: telemetry.CorrelationID(ctx),

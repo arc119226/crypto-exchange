@@ -66,7 +66,7 @@ func (h *Handler) SetMarketStatus(ctx context.Context, req gen.SetMarketStatusRe
 		if !changed {
 			return nil // already in that status: no audit row, no event
 		}
-		if _, err := h.audit.Record(ctx, tx, audit.Event{
+		if err := h.audit.Record(ctx, tx, audit.Event{
 			ActorType: audit.ActorAPIKey, ActorID: actorID, Action: "market.status.update",
 			TargetType: "market", TargetID: after.Symbol,
 			Before:        map[string]any{"status": before.Status, "version": before.Version},

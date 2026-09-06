@@ -173,7 +173,7 @@ func (s *Service) Register(ctx context.Context, email, password, ip string) (Ses
 		if err != nil {
 			return err
 		}
-		if _, err := s.audit.Record(ctx, tx, audit.Event{
+		if err := s.audit.Record(ctx, tx, audit.Event{
 			ActorType: audit.ActorUser, ActorID: u.ID, Action: "auth.register", TargetType: "user", TargetID: u.ID,
 			After: map[string]any{"email": email, "account_id": acct.ID}, IP: ip,
 		}); err != nil {
@@ -213,7 +213,7 @@ func (s *Service) Login(ctx context.Context, email, password, ip string) (Sessio
 	}
 	if !found || !ok {
 		if found {
-			_, _ = s.audit.Record(ctx, s.pool, audit.Event{ActorType: audit.ActorUser, ActorID: row.ID, Action: "auth.login.failed", TargetType: "user", TargetID: row.ID, IP: ip})
+			_ = s.audit.Record(ctx, s.pool, audit.Event{ActorType: audit.ActorUser, ActorID: row.ID, Action: "auth.login.failed", TargetType: "user", TargetID: row.ID, IP: ip})
 		}
 		return Session{}, ErrInvalidCredentials
 	}
@@ -224,7 +224,7 @@ func (s *Service) Login(ctx context.Context, email, password, ip string) (Sessio
 	}
 	var sess Session
 	err = s.inTx(ctx, func(tx pgx.Tx) error {
-		if _, err := s.audit.Record(ctx, tx, audit.Event{ActorType: audit.ActorUser, ActorID: u.ID, Action: "auth.login", TargetType: "user", TargetID: u.ID, IP: ip}); err != nil {
+		if err := s.audit.Record(ctx, tx, audit.Event{ActorType: audit.ActorUser, ActorID: u.ID, Action: "auth.login", TargetType: "user", TargetID: u.ID, IP: ip}); err != nil {
 			return err
 		}
 		var err error
@@ -259,7 +259,7 @@ func (s *Service) Refresh(ctx context.Context, refreshToken string) (Session, er
 		// by an earlier family revocation is simply invalid.
 		if row.ReplacedBy != nil {
 			if _, err := q.RevokeUserRefreshTokens(ctx, row.UserID); err == nil {
-				_, _ = s.audit.Record(ctx, s.pool, audit.Event{ActorType: audit.ActorSystem, ActorID: "auth", Action: "auth.refresh.reuse_detected", TargetType: "user", TargetID: row.UserID})
+				_ = s.audit.Record(ctx, s.pool, audit.Event{ActorType: audit.ActorSystem, ActorID: "auth", Action: "auth.refresh.reuse_detected", TargetType: "user", TargetID: row.UserID})
 			}
 		}
 		return Session{}, ErrInvalidToken
@@ -409,7 +409,7 @@ func (s *Service) CreateAPIKey(ctx context.Context, userID, label string, scopes
 			return fmt.Errorf("auth: insert api key: %w", err)
 		}
 		out = apiKeyFromRow(row)
-		_, err = s.audit.Record(ctx, tx, audit.Event{
+		err = s.audit.Record(ctx, tx, audit.Event{
 			ActorType: audit.ActorUser, ActorID: userID, Action: "auth.api_key.create", TargetType: "api_key", TargetID: row.ID,
 			After: map[string]any{"key_id": keyID, "scopes": scopeStrs, "ip_allowlist": ips, "label": label},
 		})
@@ -448,7 +448,7 @@ func (s *Service) RevokeAPIKey(ctx context.Context, userID, id string) error {
 		if n != 1 {
 			return ErrNotFound
 		}
-		_, err = s.audit.Record(ctx, tx, audit.Event{ActorType: audit.ActorUser, ActorID: userID, Action: "auth.api_key.revoke", TargetType: "api_key", TargetID: id})
+		err = s.audit.Record(ctx, tx, audit.Event{ActorType: audit.ActorUser, ActorID: userID, Action: "auth.api_key.revoke", TargetType: "api_key", TargetID: id})
 		return err
 	})
 }
@@ -546,7 +546,7 @@ func (s *Service) BootstrapAdmin(ctx context.Context, email, password string) (U
 			return err
 		}
 		u = userFromRow(row)
-		_, err = s.audit.Record(ctx, tx, audit.Event{ActorType: audit.ActorSystem, ActorID: "bootstrap", Action: "auth.admin.bootstrap", TargetType: "user", TargetID: row.ID, After: map[string]any{"email": email}})
+		err = s.audit.Record(ctx, tx, audit.Event{ActorType: audit.ActorSystem, ActorID: "bootstrap", Action: "auth.admin.bootstrap", TargetType: "user", TargetID: row.ID, After: map[string]any{"email": email}})
 		return err
 	})
 	if err != nil {
