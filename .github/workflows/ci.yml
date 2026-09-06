@@ -147,6 +147,38 @@ jobs:
           CI: "true" # a missing Docker daemon fails instead of skipping
         run: make test-integration
 
+  e2e:
+    name: e2e
+    needs: [integration]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: |
+            go.sum
+            tools/go.sum
+      # api, engine and admin run as separate containers, so every order has
+      # to travel over the NATS command bus to reach the engine. This is the
+      # only job that exercises the split deployment (docs/plan-v1.0.md §13.3).
+      - name: compose app profile — exchangectl e2e, engine kill -9, market halt
+        env:
+          KEEP: "1" # tear down in the step below, so the logs survive a failure
+        run: make e2e
+      - name: collect container logs
+        if: always()
+        run: docker compose -f deploy/compose/compose.yaml --env-file .env --profile infra --profile app logs --no-color > compose-logs.txt || true
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: e2e-compose-logs
+          path: compose-logs.txt
+          if-no-files-found: ignore
+      - name: tear down
+        if: always()
+        run: docker compose -f deploy/compose/compose.yaml --env-file .env --profile infra --profile app down -v --remove-orphans || true
+
   image:
     name: image
     needs: [integration]

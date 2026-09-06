@@ -115,6 +115,17 @@ occupies the `client_order_id`. `DELETE /v1/orders/{id}` on a terminal order
 returns 200 with the current state (idempotent). Resources of other accounts
 are indistinguishable from missing ones (404, or an empty list).
 
+## Market status
+
+A market can be `active`, `halted`, `cancel_only` or `delisted`
+(`docs/plan-v1.0.md` §6.6). An operator changes it with
+`PUT /admin/v1/markets/{symbol}/status`; the engine picks the change up from
+the `market.updated` event, so it applies to the next order without a
+restart. On a market that is not `active`, new orders come back as 201 with
+`status: rejected` and `reject_reason: market_not_active`, while cancels keep
+working — that is deliberate, so an operator can drain a book during an
+incident.
+
 ## Reads
 
 `GET /v1/orders`, `/v1/fills`, `/v1/ledger/entries`, `/v1/markets/{symbol}/trades`

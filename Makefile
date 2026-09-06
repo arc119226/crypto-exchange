@@ -20,7 +20,7 @@ FOUNDRY_TAG   ?= $(shell sed -n 's/^FOUNDRY_TAG=//p' .env.example)
 FOUNDRY_IMAGE := ghcr.io/foundry-rs/foundry:$(FOUNDRY_TAG)
 ALL_PROFILES  := --profile infra --profile observability --profile app --profile single
 
-.PHONY: help tools gen gen-check fmt tidy lint test test-fuzz test-integration cover-money build image \
+.PHONY: help tools gen gen-check fmt tidy lint test test-fuzz test-integration e2e cover-money build image \
 	    up up-single down reset infra-up run migrate seed artifacts compose-config contracts-test \
 	    gen-dev-secrets demo trace loadgen
 
@@ -118,6 +118,9 @@ artifacts: ## Copy addresses.json out of the compose artifacts volume (for make 
 	mkdir -p deploy/compose/artifacts
 	$(COMPOSE) --profile infra run --rm --no-deps --entrypoint cat contracts-deployer /artifacts/addresses.json > deploy/compose/artifacts/addresses.json
 	@cat deploy/compose/artifacts/addresses.json
+
+e2e: ## Multi-container end-to-end test (compose app profile + exchangectl e2e; needs Docker)
+	bash scripts/e2e.sh
 
 compose-config: ## Validate the compose file with every profile (no daemon needed)
 	docker compose -f $(COMPOSE_FILE) --env-file .env.example $(ALL_PROFILES) config -q
