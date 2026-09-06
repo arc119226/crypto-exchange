@@ -4,6 +4,7 @@ package integration
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"math/big"
@@ -375,6 +376,39 @@ func TestSweepDoesNotTakeMoreThanTheLedgerKnowsAbout(t *testing.T) {
 		"the money nobody credited stays put, got %s wei", left)
 	assert.False(t, h.houseBalance(t, ctx, "custody_deposit_addresses", "ETH").IsNegative(),
 		"custody never claims a transfer it did not receive")
+	h.assertTrialBalanceZero(t, ctx)
+}
+
+// An asset whose balance cannot be read is skipped for the tick, and does not
+// stop the assets that can be read.
+//
+// This is the shape CI found on anvil, where the registry names a MockUSDC
+// address that the testcontainer's chain has never had deployed. In a real
+// deployment it is a registry row with the wrong contract address: the sweeper
+// cannot know what is there, so it must not sweep it -- but letting one bad
+// row stop collecting everything else would turn a misconfigured token into a
+// hot wallet that slowly runs dry.
+func TestSweepSkipsAnAssetItCannotRead(t *testing.T) {
+	h := setupSweep(t)
+	ctx := context.Background()
+	account, address := h.deposited(t, ctx, "ETH", "2")
+	h.creditDeposit(t, ctx, account, strings.ToLower(address.Hex()), "USDC", "500")
+
+	h.chain.failTokenBalance(h.usdc, errors.New("evm: balanceOf returned 0 bytes, not 32"))
+
+	require.NoError(t, h.worker.Tick(ctx),
+		"one unreadable asset is a registry problem, not a failed scan")
+
+	rows := h.sweeps(t, ctx)
+	require.Len(t, rows, 1, "the ether was still collected")
+	assert.Equal(t, "ETH", rows[0].Asset)
+
+	// And it stays skipped rather than half-planned: nothing claims to know
+	// how much USDC is there.
+	require.NoError(t, h.worker.Tick(ctx))
+	for _, r := range h.sweeps(t, ctx) {
+		assert.NotEqual(t, "USDC", r.Asset, "an asset we cannot read is not swept")
+	}
 	h.assertTrialBalanceZero(t, ctx)
 }
 

@@ -152,14 +152,65 @@ func (w *Worker) plan(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("sweep: list assets: %w", err)
 	}
+	eligible, err := w.eligibleAddresses(ctx)
+	if err != nil {
+		return err
+	}
+	var firstErr error
+	// Assets outside, addresses inside. The order matters: whether an asset
+	// can be read at all is a property of the asset, so finding out once per
+	// tick is both cheaper and the only way to skip it as a unit.
+	for _, asset := range assets {
+		if asset.ChainID != w.cfg.ChainID || asset.Status != registry.AssetActive {
+			continue
+		}
+		if !asset.SweepThreshold.IsPositive() {
+			// A zero threshold would sweep an address holding one wei, paying
+			// more gas than it recovers, on every tick forever.
+			continue
+		}
+		for _, addr := range eligible {
+			err := w.planOne(ctx, addr, asset)
+			if err == nil {
+				continue
+			}
+			// An asset whose balance cannot be read is a registry problem, not
+			// a transient one: the contract address is wrong, or names
+			// something that is not a token on this chain. The sweeper does
+			// not know how much is there, so it must not sweep it -- but
+			// letting one bad row stop the assets that *can* be read would
+			// turn a misconfigured token into a hot wallet that slowly runs
+			// dry while every tick reports a failure that is not the real
+			// problem. Skip the asset for this tick, loudly, and carry on.
+			if errors.Is(err, errUnreadable) {
+				w.log.Error("cannot read this asset's balance, so it is not being collected",
+					slog.String("asset", asset.Symbol), slog.String("err", err.Error()))
+				w.metrics.unreadable.WithLabelValues(asset.Symbol).Inc()
+				break
+			}
+			w.log.Error("could not plan a sweep",
+				slog.String("address", addr.Address), slog.String("asset", asset.Symbol),
+				slog.String("err", err.Error()))
+			if firstErr == nil {
+				firstErr = err
+			}
+		}
+	}
+	return firstErr
+}
+
+// eligibleAddresses is the set worth looking at this tick: assigned, and with
+// nothing the ledger has yet to credit. Both are asset-independent, so they
+// are decided once rather than once per asset.
+func (w *Worker) eligibleAddresses(ctx context.Context) ([]sqlcgen.ChainDepositAddress, error) {
 	q := sqlcgen.New(w.db)
 	addresses, err := q.ListDepositAddresses(ctx, sqlcgen.ListDepositAddressesParams{
 		TenantID: w.cfg.Tenant, ChainID: w.cfg.ChainID,
 	})
 	if err != nil {
-		return fmt.Errorf("sweep: list addresses: %w", err)
+		return nil, fmt.Errorf("sweep: list addresses: %w", err)
 	}
-	var firstErr error
+	out := make([]sqlcgen.ChainDepositAddress, 0, len(addresses))
 	for _, addr := range addresses {
 		// A free pool slot has never been handed out, so nothing can have been
 		// deposited to it.
@@ -170,37 +221,20 @@ func (w *Worker) plan(ctx context.Context) error {
 			TenantID: w.cfg.Tenant, ID: addr.ID,
 		})
 		if err != nil {
-			return fmt.Errorf("sweep: unsettled deposits of %s: %w", addr.Address, err)
+			return nil, fmt.Errorf("sweep: unsettled deposits of %s: %w", addr.Address, err)
 		}
 		if unsettled > 0 {
 			continue
 		}
-		for _, asset := range assets {
-			if asset.ChainID != w.cfg.ChainID || asset.Status != registry.AssetActive {
-				continue
-			}
-			if err := w.planOne(ctx, addr, asset); err != nil {
-				w.log.Error("could not plan a sweep",
-					slog.String("address", addr.Address), slog.String("asset", asset.Symbol),
-					slog.String("err", err.Error()))
-				if firstErr == nil {
-					firstErr = err
-				}
-			}
-		}
+		out = append(out, addr)
 	}
-	return firstErr
+	return out, nil
 }
 
 func (w *Worker) planOne(ctx context.Context, addr sqlcgen.ChainDepositAddress, asset registry.Asset) error {
-	if !asset.SweepThreshold.IsPositive() {
-		// A zero threshold would sweep an address holding one wei, paying more
-		// gas than it recovers, on every tick forever.
-		return nil
-	}
 	held, err := w.heldBy(ctx, addr.Address, asset)
 	if err != nil {
-		return err
+		return fmt.Errorf("%w: %s on %s: %w", errUnreadable, asset.Symbol, addr.Address, err)
 	}
 	if held.Cmp(asset.SweepThreshold) < 0 {
 		return nil

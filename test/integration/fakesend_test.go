@@ -49,6 +49,9 @@ type sendChain struct {
 	tip     *big.Int
 	// sendErr fails the next SendRawTransaction, once.
 	sendErr error
+	// tokenErr fails every TokenBalance for one contract, standing in for a
+	// registry row that names an address with no token behind it.
+	tokenErr map[common.Address]error
 	// sent records every raw transaction that reached the node, in order.
 	sent []*types.Transaction
 }
@@ -65,9 +68,10 @@ func newSendChain(chainID int64) *sendChain {
 		pool:       map[common.Hash]*types.Transaction{},
 		mined:      map[common.Hash]*types.Receipt{},
 		minedNonce: map[common.Address]uint64{}, foreignNonce: map[common.Address]uint64{},
-		ether:   map[common.Address]*big.Int{},
-		tokens:  map[common.Address]map[common.Address]*big.Int{},
-		baseFee: big.NewInt(1_000_000_000), tip: big.NewInt(1_500_000_000),
+		ether:    map[common.Address]*big.Int{},
+		tokens:   map[common.Address]map[common.Address]*big.Int{},
+		tokenErr: map[common.Address]error{},
+		baseFee:  big.NewInt(1_000_000_000), tip: big.NewInt(1_500_000_000),
 	}
 }
 
@@ -146,6 +150,9 @@ func (c *sendChain) Balance(_ context.Context, a common.Address) (*big.Int, erro
 func (c *sendChain) TokenBalance(_ context.Context, token, holder common.Address) (*big.Int, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if err := c.tokenErr[token]; err != nil {
+		return nil, err
+	}
 	return new(big.Int).Set(c.tokenOf(token, holder)), nil
 }
 
@@ -332,6 +339,16 @@ func (c *sendChain) advance(blocks uint64) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.head += blocks
+}
+
+// failTokenBalance makes every balanceOf on this contract fail, the way a
+// registry row pointing at an address with no code does: eth_call answers with
+// nothing, and reading that as zero would say "nothing to collect" when the
+// truth is that we asked the wrong thing.
+func (c *sendChain) failTokenBalance(token common.Address, err error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.tokenErr[token] = err
 }
 
 // failNextSend makes the next broadcast fail, once.

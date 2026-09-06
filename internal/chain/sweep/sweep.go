@@ -63,6 +63,12 @@ const gasForNativeTransfer = 21000
 // ErrNotFound is an unknown sweep id.
 var ErrNotFound = errors.New("sweep: not found")
 
+// errUnreadable marks an asset whose on-chain balance could not be read: a
+// registry row naming a contract address that answers nothing, or a node that
+// would not say. It is internal because callers do not act on it -- only the
+// scan does, by leaving that asset alone for the tick.
+var errUnreadable = errors.New("sweep: balance unreadable")
+
 // Chain is what the sweeper needs from a node. An interface for the same
 // reason the deposit and withdrawal packages have one: the two-step token
 // path and the balance races are the parts most likely to be wrong, and a

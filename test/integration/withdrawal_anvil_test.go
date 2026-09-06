@@ -169,6 +169,13 @@ func (h anvilSendHarness) locked(t *testing.T, ctx context.Context, account, ass
 // different key — derived at m/44'/60'/0'/0/i rather than the hot wallet's
 // path — and the only check that can tell a valid signature from a plausible
 // one is the hot wallet's own balance afterwards.
+//
+// It also carries a second case for free, and deliberately does not paper over
+// it: the registry names a MockUSDC address that compose deploys and this
+// testcontainer never has, so the sweeper meets a token it cannot read on
+// every tick. Leaving USDC active here is what makes this test prove that an
+// unreadable asset does not stop the ether being collected — which is exactly
+// how the shape was found.
 func TestSweepAgainstAnvil(t *testing.T) {
 	h := setupAnvilSweep(t)
 	ctx := context.Background()
@@ -202,6 +209,12 @@ func TestSweepAgainstAnvil(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, want.String(), gained.String(),
 		"the hot wallet really received what a deposit address's own key sent")
+
+	// USDC is active in the registry and has no contract on this chain. It was
+	// skipped every tick, and the ether above was collected anyway.
+	for _, s := range h.sweeps(t, ctx) {
+		assert.NotEqual(t, "USDC", s.Asset, "a token this chain does not have is not swept")
+	}
 
 	// And the address kept only the dust the gas budget left it.
 	left := h.anvil.Balance(t, address)
