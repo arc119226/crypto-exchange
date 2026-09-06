@@ -1,0 +1,19 @@
+{
+  "symbol": "ETH-USDC",
+  "last_seq": 3,
+  "bids": [],
+  "asks": [
+    {
+      "order_id": "S2",
+      "account_id": "S2",
+      "side": "sell",
+      "price": "1995",
+      "qty": "0.5",
+      "remaining": "0.298",
+      "filled_qty": "0.202",
+      "filled_quote": "402.99",
+      "seq": 2,
+      "ts": "2026-09-05T00:00:02Z"
+    }
+  ]
+}

@@ -13,4 +13,6 @@ var (
 	ErrInvalidStep = errors.New("money: step must be positive")
 	// ErrInvalidAsset is returned by Asset.Validate.
 	ErrInvalidAsset = errors.New("money: invalid asset")
+	// ErrDivisionByZero is returned by DivRoundDown when the divisor is zero.
+	ErrDivisionByZero = errors.New("money: division by zero")
 )

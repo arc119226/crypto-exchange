@@ -1,0 +1,8 @@
+# Same price: earliest seq first; worse price only after the level is exhausted; market on an empty side is rejected.
+{"market":{"symbol":"ETH-USDC","price_tick":"0.01","qty_step":"0.0001","min_notional":"5","base_scale":18,"quote_scale":6,"self_trade_policy":"cancel_newest"}}
+{"seq":1,"ts":"2026-09-05T00:00:01Z","new":{"order_id":"X","account_id":"X","side":"buy","type":"limit","time_in_force":"gtc","price":"2000","qty":"0.3"}}
+{"seq":2,"ts":"2026-09-05T00:00:02Z","new":{"order_id":"Y","account_id":"Y","side":"buy","type":"limit","time_in_force":"gtc","price":"1999","qty":"0.3"}}
+{"seq":3,"ts":"2026-09-05T00:00:03Z","new":{"order_id":"Z","account_id":"Z","side":"buy","type":"limit","time_in_force":"gtc","price":"2000","qty":"0.3"}}
+{"seq":4,"ts":"2026-09-05T00:00:04Z","new":{"order_id":"M1","account_id":"M","side":"sell","type":"market","qty":"0.5"}}
+{"seq":5,"ts":"2026-09-05T00:00:05Z","new":{"order_id":"M2","account_id":"M","side":"sell","type":"market","qty":"0.5"}}
+{"seq":6,"ts":"2026-09-05T00:00:06Z","new":{"order_id":"M3","account_id":"M","side":"sell","type":"market","qty":"0.1"}}

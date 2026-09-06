@@ -3,6 +3,7 @@
 #
 #   lint ─┐
 #   unit ─┼─► integration ─► image
+#        └─► fuzz-smoke
 #   gen-check, compose-config, contracts run alongside.
 name: ci
 
@@ -62,12 +63,29 @@ jobs:
         run: make test
       - name: coverage gate (internal/money >= 95%)
         run: make cover-money
+      - name: matching property tests at full strength (>= 1,000 sequences each; -short runs 200)
+        run: go test -race -count=1 -run 'TestProperty' ./internal/matching/
       - name: exchange / exchangectl smoke
         run: |
           make build
           bin/exchange version
           bin/exchangectl version
           bin/exchange admin bootstrap && exit 1 || test $? -eq 3   # not implemented yet -> exit 3
+
+  fuzz-smoke:
+    name: fuzz-smoke
+    needs: [unit]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: |
+            go.sum
+            tools/go.sum
+      - name: every Fuzz* target for 30s (docs/plan-v1.0.md §13.3)
+        run: make test-fuzz FUZZ_TIME=30s
 
   gen-check:
     name: gen-check

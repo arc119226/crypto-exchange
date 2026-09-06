@@ -38,6 +38,7 @@ linters:
           allow:
             - $gostd
             - github.com/arc119226/crypto-exchange/internal/money
+            - github.com/arc119226/crypto-exchange/internal/matching # external test package
             - github.com/stretchr/testify
             - pgregory.net/rapid
         telemetry:
@@ -86,6 +87,8 @@ linters:
             - github.com/arc119226/crypto-exchange/internal/app
             - github.com/arc119226/crypto-exchange/internal/telemetry
             - github.com/arc119226/crypto-exchange/internal/money
+            # exchangectl replay drives the pure order book directly (no I/O in matching)
+            - github.com/arc119226/crypto-exchange/internal/matching
             - github.com/arc119226/crypto-exchange/cmd/exchangectl/internal
             - github.com/spf13/cobra
             - github.com/oapi-codegen/runtime

@@ -190,7 +190,14 @@ B 最終:available = 2000 − 2000 + 4 + 1200 = 1204 USDC、0.3992 ETH;hold = 0 
 
 **純函式**:`Apply(cmd)` 不呼叫 `time.Now()`、不用 map 迭代順序決定任何輸出(價位一律走排序後的 slice),所以「同一命令序列重放後 `Snapshot()` deep-equal」可以用 `-count=20` 驗證。
 
-**tick / step**:API 端「不是整數倍就拒單、不自動截斷」;`matching` 再驗一次回 error 而非 panic。`money.IsMultipleOf` 已在 Phase 0 實作並測試(`internal/money`)。
+**tick / step**:API 端「不是整數倍就拒單、不自動截斷」;`matching` 再驗一次回 `rejected` 事件而非 panic。`money.IsMultipleOf` 已在 Phase 0 實作並測試(`internal/money`)。
+
+**Phase 1 定案(原第 9 節疑問 1、2)**:
+
+- 限價恰等於對手價 **成交**(買方限價 ≥ 對手賣價、賣方限價 ≤ 對手買價;`crosses()`),與業界慣例一致;golden `limit_ioc_and_multi_level_sweep` 與單元測試 `TestEqualPricesTradeAndNonCrossingOrdersRest` 鎖住。
+- `max_slippage_bps` 的基準價維持計畫定義:**市價單到達時的最佳對手價**,界線 = best × (1 ± bps/10000),以 18 位小數精確計算、不需為 tick 倍數。推論:最佳價位本身永遠在界線內,所以市價單絕不會「零成交卻因保護帶被拒」——`price_protection` 只會是**剩餘量的取消原因**,不會是拒單原因(修正第 8 節 E2 的原始提案)。零成交的市價單只有兩種拒單:對手側為空(`empty_book`)、quote 預算在最佳價連一個 `qty_step` 都買不到(`quote_qty_too_small`,例如 5 USDC 在 100,000 的價位);兩者都在 `Accepted` 之前判定,因此沒有 Hold、沒有 Release。
+
+**Phase 1 實作與事件對照**(`internal/matching`):`Apply` 對每個命令回傳事件序列 `accepted → (trade → maker 的 updated|filled)* → taker 的 filled|updated|cancelled`;拒單只回 `rejected`,找不到的取消回 `cancel_rejected`。`trade.index` 是同一命令內的第 n 筆成交,供 trading 派生確定性的 trade_id。市價買的 `cancelled` 帶 `remaining_quote`(釋放 quote hold),其他訂單帶 `remaining_qty`。golden 檔在 `test/fixtures/matching/`,`exchangectl replay --file <script>` 可重播。
 
 ---
 
@@ -247,7 +254,7 @@ B 最終:available = 2000 − 2000 + 4 + 1200 = 1204 USDC、0.3992 ETH;hold = 0 
 | # | 位置 | 問題 | 修正 |
 |---|---|---|---|
 | **E1** | §6.4.2 `broadcast`(重送耗盡)→ `resolve(cancel_nonce)` 列:「確認後 Release」 | `Release` 在 §6.1.3 定義為 hold → available,但依 §6.1.4(e) 資金在 `signed → broadcast` 時已從 hold 移到 `pending_withdrawal`;對 hold 做 Release 會讓 hold 變負、`balances` CHECK 失敗,錢卡在 `pending_withdrawal`。 | 改為 debit `pending_withdrawal` X / credit `user:available` X(與 `resolve(refund)` 相同),取代交易的 gas 記 `gas_expense`;`failed(broadcast)` 的分錄取決於**前一個桶**而非狀態名稱。**已修正 `docs/plan-v1.0.md`**(§6.1.4(e) 新增一列、§6.4.2 該列改寫)。 |
-| **E2** | §6.2 拒單原因、§6.3 市價單 | 市價單因 `max_slippage_bps` 一筆都吃不到時沒有定義結果:`empty_book` 不對(簿不空),`cancelled` 也不對(沒有任何成交卻要先 Hold 再 Release)。 | 新增拒單原因 `price_protection`:零成交 → `rejected(price_protection)`(交易回滾、無分錄);已有成交才觸及保護帶 → `cancelled(reason=price_protection)`。Phase 1 實作時採用;計畫 v1.1 補進枚舉。 |
+| **E2** | §6.2 拒單原因、§6.3 市價單 | 市價單「零成交」的情況沒有完整定義:計畫只寫了空簿 → `rejected(empty_book)`;quote 預算小到在最佳價連一個 step 都買不到的情況(5 USDC 對 100,000 的價位)既不是空簿也不該 Hold 後再 Release。 | Phase 1 新增拒單原因 `quote_qty_too_small`,與 `empty_book` 一樣在 `Accepted` 之前判定。保護帶以到達時最佳價為基準,最佳價位永遠在界線內,所以 `price_protection` 只作為**取消原因**(有成交後才觸及界線),不需要拒單原因(第 3 節 Phase 1 定案)。計畫 v1.1 補進枚舉。 |
 | **E3** | §6.2 STP 列的事件欄 | 只寫 `order.accepted + order.cancelled(self_trade)`,漏掉撞到自己之前可能已與他人成交的 `trade.executed`×n(第 3 節例子)。 | 事件欄補 `trade.executed`×n(n ≥ 0)。文件層級澄清,不影響實作。 |
 | **E4** | §6.1.3 `Release` 鍵 `release:order:{order_id}:{seq}` vs §6.1.4(b) | 價差 release 出現在 Settle 的同一 entry 內(鍵 `settle:trade:{trade_id}`),不是獨立 Release;兩者並存但計畫沒說清楚。 | 約定:每筆成交的價差 release 屬於 Settle entry;`release:order:…` 只用於取消 / IOC 剩餘 / `filled` 時的殘值。 |
 | E5 | §6.1.1 `external` | 標「無正常餘額」但恆等式需要符號。 | 本文件 1.1 約定 credit − debit。 |
@@ -259,8 +266,8 @@ E1 是計畫的實質錯誤(會讓一條人工處置路徑在資料庫層失敗)
 
 ## 9. 疑問清單(留給對應 Phase 決定)
 
-1. **(Phase 1)** 限價單「部分成交後價格不再滿足」的判斷是否含等於?建議:對手價嚴格優於或等於限價都成交(標準做法),golden 案例要有「限價恰等於對手價」。
-2. **(Phase 1)** `max_slippage_bps` 的基準價是「觸發時的最佳對手價」;若最佳價本身就是唯一一檔,保護帶永遠不觸發,是否要改成以「上一筆成交價」為基準?建議 v1 維持計畫定義,文件明示。
+1. **(Phase 1,已定案 → 第 3 節)** 限價恰等於對手價成交。
+2. **(Phase 1,已定案 → 第 3 節)** 保護帶基準維持「到達時的最佳對手價」;`price_protection` 只是取消原因。
 3. **(Phase 2)** `balances` 的 `version` 欄位是否用於樂觀鎖?計畫同時用 `FOR UPDATE`。建議只留 `FOR UPDATE`,`version` 作為除錯用途。
 4. **(Phase 2)** 手續費是否允許 0 bps 的市場(做市優惠)?`fee_schedules` CHECK 允許 0,ceil(0) = 0,守恆不受影響 → 可以。
 5. **(Phase 3)** `order.accepted` 對「同交易內立刻全部成交」的單也要發(§6.2 規則),事件順序 accepted → executed×n → filled 在 outbox 內以 `id` 排序即可;跨市場順序不保證 → 客戶端只能依 `account_seq`。

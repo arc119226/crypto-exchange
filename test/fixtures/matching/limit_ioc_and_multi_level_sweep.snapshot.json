@@ -1,0 +1,19 @@
+{
+  "symbol": "ETH-USDC",
+  "last_seq": 7,
+  "bids": [
+    {
+      "order_id": "B1",
+      "account_id": "B",
+      "side": "buy",
+      "price": "2010",
+      "qty": "0.5",
+      "remaining": "0.2",
+      "filled_qty": "0.3",
+      "filled_quote": "599",
+      "seq": 5,
+      "ts": "2026-09-05T00:00:05Z"
+    }
+  ],
+  "asks": []
+}

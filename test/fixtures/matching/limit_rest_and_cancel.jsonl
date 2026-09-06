@@ -1,0 +1,9 @@
+# Non-crossing limit orders rest by (price, seq); cancels remove exactly one order.
+{"market":{"symbol":"ETH-USDC","price_tick":"0.01","qty_step":"0.0001","min_notional":"5","base_scale":18,"quote_scale":6,"self_trade_policy":"cancel_newest"}}
+{"seq":1,"ts":"2026-09-05T00:00:01Z","new":{"order_id":"B1","account_id":"B","side":"buy","type":"limit","time_in_force":"gtc","price":"1999","qty":"0.5"}}
+{"seq":2,"ts":"2026-09-05T00:00:02Z","new":{"order_id":"S1","account_id":"S","side":"sell","type":"limit","time_in_force":"gtc","price":"2001","qty":"0.5"}}
+{"seq":3,"ts":"2026-09-05T00:00:03Z","new":{"order_id":"B2","account_id":"B","side":"buy","type":"limit","time_in_force":"gtc","price":"1999","qty":"0.25"}}
+{"seq":4,"ts":"2026-09-05T00:00:04Z","new":{"order_id":"B3","account_id":"C","side":"buy","type":"limit","time_in_force":"gtc","price":"1998.5","qty":"1"}}
+{"seq":5,"ts":"2026-09-05T00:00:05Z","cancel":{"order_id":"B1"}}
+{"seq":6,"ts":"2026-09-05T00:00:06Z","cancel":{"order_id":"NOPE"}}
+{"seq":7,"ts":"2026-09-05T00:00:07Z","cancel":{"order_id":"S1","account_id":"B"}}

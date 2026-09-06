@@ -2,7 +2,7 @@
 
 白牌交易引擎(white-label exchange engine)的商業化原型:現貨撮合、複式記帳帳本、EVM 充提與歸集、行情推播、管理後台,以單一 Go binary 多角色的模組化單體交付,客戶透過 REST / WebSocket / Webhook 與事件契約整合。
 
-**目前狀態:Phase 0 walking skeleton。** 單一 module、單一 binary 多角色、`GET /v1/markets` 從 OpenAPI 到 Postgres 的最薄切片、compose、CI 已就位;撮合、帳本、auth、鏈上程式碼自 Phase 1 起依 `docs/plan-v1.0.md` 第 12 節逐階段加入。
+**目前狀態:Phase 1 撮合純 library。** Phase 0 的 walking skeleton(單一 module、單一 binary 多角色、`GET /v1/markets` 從 OpenAPI 到 Postgres、compose、CI)已合併;`internal/matching` 是無 I/O、確定性的訂單簿(限價 GTC / IOC、市價 quote/base 語意、取消、部分成交、STP `cancel_newest`、滑價保護帶),以屬性 / 模糊 / golden 測試鎖住,`exchangectl replay` 可重播命令腳本。帳本、trading、auth、鏈上程式碼自 Phase 2 起依 `docs/plan-v1.0.md` 第 12 節逐階段加入。
 
 ## 產品邊界
 
@@ -37,7 +37,10 @@ make reset              # 停止並清空 postgres / nats / anvil 狀態與合�
 
 ```sh
 make lint               # go vet + golangci-lint(depguard 模組邊界、forbidigo 禁 float;版本釘在 tools/go.mod)
-make test               # 單元 + 屬性測試(-race)
+make test               # 單元 + 屬性測試(-race;rapid 每個性質 1,000 個序列)
+make test-fuzz          # 每個 Fuzz* 目標跑 FUZZ_TIME(預設 30s)
+go run ./cmd/exchangectl replay --file test/fixtures/matching/market_buy_two_levels.jsonl   # 重播撮合腳本、印事件與深度
+go test ./internal/matching -run TestGolden -update   # 重新產生 golden(改語意時,diff 要 review)
 make gen && make gen-check   # 重新產生 OpenAPI server/client 與 sqlc 程式碼;產物進 repo,CI 比對
 make test-integration   # testcontainers(需要 Docker):migration → seed → GET /v1/markets
 make contracts-test     # 在釘住的 foundry 映像內跑 forge test
@@ -53,6 +56,7 @@ cmd/exchange          單一 binary:serve --role=api|engine|chain|signer|stream|
 cmd/exchangectl       開發/營運 CLI(產生的 OpenAPI client)
 internal/app          設定、run loop、/healthz /readyz /metrics、SIGTERM drain、依賴退避
 internal/api          public REST(oapi-codegen strict server)+ RFC 7807
+internal/matching     純函式訂單簿(Apply / Restore / Snapshot;無 I/O、無時鐘)
 internal/registry     assets / markets / fee schedules(sqlc)+ seed
 internal/money        Decimal 金額型別(禁 float;JSON 字串)
 internal/telemetry    slog、correlation id、Prometheus
@@ -64,6 +68,7 @@ infra/contracts       MockUSDC + 冪等部署腳本(Foundry)
 infra/postgres        ex_* 登入角色 initdb 腳本
 infra/observability   prometheus / grafana 設定
 test/integration      testcontainers 整合測試(build tag integration)
+test/fixtures/matching 撮合命令腳本與 golden 事件 / 快照
 docs                  計畫、審查、ADR、領域文件
 ```
 
@@ -79,4 +84,4 @@ docs                  計畫、審查、ADR、領域文件
 
 ## 下一步
 
-Phase 1(`docs/plan-v1.0.md` §12):`internal/matching` 純函式訂單簿 + 屬性/模糊測試 + `exchangectl replay`。DoD 不過不進下一階段。
+Phase 2(`docs/plan-v1.0.md` §12):`internal/ledger` 複式帳本 + Postgres(Hold / Release / Settle / Credit、試算平衡、管理員調帳)。DoD 不過不進下一階段。

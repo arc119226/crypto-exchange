@@ -18,7 +18,7 @@ v0.1 規劃了 11 個各自建置的 Go 微服務。審查指出:(1) 服務邊�
 
 採選項 3。
 
-- 模組邊界:`internal/{money,matching,ledger,registry,policy,trading,eventbus,marketdata,stream,chain/*,auth,audit,webhook,admin,api,app,telemetry,platform}`,相依方向由 `.golangci.yml` depguard 強制(`money` 只准 stdlib + decimal;`matching` 只准 `money`;`ledger` 不得 import trading/chain/api/admin/registry;`api/admin/stream` 只被 `app` import;`cmd/*` 只准 `app`、`telemetry`、`money`;無人 import `cmd`)。
+- 模組邊界:`internal/{money,matching,ledger,registry,policy,trading,eventbus,marketdata,stream,chain/*,auth,audit,webhook,admin,api,app,telemetry,platform}`,相依方向由 `.golangci.yml` depguard 強制(`money` 只准 stdlib + decimal;`matching` 只准 `money`;`ledger` 不得 import trading/chain/api/admin/registry;`api/admin/stream` 只被 `app` import;`cmd/*` 只准 `app`、`telemetry`、`money`、`matching`(`exchangectl replay` 直接驅動純函式訂單簿,matching 沒有 I/O,所以不經 `app`);無人 import `cmd`)。
 - 角色:`api`、`engine`(恰好 1 個,PG advisory lock)、`chain`、`signer`(恰好 1 個,唯一掛 keystore)、`stream`、`admin`、`worker`、`all`。角色之間在 `role=all` 為 in-process 呼叫,拆分部署為 NATS request-reply。
 - 部署:一個 image(`build/Dockerfile`,distroless)、compose profiles `single`(一個容器)與 `app`(一角色一容器)。
 - 客戶只透過 REST / WebSocket / Webhook / 事件契約整合;`internal/` 不承諾 Go API 穩定。
