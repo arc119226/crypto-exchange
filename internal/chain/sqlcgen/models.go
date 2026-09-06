@@ -59,12 +59,46 @@ type ChainDepositAddress struct {
 	AssignedAt      pgtype.Timestamptz
 }
 
+type ChainHotWallet struct {
+	TenantID  string
+	ChainID   int64
+	Address   string
+	NextNonce int64
+	UpdatedAt time.Time
+}
+
+type ChainNonceFill struct {
+	ID        int64
+	TenantID  string
+	ChainID   int64
+	Nonce     int64
+	TxHash    string
+	Reason    string
+	Status    string
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
+
 type ChainScanCursor struct {
 	TenantID         string
 	ChainID          int64
 	LastScannedBlock int64
 	LastBlockHash    string
 	UpdatedAt        time.Time
+}
+
+type ChainSigningLog struct {
+	ID          int64
+	TenantID    string
+	Kind        string
+	RefID       string
+	Attempt     int32
+	ChainID     int64
+	FromAddress string
+	ToAddress   string
+	Nonce       int64
+	TxHash      string
+	SignedAt    time.Time
 }
 
 type ChainWithdrawal struct {
@@ -87,4 +121,11 @@ type ChainWithdrawal struct {
 	Version        int32
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
+	Nonce          *int64
+	RawTx          []byte
+	TxHash         *string
+	BroadcastAt    pgtype.Timestamptz
+	Replacements   int32
+	BlockNumber    *int64
+	GasCost        pgtype.Numeric
 }
