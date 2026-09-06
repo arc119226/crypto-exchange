@@ -854,7 +854,7 @@ const upsertHotWallet = `-- name: UpsertHotWallet :one
 INSERT INTO chain.hot_wallets (tenant_id, chain_id, address, next_nonce)
 VALUES ($1, $2, $3, $4)
 ON CONFLICT (tenant_id, chain_id) DO UPDATE
-SET address = excluded.address, updated_at = now()
+SET updated_at = now()
 RETURNING tenant_id, chain_id, address, next_nonce, updated_at
 `
 
@@ -865,10 +865,15 @@ type UpsertHotWalletParams struct {
 	NextNonce int64
 }
 
-// Records the hot wallet on first start. The address is overwritten only when
-// it is genuinely the same wallet re-derived; a different address on an
-// existing row is a different wallet, which NonceManager refuses before it
-// ever gets here.
+// Records the hot wallet on first start, and on every start after that returns
+// what is already stored.
+//
+// The address is deliberately NOT overwritten. It is the evidence NonceManager
+// compares against the key it derives, and a row that adopted whatever address
+// it was last asked about could never disagree with anything -- which is to
+// say the "this is a different wallet" refusal would be unreachable, and a
+// deployment given the wrong seed would carry on allocating nonces against a
+// stranger's counter.
 func (q *Queries) UpsertHotWallet(ctx context.Context, arg UpsertHotWalletParams) (ChainHotWallet, error) {
 	row := q.db.QueryRow(ctx, upsertHotWallet,
 		arg.TenantID,
