@@ -2,7 +2,7 @@
 
 白牌交易引擎(white-label exchange engine)的商業化原型:現貨撮合、複式記帳帳本、EVM 充提與歸集、行情推播、管理後台,以單一 Go binary 多角色的模組化單體交付,客戶透過 REST / WebSocket / Webhook 與事件契約整合。
 
-**目前狀態:Phase 1 撮合純 library。** Phase 0 的 walking skeleton(單一 module、單一 binary 多角色、`GET /v1/markets` 從 OpenAPI 到 Postgres、compose、CI)已合併;`internal/matching` 是無 I/O、確定性的訂單簿(限價 GTC / IOC、市價 quote/base 語意、取消、部分成交、STP `cancel_newest`、滑價保護帶),以屬性 / 模糊 / golden 測試鎖住,`exchangectl replay` 可重播命令腳本。帳本、trading、auth、鏈上程式碼自 Phase 2 起依 `docs/plan-v1.0.md` 第 12 節逐階段加入。
+**目前狀態:Phase 2 帳本 + Postgres。** 已合併:Phase 0 walking skeleton(單一 module、單一 binary 多角色、`GET /v1/markets`、compose、CI)、Phase 1 `internal/matching`(無 I/O、確定性訂單簿,屬性 / 模糊 / golden 測試,`exchangectl replay`)。Phase 2 加入 `internal/ledger`(複式記帳、凍結即分錄、balances 快取、冪等鍵、deferred trigger、GRANT-only 權限)、`internal/audit`、admin API(`/admin/v1`,帳戶 / 餘額 / 分錄 / 試算平衡 / 調帳 / 稽核)與 `exchangectl admin`。trading、auth、鏈上程式碼自 Phase 3 起依 `docs/plan-v1.0.md` 第 12 節逐階段加入。
 
 ## 產品邊界
 
@@ -23,7 +23,13 @@ make up-single          # postgres / redis / nats / anvil / MockUSDC 部署 / mi
 curl -s localhost:8080/v1/markets | jq          # seed 進去的 ETH-USDC,金額一律字串("price_tick": "0.01")
 go run ./cmd/exchangectl markets list           # 同一件事,走產生的 OpenAPI client
 curl -s localhost:9100/readyz                   # {"status":"ok", ...}
-curl -s localhost:9100/metrics | grep exchange_build_info
+curl -s localhost:9100/metrics | grep -E 'exchange_build_info|ledger_trial_balance_diff'
+
+# 帳本(admin API,金鑰在 .env 的 ADMIN_API_KEY)
+export EXCHANGE_ADMIN_URL=http://localhost:8082 EXCHANGE_ADMIN_API_KEY=$(sed -n 's/^ADMIN_API_KEY=//p' .env)
+ACC=$(go run ./cmd/exchangectl admin accounts create)                                   # 開一個現貨帳戶
+go run ./cmd/exchangectl admin fund --account $ACC --asset USDC --amount 10000            # dev faucet(external → available,寫審計)
+go run ./cmd/exchangectl admin balances $ACC && go run ./cmd/exchangectl admin trial-balance   # 每資產 diff = 0
 make artifacts                                  # 把 addresses.json 從 volume 複製到 deploy/compose/artifacts/
 cast call $(jq -r .usdc deploy/compose/artifacts/addresses.json) "decimals()(uint8)" --rpc-url localhost:8545   # 6
 
@@ -42,7 +48,8 @@ make test-fuzz          # 每個 Fuzz* 目標跑 FUZZ_TIME(預設 30s)
 go run ./cmd/exchangectl replay --file test/fixtures/matching/market_buy_two_levels.jsonl   # 重播撮合腳本、印事件與深度
 go test ./internal/matching -run TestGolden -update   # 重新產生 golden(改語意時,diff 要 review)
 make gen && make gen-check   # 重新產生 OpenAPI server/client 與 sqlc 程式碼;產物進 repo,CI 比對
-make test-integration   # testcontainers(需要 Docker):migration → seed → GET /v1/markets
+make test-integration   # testcontainers(需要 Docker):migration、seed、GET /v1/markets、帳本(算例、500 個隨機序列、100 goroutine 併發)、admin API
+TEST_PG_ADMIN_URL=postgres://exchange:test@127.0.0.1:5433/postgres make test-integration   # 改用現成的本機 Postgres(先跑 infra/postgres/initdb/01-roles.sh),每個測試一個新 database
 make contracts-test     # 在釘住的 foundry 映像內跑 forge test
 make infra-up && make migrate && make seed && make run ROLE=api   # 只起基礎設施,role 在主機上 go run
 ```
@@ -57,11 +64,15 @@ cmd/exchangectl       開發/營運 CLI(產生的 OpenAPI client)
 internal/app          設定、run loop、/healthz /readyz /metrics、SIGTERM drain、依賴退避
 internal/api          public REST(oapi-codegen strict server)+ RFC 7807
 internal/matching     純函式訂單簿(Apply / Restore / Snapshot;無 I/O、無時鐘)
+internal/ledger       複式帳本:Post / Hold / Release / Settle / Credit / Adjust、balances 快取、試算平衡(sqlc)
+internal/audit        append-only 稽核紀錄
+internal/admin        admin REST(oapi-codegen strict server)+ X-Admin-Api-Key
 internal/registry     assets / markets / fee schedules(sqlc)+ seed
 internal/money        Decimal 金額型別(禁 float;JSON 字串)
 internal/telemetry    slog、correlation id、Prometheus
 internal/platform     pgx / NATS / Redis 連線與健康檢查
-api/public/v1         OpenAPI 契約
+api/public/v1         公開 OpenAPI 契約
+api/admin/v1          admin OpenAPI 契約
 migrations            goose SQL(embed)
 deploy/compose        compose.yaml(profiles:infra / app / single / observability)
 infra/contracts       MockUSDC + 冪等部署腳本(Foundry)
@@ -84,4 +95,4 @@ docs                  計畫、審查、ADR、領域文件
 
 ## 下一步
 
-Phase 2(`docs/plan-v1.0.md` §12):`internal/ledger` 複式帳本 + Postgres(Hold / Release / Settle / Credit、試算平衡、管理員調帳)。DoD 不過不進下一階段。
+Phase 3(`docs/plan-v1.0.md` §12):`internal/trading` 狀態機 + per-market runner、outbox / JetStream、public OpenAPI 的交易端點、最小 auth。DoD 不過不進下一階段。
