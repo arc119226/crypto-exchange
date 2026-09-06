@@ -8,15 +8,21 @@ import (
 	"crypto/rand"
 	"io"
 	"log/slog"
+	"math/big"
+	"strings"
 	"testing"
 
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/arc119226/crypto-exchange/internal/audit"
 	"github.com/arc119226/crypto-exchange/internal/auth"
+	"github.com/arc119226/crypto-exchange/internal/chain/hdwallet"
+	"github.com/arc119226/crypto-exchange/internal/chain/signer"
 	"github.com/arc119226/crypto-exchange/internal/chain/withdrawal"
 	"github.com/arc119226/crypto-exchange/internal/ledger"
 	"github.com/arc119226/crypto-exchange/internal/platform/pg"
@@ -372,16 +378,16 @@ func TestWithdrawalRolePrivileges(t *testing.T) {
 	require.NoError(t, apiLedger.LoadHouseAccounts(ctx))
 	_, priv, err := ed25519.GenerateKey(rand.Reader)
 	require.NoError(t, err)
-	signer, err := auth.NewSigner(priv, "exchange")
+	jwtSigner, err := auth.NewSigner(priv, "exchange")
 	require.NoError(t, err)
-	verifier, err := signer.VerifierFor()
+	verifier, err := jwtSigner.VerifierFor()
 	require.NoError(t, err)
 	master := make([]byte, auth.MasterKeyLen)
 	_, err = rand.Read(master)
 	require.NoError(t, err)
 	rec := audit.NewRecorder("default")
 	authSvc, err := auth.New(apiPool, auth.Config{Tenant: "default", MasterKey: master, Password: auth.TestPasswordParams},
-		signer, verifier, apiLedger, rec)
+		jwtSigner, verifier, apiLedger, rec)
 	require.NoError(t, err)
 	session, err := authSvc.Register(ctx, "withdraw-privileges@e2e.local", password, "203.0.113.9")
 	require.NoError(t, err)
@@ -457,5 +463,119 @@ func TestWithdrawalRolePrivileges(t *testing.T) {
 		assert.Equal(t, withdrawal.StatusFundsLocked, h.status(t, ctx, session.AccountID, id))
 		assert.Equal(t, "0.5", h.balance(t, ctx, session.AccountID, "ETH").Hold.String())
 		h.assertTrialBalanceZero(t, ctx)
+	})
+
+	signerPool, err := pg.Open(ctx, pg.PoolConfig{DSN: h.DSN("ex_signer"), MaxConns: 4})
+	require.NoError(t, err)
+	defer signerPool.Close()
+
+	t.Run("the signer role can sign it", func(t *testing.T) {
+		// Reads the withdrawal to check the request against it, and appends to
+		// chain.signing_log — the two grants 0010 and 0011 give this role, and
+		// nothing else.
+		w, err := hdwallet.FromMnemonic(testMnemonic)
+		require.NoError(t, err)
+		defer w.Close()
+		s, err := signer.NewKeystoreSigner(signerPool, "default", anvilChainID, w,
+			registry.NewStore(signerPool), rec, slog.New(slog.NewTextHandler(io.Discard, nil)))
+		require.NoError(t, err)
+		res, err := s.Sign(ctx, signer.Request{
+			Kind: signer.KindWithdrawal, RefID: id, ChainID: anvilChainID,
+			To: common.HexToAddress(payoutAddress), Asset: "ETH", Value: amt("0.5"),
+			Nonce: 0, Gas: 21000, TipCap: big.NewInt(1), FeeCap: big.NewInt(2),
+		})
+		require.NoError(t, err)
+		assert.NotEmpty(t, res.RawTx)
+	})
+
+	t.Run("the signer role cannot move the withdrawal it signed", func(t *testing.T) {
+		// Holding the key must not carry the ability to declare the money
+		// sent. The chain role writes the transaction columns; the signer only
+		// produces bytes (§6.4.2, §6.6).
+		for _, stmt := range []string{
+			`UPDATE chain.withdrawals SET status = 'broadcast' WHERE id = $1`,
+			`UPDATE chain.withdrawals SET tx_hash = '0x` + strings.Repeat("a", 64) + `' WHERE id = $1`,
+		} {
+			_, err := signerPool.Exec(ctx, stmt, id)
+			var pgErr *pgconn.PgError
+			require.ErrorAs(t, err, &pgErr, stmt)
+			assert.Equal(t, "42501", pgErr.Code, stmt)
+		}
+	})
+
+	t.Run("nobody may rewrite the signing log", func(t *testing.T) {
+		// The UNIQUE key is only a defence if the row it collides with cannot
+		// be cleared: a signature that happened cannot be unhappened.
+		for _, p := range []struct {
+			role string
+			pool *pgxpool.Pool
+		}{{"ex_chain", chainPool}, {"ex_admin", adminPool}, {"ex_signer", signerPool}} {
+			_, err := p.pool.Exec(ctx, `DELETE FROM chain.signing_log WHERE ref_id = $1`, id)
+			var pgErr *pgconn.PgError
+			require.ErrorAs(t, err, &pgErr, p.role)
+			assert.Equal(t, "42501", pgErr.Code, p.role)
+		}
+		// And the chain role cannot forge one either.
+		_, err := chainPool.Exec(ctx,
+			`INSERT INTO chain.signing_log (kind, ref_id, attempt, chain_id, from_address, to_address, nonce, tx_hash, raw_tx)
+			 VALUES ('withdrawal', $1, 9, $2, $3, $3, 0, $4, '\x00')`,
+			id, anvilChainID, payoutAddress, "0x"+strings.Repeat("b", 64))
+		var pgErr *pgconn.PgError
+		require.ErrorAs(t, err, &pgErr)
+		assert.Equal(t, "42501", pgErr.Code)
+	})
+
+	t.Run("the admin role can ask for a resolution but not act on one", func(t *testing.T) {
+		// resolve is four actions that all need a node and a key. Admin has
+		// neither, so it may write the request columns and nothing else — a
+		// role that could write tx_hash could make a withdrawal look sent
+		// without anything having been signed.
+		//
+		// Admin does hold status, because reviewing writes it. What stops it
+		// declaring a withdrawal sent is the pair: the states that mean "on
+		// the chain" require the transaction columns (0011), and those are the
+		// ones it may not write. Neither half is sufficient alone, and this is
+		// the half a grant test alone would miss.
+		_, err := adminPool.Exec(ctx,
+			`UPDATE chain.withdrawals SET status = 'confirmed' WHERE id = $1`, id)
+		var checkErr *pgconn.PgError
+		require.ErrorAs(t, err, &checkErr)
+		assert.Equal(t, "23514", checkErr.Code, "signed means signed")
+
+		// Put the withdrawal where a resolution applies, as the chain role
+		// would. This is ex_all because it is setup, not the thing under test.
+		_, err = h.all.Exec(ctx, `UPDATE chain.withdrawals
+			SET status = 'broadcast', nonce = 0, raw_tx = '\x00', tx_hash = $2, broadcast_at = now()
+			WHERE id = $1`, id, "0x"+strings.Repeat("e", 64))
+		require.NoError(t, err)
+
+		// The real query, not a hand-written UPDATE: it also touches version
+		// and updated_at and writes an audit row, and a missing grant on any
+		// of those is exactly the kind of thing that only shows up here.
+		adminLedger := ledger.New(adminPool, "default")
+		require.NoError(t, adminLedger.LoadHouseAccounts(ctx))
+		rec, err := withdrawal.NewReviewer(adminPool, "default", adminLedger, rec).
+			RequestResolve(ctx, withdrawal.ResolveParams{
+				ID: id, Action: withdrawal.ActionBump, Note: "stuck",
+				ActorType: audit.ActorAPIKey, ActorID: "admin-api-key",
+			})
+		require.NoError(t, err)
+		assert.Equal(t, withdrawal.ActionBump, rec.ResolveAction)
+
+		for _, stmt := range []string{
+			`UPDATE chain.withdrawals SET nonce = 3 WHERE id = $1`,
+			`UPDATE chain.withdrawals SET tx_hash = '0x` + strings.Repeat("c", 64) + `' WHERE id = $1`,
+			`UPDATE chain.withdrawals SET cancel_tx_hash = '0x` + strings.Repeat("d", 64) + `' WHERE id = $1`,
+		} {
+			_, err := adminPool.Exec(ctx, stmt, id)
+			var pgErr *pgconn.PgError
+			require.ErrorAs(t, err, &pgErr, stmt)
+			assert.Equal(t, "42501", pgErr.Code, stmt)
+		}
+
+		// The chain role is the one that clears the request it applied.
+		_, err = chainPool.Exec(ctx,
+			`UPDATE chain.withdrawals SET resolve_action = NULL, resolve_error = 'done' WHERE id = $1`, id)
+		require.NoError(t, err)
 	})
 }

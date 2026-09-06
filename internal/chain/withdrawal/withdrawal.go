@@ -43,6 +43,16 @@ const (
 const (
 	FailureInsufficientBalance = "insufficient_balance"
 	FailurePolicy              = "policy"
+	// FailureBroadcast is a transaction the node refused that the chain
+	// confirms is not mined: the funds go back to available.
+	FailureBroadcast = "broadcast"
+	// FailureOnChain is a transaction that was mined and reverted. The gas is
+	// spent and the amount stays in pending_withdrawal for a person to
+	// resolve (§6.1.4 e).
+	FailureOnChain = "on_chain"
+	// FailureReplaced is a broadcast transaction cancelled by an admin with a
+	// same-nonce self-transfer.
+	FailureReplaced = "replaced"
 )
 
 // Errors callers distinguish.
@@ -75,6 +85,14 @@ type Record struct {
 	ReviewNote    string
 	ReviewedBy    string
 	ReviewedAt    *time.Time
+	// TxHash is the transaction now representing this withdrawal: the
+	// displacement once one is in flight, otherwise the withdrawal's own.
+	TxHash string
+	// ResolveAction is an operator resolution the chain role has not applied
+	// yet; ResolveError is why the last one could not be applied. Both are
+	// empty on a withdrawal nobody has had to intervene in.
+	ResolveAction Action
+	ResolveError  string
 	CreatedAt     time.Time
 	UpdatedAt     time.Time
 }
@@ -96,9 +114,14 @@ func recordFrom(row sqlcgen.ChainWithdrawal) (Record, error) {
 		ID: row.ID, AccountID: row.AccountID, Asset: row.Asset, Amount: amount,
 		ToAddress: row.ToAddress, ChainID: row.ChainID, Status: row.Status,
 		FailureReason: deref(row.FailureReason), ReviewNote: deref(row.ReviewNote),
-		ReviewedBy: deref(row.ReviewedBy),
-		CreatedAt:  row.CreatedAt, UpdatedAt: row.UpdatedAt,
+		ReviewedBy: deref(row.ReviewedBy), TxHash: deref(row.TxHash),
+		CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt,
 	}
+	if row.CancelTxHash != nil {
+		rec.TxHash = *row.CancelTxHash
+	}
+	rec.ResolveAction = Action(deref(row.ResolveAction))
+	rec.ResolveError = deref(row.ResolveError)
 	if row.ReviewedAt.Valid {
 		at := row.ReviewedAt.Time
 		rec.ReviewedAt = &at

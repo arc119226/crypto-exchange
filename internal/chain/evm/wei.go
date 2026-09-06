@@ -20,8 +20,8 @@ const MaxScale int32 = 18
 // ToWei converts a decimal amount into the asset's smallest unit.
 //
 // It refuses an amount with more decimal places than the asset has, rather
-// than rounding: silently dropping a digit here would mean crediting a
-// different number than the chain moved.
+// than rounding: silently dropping a digit here would mean sending a
+// different number than the ledger recorded.
 func ToWei(amount money.Amount, scale int32) (*big.Int, error) {
 	if scale < 0 || scale > MaxScale {
 		return nil, fmt.Errorf("evm: scale %d out of range", scale)
@@ -30,17 +30,29 @@ func ToWei(amount money.Amount, scale int32) (*big.Int, error) {
 		return nil, fmt.Errorf("evm: negative amount %s", amount)
 	}
 	// amount is coefficient x 10^exponent, so the value in the smallest unit
-	// is coefficient x 10^(exponent+scale). A negative result means the amount
-	// carries digits the asset cannot represent.
+	// is coefficient x 10^(exponent+scale).
 	shift := amount.Exponent() + scale
-	if shift < 0 {
-		return nil, fmt.Errorf("evm: %s has more precision than scale %d allows", amount, scale)
-	}
 	out := new(big.Int).Set(amount.Coefficient())
-	if shift > 0 {
-		out.Mul(out, new(big.Int).Exp(big.NewInt(10), big.NewInt(int64(shift)), nil))
+	switch {
+	case shift > 0:
+		out.Mul(out, pow10(shift))
+	case shift < 0:
+		// More decimal places than the asset has -- which only means the
+		// amount is unrepresentable if one of them is non-zero. An amount read
+		// back from NUMERIC(36,18) always carries eighteen of them, so
+		// 50.000000000000000000 USDC must convert cleanly to 50000000 rather
+		// than being refused for digits that are all zero.
+		rem := new(big.Int)
+		out.QuoRem(out, pow10(-shift), rem)
+		if rem.Sign() != 0 {
+			return nil, fmt.Errorf("evm: %s has more precision than scale %d allows", amount, scale)
+		}
 	}
 	return out, nil
+}
+
+func pow10(n int32) *big.Int {
+	return new(big.Int).Exp(big.NewInt(10), big.NewInt(int64(n)), nil)
 }
 
 // FromWei converts the asset's smallest unit into a decimal amount. The

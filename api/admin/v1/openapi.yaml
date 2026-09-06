@@ -257,6 +257,58 @@ paths:
         "500":
           $ref: "#/components/responses/InternalError"
 
+  /admin/v1/withdrawals/{id}/resolve:
+    post:
+      tags: [withdrawals]
+      operationId: resolveWithdrawal
+      summary: Unstick a withdrawal the machine could not finish
+      description: >
+        Four resolutions, and which one is legal depends on where the
+        withdrawal stopped (docs/plan-v1.0.md §6.4.2).
+
+
+        A `broadcast` withdrawal has a transaction in flight and its amount in
+        `pending_withdrawal`: `bump` re-sends it on the same nonce with a
+        higher fee, past the automatic replacement limit; `cancel_nonce`
+        displaces it with a self-transfer on that nonce. Neither moves money
+        now — the refund for a cancellation happens when the displacement is
+        mined, because until then the original can still win the race.
+
+
+        A `failed`/`on_chain` withdrawal has a transaction that reverted, gas
+        spent, and its amount still in `pending_withdrawal`: `refund` returns
+        the amount to the user and ends the withdrawal, `retry` puts it back on
+        hold and sends the row round again with a fresh nonce.
+
+
+        Anything else is 409 — including a bump on a withdrawal already being
+        cancelled, which would bid against our own displacement.
+      parameters:
+        - $ref: "#/components/parameters/WithdrawalID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WithdrawalResolveRequest"
+      responses:
+        "200":
+          description: The withdrawal after the resolution
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminWithdrawal"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
   /admin/v1/ledger/trial-balance:
     get:
       tags: [ledger]
@@ -482,6 +534,12 @@ components:
         to_address: { type: string }
         chain_id: { type: integer, format: int64 }
         status: { type: string }
+        tx_hash:
+          type: string
+          nullable: true
+          description: >
+            The transaction now representing this withdrawal: the displacement
+            while a cancellation is in flight, otherwise the withdrawal's own.
         failure_reason: { type: string, nullable: true }
         review_note: { type: string, nullable: true }
         reviewed_by: { type: string, nullable: true }
@@ -509,6 +567,21 @@ components:
           type: string
           maxLength: 500
           description: Why. Recorded on the withdrawal and in the audit trail.
+
+    WithdrawalResolveRequest:
+      type: object
+      required: [action]
+      properties:
+        action:
+          type: string
+          enum: [bump, cancel_nonce, refund, retry]
+        note:
+          type: string
+          maxLength: 500
+          description: >
+            Why. Required: every one of these actions is a person overriding
+            the machine, and the audit trail is the only place that reason
+            survives.
 
     AccountKind:
       type: string

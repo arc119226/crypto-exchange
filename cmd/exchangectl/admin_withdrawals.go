@@ -10,7 +10,7 @@ import (
 
 func newAdminWithdrawalsCmd() *cobra.Command {
 	c := &cobra.Command{Use: "withdrawals", Short: "The withdrawal review queue (/admin/v1/withdrawals)"}
-	c.AddCommand(newAdminWithdrawalsListCmd(), newAdminWithdrawalsReviewCmd())
+	c.AddCommand(newAdminWithdrawalsListCmd(), newAdminWithdrawalsReviewCmd(), newAdminWithdrawalsResolveCmd())
 	return c
 }
 
@@ -88,6 +88,59 @@ func newAdminWithdrawalsReviewCmd() *cobra.Command {
 		},
 	}
 	c.Flags().StringVar(&note, "note", "", "why; required when rejecting")
+	return c
+}
+
+func newAdminWithdrawalsResolveCmd() *cobra.Command {
+	var note string
+	c := &cobra.Command{
+		Use:   "resolve <id> <bump|cancel_nonce|refund|retry>",
+		Short: "Unstick a withdrawal the machine could not finish",
+		Long: "Which action applies depends on where the withdrawal stopped.\n\n" +
+			"A broadcast withdrawal has a transaction in flight:\n" +
+			"  bump          re-send it on the same nonce with a higher fee\n" +
+			"  cancel_nonce  displace it with a self-transfer on that nonce\n\n" +
+			"A failed/on_chain withdrawal has a transaction that reverted:\n" +
+			"  refund        return the amount to the user and end it\n" +
+			"  retry         put it back on hold and send it again\n\n" +
+			"Nothing happens in the admin role, which holds no key: the request is\n" +
+			"recorded and the chain worker applies it on its next tick. --note is\n" +
+			"required, because every one of these is a person overriding the\n" +
+			"machine on someone else's money.",
+		Args: cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			format, err := outputFormat(cmd)
+			if err != nil {
+				return err
+			}
+			action := adminclient.WithdrawalResolveRequestAction(args[1])
+			if !action.Valid() {
+				return fmt.Errorf("action must be bump, cancel_nonce, refund or retry, got %q", args[1])
+			}
+			if note == "" {
+				return fmt.Errorf("--note is required: say why")
+			}
+			client, base, err := newAdminClient(cmd)
+			if err != nil {
+				return err
+			}
+			resp, err := client.ResolveWithdrawalWithResponse(cmd.Context(), args[0],
+				adminclient.ResolveWithdrawalJSONRequestBody{Action: action, Note: &note})
+			if err != nil {
+				return transportError(base, err)
+			}
+			if resp.JSON200 == nil {
+				return adminError(resp.HTTPResponse, resp.Body)
+			}
+			if format == "json" {
+				return printJSON(cmd.OutOrStdout(), resp.JSON200)
+			}
+			return printTable(cmd.OutOrStdout(),
+				[]string{"ID", "ACCOUNT", "ASSET", "AMOUNT", "TO", "REQUESTED"},
+				adminWithdrawalRows([]adminclient.AdminWithdrawal{*resp.JSON200}))
+		},
+	}
+	c.Flags().StringVar(&note, "note", "", "why; required")
 	return c
 }
 

@@ -202,7 +202,9 @@ services:
       DATABASE_URL: postgres://ex_chain:${POSTGRES_PASSWORD}@postgres:5432/exchange?sslmode=disable
       ETH_REQUIRED_CONFIRMATIONS_DEFAULT: "1"   # anvil: a deposit in the head block is already confirmed
       ETH_SCAN_INTERVAL: 2s
-      SIGNER_SUBJECT: cmd.signer.sign.default            # signing goes over NATS request-reply to exchange-signer
+      # Signing goes over NATS request-reply to exchange-signer, on
+      # WALLET_SIGNER_SUBJECT_PREFIX + "." + TENANT_ID. Both roles take the
+      # same default, so neither states it.
     depends_on:
       <<: *app-deps
       anvil: { condition: service_healthy }

@@ -205,5 +205,8 @@ func toWithdrawal(w withdrawal.Record) gen.Withdrawal {
 	if w.ReviewNote != "" {
 		out.ReviewNote = &w.ReviewNote
 	}
+	if w.TxHash != "" {
+		out.TxHash = &w.TxHash
+	}
 	return out
 }

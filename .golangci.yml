@@ -138,6 +138,21 @@ linters:
           deny:
             - pkg: github.com/arc119226/crypto-exchange/internal/chain/hdwallet
               desc: address assignment must not import key derivation
+        # The signer's NATS transport lives outside internal/chain for the
+        # same reason cmdbus lives outside internal/trading: the domain owns
+        # the interface and must not depend on the wire.
+        signerbus:
+          list-mode: strict
+          files:
+            - "**/internal/signerbus/**"
+          allow:
+            - $gostd
+            - github.com/arc119226/crypto-exchange/internal/chain/signer
+            - github.com/arc119226/crypto-exchange/internal/telemetry
+            - github.com/arc119226/crypto-exchange/internal/money
+            - github.com/ethereum/go-ethereum
+            - github.com/nats-io/nats.go
+            - github.com/stretchr/testify
         cmdbus:
           list-mode: strict
           files:

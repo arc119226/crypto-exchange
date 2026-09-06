@@ -46,6 +46,10 @@ type Payload struct {
 	PreviousStatus string `json:"previous_status,omitempty"`
 	// Reason explains a rejection, a review or a failure; empty otherwise.
 	Reason string `json:"reason,omitempty"`
+	// TxHash is the transaction now representing this withdrawal, once one
+	// exists. It is the displacement's hash while a cancellation is in
+	// flight, because that is the transaction whose fate decides the money.
+	TxHash string `json:"tx_hash,omitempty"`
 }
 
 // Event wraps a payload in an envelope. Withdrawals are account-scoped, like

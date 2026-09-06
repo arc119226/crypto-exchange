@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/arc119226/crypto-exchange/internal/audit"
+	"github.com/arc119226/crypto-exchange/internal/chain/signer"
 	"github.com/arc119226/crypto-exchange/internal/chain/sqlcgen"
 	"github.com/arc119226/crypto-exchange/internal/ledger"
 	"github.com/arc119226/crypto-exchange/internal/money"
@@ -30,6 +31,10 @@ type Config struct {
 	Tenant string
 	// Batch is how many withdrawals one tick claims.
 	Batch int32
+	// NativeAsset is the symbol gas is denominated in. Gas is always paid in
+	// the chain's own coin, whatever the withdrawal moved, so a USDC
+	// withdrawal still books its gas here.
+	NativeAsset string
 }
 
 // KYCReader supplies the account's KYC level. It is an interface so the chain
@@ -59,6 +64,14 @@ type Worker struct {
 	audit   *audit.Recorder
 	log     *slog.Logger
 	metrics *Metrics
+
+	// The send half. All nil in a deployment with no node configured, which
+	// leaves the policy half running on its own: deciding withdrawals and
+	// locking their funds needs no chain at all.
+	chain  Chain
+	signer signer.Signer
+	nonces Nonces
+	send   SendConfig
 }
 
 // NewWorker builds the chain-side worker.
@@ -66,8 +79,29 @@ func NewWorker(db *pgxpool.Pool, cfg Config, reg registry.Reader, limits LimitRe
 	if cfg.Batch <= 0 {
 		cfg.Batch = 50
 	}
+	if cfg.NativeAsset == "" {
+		cfg.NativeAsset = "ETH"
+	}
 	return &Worker{db: db, cfg: cfg, reg: reg, limits: limits, ledger: l, kyc: kyc, policy: p, audit: rec, log: log, metrics: NewMetrics(nil)}
 }
+
+// WithSending gives the worker what it needs to sign, broadcast and track.
+// Without it Send does nothing and withdrawals stop at funds_locked, which is
+// exactly what a deployment without a node or a signer should do.
+func (w *Worker) WithSending(c Chain, s signer.Signer, n Nonces, cfg SendConfig) *Worker {
+	if cfg.ReplaceAfter <= 0 {
+		cfg.ReplaceAfter = time.Minute
+	}
+	if cfg.MaxReplacements <= 0 {
+		cfg.MaxReplacements = 3
+	}
+	w.chain, w.signer, w.nonces, w.send = c, s, n, cfg
+	return w
+}
+
+// Sends reports whether this worker can sign and broadcast, or only decide and
+// lock.
+func (w *Worker) Sends() bool { return w.chain != nil }
 
 // WithMetrics attaches Prometheus collectors.
 func (w *Worker) WithMetrics(m *Metrics) *Worker {

@@ -92,6 +92,26 @@ func TestToWeiRefusesExcessPrecision(t *testing.T) {
 	require.NoError(t, err)
 }
 
+// TestToWeiAcceptsTrailingZerosBeyondTheScale pins the other half of that
+// rule, which is not the same thing and was once wrong.
+//
+// Every amount read back from the ledger carries eighteen decimal places,
+// because that is what NUMERIC(36,18) returns. Judging precision by the number
+// of decimals rather than by their value refused every single ERC-20
+// withdrawal: 50 USDC arrives from the database as 50.000000000000000000, and
+// twelve zeros are not lost precision.
+func TestToWeiAcceptsTrailingZerosBeyondTheScale(t *testing.T) {
+	fromLedger, err := money.ParseAmount("50.000000000000000000")
+	require.NoError(t, err)
+	got, err := evm.ToWei(fromLedger, 6)
+	require.NoError(t, err)
+	require.Equal(t, "50000000", got.String())
+
+	// And a digit that is not zero is still refused, at any distance.
+	_, err = evm.ToWei(money.MustParse("50.000000000000000001"), 6)
+	require.ErrorContains(t, err, "precision")
+}
+
 // TestFromWeiRefusesValuesTheLedgerCannotHold: the ledger stores
 // NUMERIC(36,18) (ADR-0004), so a uint256 near its maximum has no
 // representation. A token can emit such a Transfer — a broken or hostile

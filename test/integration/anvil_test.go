@@ -152,6 +152,17 @@ func (a *anvil) SendERC20(t *testing.T, token, from, to common.Address, amount *
 	return strings.ToLower(hash)
 }
 
+// Balance is what the node says an address holds, in wei. It is the only
+// check that can tell a valid signature from a plausible one.
+func (a *anvil) Balance(t *testing.T, addr common.Address) *big.Int {
+	t.Helper()
+	var hex string
+	require.NoError(t, a.call(t, &hex, "eth_getBalance", addr.Hex(), "latest"))
+	out, ok := new(big.Int).SetString(strings.TrimPrefix(hex, "0x"), 16)
+	require.True(t, ok, "undecodable balance %q", hex)
+	return out
+}
+
 // Snapshot returns an id that Revert restores the chain to.
 func (a *anvil) Snapshot(t *testing.T) string {
 	t.Helper()

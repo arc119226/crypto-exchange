@@ -260,7 +260,7 @@ B 最終:available = 2000 − 2000 + 4 + 1200 = 1204 USDC、0.3992 ETH;hold = 0 
 | E5 | §6.1.1 `external` | 標「無正常餘額」但恆等式需要符號。 | 本文件 1.1 約定 credit − debit。 |
 | E6 | §6.6 `assets` | 沒寫 `display_scale ≤ scale`。 | Phase 0 migration 已加 `CHECK (display_scale BETWEEN 0 AND scale)`。 |
 
-E1 是計畫的實質錯誤(會讓一條人工處置路徑在資料庫層失敗),滿足 Phase 0「找出至少一處本文件的錯誤並修正」。
+E1 是計畫的實質錯誤(會讓一條人工處置路徑在資料庫層失敗),滿足 Phase 0「找出至少一處本文件的錯誤並修正」。Phase 4b-2 實作 `resolve(cancel_nonce)` 時照這條勘誤走:`settleCancelled` 是 `Post` 而不是 `Release`,並且等取代交易被挖出來才動錢。
 
 ---
 
@@ -443,3 +443,43 @@ Phase 4 分四段:4a 充值(再拆 4a-1 金鑰與地址、4a-2 掃描與入帳)�
 **兩個只有拆分部署才看得見的權限缺口**(這已經是第三、第四個同類):`withdrawal.requested` 與 INSERT 同一筆交易寫進 outbox,而 account-scoped 事件要 `NextAccountSeq`(`UPDATE … RETURNING`),所以 api 需要 `UPDATE (next_seq) ON ledger.accounts`;政策依 KYC 等級,而等級在帳戶背後的 user 上,所以 chain 需要 `SELECT (id, kyc_level) ON auth.users`。兩個都是欄位級:api 只能推進序號、chain 只能讀等級,讀不到密碼雜湊、TOTP 種子或 email。`TestWithdrawalRolePrivileges` 用真的 `ex_api` / `ex_chain` / `ex_admin` 連線跑完整條路徑釘住這件事,並且**在補上 grant 之前先確認它會紅**。
 
 **Phase 4b-1 學到的事**:測試預期「粉塵金額應被拒絕」卻看著它通過,才發現兩個資產的 `min_withdrawal` 一直是 0——因為在提現政策出現之前沒有任何東西會讀它。真鏈上這代表接受一筆 gas 比金額還貴的 1 wei 提現。`min_deposit` 則刻意留 0:目前沒有程式碼執行它,而**一個沒有程式碼遵守的 registry 值比沒有這個值更糟**。
+
+---
+
+## 18. Phase 4b-2 程式碼與 §6.4.2 / §6.6 的對應(簽名、廣播、追蹤、人工處置)
+
+4b-1 把提現送到 `funds_locked` 就停住;這一半接手,把它變成鏈上一筆真的交易,並在確認後結清帳本。這是整個系統第一次有東西「花掉」錢。
+
+| 計畫 | 實作 | 備註 |
+|---|---|---|
+| `funds_locked → signed` | `Worker.sign`:先 **pin nonce**、再簽、最後把 nonce + `raw_tx` + 狀態寫在同一筆交易 | 簽名本身在交易外(那是跨行程網路呼叫,握著列鎖等它會讓所有提現排在最慢的 signer 後面) |
+| 簽名不可重複(§6.6) | `chain.signing_log` UNIQUE `(tenant_id, kind, ref_id, attempt)`,只有 `ex_signer` 能 INSERT,**沒有任何角色能 UPDATE / DELETE** | `attempt` 是計畫沒寫的一欄:沒有它,加價重送根本簽不出來 |
+| 簽的是「意圖」不是交易 | `signer.Request{Kind, RefID, To, Asset, Value, …}`,signer 自己查資料庫、自己組交易 | **刻意偏離** §6.6 的「呼叫端傳 unsigned tx」,見下 |
+| `signed → broadcast` | `Worker.broadcast`:先送鏈,再 `hold → pending_withdrawal` + 狀態,同一筆交易 | 順序有意義:鏈上有交易而帳本沒分錄 = 錢無聲離開;分錄有而交易沒送出 = 下一輪重送同一份 bytes 就修好了 |
+| `broadcast → confirmed` | `Worker.confirm`:`pending_withdrawal → custody_hot`,**外加一筆 gas 分錄** | 兩筆而非一筆:金額是提現自己的資產,gas 永遠是鏈的原生幣。合成一筆會得到一筆各資產不平衡的分錄 |
+| nonce 管理(§6.4.2) | `internal/chain/hotwallet.Manager`:三條啟動規則、`Allocate`、`Recycle`、`fill` | `pending > dbNext` **拒絕啟動**:鏈上有這個資料庫沒配過的交易,代表別人也拿著這把鑰匙 |
+| nonce 缺口 | 0 值自轉,先寫 `chain.nonce_fills` 再送出 | 寫在前:送出去但沒記錄的填補,下次啟動會被當成缺口再填一次,而那個 nonce 已經被鏈吃掉了 |
+| 重送(§6.4.2) | `maybeReplace`:超過 `ETH_REPLACE_AFTER` 就 `Bump(10 + 10×replacements)%`、同 nonce、`attempt = replacements + 1` | 從**當下**的建議價加價,不是從原本的:市場已經動了,協定只要求贏過真的送出去的那筆 |
+| `MAX_REPLACEMENTS` | 用完就停,狀態留在 `broadcast`,`withdrawals_stuck_total` +1 | 跟塞住的 mempool 無限對賭不是策略,是等人 |
+| `resolve(bump/cancel_nonce/refund/retry)` | admin 寫四個 `resolve_*` 欄,chain role 的 `ApplyResolutions` 執行 | 見下:這是這個 PR 最大的一處設計決定 |
+| `resolve(cancel_nonce)` 的退款 | `settleCancelled`:**取代交易被挖出來之後才退**,而且是 `Post` 不是 `Release` | 兩件事都是 E1 那條勘誤:錢在廣播時就離開 hold 了;而在取代交易確認前,原交易仍可能贏 |
+| `failed(on_chain)` | gas 記帳,金額**留在 `pending_withdrawal`** | 交易所已經不欠使用者這筆 available,也還沒付出去。要變成哪一邊是人的決定 |
+| 權限(§14) | signer:SELECT 提現 + INSERT signing_log,**不能改提現任何一欄**;chain:交易欄 + 清 resolve 請求;admin:只有四個 resolve 請求欄 | 握著鑰匙不等於能宣告錢已送出 |
+| 指標(§15) | `withdrawals_replacements_total`、`withdrawals_stuck_total`、`withdrawals_resolutions_total` | `stuck` 值得告警:它的定義就是「機器放棄了,等人」 |
+
+操作步驟在 [`docs/runbooks/stuck-withdrawal.md`](runbooks/stuck-withdrawal.md)(§9 列的五份 runbook 之一,提前寫,因為它涵蓋的是這個 PR 第一次做出來的人工處置路徑)。
+
+**設計決定:`resolve` 是「請求」而不是「動作」。** 計畫把 `resolve` 畫在 admin 那一側,直覺會寫成一個同步端點。但四個動作沒有一個做得到:`bump` 與 `cancel_nonce` 要簽名和節點,`refund` 與 `retry` 要 `chain.nonce_fills` 的 grant 與提現的狀態欄——admin 角色一個都沒有。**而且不該有**:能寫 `tx_hash` 的角色可以讓一筆提現看起來已經送出,卻沒有任何東西被簽過,那正是 §6.4.2 這條分工要防的事。所以 admin 寫四個請求欄,chain role 在自己的 tick 上執行。附帶好處是操作員的決定會存活過 chain role 的重啟,而不是死在一個 HTTP 請求裡。合法性檢查兩次:當下(操作員還盯著螢幕時給 409)、執行前再一次(廣播中的提現隨時可能確認)。
+
+**設計決定:signer 簽的是意圖,不是交易。** §6.6 的草圖是呼叫端組好 unsigned `types.Transaction` 交給 signer 驗證。ERC-20 讓這條路變窄:代幣提現的 `to` 是合約位址,真正的收款人埋在 calldata 裡,所以「驗證」等於「解碼 calldata 然後相信這次解碼」。改成 signer 自己從已核對過的欄位組交易,那一步就不存在了。
+
+**pin nonce 的理由是一個沒有測試會自己發現的崩潰視窗。** 原本的順序是 allocate → sign → record。行程若死在 sign 與 record 之間,重啟後會配到**另一個** nonce、用 `attempt = 0` 再問一次 signer——而 signing log 會永遠拒絕它,提現就此卡死。現在 nonce 先寫在提現列上並提交,重試問的是同一個意圖,signer 回傳它已經簽出來的那筆交易(`raw_tx` 存在 signing log 裡正是為此)。`TestWithdrawalRecoversFromACrashBetweenSigningAndRecording` 釘住這件事。
+
+**`custody:hot` 會是負的,而且是誠實的。** 錢從 `custody:deposit_addresses` 進來、從 `custody:hot` 出去,中間的歸集是 4c。在那之前熱錢包付出去的比收進來的多,`custody_hot` 這個資產帳戶自然為負。這不會炸:`ledger.balances` 的 `available >= 0` CHECK 只作用在使用者的桶上(`aggregateDeltas` 跳過 house bucket),house 餘額由分錄推導,試算表照樣平衡。
+
+**又一個只有拆分部署才看得見的權限缺口**(第五個了):`RequestWithdrawalResolve` 除了四個請求欄還會把 `resolve_error` 清成 NULL——新的請求不該掛著上一次的失敗訊息——而 grant 裡沒有這一欄。手寫 UPDATE 四個欄位的測試會過,真正的查詢在 `ex_admin` 上是 42501。教訓與 3c、4a-2、4b-1 完全一樣:**權限測試要跑真正的那一句 SQL,不是它的近似**。
+
+**Phase 4b-2 學到的兩件事**,都在沒有測試碰過的程式碼裡:
+
+1. `evm.ToWei` 用「小數位數」而不是「小數的值」判斷精度,於是從 `NUMERIC(36,18)` 讀回來的金額對任何非 18 位的資產都顯得過度精確——**這會拒絕掉每一筆 ERC-20 提現**。50 USDC 從資料庫回來是 `50.000000000000000000`,而十二個零不是丟失的精度。
+2. `UpsertHotWallet` 每次啟動都覆寫存起來的位址,於是「這是另一個錢包」那條拒絕永遠不可能觸發——拿錯種子的部署會繼續照著陌生人的計數配 nonce。改成不覆寫,那個比對才有東西可比。

@@ -256,10 +256,14 @@ func emit(ctx context.Context, tx pgx.Tx, l *ledger.Service, tenant, eventType s
 	if err != nil {
 		return err
 	}
+	txHash := deref(row.TxHash)
+	if row.CancelTxHash != nil {
+		txHash = *row.CancelTxHash
+	}
 	env, err := Event(eventType, tenant, Payload{
 		WithdrawalID: row.ID, AccountID: row.AccountID, Asset: row.Asset, Amount: amount,
 		ToAddress: row.ToAddress, ChainID: row.ChainID, Status: row.Status,
-		PreviousStatus: previous, Reason: reason,
+		PreviousStatus: previous, Reason: reason, TxHash: txHash,
 	}, seq, time.Now().UTC().Truncate(time.Microsecond))
 	if err != nil {
 		return err

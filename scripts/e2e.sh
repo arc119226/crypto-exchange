@@ -158,16 +158,21 @@ cast_run send --unlocked --from "$sender" "$usdc_contract" "mint(address,uint256
 cast_run send --unlocked --from "$sender" "$usdc_contract" "transfer(address,uint256)" "$addr" 250500000 >/dev/null
 wait_for_credit USDC "$before_usdc"
 
-# The withdrawal half (docs/plan-v1.0.md §6.4.2). Nothing is signed in this
-# phase: the check is that a request is decided by the policy and its funds end
-# up on hold, and that the amount over the limit waits for a person instead.
+# The withdrawal half (docs/plan-v1.0.md §6.4.2), now all the way to the chain:
+# the policy decides, the funds are locked, the signer signs over NATS, the
+# chain role broadcasts, and the money actually arrives.
 withdrawal_status() {
   "$CTL" withdrawals list --output json | jq -r --arg id "$1" '.withdrawals[] | select(.id==$id) | .status'
 }
 
-# wait_for_status ID STATUS — polls until the withdrawal reaches it
+# wait_for_status ID STATUS — polls until the withdrawal reaches it.
+#
+# Sixty seconds because reaching `confirmed` is five ticks and a block: policy,
+# lock, sign, broadcast, receipt. Each is deliberately its own committed step
+# (§6.4.2), so the machine is never faster than the tick interval times the
+# number of states it has to cross.
 wait_for_status() {
-  for _ in $(seq 1 30); do
+  for _ in $(seq 1 60); do
     [ "$(withdrawal_status "$1")" = "$2" ] && return 0
     sleep 1
   done
@@ -177,14 +182,42 @@ wait_for_status() {
   return 1
 }
 
-# $sender is anvil account #0, resolved for the deposit above: an ordinary
-# external address, which is what a user actually withdraws to.
-log "a withdrawal inside the limits is decided without a person"
+# A destination that has never held anything, unique to this run. Starting
+# from zero is what lets the checks below be exact equalities rather than
+# "something changed": the balance afterwards is the withdrawal and nothing
+# else, on a chain whose state survives restarts.
+payout=$(printf '0x%040x' "$STAMP")
+
+# on_chain BALANCE-COMMAND... — the balance as a plain number. Newer foundry
+# appends a scientific-notation hint ("50000000000000000 [5e16]"), so take the
+# first field either way.
+on_chain() { cast_run "$@" | awk 'NR==1 {print $1}'; }
+
+log "a withdrawal inside the limits is signed, sent and confirmed"
 hold_before=$("$CTL" balances --output json | jq -r '.balances[] | select(.asset=="ETH") | .hold')
-auto=$("$CTL" withdrawals create --asset ETH --amount 0.05 --to "$sender" --output json | jq -r .id)
+[ "$(on_chain balance "$payout")" = "0" ] || { echo "$payout is not a fresh address"; exit 1; }
+auto=$("$CTL" withdrawals create --asset ETH --amount 0.05 --to "$payout" --output json | jq -r .id)
 wait_for_status "$auto" funds_locked
 hold_after=$("$CTL" balances --output json | jq -r '.balances[] | select(.asset=="ETH") | .hold')
 [ "$hold_before" != "$hold_after" ] || { echo "the withdrawal locked no funds"; "$CTL" balances; exit 1; }
+
+# Everything past here needs the signer, the nonce manager and a real
+# transaction. This is the only check in the suite that can tell a valid
+# signature from a plausible one: a wrong one produces a withdrawal that looks
+# sent and moves nothing.
+wait_for_status "$auto" confirmed
+received=$(on_chain balance "$payout")
+[ "$received" = "50000000000000000" ] || {
+  echo "the withdrawal confirmed but $payout holds $received wei, not 0.05 ETH"
+  "$CTL" withdrawals list; exit 1
+}
+log "the destination really received 0.05 ETH"
+
+# The transaction hash is on the withdrawal, and the chain has mined it.
+tx=$("$CTL" withdrawals list --output json | jq -r --arg id "$auto" '.withdrawals[] | select(.id==$id) | .tx_hash')
+echo "$tx" | grep -Eq '^0x[0-9a-fA-F]{64}$' || { echo "no tx_hash on the confirmed withdrawal: $tx"; exit 1; }
+cast_run receipt "$tx" --json | jq -e '.blockNumber != null' >/dev/null \
+  || { echo "the chain has no receipt for $tx"; cast_run receipt "$tx" || true; exit 1; }
 
 # The same key with the same request is the same withdrawal, not a second one.
 key="e2e-$STAMP-idem"
@@ -199,7 +232,28 @@ wait_for_status "$big" pending_review
 "$CTL" admin withdrawals list --output json | jq -e --arg id "$big" '.withdrawals | map(.id) | index($id) != null' >/dev/null \
   || { echo "the withdrawal is not in the admin review queue"; "$CTL" admin withdrawals list; exit 1; }
 "$CTL" admin withdrawals review "$big" approve --note "e2e" >/dev/null
-wait_for_status "$big" funds_locked
+wait_for_status "$big" confirmed
+
+# A USDC withdrawal takes the same path through a contract call, and pays its
+# gas in ETH. The hot wallet was minted 1,000,000 USDC by Deploy.s.sol.
+log "a token withdrawal moves the token and pays gas in the native coin"
+token=$("$CTL" withdrawals create --asset USDC --amount 25 --to "$payout" --output json | jq -r .id)
+wait_for_status "$token" confirmed
+usdc_received=$(on_chain call "$usdc_contract" "balanceOf(address)(uint256)" "$payout")
+# 25 USDC in the token's own 6 decimals. That the number is right and not
+# merely non-zero is the check that the scale conversion survived the round
+# trip through NUMERIC(36,18).
+[ "$usdc_received" = "25000000" ] || {
+  echo "the USDC withdrawal confirmed but $payout holds $usdc_received base units, not 25 USDC"
+  "$CTL" withdrawals list; exit 1
+}
+
+# resolve is refused on a withdrawal that has nothing to resolve, which is the
+# 409 an operator sees rather than a silent no-op.
+log "resolve refuses an action the withdrawal has outgrown"
+if "$CTL" admin withdrawals resolve "$auto" bump --note "e2e" >/dev/null 2>&1; then
+  echo "bumping a confirmed withdrawal was accepted"; exit 1
+fi
 
 log "a resting order survives kill -9 of the engine"
 session=$("$CTL" user register --email "restart-$STAMP@e2e.local" --password "restart-$STAMP-pw" --output json)

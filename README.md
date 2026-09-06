@@ -2,13 +2,19 @@
 
 白牌交易引擎(white-label exchange engine)的商業化原型:現貨撮合、複式記帳帳本、EVM 充提與歸集、行情推播、管理後台,以單一 Go binary 多角色的模組化單體交付,客戶透過 REST / WebSocket / Webhook 與事件契約整合。
 
-**目前狀態:Phase 4b-1 進行中(提現狀態機到「鎖定資金」為止;本 PR)。Phase 3 與 4a 已完成。** 已合併:Phase 0 walking skeleton、Phase 1 `internal/matching`(無 I/O、確定性訂單簿)、Phase 2 `internal/ledger`(複式記帳、凍結即分錄、冪等鍵)與 admin API、Phase 3a `internal/trading` + `internal/eventbus`(每市場 runner、一筆交易內 Hold → Apply → 成交 / 分錄 / outbox、重啟重建、JetStream relay)、Phase 3b `internal/auth` + `internal/ratelimit` + public API(JWT / refresh / API key HMAC、限流、`client_order_id` 冪等)。3c 讓拆分部署真的能交易:`internal/cmdbus`(NATS request-reply 命令匯流排,跨容器仍保持 404 / 422 / 503 的錯誤語意,命令帶 `aud=internal` JWT)、`eventbus` 消費端與引擎的`market.updated` 熱載入、`PUT /admin/v1/markets/{symbol}/status`、`api/events/v1/*.json` + `docs/events.md` 事件契約(golden + JSON Schema 測試),以及每個 PR 都跑的多容器 `make e2e`。
+**目前狀態:Phase 4b-2 進行中(簽名、廣播、追蹤與人工處置;本 PR)。Phase 3、4a 與 4b-1 已完成。** 已合併:Phase 0 walking skeleton、Phase 1 `internal/matching`(無 I/O、確定性訂單簿)、Phase 2 `internal/ledger`(複式記帳、凍結即分錄、冪等鍵)與 admin API、Phase 3a `internal/trading` + `internal/eventbus`(每市場 runner、一筆交易內 Hold → Apply → 成交 / 分錄 / outbox、重啟重建、JetStream relay)、Phase 3b `internal/auth` + `internal/ratelimit` + public API(JWT / refresh / API key HMAC、限流、`client_order_id` 冪等)。3c 讓拆分部署真的能交易:`internal/cmdbus`(NATS request-reply 命令匯流排,跨容器仍保持 404 / 422 / 503 的錯誤語意,命令帶 `aud=internal` JWT)、`eventbus` 消費端與引擎的`market.updated` 熱載入、`PUT /admin/v1/markets/{symbol}/status`、`api/events/v1/*.json` + `docs/events.md` 事件契約(golden + JSON Schema 測試),以及每個 PR 都跑的多容器 `make e2e`。
 
 4a-1 已合併:`internal/chain/hdwallet`(BIP-44 派生、scrypt + AES-256-GCM 的 `hd-seed.json`)、`exchange keys import-mnemonic`、signer role 維護的**預生成充值地址池**、`GET /v1/deposit-address`——api role 只認領地址,永遠拿不到金鑰。
 
 4a-2 已合併,鏈上的錢真的被看見:`internal/chain/evm`(ethclient 封裝、wei 邊界)、`internal/chain/deposit`(掃描器:原生 ETH 與 ERC-20 兩條路徑、確認數、reorg 回退與孤立/丟棄、`Credit` 入帳)、`deposit.*` 事件契約、`GET /v1/deposits`,以及 `scripts/e2e.sh` 裡真的用 `cast` 把 ETH 與 MockUSDC 打進充值地址再等餘額變動。
 
-本 PR(4b-1)是提現的前半段,**不碰鏈也不碰任何私鑰**:`POST /v1/withdrawals`(必帶 `Idempotency-Key`)、`policy.WithdrawalPolicy`(單筆與每日限額依 KYC 等級,超標一律進人工審核而不是拒絕)、chain role 的 worker 把提現推到 `funds_locked`(`ledger.Hold` 與狀態同一筆交易)、admin 的審核佇列,以及 `exchangectl withdrawals` / `exchangectl admin withdrawals`。簽名、廣播與追蹤是 4b-2 的事,從 `funds_locked` 接手。
+4b-1 已合併,是提現的前半段,**不碰鏈也不碰任何私鑰**:`POST /v1/withdrawals`(必帶 `Idempotency-Key`)、`policy.WithdrawalPolicy`(單筆與每日限額依 KYC 等級,超標一律進人工審核而不是拒絕)、chain role 的 worker 把提現推到 `funds_locked`(`ledger.Hold` 與狀態同一筆交易)、admin 的審核佇列,以及 `exchangectl withdrawals` / `exchangectl admin withdrawals`。
+
+本 PR(4b-2)讓錢真的出得去:`internal/chain/signer`(簽的是**意圖**而不是別人組好的交易——ERC-20 的收款人埋在 calldata 裡,自己組就不必解碼再相信解碼)、`chain.signing_log` 的 UNIQUE `(kind, ref_id, attempt)` 讓一個意圖只能被簽一次、`internal/signerbus`(signer role 的 NATS request-reply,私鑰永遠不上線)、`internal/chain/hotwallet` 的 nonce 管理(三條啟動規則,鏈上有我們沒配過的 nonce 就**拒絕啟動**)、`funds_locked → signed → broadcast → confirmed` 與 §6.1.4(e) 的分錄(確認時 gas 是**另一筆**分錄,永遠記在原生幣)、EIP-1559 加價重送與上限,以及 `POST /admin/v1/withdrawals/{id}/resolve` 的四種人工處置。
+
+`resolve` 是**請求**而不是動作:admin role 沒有節點也沒有金鑰,它只寫四個請求欄,chain role 在自己的 tick 上執行——能寫 `tx_hash` 的角色可以讓一筆提現看起來已經送出卻什麼都沒簽過。處置的操作步驟在 [`docs/runbooks/stuck-withdrawal.md`](docs/runbooks/stuck-withdrawal.md)。
+
+**這個階段 `custody:hot` 會是負的**,而且是誠實的:錢從 `custody:deposit_addresses` 進來、從 `custody:hot` 出去,中間的歸集是 4c。試算表照樣平衡。
 
 ## 產品邊界
 
