@@ -14,6 +14,7 @@ import (
 
 	"github.com/arc119226/crypto-exchange/internal/admin/gen"
 	"github.com/arc119226/crypto-exchange/internal/audit"
+	"github.com/arc119226/crypto-exchange/internal/chain/withdrawal"
 	"github.com/arc119226/crypto-exchange/internal/ledger"
 	"github.com/arc119226/crypto-exchange/internal/registry"
 	"github.com/arc119226/crypto-exchange/internal/telemetry"
@@ -29,6 +30,10 @@ type Handler struct {
 	audit    *audit.Recorder
 	registry *registry.Store
 	tenant   string
+	// withdrawals is the review queue; nil in a deployment without the chain
+	// tables, which turns the two withdrawal endpoints into 500s rather than
+	// pretending the queue is empty.
+	withdrawals *withdrawal.Reviewer
 }
 
 var _ gen.StrictServerInterface = (*Handler)(nil)
@@ -41,6 +46,12 @@ func NewHandler(pool *pgxpool.Pool, l *ledger.Service, r *registry.Store, a *aud
 		tenant = "default"
 	}
 	return &Handler{pool: pool, ledger: l, registry: r, audit: a, tenant: tenant}
+}
+
+// WithWithdrawals enables the withdrawal review queue.
+func (h *Handler) WithWithdrawals(r *withdrawal.Reviewer) *Handler {
+	h.withdrawals = r
+	return h
 }
 
 func (h *Handler) inTx(ctx context.Context, fn func(tx pgx.Tx) error) error {

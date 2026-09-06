@@ -18,6 +18,7 @@ import (
 	"github.com/arc119226/crypto-exchange/internal/auth"
 	"github.com/arc119226/crypto-exchange/internal/chain"
 	"github.com/arc119226/crypto-exchange/internal/chain/deposit"
+	"github.com/arc119226/crypto-exchange/internal/chain/withdrawal"
 	"github.com/arc119226/crypto-exchange/internal/cmdbus"
 	"github.com/arc119226/crypto-exchange/internal/ledger"
 	"github.com/arc119226/crypto-exchange/internal/ratelimit"
@@ -94,6 +95,9 @@ func newAPIServer(ctx context.Context, cfg Config, log *slog.Logger, m *telemetr
 		// only process that holds the seed (docs/plan-v1.0.md §6.4.1)
 		Chain:    chain.NewAddresses(d.pool, cfg.TenantID, cfg.Chain.ChainID),
 		Deposits: deposit.NewReader(d.pool, cfg.TenantID),
+		// recording only: this role has no UPDATE on chain.withdrawals, so it
+		// cannot move one towards being signed (docs/plan-v1.0.md §6.4.2)
+		Withdrawals: withdrawal.NewService(d.pool, cfg.TenantID, cfg.Chain.ChainID, store, l, audit.NewRecorder(cfg.TenantID)),
 	})
 	srv := &http.Server{Addr: cfg.HTTPAddr, Handler: handler, ReadHeaderTimeout: 5 * time.Second}
 	var refresh *registryRefresher

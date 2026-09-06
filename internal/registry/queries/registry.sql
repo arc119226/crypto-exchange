@@ -130,3 +130,34 @@ UPDATE registry.markets
        version    = version + 1,
        updated_at = now()
  WHERE tenant_id = $1 AND symbol = $2 AND status IS DISTINCT FROM $3;
+
+-- name: ListWithdrawalLimits :many
+-- Joined to the asset so callers work in symbols; the table is keyed by id.
+SELECT w.*, a.symbol AS asset_symbol
+FROM registry.withdrawal_limits w
+JOIN registry.assets a ON a.id = w.asset_id
+WHERE w.tenant_id = $1
+ORDER BY a.symbol, w.kyc_level;
+
+-- name: GetWithdrawalLimit :one
+SELECT w.*, a.symbol AS asset_symbol
+FROM registry.withdrawal_limits w
+JOIN registry.assets a ON a.id = w.asset_id
+WHERE w.tenant_id = $1 AND a.symbol = $2 AND w.kyc_level = $3;
+
+-- name: UpsertWithdrawalLimit :exec
+INSERT INTO registry.withdrawal_limits (
+    tenant_id, asset_id, kyc_level, auto_approve_limit, daily_limit, require_manual_review
+)
+SELECT $1, a.id, $3, $4, $5, $6 FROM registry.assets a
+WHERE a.tenant_id = $1 AND a.symbol = $2
+ON CONFLICT (tenant_id, asset_id, kyc_level) DO UPDATE
+SET auto_approve_limit    = EXCLUDED.auto_approve_limit,
+    daily_limit           = EXCLUDED.daily_limit,
+    require_manual_review = EXCLUDED.require_manual_review,
+    version               = registry.withdrawal_limits.version + 1,
+    updated_at            = now()
+WHERE (registry.withdrawal_limits.auto_approve_limit, registry.withdrawal_limits.daily_limit,
+       registry.withdrawal_limits.require_manual_review)
+      IS DISTINCT FROM
+      (EXCLUDED.auto_approve_limit, EXCLUDED.daily_limit, EXCLUDED.require_manual_review);

@@ -117,6 +117,12 @@ linters:
             - github.com/arc119226/crypto-exchange/internal/money
             - github.com/arc119226/crypto-exchange/internal/telemetry
             - github.com/arc119226/crypto-exchange/internal/platform/pg
+            # §5.1 lists policy among the chain role's modules: the withdrawal
+            # worker is where WithdrawalPolicy is applied (§6.4.2).
+            - github.com/arc119226/crypto-exchange/internal/policy
+            # §6.4.2 requires every withdrawal transition to write an audit
+            # event, which is why 0004 grants ex_chain INSERT on audit_events.
+            - github.com/arc119226/crypto-exchange/internal/audit
             - github.com/btcsuite/btcd
             - github.com/cosmos/go-bip39
             - github.com/ethereum/go-ethereum

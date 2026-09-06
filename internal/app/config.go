@@ -134,6 +134,13 @@ type ChainConfig struct {
 	// RequiredConfirmations applies to an asset whose registry row says 0;
 	// normally the asset decides.
 	RequiredConfirmations int32 `env:"REQUIRED_CONFIRMATIONS_DEFAULT" envDefault:"1"`
+	// WithdrawalInterval is how often the chain role runs the withdrawal
+	// worker. It is separate from ScanInterval because the two answer to
+	// different clocks: scanning follows the chain's block time, while a
+	// withdrawal only waits on a policy decision and a ledger write.
+	WithdrawalInterval time.Duration `env:"WITHDRAWAL_INTERVAL" envDefault:"1s"`
+	// WithdrawalBatchSize caps how many withdrawals one tick claims.
+	WithdrawalBatchSize int32 `env:"WITHDRAWAL_BATCH_SIZE" envDefault:"50"`
 }
 
 // WalletConfig locates the HD seed and sizes the deposit address pool
@@ -270,6 +277,7 @@ func (c Config) LogValue() slog.Value {
 		slog.String("eth_rpc_url", c.Chain.RPCURL),
 		slog.Int64("eth_chain_id", c.Chain.ChainID),
 		slog.Duration("eth_scan_interval", c.Chain.ScanInterval),
+		slog.Duration("eth_withdrawal_interval", c.Chain.WithdrawalInterval),
 		slog.Uint64("eth_scan_batch_size", c.Chain.ScanBatchSize),
 		slog.Uint64("eth_block_ring_depth", c.Chain.BlockRingDepth),
 		slog.Uint64("eth_orphan_expiry_blocks", c.Chain.OrphanExpiryBlocks),

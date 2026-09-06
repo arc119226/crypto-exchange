@@ -138,8 +138,8 @@ func Seed(ctx context.Context, opts SeedOptions, out io.Writer) error {
 	if err != nil {
 		return fmt.Errorf("seed: %w", err)
 	}
-	_, _ = fmt.Fprintf(out, "seed: tenant=%s chain=%d fee_schedules=%d assets=%d markets=%d (usdc=%s)\n",
-		opts.TenantID, fx.ChainID, res.FeeSchedules, res.Assets, res.Markets, fx.USDC)
+	_, _ = fmt.Fprintf(out, "seed: tenant=%s chain=%d fee_schedules=%d assets=%d markets=%d withdrawal_limits=%d (usdc=%s)\n",
+		opts.TenantID, fx.ChainID, res.FeeSchedules, res.Assets, res.Markets, res.Limits, fx.USDC)
 	return nil
 }
 

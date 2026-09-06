@@ -171,3 +171,24 @@ func ValidatePrecision(priceTick, qtyStep money.Amount, baseScale, quoteScale in
 	}
 	return nil
 }
+
+// ValidateWithdrawalLimit checks one limit row (docs/plan-v1.0.md §6.4.2).
+func ValidateWithdrawalLimit(in WithdrawalLimitInput) error {
+	if in.Asset == "" {
+		return fmt.Errorf("%w: withdrawal limit asset is required", ErrInvalid)
+	}
+	if in.KYCLevel < 0 || in.KYCLevel > 2 {
+		return fmt.Errorf("%w: withdrawal limit %s kyc_level %d is outside 0..2", ErrInvalid, in.Asset, in.KYCLevel)
+	}
+	if in.AutoApproveLimit.IsNegative() || in.DailyLimit.IsNegative() {
+		return fmt.Errorf("%w: withdrawal limit %s amounts must not be negative", ErrInvalid, in.Asset)
+	}
+	// A per-request ceiling above the daily one can never bind: the daily
+	// check would reject first. Saying so here beats a limit that silently
+	// does nothing.
+	if in.AutoApproveLimit.Cmp(in.DailyLimit) > 0 {
+		return fmt.Errorf("%w: withdrawal limit %s auto_approve_limit %s exceeds daily_limit %s",
+			ErrInvalid, in.Asset, in.AutoApproveLimit, in.DailyLimit)
+	}
+	return nil
+}

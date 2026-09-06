@@ -110,7 +110,8 @@ schema; `planned` means the phase that adds it will add the schema with it.
 | `ledger.posted` | engine, chain, admin | stream (balances), back-office projection | planned (Phase 5) |
 | `asset.updated`, `fee_schedule.updated` | admin | engine (reload), webhook | planned (Phase 5) |
 | `deposit.detected`, `deposit.credited`, `deposit.orphaned`, `deposit.dropped`, `deposit.reversed` | chain | stream, webhook, admin | shipped |
-| `withdrawal.state_changed` | api, chain, admin | stream, webhook, admin | planned (Phase 4b) |
+| `withdrawal.requested` | api | stream, webhook, admin | shipped |
+| `withdrawal.state_changed` | api, chain, admin | stream, webhook, admin | shipped |
 | `sweep.completed`, `sweep.failed` | chain | admin | planned (Phase 4c) |
 | `alert.hot_wallet_low` | chain | webhook, admin | planned (Phase 4c) |
 | `reconciliation.break_detected` | worker | webhook, admin | planned (Phase 4c) |
@@ -125,9 +126,18 @@ reappears under the same `deposit_id`, with a different `block_number`.
 `deposit.reversed` is an alert rather than a completed reversal — the
 reversing entry is made by hand once an operator confirms it (§6.4.1).
 
+`withdrawal.*` is two types rather than one per state. `withdrawal.requested`
+marks the row coming into existence and `withdrawal.state_changed` carries
+every move after it, naming both ends in `previous_status` and `status`. The
+state machine is still growing — signing, broadcasting and confirmation join
+it with the signer role — and a type per state would multiply the contract by
+the length of the machine for consumers that subscribe to all of them anyway.
+`withdrawal.requested` is the one event the **api** role produces; every other
+transition comes from `chain` or `admin`.
+
 The chain role writes these to the outbox; the **relay that publishes them
 runs in the engine role**, so a deployment without an engine leaves deposit
-events sitting in `eventbus.outbox`.
+and withdrawal events sitting in `eventbus.outbox`.
 
 `order.*` and `trade.executed` carry `seq`; `order.*` and `balance.updated`
 carry `account_seq`. `order.accepted` is emitted for **every** order that was

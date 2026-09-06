@@ -155,6 +155,50 @@ func (q *Queries) GetMarketBySymbol(ctx context.Context, arg GetMarketBySymbolPa
 	return i, err
 }
 
+const getWithdrawalLimit = `-- name: GetWithdrawalLimit :one
+SELECT w.tenant_id, w.asset_id, w.kyc_level, w.auto_approve_limit, w.daily_limit, w.require_manual_review, w.version, w.created_at, w.updated_at, a.symbol AS asset_symbol
+FROM registry.withdrawal_limits w
+JOIN registry.assets a ON a.id = w.asset_id
+WHERE w.tenant_id = $1 AND a.symbol = $2 AND w.kyc_level = $3
+`
+
+type GetWithdrawalLimitParams struct {
+	TenantID string
+	Symbol   string
+	KycLevel int16
+}
+
+type GetWithdrawalLimitRow struct {
+	TenantID            string
+	AssetID             string
+	KycLevel            int16
+	AutoApproveLimit    pgtype.Numeric
+	DailyLimit          pgtype.Numeric
+	RequireManualReview bool
+	Version             int32
+	CreatedAt           time.Time
+	UpdatedAt           time.Time
+	AssetSymbol         string
+}
+
+func (q *Queries) GetWithdrawalLimit(ctx context.Context, arg GetWithdrawalLimitParams) (GetWithdrawalLimitRow, error) {
+	row := q.db.QueryRow(ctx, getWithdrawalLimit, arg.TenantID, arg.Symbol, arg.KycLevel)
+	var i GetWithdrawalLimitRow
+	err := row.Scan(
+		&i.TenantID,
+		&i.AssetID,
+		&i.KycLevel,
+		&i.AutoApproveLimit,
+		&i.DailyLimit,
+		&i.RequireManualReview,
+		&i.Version,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.AssetSymbol,
+	)
+	return i, err
+}
+
 const listAssets = `-- name: ListAssets :many
 
 SELECT id, tenant_id, symbol, name, chain_id, contract_address, is_native, scale, display_scale, required_confirmations, min_deposit, min_withdrawal, withdrawal_fee, sweep_threshold, deposit_enabled, withdraw_enabled, status, version, created_at, updated_at FROM registry.assets
@@ -280,6 +324,59 @@ func (q *Queries) ListMarkets(ctx context.Context, tenantID string) ([]ListMarke
 			&i.FeeScheduleName,
 			&i.MakerBps,
 			&i.TakerBps,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listWithdrawalLimits = `-- name: ListWithdrawalLimits :many
+SELECT w.tenant_id, w.asset_id, w.kyc_level, w.auto_approve_limit, w.daily_limit, w.require_manual_review, w.version, w.created_at, w.updated_at, a.symbol AS asset_symbol
+FROM registry.withdrawal_limits w
+JOIN registry.assets a ON a.id = w.asset_id
+WHERE w.tenant_id = $1
+ORDER BY a.symbol, w.kyc_level
+`
+
+type ListWithdrawalLimitsRow struct {
+	TenantID            string
+	AssetID             string
+	KycLevel            int16
+	AutoApproveLimit    pgtype.Numeric
+	DailyLimit          pgtype.Numeric
+	RequireManualReview bool
+	Version             int32
+	CreatedAt           time.Time
+	UpdatedAt           time.Time
+	AssetSymbol         string
+}
+
+// Joined to the asset so callers work in symbols; the table is keyed by id.
+func (q *Queries) ListWithdrawalLimits(ctx context.Context, tenantID string) ([]ListWithdrawalLimitsRow, error) {
+	rows, err := q.db.Query(ctx, listWithdrawalLimits, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListWithdrawalLimitsRow{}
+	for rows.Next() {
+		var i ListWithdrawalLimitsRow
+		if err := rows.Scan(
+			&i.TenantID,
+			&i.AssetID,
+			&i.KycLevel,
+			&i.AutoApproveLimit,
+			&i.DailyLimit,
+			&i.RequireManualReview,
+			&i.Version,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.AssetSymbol,
 		); err != nil {
 			return nil, err
 		}
@@ -480,6 +577,45 @@ func (q *Queries) UpsertMarket(ctx context.Context, arg UpsertMarketParams) erro
 		arg.FeeScheduleID,
 		arg.SelfTradePolicy,
 		arg.Status,
+	)
+	return err
+}
+
+const upsertWithdrawalLimit = `-- name: UpsertWithdrawalLimit :exec
+INSERT INTO registry.withdrawal_limits (
+    tenant_id, asset_id, kyc_level, auto_approve_limit, daily_limit, require_manual_review
+)
+SELECT $1, a.id, $3, $4, $5, $6 FROM registry.assets a
+WHERE a.tenant_id = $1 AND a.symbol = $2
+ON CONFLICT (tenant_id, asset_id, kyc_level) DO UPDATE
+SET auto_approve_limit    = EXCLUDED.auto_approve_limit,
+    daily_limit           = EXCLUDED.daily_limit,
+    require_manual_review = EXCLUDED.require_manual_review,
+    version               = registry.withdrawal_limits.version + 1,
+    updated_at            = now()
+WHERE (registry.withdrawal_limits.auto_approve_limit, registry.withdrawal_limits.daily_limit,
+       registry.withdrawal_limits.require_manual_review)
+      IS DISTINCT FROM
+      (EXCLUDED.auto_approve_limit, EXCLUDED.daily_limit, EXCLUDED.require_manual_review)
+`
+
+type UpsertWithdrawalLimitParams struct {
+	TenantID            string
+	Symbol              string
+	KycLevel            int16
+	AutoApproveLimit    pgtype.Numeric
+	DailyLimit          pgtype.Numeric
+	RequireManualReview bool
+}
+
+func (q *Queries) UpsertWithdrawalLimit(ctx context.Context, arg UpsertWithdrawalLimitParams) error {
+	_, err := q.db.Exec(ctx, upsertWithdrawalLimit,
+		arg.TenantID,
+		arg.Symbol,
+		arg.KycLevel,
+		arg.AutoApproveLimit,
+		arg.DailyLimit,
+		arg.RequireManualReview,
 	)
 	return err
 }

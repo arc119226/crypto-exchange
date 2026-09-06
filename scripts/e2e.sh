@@ -158,6 +158,49 @@ cast_run send --unlocked --from "$sender" "$usdc_contract" "mint(address,uint256
 cast_run send --unlocked --from "$sender" "$usdc_contract" "transfer(address,uint256)" "$addr" 250500000 >/dev/null
 wait_for_credit USDC "$before_usdc"
 
+# The withdrawal half (docs/plan-v1.0.md §6.4.2). Nothing is signed in this
+# phase: the check is that a request is decided by the policy and its funds end
+# up on hold, and that the amount over the limit waits for a person instead.
+withdrawal_status() {
+  "$CTL" withdrawals list --output json | jq -r --arg id "$1" '.withdrawals[] | select(.id==$id) | .status'
+}
+
+# wait_for_status ID STATUS — polls until the withdrawal reaches it
+wait_for_status() {
+  for _ in $(seq 1 30); do
+    [ "$(withdrawal_status "$1")" = "$2" ] && return 0
+    sleep 1
+  done
+  echo "withdrawal $1 never reached $2 (now: $(withdrawal_status "$1"))"
+  "$CTL" withdrawals list || true
+  "${COMPOSE[@]}" logs --no-color --tail=50 exchange-chain || true
+  return 1
+}
+
+# $sender is anvil account #0, resolved for the deposit above: an ordinary
+# external address, which is what a user actually withdraws to.
+log "a withdrawal inside the limits is decided without a person"
+hold_before=$("$CTL" balances --output json | jq -r '.balances[] | select(.asset=="ETH") | .hold')
+auto=$("$CTL" withdrawals create --asset ETH --amount 0.05 --to "$sender" --output json | jq -r .id)
+wait_for_status "$auto" funds_locked
+hold_after=$("$CTL" balances --output json | jq -r '.balances[] | select(.asset=="ETH") | .hold')
+[ "$hold_before" != "$hold_after" ] || { echo "the withdrawal locked no funds"; "$CTL" balances; exit 1; }
+
+# The same key with the same request is the same withdrawal, not a second one.
+key="e2e-$STAMP-idem"
+first=$("$CTL" withdrawals create --asset ETH --amount 0.02 --to "$sender" --idempotency-key "$key" --output json | jq -r .id)
+again=$("$CTL" withdrawals create --asset ETH --amount 0.02 --to "$sender" --idempotency-key "$key" --output json | jq -r .id)
+[ "$first" = "$again" ] || { echo "the same Idempotency-Key produced two withdrawals: $first and $again"; exit 1; }
+
+log "a withdrawal over the limit waits for an administrator"
+# 0.5 ETH is above the seeded level-0 ceiling of 0.1.
+big=$("$CTL" withdrawals create --asset ETH --amount 0.5 --to "$sender" --output json | jq -r .id)
+wait_for_status "$big" pending_review
+"$CTL" admin withdrawals list --output json | jq -e --arg id "$big" '.withdrawals | map(.id) | index($id) != null' >/dev/null \
+  || { echo "the withdrawal is not in the admin review queue"; "$CTL" admin withdrawals list; exit 1; }
+"$CTL" admin withdrawals review "$big" approve --note "e2e" >/dev/null
+wait_for_status "$big" funds_locked
+
 log "a resting order survives kill -9 of the engine"
 session=$("$CTL" user register --email "restart-$STAMP@e2e.local" --password "restart-$STAMP-pw" --output json)
 account=$(echo "$session" | jq -r .account_id)

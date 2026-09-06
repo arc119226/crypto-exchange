@@ -140,3 +140,50 @@ func marketFromRow(r sqlcgen.ListMarketsRow) (Market, error) {
 		Version: r.Version, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt,
 	}, nil
 }
+
+// WithdrawalLimit is one row of registry.withdrawal_limits: what an account at
+// a given KYC level may withdraw of one asset without a person looking at it
+// (docs/plan-v1.0.md §6.4.2). The table has existed since migration 0002; the
+// withdrawal policy is the first thing to read it.
+type WithdrawalLimit struct {
+	TenantID string
+	AssetID  string
+	Asset    string
+	KYCLevel int16
+	// AutoApproveLimit is the largest single withdrawal that skips review.
+	AutoApproveLimit money.Amount
+	// DailyLimit caps the rolling 24 h total; over it the request is rejected
+	// rather than queued, because waiting will not make it fit.
+	DailyLimit money.Amount
+	// RequireManualReview sends every withdrawal of this asset at this level
+	// to the queue whatever the amounts say.
+	RequireManualReview bool
+	Version             int32
+	CreatedAt           time.Time
+	UpdatedAt           time.Time
+}
+
+// WithdrawalLimitInput is the admin-facing upsert shape.
+type WithdrawalLimitInput struct {
+	Asset               string
+	KYCLevel            int16
+	AutoApproveLimit    money.Amount
+	DailyLimit          money.Amount
+	RequireManualReview bool
+}
+
+func withdrawalLimitFromRow(r sqlcgen.ListWithdrawalLimitsRow) (WithdrawalLimit, error) {
+	auto, err := pg.AmountFromNumeric(r.AutoApproveLimit)
+	if err != nil {
+		return WithdrawalLimit{}, err
+	}
+	daily, err := pg.AmountFromNumeric(r.DailyLimit)
+	if err != nil {
+		return WithdrawalLimit{}, err
+	}
+	return WithdrawalLimit{
+		TenantID: r.TenantID, AssetID: r.AssetID, Asset: r.AssetSymbol, KYCLevel: r.KycLevel,
+		AutoApproveLimit: auto, DailyLimit: daily, RequireManualReview: r.RequireManualReview,
+		Version: r.Version, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt,
+	}, nil
+}

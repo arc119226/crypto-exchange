@@ -46,12 +46,13 @@ func TestMigrateSeedAndRegistry(t *testing.T) {
 	assert.Contains(t, out.String(), "no pending migrations")
 	out.Reset()
 	require.NoError(t, app.MigrateStatus(ctx, h.DSN("ex_migrate"), &out))
-	assert.Equal(t, 9, strings.Count(out.String(), "applied"), out.String()) // 0001 schemas, 0002 registry, 0003 ledger, 0004 audit, 0005 trading, 0006 eventbus, 0007 auth, 0008 chain addresses, 0009 chain deposits
+	assert.Equal(t, 10, strings.Count(out.String(), "applied"), out.String()) // 0001 schemas, 0002 registry, 0003 ledger, 0004 audit, 0005 trading, 0006 eventbus, 0007 auth, 0008 chain addresses, 0009 chain deposits, 0010 chain withdrawals
 
 	// seed twice with the admin role: idempotent, versions stay at 1
 	seedOpts := app.SeedOptions{DSN: h.DSN("ex_admin"), FixturesPath: fixtures, TenantID: "default", ChainID: 31337, RequiredConfirmations: 1}
 	require.NoError(t, app.Seed(ctx, seedOpts, &out))
 	assert.Contains(t, out.String(), "markets=1")
+	assert.Contains(t, out.String(), "withdrawal_limits=6")
 	require.NoError(t, app.Seed(ctx, seedOpts, &out))
 
 	// wrong chain id is refused before touching the database
@@ -81,6 +82,21 @@ func TestMigrateSeedAndRegistry(t *testing.T) {
 	assert.Equal(t, registry.STPCancelNewest, m.SelfTradePolicy)
 	assert.Equal(t, registry.MarketActive, m.Status)
 	assert.Equal(t, int32(1), m.Version, "second seed must not bump the version")
+
+	// withdrawal limits: three KYC levels per asset, and the api role can read
+	// them because the policy check needs them (migration 0002 grants SELECT on
+	// the whole registry schema).
+	limits, err := store.ListWithdrawalLimits(ctx, "default")
+	require.NoError(t, err)
+	require.Len(t, limits, 6)
+	eth0, err := store.GetWithdrawalLimit(ctx, "default", "ETH", 0)
+	require.NoError(t, err)
+	assert.Equal(t, "0.1", eth0.AutoApproveLimit.String())
+	assert.Equal(t, "1", eth0.DailyLimit.String())
+	assert.False(t, eth0.RequireManualReview)
+	assert.Equal(t, int32(1), eth0.Version, "second seed must not bump the version")
+	_, err = store.GetWithdrawalLimit(ctx, "default", "ETH", 3)
+	assert.ErrorIs(t, err, registry.ErrNotFound, "an unknown kyc level has no limit, it is not silently unlimited")
 
 	got, err := store.GetMarket(ctx, "default", "ETH-USDC")
 	require.NoError(t, err)
