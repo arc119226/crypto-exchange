@@ -186,3 +186,40 @@ func mapErr(what string, err error) error {
 	}
 	return fmt.Errorf("registry: %s: %w", what, err)
 }
+
+// ValidMarketStatus reports whether s is one of the four market statuses.
+func ValidMarketStatus(s string) bool {
+	switch s {
+	case MarketActive, MarketHalted, MarketCancelOnly, MarketDelisted:
+		return true
+	}
+	return false
+}
+
+// SetMarketStatus moves a market between active, halted, cancel_only and
+// delisted (docs/plan-v1.0.md §6.6). It reports whether the status actually
+// changed: setting the status a market already has is a no-op, so the caller
+// writes neither an audit record nor an event for it.
+func (s *Store) SetMarketStatus(ctx context.Context, tx pgx.Tx, tenantID, symbol, status string) (Market, bool, error) {
+	if !ValidMarketStatus(status) {
+		return Market{}, false, fmt.Errorf("%w: market status %q", ErrInvalid, status)
+	}
+	q := s.q.WithTx(tx)
+	before, err := q.GetMarketBySymbol(ctx, sqlcgen.GetMarketBySymbolParams{TenantID: tenantID, Symbol: symbol})
+	if err != nil {
+		return Market{}, false, mapErr("market "+symbol, err)
+	}
+	if before.Status == status {
+		m, err := marketFromRow(sqlcgen.ListMarketsRow(before))
+		return m, false, err
+	}
+	if err := q.SetMarketStatus(ctx, sqlcgen.SetMarketStatusParams{TenantID: tenantID, Symbol: symbol, Status: status}); err != nil {
+		return Market{}, false, fmt.Errorf("registry: set market %s status: %w", symbol, err)
+	}
+	after, err := q.GetMarketBySymbol(ctx, sqlcgen.GetMarketBySymbolParams{TenantID: tenantID, Symbol: symbol})
+	if err != nil {
+		return Market{}, false, mapErr("market "+symbol, err)
+	}
+	m, err := marketFromRow(sqlcgen.ListMarketsRow(after))
+	return m, true, err
+}

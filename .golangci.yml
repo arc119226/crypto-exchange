@@ -104,6 +104,20 @@ linters:
             - github.com/prometheus/client_golang
             - github.com/stretchr/testify
             - pgregory.net/rapid
+        cmdbus:
+          list-mode: strict
+          files:
+            - "**/internal/cmdbus/**"
+          allow:
+            - $gostd
+            - github.com/arc119226/crypto-exchange/internal/trading
+            - github.com/arc119226/crypto-exchange/internal/matching
+            - github.com/arc119226/crypto-exchange/internal/auth
+            - github.com/arc119226/crypto-exchange/internal/telemetry
+            - github.com/arc119226/crypto-exchange/internal/money
+            - github.com/nats-io/nats.go
+            - github.com/prometheus/client_golang
+            - github.com/stretchr/testify
         auth:
           list-mode: strict
           files:

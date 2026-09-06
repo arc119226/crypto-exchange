@@ -15,6 +15,7 @@ import (
 	"github.com/arc119226/crypto-exchange/internal/admin/gen"
 	"github.com/arc119226/crypto-exchange/internal/audit"
 	"github.com/arc119226/crypto-exchange/internal/ledger"
+	"github.com/arc119226/crypto-exchange/internal/registry"
 	"github.com/arc119226/crypto-exchange/internal/telemetry"
 )
 
@@ -23,18 +24,23 @@ const actorID = "admin-api-key"
 
 // Handler implements gen.StrictServerInterface.
 type Handler struct {
-	pool   *pgxpool.Pool
-	ledger *ledger.Service
-	audit  *audit.Recorder
+	pool     *pgxpool.Pool
+	ledger   *ledger.Service
+	audit    *audit.Recorder
+	registry *registry.Store
+	tenant   string
 }
 
 var _ gen.StrictServerInterface = (*Handler)(nil)
 
-// NewHandler wires the admin API to the ledger and the audit trail. The
-// pool must carry a role allowed to write the ledger and the audit log
-// (ex_admin or ex_all).
-func NewHandler(pool *pgxpool.Pool, l *ledger.Service, a *audit.Recorder) *Handler {
-	return &Handler{pool: pool, ledger: l, audit: a}
+// NewHandler wires the admin API to the ledger, the registry and the audit
+// trail. The pool must carry a role allowed to write all three (ex_admin or
+// ex_all).
+func NewHandler(pool *pgxpool.Pool, l *ledger.Service, r *registry.Store, a *audit.Recorder, tenant string) *Handler {
+	if tenant == "" {
+		tenant = "default"
+	}
+	return &Handler{pool: pool, ledger: l, registry: r, audit: a, tenant: tenant}
 }
 
 func (h *Handler) inTx(ctx context.Context, fn func(tx pgx.Tx) error) error {

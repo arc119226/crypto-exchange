@@ -120,3 +120,13 @@ WHERE (registry.markets.base_asset_id, registry.markets.quote_asset_id, registry
        EXCLUDED.qty_step, EXCLUDED.min_notional, EXCLUDED.max_qty,
        EXCLUDED.max_slippage_bps, EXCLUDED.fee_schedule_id,
        EXCLUDED.self_trade_policy, EXCLUDED.status);
+
+-- name: SetMarketStatus :exec
+-- Status changes are the one registry write the admin API makes on a live
+-- market; version and updated_at move only when the status really changes so
+-- an idempotent replay does not emit a new event.
+UPDATE registry.markets
+   SET status     = $3,
+       version    = version + 1,
+       updated_at = now()
+ WHERE tenant_id = $1 AND symbol = $2 AND status IS DISTINCT FROM $3;

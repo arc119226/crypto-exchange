@@ -38,13 +38,30 @@ type Config struct {
 	RateLimit       RateLimitConfig  `envPrefix:"RATELIMIT_"`
 	Admin           AdminConfig      `envPrefix:"ADMIN_"`
 	Engine          EngineConfig     `envPrefix:"ENGINE_"`
+	Registry        RegistryConfig   `envPrefix:"REGISTRY_"`
 	Outbox          OutboxConfig     `envPrefix:"OUTBOX_"`
 	Shutdown        ShutdownConfig   `envPrefix:"SHUTDOWN_"`
 }
 
-// EngineConfig tunes the trading engine (engine role).
+// EngineConfig tunes the trading engine (engine role) and the command bus
+// that reaches it from a separate api role (docs/plan-v1.0.md §5.2).
 type EngineConfig struct {
 	QueueSize int `env:"QUEUE_SIZE" envDefault:"1024"` // commands waiting per market
+	// CommandSubjectPrefix is the first tokens of cmd.trading.<tenant>.<market>.
+	CommandSubjectPrefix string `env:"COMMAND_SUBJECT_PREFIX" envDefault:"cmd.trading"`
+	// CommandTimeout bounds one request-reply round trip; exceeding it is a 503.
+	CommandTimeout time.Duration `env:"COMMAND_TIMEOUT" envDefault:"5s"`
+	// InternalTokenTTL is the lifetime of the aud=internal JWT the api role
+	// mints per command (docs/plan-v1.0.md §14).
+	InternalTokenTTL time.Duration `env:"INTERNAL_TOKEN_TTL" envDefault:"5m"`
+}
+
+// RegistryConfig tunes the registry cache of roles that do not run the
+// engine. The engine reloads on market.updated; an api role without one
+// re-reads on this interval instead, so a delisted market stops being
+// offered without a restart.
+type RegistryConfig struct {
+	RefreshInterval time.Duration `env:"REFRESH_INTERVAL" envDefault:"30s"`
 }
 
 // OutboxConfig tunes the outbox relay (engine role, needs NATS).

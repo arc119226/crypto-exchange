@@ -63,6 +63,7 @@ func Run(ctx context.Context, cfg Config, roles []Role, bi BuildInfo) error {
 		adminLedger  *ledger.Service
 		eng          engineComponents
 		sharedLedger *ledger.Service
+		apiRefresh   *registryRefresher
 	)
 	// the ledger service is shared by every role in the process that needs it
 	ledgerFor := func() (*ledger.Service, error) {
@@ -85,13 +86,12 @@ func Run(ctx context.Context, cfg Config, roles []Role, bi BuildInfo) error {
 		}
 		eng.engine = newEngine(cfg, log, d.pool, l, reg)
 		if d.nc != nil {
-			relay, err := newRelay(ctx, cfg, log, d.pool, d.nc, reg)
-			if err != nil {
+			if err := eng.attachNATS(ctx, cfg, log, d, reg); err != nil {
 				return err
 			}
-			eng.relay = relay
+			defer eng.close(log)
 		} else {
-			log.Warn("engine running without NATS: events stay in the outbox until a relay runs")
+			log.Warn("engine running without NATS: events stay in the outbox, and only an api role in this process can trade")
 		}
 		checker.Register("engine", true, eng.engine.ReadyCheck)
 	}
@@ -102,11 +102,12 @@ func Run(ctx context.Context, cfg Config, roles []Role, bi BuildInfo) error {
 			if err != nil {
 				return err
 			}
-			srv, err := newAPIServer(ctx, cfg, log, httpMetrics, d, l, eng.engine)
+			srv, refresh, err := newAPIServer(ctx, cfg, log, httpMetrics, reg, d, l, eng.engine)
 			if err != nil {
 				return err
 			}
 			servers = append(servers, srv)
+			apiRefresh = refresh
 		case RoleEngine:
 			// built above
 		case RoleAdmin:
@@ -131,6 +132,9 @@ func Run(ctx context.Context, cfg Config, roles []Role, bi BuildInfo) error {
 	}
 	if adminLedger != nil {
 		g.Go(func() error { return observeTrialBalance(gctx, log, adminLedger) })
+	}
+	if apiRefresh != nil {
+		g.Go(func() error { return apiRefresh.run(gctx) })
 	}
 	if eng.engine != nil {
 		// Start blocks while another instance holds the lock and while books

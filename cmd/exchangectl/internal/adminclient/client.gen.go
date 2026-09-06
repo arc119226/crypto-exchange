@@ -153,6 +153,30 @@ func (e HouseCode) Valid() bool {
 	}
 }
 
+// Defines values for MarketStatus.
+const (
+	MarketStatusActive     MarketStatus = "active"
+	MarketStatusCancelOnly MarketStatus = "cancel_only"
+	MarketStatusDelisted   MarketStatus = "delisted"
+	MarketStatusHalted     MarketStatus = "halted"
+)
+
+// Valid indicates whether the value is a known member of the MarketStatus enum.
+func (e MarketStatus) Valid() bool {
+	switch e {
+	case MarketStatusActive:
+		return true
+	case MarketStatusCancelOnly:
+		return true
+	case MarketStatusDelisted:
+		return true
+	case MarketStatusHalted:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for PostingBucket.
 const (
 	PostingBucketAvailable PostingBucket = "available"
@@ -343,6 +367,54 @@ type JournalEntryList struct {
 	Entries []JournalEntry `json:"entries"`
 }
 
+// Market defines model for Market.
+type Market struct {
+	BaseAsset string `json:"base_asset"`
+	ID        string `json:"id"`
+	MakerBps  int32  `json:"maker_bps"`
+
+	// MinNotional Decimal serialized as a string (NUMERIC(36,18)); never a JSON number.
+	//
+	// Example: 1990.00
+	MinNotional Amount `json:"min_notional"`
+
+	// PriceTick Decimal serialized as a string (NUMERIC(36,18)); never a JSON number.
+	//
+	// Example: 1990.00
+	PriceTick Amount `json:"price_tick"`
+
+	// QtyStep Decimal serialized as a string (NUMERIC(36,18)); never a JSON number.
+	//
+	// Example: 1990.00
+	QtyStep         Amount `json:"qty_step"`
+	QuoteAsset      string `json:"quote_asset"`
+	SelfTradePolicy string `json:"self_trade_policy"`
+
+	// Status active takes orders and cancels; halted and cancel_only take cancels only; delisted requires an empty book (docs/plan-v1.0.md 6.6).
+	Status MarketStatus `json:"status"`
+
+	// Symbol Example: ETH-USDC
+	Symbol   string `json:"symbol"`
+	TakerBps int32  `json:"taker_bps"`
+	Version  int32  `json:"version"`
+}
+
+// MarketList defines model for MarketList.
+type MarketList struct {
+	Markets []Market `json:"markets"`
+}
+
+// MarketStatus active takes orders and cancels; halted and cancel_only take cancels only; delisted requires an empty book (docs/plan-v1.0.md 6.6).
+type MarketStatus string
+
+// MarketStatusRequest defines model for MarketStatusRequest.
+type MarketStatusRequest struct {
+	Reason string `json:"reason"`
+
+	// Status active takes orders and cancels; halted and cancel_only take cancels only; delisted requires an empty book (docs/plan-v1.0.md 6.6).
+	Status MarketStatus `json:"status"`
+}
+
 // Posting defines model for Posting.
 type Posting struct {
 	AccountID string `json:"account_id"`
@@ -406,6 +478,9 @@ type AccountID = string
 // Limit defines model for Limit.
 type Limit = int32
 
+// MarketSymbol Example: ETH-USDC
+type MarketSymbol = string
+
 // Offset defines model for Offset.
 type Offset = int32
 
@@ -454,6 +529,9 @@ type SetAccountStatusJSONRequestBody = AccountStatusRequest
 
 // CreateAdjustmentJSONRequestBody defines body for CreateAdjustment for application/json ContentType.
 type CreateAdjustmentJSONRequestBody = AdjustmentRequest
+
+// SetMarketStatusJSONRequestBody defines body for SetMarketStatus for application/json ContentType.
+type SetMarketStatusJSONRequestBody = MarketStatusRequest
 
 // RequestEditorFn is the function signature for the RequestEditor callback function
 type RequestEditorFn func(ctx context.Context, req *http.Request) error
@@ -616,6 +694,29 @@ type ClientInterface interface {
 	//
 	// Corresponds with GET /admin/v1/ledger/trial-balance (the `GetTrialBalance` operationId).
 	GetTrialBalance(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ListMarkets Markets of the tenant
+	//
+	// Corresponds with GET /admin/v1/markets (the `ListMarkets` operationId).
+	ListMarkets(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// SetMarketStatusWithBody Halt, resume or delist a market
+	//
+	// Changes the market's trading status and publishes market.updated, which the engine consumes to reload its registry cache without a restart. Setting the status a market already has changes nothing and emits no event. The path parameter is the symbol, matching GET /v1/markets/{symbol}.
+	//
+	// Takes any type of body and a specified content type.
+	//
+	// Corresponds with PUT /admin/v1/markets/{symbol}/status (the `SetMarketStatus` operationId).
+	SetMarketStatusWithBody(ctx context.Context, symbol MarketSymbol, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// SetMarketStatus Halt, resume or delist a market
+	//
+	// Changes the market's trading status and publishes market.updated, which the engine consumes to reload its registry cache without a restart. Setting the status a market already has changes nothing and emits no event. The path parameter is the symbol, matching GET /v1/markets/{symbol}.
+	//
+	// Takes a body of the `application/json` content type.
+	//
+	// Corresponds with PUT /admin/v1/markets/{symbol}/status (the `SetMarketStatus` operationId).
+	SetMarketStatus(ctx context.Context, symbol MarketSymbol, body SetMarketStatusJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 }
 
 // ListAccounts List ledger accounts
@@ -816,6 +917,59 @@ func (c *Client) ListEntries(ctx context.Context, params *ListEntriesParams, req
 // Corresponds with GET /admin/v1/ledger/trial-balance (the `GetTrialBalance` operationId).
 func (c *Client) GetTrialBalance(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewGetTrialBalanceRequest(c.Server)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// ListMarkets Markets of the tenant
+//
+// Corresponds with GET /admin/v1/markets (the `ListMarkets` operationId).
+func (c *Client) ListMarkets(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListMarketsRequest(c.Server)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// SetMarketStatusWithBody Halt, resume or delist a market
+//
+// Changes the market's trading status and publishes market.updated, which the engine consumes to reload its registry cache without a restart. Setting the status a market already has changes nothing and emits no event. The path parameter is the symbol, matching GET /v1/markets/{symbol}.
+//
+// Takes any type of body and a specified content type.
+//
+// Corresponds with PUT /admin/v1/markets/{symbol}/status (the `SetMarketStatus` operationId).
+func (c *Client) SetMarketStatusWithBody(ctx context.Context, symbol MarketSymbol, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewSetMarketStatusRequestWithBody(c.Server, symbol, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// SetMarketStatus Halt, resume or delist a market
+//
+// Changes the market's trading status and publishes market.updated, which the engine consumes to reload its registry cache without a restart. Setting the status a market already has changes nothing and emits no event. The path parameter is the symbol, matching GET /v1/markets/{symbol}.
+//
+// Takes a body of the `application/json` content type.
+//
+// Corresponds with PUT /admin/v1/markets/{symbol}/status (the `SetMarketStatus` operationId).
+func (c *Client) SetMarketStatus(ctx context.Context, symbol MarketSymbol, body SetMarketStatusJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewSetMarketStatusRequest(c.Server, symbol, body)
 	if err != nil {
 		return nil, err
 	}
@@ -1330,6 +1484,80 @@ func NewGetTrialBalanceRequest(server string) (*http.Request, error) {
 	return req, nil
 }
 
+// NewListMarketsRequest constructs an http.Request for the ListMarkets method
+func NewListMarketsRequest(server string) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/admin/v1/markets")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewSetMarketStatusRequest calls the generic SetMarketStatus builder with application/json body
+func NewSetMarketStatusRequest(server string, symbol MarketSymbol, body SetMarketStatusJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewSetMarketStatusRequestWithBody(server, symbol, "application/json", bodyReader)
+}
+
+// NewSetMarketStatusRequestWithBody constructs an http.Request for the SetMarketStatus method, with any body, and a specified content type
+func NewSetMarketStatusRequestWithBody(server string, symbol MarketSymbol, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "symbol", symbol, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/admin/v1/markets/%s/status", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPut, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
 func (c *Client) applyEditors(ctx context.Context, req *http.Request, additionalEditors []RequestEditorFn) error {
 	for _, r := range c.RequestEditors {
 		if err := r(ctx, req); err != nil {
@@ -1473,6 +1701,31 @@ type ClientWithResponsesInterface interface {
 	//
 	// Corresponds with GET /admin/v1/ledger/trial-balance (the `GetTrialBalance` operationId).
 	GetTrialBalanceWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*GetTrialBalanceResponse, error)
+
+	// ListMarketsWithResponse Markets of the tenant
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /admin/v1/markets (the `ListMarkets` operationId).
+	ListMarketsWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*ListMarketsResponse, error)
+
+	// SetMarketStatusWithBodyWithResponse Halt, resume or delist a market
+	//
+	// Changes the market's trading status and publishes market.updated, which the engine consumes to reload its registry cache without a restart. Setting the status a market already has changes nothing and emits no event. The path parameter is the symbol, matching GET /v1/markets/{symbol}.
+	//
+	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with PUT /admin/v1/markets/{symbol}/status (the `SetMarketStatus` operationId).
+	SetMarketStatusWithBodyWithResponse(ctx context.Context, symbol MarketSymbol, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*SetMarketStatusResponse, error)
+
+	// SetMarketStatusWithResponse Halt, resume or delist a market
+	//
+	// Changes the market's trading status and publishes market.updated, which the engine consumes to reload its registry cache without a restart. Setting the status a market already has changes nothing and emits no event. The path parameter is the symbol, matching GET /v1/markets/{symbol}.
+	//
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with PUT /admin/v1/markets/{symbol}/status (the `SetMarketStatus` operationId).
+	SetMarketStatusWithResponse(ctx context.Context, symbol MarketSymbol, body SetMarketStatusJSONRequestBody, reqEditors ...RequestEditorFn) (*SetMarketStatusResponse, error)
 }
 
 type ListAccountsResponse struct {
@@ -2033,6 +2286,130 @@ func (r GetTrialBalanceResponse) ContentType() string {
 	return ""
 }
 
+type ListMarketsResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *MarketList
+	// ApplicationProblemJSON401 the response for an HTTP 401 `application/problem+json` response
+	ApplicationProblemJSON401 *Unauthorized
+	// ApplicationProblemJSON500 the response for an HTTP 500 `application/problem+json` response
+	ApplicationProblemJSON500 *InternalError
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r ListMarketsResponse) GetJSON200() *MarketList {
+	return r.JSON200
+}
+
+// GetApplicationProblemJSON401 returns the response for an HTTP 401 `application/problem+json` response
+func (r ListMarketsResponse) GetApplicationProblemJSON401() *Unauthorized {
+	return r.ApplicationProblemJSON401
+}
+
+// GetApplicationProblemJSON500 returns the response for an HTTP 500 `application/problem+json` response
+func (r ListMarketsResponse) GetApplicationProblemJSON500() *InternalError {
+	return r.ApplicationProblemJSON500
+}
+
+// GetBody returns the raw response body bytes
+func (r ListMarketsResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r ListMarketsResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListMarketsResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r ListMarketsResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type SetMarketStatusResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *Market
+	// ApplicationProblemJSON400 the response for an HTTP 400 `application/problem+json` response
+	ApplicationProblemJSON400 *BadRequest
+	// ApplicationProblemJSON401 the response for an HTTP 401 `application/problem+json` response
+	ApplicationProblemJSON401 *Unauthorized
+	// ApplicationProblemJSON404 the response for an HTTP 404 `application/problem+json` response
+	ApplicationProblemJSON404 *NotFound
+	// ApplicationProblemJSON500 the response for an HTTP 500 `application/problem+json` response
+	ApplicationProblemJSON500 *InternalError
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r SetMarketStatusResponse) GetJSON200() *Market {
+	return r.JSON200
+}
+
+// GetApplicationProblemJSON400 returns the response for an HTTP 400 `application/problem+json` response
+func (r SetMarketStatusResponse) GetApplicationProblemJSON400() *BadRequest {
+	return r.ApplicationProblemJSON400
+}
+
+// GetApplicationProblemJSON401 returns the response for an HTTP 401 `application/problem+json` response
+func (r SetMarketStatusResponse) GetApplicationProblemJSON401() *Unauthorized {
+	return r.ApplicationProblemJSON401
+}
+
+// GetApplicationProblemJSON404 returns the response for an HTTP 404 `application/problem+json` response
+func (r SetMarketStatusResponse) GetApplicationProblemJSON404() *NotFound {
+	return r.ApplicationProblemJSON404
+}
+
+// GetApplicationProblemJSON500 returns the response for an HTTP 500 `application/problem+json` response
+func (r SetMarketStatusResponse) GetApplicationProblemJSON500() *InternalError {
+	return r.ApplicationProblemJSON500
+}
+
+// GetBody returns the raw response body bytes
+func (r SetMarketStatusResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r SetMarketStatusResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r SetMarketStatusResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r SetMarketStatusResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
 // ListAccountsWithResponse List ledger accounts
 //
 // Returns a wrapper object for the known response body format(s).
@@ -2203,6 +2580,49 @@ func (c *ClientWithResponses) GetTrialBalanceWithResponse(ctx context.Context, r
 		return nil, err
 	}
 	return ParseGetTrialBalanceResponse(rsp)
+}
+
+// ListMarketsWithResponse Markets of the tenant
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /admin/v1/markets (the `ListMarkets` operationId).
+func (c *ClientWithResponses) ListMarketsWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*ListMarketsResponse, error) {
+	rsp, err := c.ListMarkets(ctx, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListMarketsResponse(rsp)
+}
+
+// SetMarketStatusWithBodyWithResponse Halt, resume or delist a market
+//
+// Changes the market's trading status and publishes market.updated, which the engine consumes to reload its registry cache without a restart. Setting the status a market already has changes nothing and emits no event. The path parameter is the symbol, matching GET /v1/markets/{symbol}.
+//
+// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with PUT /admin/v1/markets/{symbol}/status (the `SetMarketStatus` operationId).
+func (c *ClientWithResponses) SetMarketStatusWithBodyWithResponse(ctx context.Context, symbol MarketSymbol, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*SetMarketStatusResponse, error) {
+	rsp, err := c.SetMarketStatusWithBody(ctx, symbol, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseSetMarketStatusResponse(rsp)
+}
+
+// SetMarketStatusWithResponse Halt, resume or delist a market
+//
+// Changes the market's trading status and publishes market.updated, which the engine consumes to reload its registry cache without a restart. Setting the status a market already has changes nothing and emits no event. The path parameter is the symbol, matching GET /v1/markets/{symbol}.
+//
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with PUT /admin/v1/markets/{symbol}/status (the `SetMarketStatus` operationId).
+func (c *ClientWithResponses) SetMarketStatusWithResponse(ctx context.Context, symbol MarketSymbol, body SetMarketStatusJSONRequestBody, reqEditors ...RequestEditorFn) (*SetMarketStatusResponse, error) {
+	rsp, err := c.SetMarketStatus(ctx, symbol, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseSetMarketStatusResponse(rsp)
 }
 
 // ParseListAccountsResponse parses an HTTP response from a ListAccountsWithResponse call
@@ -2615,6 +3035,100 @@ func ParseGetTrialBalanceResponse(rsp *http.Response) (*GetTrialBalanceResponse,
 			return nil, err
 		}
 		response.ApplicationProblemJSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON500 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseListMarketsResponse parses an HTTP response from a ListMarketsWithResponse call
+func ParseListMarketsResponse(rsp *http.Response) (*ListMarketsResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListMarketsResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest MarketList
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON500 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseSetMarketStatusResponse parses an HTTP response from a SetMarketStatusWithResponse call
+func ParseSetMarketStatusResponse(rsp *http.Response) (*SetMarketStatusResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &SetMarketStatusResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest Market
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest BadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON404 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
 		var dest InternalError

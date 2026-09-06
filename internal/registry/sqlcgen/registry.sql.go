@@ -291,6 +291,28 @@ func (q *Queries) ListMarkets(ctx context.Context, tenantID string) ([]ListMarke
 	return items, nil
 }
 
+const setMarketStatus = `-- name: SetMarketStatus :exec
+UPDATE registry.markets
+   SET status     = $3,
+       version    = version + 1,
+       updated_at = now()
+ WHERE tenant_id = $1 AND symbol = $2 AND status IS DISTINCT FROM $3
+`
+
+type SetMarketStatusParams struct {
+	TenantID string
+	Symbol   string
+	Status   string
+}
+
+// Status changes are the one registry write the admin API makes on a live
+// market; version and updated_at move only when the status really changes so
+// an idempotent replay does not emit a new event.
+func (q *Queries) SetMarketStatus(ctx context.Context, arg SetMarketStatusParams) error {
+	_, err := q.db.Exec(ctx, setMarketStatus, arg.TenantID, arg.Symbol, arg.Status)
+	return err
+}
+
 const upsertAsset = `-- name: UpsertAsset :exec
 INSERT INTO registry.assets (
     tenant_id, symbol, name, chain_id, contract_address, is_native, scale, display_scale,

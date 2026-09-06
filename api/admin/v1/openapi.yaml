@@ -21,6 +21,7 @@ security:
 tags:
   - name: accounts
   - name: ledger
+  - name: registry
   - name: audit
 
 paths:
@@ -136,6 +137,57 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/BalanceList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /admin/v1/markets:
+    get:
+      tags: [registry]
+      operationId: listMarkets
+      summary: Markets of the tenant
+      responses:
+        "200":
+          description: Markets
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MarketList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /admin/v1/markets/{symbol}/status:
+    put:
+      tags: [registry]
+      operationId: setMarketStatus
+      summary: Halt, resume or delist a market
+      description: >
+        Changes the market's trading status and publishes market.updated, which
+        the engine consumes to reload its registry cache without a restart.
+        Setting the status a market already has changes nothing and emits no
+        event. The path parameter is the symbol, matching GET /v1/markets/{symbol}.
+      parameters:
+        - $ref: "#/components/parameters/MarketSymbol"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MarketStatusRequest"
+      responses:
+        "200":
+          description: Updated market
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Market"
+        "400":
+          $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "404":
@@ -283,6 +335,13 @@ components:
       required: true
       schema:
         type: string
+    MarketSymbol:
+      name: symbol
+      in: path
+      required: true
+      schema:
+        type: string
+        example: ETH-USDC
     Limit:
       name: limit
       in: query
@@ -398,6 +457,65 @@ components:
         reason:
           type: string
           minLength: 1
+
+    MarketStatus:
+      type: string
+      enum: [active, halted, cancel_only, delisted]
+      description: >
+        active takes orders and cancels; halted and cancel_only take cancels
+        only; delisted requires an empty book (docs/plan-v1.0.md 6.6).
+
+    MarketStatusRequest:
+      type: object
+      required: [status, reason]
+      properties:
+        status:
+          $ref: "#/components/schemas/MarketStatus"
+        reason:
+          type: string
+          minLength: 1
+
+    Market:
+      type: object
+      required: [id, symbol, base_asset, quote_asset, price_tick, qty_step, min_notional, maker_bps, taker_bps, self_trade_policy, status, version]
+      properties:
+        id:
+          type: string
+        symbol:
+          type: string
+          example: ETH-USDC
+        base_asset:
+          type: string
+        quote_asset:
+          type: string
+        price_tick:
+          $ref: "#/components/schemas/Amount"
+        qty_step:
+          $ref: "#/components/schemas/Amount"
+        min_notional:
+          $ref: "#/components/schemas/Amount"
+        maker_bps:
+          type: integer
+          format: int32
+        taker_bps:
+          type: integer
+          format: int32
+        self_trade_policy:
+          type: string
+        status:
+          $ref: "#/components/schemas/MarketStatus"
+        version:
+          type: integer
+          format: int32
+
+    MarketList:
+      type: object
+      required: [markets]
+      properties:
+        markets:
+          type: array
+          items:
+            $ref: "#/components/schemas/Market"
 
     Balance:
       type: object
