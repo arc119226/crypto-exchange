@@ -66,3 +66,25 @@ type ChainScanCursor struct {
 	LastBlockHash    string
 	UpdatedAt        time.Time
 }
+
+type ChainWithdrawal struct {
+	ID             string
+	TenantID       string
+	AccountID      string
+	Asset          string
+	Amount         pgtype.Numeric
+	ToAddress      string
+	ChainID        int64
+	IdempotencyKey string
+	RequestHash    string
+	Status         string
+	FailureReason  *string
+	ReviewedBy     *string
+	ReviewedAt     pgtype.Timestamptz
+	ReviewNote     *string
+	HoldEntryID    *int64
+	CorrelationID  *string
+	Version        int32
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
+}
