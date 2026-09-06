@@ -2,7 +2,7 @@
 
 白牌交易引擎(white-label exchange engine)的商業化原型:現貨撮合、複式記帳帳本、EVM 充提與歸集、行情推播、管理後台,以單一 Go binary 多角色的模組化單體交付,客戶透過 REST / WebSocket / Webhook 與事件契約整合。
 
-**目前狀態:Phase 2 帳本 + Postgres。** 已合併:Phase 0 walking skeleton(單一 module、單一 binary 多角色、`GET /v1/markets`、compose、CI)、Phase 1 `internal/matching`(無 I/O、確定性訂單簿,屬性 / 模糊 / golden 測試,`exchangectl replay`)。Phase 2 加入 `internal/ledger`(複式記帳、凍結即分錄、balances 快取、冪等鍵、deferred trigger、GRANT-only 權限)、`internal/audit`、admin API(`/admin/v1`,帳戶 / 餘額 / 分錄 / 試算平衡 / 調帳 / 稽核)與 `exchangectl admin`。trading、auth、鏈上程式碼自 Phase 3 起依 `docs/plan-v1.0.md` 第 12 節逐階段加入。
+**目前狀態:Phase 3a 交易引擎 + 事件(進行中,分 3a/3b/3c 三個 PR)。** 已合併:Phase 0 walking skeleton(單一 module、單一 binary 多角色、`GET /v1/markets`、compose、CI)、Phase 1 `internal/matching`(無 I/O、確定性訂單簿,屬性 / 模糊 / golden 測試,`exchangectl replay`)、Phase 2 `internal/ledger`(複式記帳、凍結即分錄、balances 快取、冪等鍵、deferred trigger、GRANT-only 權限)、`internal/audit`、admin API 與 `exchangectl admin`。Phase 3a 加入 `internal/trading`(訂單狀態機、每市場 runner、一筆 Postgres 交易內完成 Hold → Apply → 成交 / 分錄 / outbox、`client_order_id` 冪等、重啟從 open orders 重建、advisory lock 單實例)與 `internal/eventbus`(事件 envelope、outbox、JetStream relay);`exchange serve --role=engine` 已可運行。3b(auth + public 交易端點 + 限流)與 3c(NATS request-reply 多容器 + compose E2E)接續。
 
 ## 產品邊界
 
@@ -50,6 +50,7 @@ go test ./internal/matching -run TestGolden -update   # 重新產生 golden(改�
 make gen && make gen-check   # 重新產生 OpenAPI server/client 與 sqlc 程式碼;產物進 repo,CI 比對
 make test-integration   # testcontainers(需要 Docker):migration、seed、GET /v1/markets、帳本(算例、500 個隨機序列、100 goroutine 併發)、admin API
 TEST_PG_ADMIN_URL=postgres://exchange:test@127.0.0.1:5433/postgres make test-integration   # 改用現成的本機 Postgres(先跑 infra/postgres/initdb/01-roles.sh),每個測試一個新 database
+TEST_NATS_URL=nats://127.0.0.1:4222 ...                                                    # 同理改用現成的 `nats-server -js`(outbox relay 測試會 purge 它用到的 stream)
 make contracts-test     # 在釘住的 foundry 映像內跑 forge test
 make infra-up && make migrate && make seed && make run ROLE=api   # 只起基礎設施,role 在主機上 go run
 ```
@@ -95,4 +96,4 @@ docs                  計畫、審查、ADR、領域文件
 
 ## 下一步
 
-Phase 3(`docs/plan-v1.0.md` §12):`internal/trading` 狀態機 + per-market runner、outbox / JetStream、public OpenAPI 的交易端點、最小 auth。DoD 不過不進下一階段。
+Phase 3(`docs/plan-v1.0.md` §12)分三個 PR:3a `internal/trading` + `internal/eventbus`(本 PR);3b 最小 auth(密碼 + JWT/refresh + API key HMAC)、public 交易 / 帳戶端點、限流、`exchangectl e2e`;3c NATS request-reply 命令匯流排、多容器 compose E2E job、`docs/events.md`。DoD 不過不進下一階段。
