@@ -396,3 +396,27 @@ Phase 4 分四段:4a 充值(再拆 4a-1 金鑰與地址、4a-2 掃描與入帳)�
 **派生正確性有兩個獨立 oracle**:anvil 啟動時會印出 `m/44'/60'/0'/0/` 的私鑰,本套件對同一助記詞算出的三把金鑰與 CI e2e job 裡 anvil 印的完全相同;另外標準測試向量 `abandon … about` 的前三個地址也與公開值相符。
 
 **Phase 4a-1 學到的事**:寫測試時抓到兩個真缺陷——`cosmos/go-bip39` 的 `IsMnemonicValid` **不驗 BIP-39 checksum**(只看字數與字在不在字典裡),所以一個字打錯會靜默派生出完全不同的錢包,必須改用 `NewSeedWithErrorChecking`;`DepositPath` 原本接受 hardened 範圍的 index,會讓兩列共用一個地址。另外兩件事跟功能無關但值得記:生產用的 scrypt 參數(N=2^18)讓一個走 CLI 的測試把 `make test` 從 15 秒拉到 25 秒,所以 KDF 成本做成可注入、happy path 移到 `internal/app`;`ecdsa.PrivateKey.D` 在 Go 1.26 已 deprecated,想「抹除私鑰」反而可能產生無效金鑰,與其做安全劇場不如老實承認 Go 做不到並把力氣放在「金鑰不離開套件、不進 log」。
+
+---
+
+## 16. Phase 4a-2 程式碼與 §6.4.1 / §7.2 的對應(掃描、確認數、reorg、入帳)
+
+4a-1 讓使用者拿得到地址,4a-2 讓匯進去的錢被看見。本節把第 4 節那份設計變成程式。
+
+| 計畫 | 實作 | 備註 |
+|---|---|---|
+| 冪等鍵 `(chain_id, tx_hash, log_index)` | `chain.deposits` 的 UNIQUE;原生 ETH 用 `log_index = -1` | 依 0001 的約定把 `tenant_id` 也納入 key |
+| 確認數 = head − block + 1 | `Scanner.advance`;門檻取自 `registry.assets.required_confirmations`,config 只是沒設定時的後備 | anvil = 1,所以偵測到的同一輪就入帳 |
+| 原生 ETH | `BlockByNumber(full)` 比對 `tx.To ∈ 受控地址`,**再查 receipt** | log 只會出現在成功的交易裡,但交易本身不管成敗都會在區塊裡——out-of-gas 的轉帳一毛都沒動 |
+| ERC-20 | `FilterLogs(合約, topic0=Transfer)` 後在記憶體比對 `topics[2]` | 不把地址塞進 topic 陣列(§6.4.1);`DecodeTransfer` 只接受標準版面,非標準的回 error 而不是猜 |
+| reorg 回退 | `reconcileTip` → `commonAncestor` → `rewind`;`chain.blocks` 是深度 `ETH_BLOCK_RING_DEPTH` 的環 | 找不到共同祖先就停下來報錯,不猜 |
+| 重現走 UPDATE | `Scanner.record` 先 `SELECT … FOR UPDATE`,命中就 `UpdateDepositSighting` | §6.4.1 點名的陷阱:INSERT 會撞 UNIQUE 被當重複,那筆充值就**永遠不會入帳** |
+| 入帳(§6.1.4 d) | 一筆交易內 `ledger.Credit`(source `custody_deposit_addresses`)+ 狀態 + outbox;冪等鍵 `deposit:{chain}:{tx}:{log}` | 崩潰後重放靠 `journal_entries` 的 UNIQUE 擋掉 |
+| 入帳後深度 reorg | 掃描器**不動**已 credited 的列 | 錢可能已經花掉;自動反向分錄會撞 `balances` CHECK。走人工(`docs/runbooks/reorg-alert.md`) |
+| genesis 檢查(§6.4.1 步驟 5) | `Scanner.Start` 比對 `chain.chain_state.genesis_hash`,不符或 `head < cursor` 就**拒絕啟動** | anvil volume 被清掉但 Postgres 還記得舊游標,是每個開發者遲早會遇到的 |
+| 事件契約(§7.2) | `deposit.detected|credited|orphaned|dropped|reversed`,五種共用一個 payload | `dropped` 在 §7.2 catalog 漏了,以 §6.4.1 為準;`confirmations_updated` 刻意不發 |
+| 指標(§15) | `chain_head_block`、`chain_last_scanned_block`、`chain_scanner_lag_blocks`、`chain_reorgs_total`、`chain_unreadable_transfers_total`、`deposits_credited_total{asset}` | |
+
+**驗證分工**:`test/integration/deposit_scripted_test.go` 用**腳本化的鏈**跑 reorg 形狀、失敗交易、ERC-20 scale、以及「已入帳的充值不會被 reorg 收回」;`deposit_test.go` 用 **anvil testcontainer** 跑同一套確認數與 reorg 故事(沒有 docker 就 skip,CI 會跑);ERC-20 對**真的部署出來的** MockUSDC 的路徑歸 `scripts/e2e.sh`。
+
+**Phase 4a-2 學到的事**:為了能在沒有 docker 的機器上真的執行 reorg 邏輯,把節點抽成 `deposit.Chain` 介面——這不是為抽象而抽象,是因為替代方案是把整包最容易寫錯的東西**沒跑過就推上去**,而 3c 的 e2e 已經示範過那要付四輪的代價。腳本化的鏈立刻抓到兩個真缺陷:**等高的 reorg 完全看不見**(`Tick` 只在 `cursor < head` 時對帳,所以把區塊 N 換成另一個區塊 N 之後,來自被丟棄分支的充值看起來還是真的;鏈變短更是永遠不會發現),以及 `orphaned → dropped` 這個轉換**違反它自己的 CHECK**(`orphaned_at_block` 被雙向綁在 `orphaned` 狀態上,但被 drop 的充值必須留著當初是在哪一塊被孤立的)。另外 `money.Amount` 是 NUMERIC(36,18),放不下接近 2^256 的 uint256,所以 `FromWei` 對這種值回 error 而不是截斷——一個壞掉或惡意的 token 真的會發出那種 Transfer。
