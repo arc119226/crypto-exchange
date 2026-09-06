@@ -102,6 +102,33 @@ type ChainSigningLog struct {
 	SignedAt    time.Time
 }
 
+type ChainSweep struct {
+	ID               string
+	TenantID         string
+	ChainID          int64
+	AddressID        string
+	FromAddress      string
+	Asset            string
+	Amount           pgtype.Numeric
+	Status           string
+	FailureReason    *string
+	GasFundingTxHash *string
+	GasFundingNonce  *int64
+	GasFundingAmount pgtype.Numeric
+	GasFundingRawTx  []byte
+	GasFundingCost   pgtype.Numeric
+	Nonce            *int64
+	RawTx            []byte
+	TxHash           *string
+	BroadcastAt      pgtype.Timestamptz
+	BlockNumber      *int64
+	GasCost          pgtype.Numeric
+	CorrelationID    *string
+	Version          int32
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
+}
+
 type ChainWithdrawal struct {
 	ID                 string
 	TenantID           string

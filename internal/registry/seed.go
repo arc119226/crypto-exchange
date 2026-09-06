@@ -69,6 +69,16 @@ var (
 	// registry value no code honours is worse than an absent one.
 	seedMinWithdrawalETH  = money.MustParse("0.01")
 	seedMinWithdrawalUSDC = money.MustParse("5")
+
+	// The balance at which an address is worth emptying (§6.4.3). Same story
+	// as min_withdrawal: the column has existed since 0002 with nothing
+	// reading it, and a zero threshold means sweeping an address holding one
+	// wei -- paying more gas than the sweep recovers, forever, on every tick.
+	//
+	// The ETH figure is low enough that a dev deposit of 1 ETH is swept and
+	// high enough that the dust a token sweep leaves behind is not.
+	seedSweepThresholdETH  = money.MustParse("0.05")
+	seedSweepThresholdUSDC = money.MustParse("10")
 )
 
 // Withdrawal limits per asset and KYC level (docs/plan-v1.0.md §6.4.2). The
@@ -126,9 +136,11 @@ func Seed(ctx context.Context, pool *pgxpool.Pool, fx Fixtures, opts SeedOptions
 	for _, in := range []AssetInput{
 		{Symbol: "ETH", Name: "Ether", ChainID: fx.ChainID, IsNative: true, Scale: 18, DisplayScale: 6,
 			RequiredConfirmations: opts.RequiredConfirmations, MinWithdrawal: seedMinWithdrawalETH,
+			SweepThreshold: seedSweepThresholdETH,
 			DepositEnabled: true, WithdrawEnabled: true, Status: AssetActive},
 		{Symbol: "USDC", Name: "Mock USD Coin", ChainID: fx.ChainID, ContractAddress: &usdc, Scale: 6, DisplayScale: 2,
 			RequiredConfirmations: opts.RequiredConfirmations, MinWithdrawal: seedMinWithdrawalUSDC,
+			SweepThreshold: seedSweepThresholdUSDC,
 			DepositEnabled: true, WithdrawEnabled: true, Status: AssetActive},
 	} {
 		if _, err := store.UpsertAsset(ctx, tx, opts.TenantID, in); err != nil {
