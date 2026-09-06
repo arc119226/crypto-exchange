@@ -325,6 +325,37 @@ func (q *Queries) GetJournalEntryByKey(ctx context.Context, arg GetJournalEntryB
 	return i, err
 }
 
+const getSpotAccountByOwner = `-- name: GetSpotAccountByOwner :one
+SELECT id, tenant_id, kind, house_code, owner_user_id, status, next_seq, version, created_at, updated_at FROM ledger.accounts
+WHERE tenant_id = $1 AND owner_user_id = $2 AND kind = 'spot'
+ORDER BY created_at, id
+LIMIT 1
+`
+
+type GetSpotAccountByOwnerParams struct {
+	TenantID    string
+	OwnerUserID *string
+}
+
+// Registration opens exactly one spot account per user (docs/plan-v1.0.md §6.7).
+func (q *Queries) GetSpotAccountByOwner(ctx context.Context, arg GetSpotAccountByOwnerParams) (LedgerAccount, error) {
+	row := q.db.QueryRow(ctx, getSpotAccountByOwner, arg.TenantID, arg.OwnerUserID)
+	var i LedgerAccount
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.Kind,
+		&i.HouseCode,
+		&i.OwnerUserID,
+		&i.Status,
+		&i.NextSeq,
+		&i.Version,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const houseBalances = `-- name: HouseBalances :many
 SELECT a.house_code, p.asset,
        (SUM(CASE p.direction WHEN 'debit'  THEN p.amount ELSE 0 END)

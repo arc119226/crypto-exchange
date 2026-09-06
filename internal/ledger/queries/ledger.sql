@@ -132,3 +132,10 @@ SELECT a.house_code, p.asset,
 -- Per-account event sequence for the private stream (docs/plan-v1.0.md §7.1);
 -- called inside the transaction that writes the outbox rows.
 UPDATE ledger.accounts SET next_seq = next_seq + 1 WHERE id = $1 RETURNING next_seq;
+
+-- name: GetSpotAccountByOwner :one
+-- Registration opens exactly one spot account per user (docs/plan-v1.0.md §6.7).
+SELECT * FROM ledger.accounts
+WHERE tenant_id = $1 AND owner_user_id = $2 AND kind = 'spot'
+ORDER BY created_at, id
+LIMIT 1;

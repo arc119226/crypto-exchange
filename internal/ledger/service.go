@@ -99,6 +99,19 @@ func (s *Service) CreateSpotAccount(ctx context.Context, db sqlcgen.DBTX, ownerU
 	return accountFromRow(row), nil
 }
 
+// SpotAccountOf returns the spot account registration opened for a user
+// (docs/plan-v1.0.md §6.7: exactly one per user).
+func (s *Service) SpotAccountOf(ctx context.Context, db sqlcgen.DBTX, userID string) (Account, error) {
+	row, err := sqlcgen.New(db).GetSpotAccountByOwner(ctx, sqlcgen.GetSpotAccountByOwnerParams{TenantID: s.tenant, OwnerUserID: &userID})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return Account{}, ErrAccountNotFound
+		}
+		return Account{}, fmt.Errorf("ledger: spot account of %s: %w", userID, err)
+	}
+	return accountFromRow(row), nil
+}
+
 // Account fetches one account of the tenant.
 func (s *Service) Account(ctx context.Context, id string) (Account, error) {
 	row, err := sqlcgen.New(s.pool).GetAccount(ctx, id)
