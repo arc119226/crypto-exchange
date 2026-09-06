@@ -13,8 +13,9 @@
 -- form.
 
 -- Derivation indices come from a sequence rather than max()+1 so two signers
--- can never mint the same m/44'/60'/0'/0/{i}. A rolled-back insert burns an
--- index; a gap only means one derived address is never used.
+-- can never mint the same m/44'/60'/0'/0/{i}. The signer draws nextval first
+-- and passes the index in explicitly, because it has to derive the address
+-- before it has a row to insert. A gap only means one index is never used.
 CREATE SEQUENCE chain.deposit_address_index_seq AS bigint START WITH 0 MINVALUE 0;
 
 CREATE TABLE chain.deposit_addresses (
@@ -22,8 +23,7 @@ CREATE TABLE chain.deposit_addresses (
     tenant_id        text        NOT NULL DEFAULT 'default',
     chain_id         bigint      NOT NULL,
     -- BIP-44 m/44'/60'/0'/0/{derivation_index}
-    derivation_index bigint      NOT NULL DEFAULT nextval('chain.deposit_address_index_seq')
-                                 CHECK (derivation_index >= 0),
+    derivation_index bigint      NOT NULL CHECK (derivation_index >= 0),
     address          text        NOT NULL CHECK (address ~ '^0x[0-9a-f]{40}$'),
     -- NULL while the row is a free slot in the pool
     account_id       uuid        REFERENCES ledger.accounts (id),

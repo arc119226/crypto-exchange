@@ -90,25 +90,32 @@ func (q *Queries) GetDepositAddressByAccount(ctx context.Context, arg GetDeposit
 	return i, err
 }
 
-const insertDepositAddress = `-- name: InsertDepositAddress :one
-INSERT INTO chain.deposit_addresses (tenant_id, chain_id, address)
-VALUES ($1, $2, $3)
-RETURNING derivation_index
+const insertDepositAddress = `-- name: InsertDepositAddress :execrows
+INSERT INTO chain.deposit_addresses (tenant_id, chain_id, derivation_index, address)
+VALUES ($1, $2, $3, $4)
+ON CONFLICT DO NOTHING
 `
 
 type InsertDepositAddressParams struct {
-	TenantID string
-	ChainID  int64
-	Address  string
+	TenantID        string
+	ChainID         int64
+	DerivationIndex int64
+	Address         string
 }
 
-// derivation_index comes from the sequence default so concurrent signers
-// cannot mint the same BIP-44 index.
+// ON CONFLICT keeps a refill idempotent if the same address is derived twice
+// (a rewound sequence); the caller counts what it actually created.
 func (q *Queries) InsertDepositAddress(ctx context.Context, arg InsertDepositAddressParams) (int64, error) {
-	row := q.db.QueryRow(ctx, insertDepositAddress, arg.TenantID, arg.ChainID, arg.Address)
-	var derivation_index int64
-	err := row.Scan(&derivation_index)
-	return derivation_index, err
+	result, err := q.db.Exec(ctx, insertDepositAddress,
+		arg.TenantID,
+		arg.ChainID,
+		arg.DerivationIndex,
+		arg.Address,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const listDepositAddresses = `-- name: ListDepositAddresses :many
@@ -151,4 +158,16 @@ func (q *Queries) ListDepositAddresses(ctx context.Context, arg ListDepositAddre
 		return nil, err
 	}
 	return items, nil
+}
+
+const nextDepositAddressIndex = `-- name: NextDepositAddressIndex :one
+SELECT nextval('chain.deposit_address_index_seq')::bigint
+`
+
+// Drawn before deriving, because the address is a function of the index.
+func (q *Queries) NextDepositAddressIndex(ctx context.Context) (int64, error) {
+	row := q.db.QueryRow(ctx, nextDepositAddressIndex)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
 }

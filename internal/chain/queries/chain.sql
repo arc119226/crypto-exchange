@@ -2,12 +2,16 @@
 SELECT count(*) FROM chain.deposit_addresses
 WHERE tenant_id = $1 AND chain_id = $2 AND account_id IS NULL;
 
--- name: InsertDepositAddress :one
--- derivation_index comes from the sequence default so concurrent signers
--- cannot mint the same BIP-44 index.
-INSERT INTO chain.deposit_addresses (tenant_id, chain_id, address)
-VALUES ($1, $2, $3)
-RETURNING derivation_index;
+-- name: NextDepositAddressIndex :one
+-- Drawn before deriving, because the address is a function of the index.
+SELECT nextval('chain.deposit_address_index_seq')::bigint;
+
+-- name: InsertDepositAddress :execrows
+-- ON CONFLICT keeps a refill idempotent if the same address is derived twice
+-- (a rewound sequence); the caller counts what it actually created.
+INSERT INTO chain.deposit_addresses (tenant_id, chain_id, derivation_index, address)
+VALUES ($1, $2, $3, $4)
+ON CONFLICT DO NOTHING;
 
 -- name: GetDepositAddressByAccount :one
 SELECT * FROM chain.deposit_addresses
