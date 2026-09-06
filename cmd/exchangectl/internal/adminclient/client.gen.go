@@ -515,6 +515,39 @@ type Problem struct {
 	Type          string `json:"type"`
 }
 
+// Sweep defines model for Sweep.
+type Sweep struct {
+	// Amount Decimal serialized as a string (NUMERIC(36,18)); never a JSON number.
+	//
+	// Example: 1990.00
+	Amount        Amount    `json:"amount"`
+	Asset         string    `json:"asset"`
+	BlockNumber   *int64    `json:"block_number,omitempty"`
+	ChainID       int64     `json:"chain_id"`
+	CreatedAt     time.Time `json:"created_at"`
+	FailureReason *string   `json:"failure_reason,omitempty"`
+
+	// FromAddress The deposit address that was emptied, lower-case.
+	FromAddress string `json:"from_address"`
+
+	// GasCost What the sweep transaction burned, always in the chain's native coin — which is not necessarily `asset`.
+	GasCost *Amount `json:"gas_cost,omitempty"`
+
+	// GasFundingTxHash The ether the hot wallet sent so the address could pay for its own transfer; null for a native sweep.
+	GasFundingTxHash *string `json:"gas_funding_tx_hash,omitempty"`
+	ID               string  `json:"id"`
+
+	// Status requested, gas_funded, broadcast, confirmed or failed.
+	Status    string     `json:"status"`
+	TxHash    *string    `json:"tx_hash,omitempty"`
+	UpdatedAt *time.Time `json:"updated_at,omitempty"`
+}
+
+// SweepList defines model for SweepList.
+type SweepList struct {
+	Sweeps []Sweep `json:"sweeps"`
+}
+
 // TrialBalance defines model for TrialBalance.
 type TrialBalance struct {
 	// Balanced true when every diff is zero.
@@ -618,6 +651,11 @@ type ListEntriesParams struct {
 	RefID     *string `form:"ref_id,omitempty" json:"ref_id,omitempty"`
 	Limit     *Limit  `form:"limit,omitempty" json:"limit,omitempty"`
 	Offset    *Offset `form:"offset,omitempty" json:"offset,omitempty"`
+}
+
+// ListSweepsParams defines parameters for ListSweeps.
+type ListSweepsParams struct {
+	Limit *Limit `form:"limit,omitempty" json:"limit,omitempty"`
 }
 
 // ListWithdrawalsForReviewParams defines parameters for ListWithdrawalsForReview.
@@ -827,6 +865,15 @@ type ClientInterface interface {
 	//
 	// Corresponds with PUT /admin/v1/markets/{symbol}/status (the `SetMarketStatus` operationId).
 	SetMarketStatus(ctx context.Context, symbol MarketSymbol, body SetMarketStatusJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ListSweeps Recent collections into the hot wallet
+	//
+	// Sweeps move deposits from the per-account addresses they landed on to the hot wallet withdrawals are paid from (docs/plan-v1.0.md §6.4.3). No user balance is involved: a sweep moves the exchange's own custody between two of its own house accounts.
+	//
+	// A native sweep is one transaction. A token sweep is two, because an address that has only ever received tokens holds no ether and cannot pay for its own transfer, so the hot wallet funds it first — `gas_funding_tx_hash` is that leg.
+	//
+	// Corresponds with GET /admin/v1/sweeps (the `ListSweeps` operationId).
+	ListSweeps(ctx context.Context, params *ListSweepsParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// ListWithdrawalsForReview The withdrawal review queue
 	//
@@ -1135,6 +1182,25 @@ func (c *Client) SetMarketStatusWithBody(ctx context.Context, symbol MarketSymbo
 // Corresponds with PUT /admin/v1/markets/{symbol}/status (the `SetMarketStatus` operationId).
 func (c *Client) SetMarketStatus(ctx context.Context, symbol MarketSymbol, body SetMarketStatusJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewSetMarketStatusRequest(c.Server, symbol, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// ListSweeps Recent collections into the hot wallet
+//
+// Sweeps move deposits from the per-account addresses they landed on to the hot wallet withdrawals are paid from (docs/plan-v1.0.md §6.4.3). No user balance is involved: a sweep moves the exchange's own custody between two of its own house accounts.
+//
+// A native sweep is one transaction. A token sweep is two, because an address that has only ever received tokens holds no ether and cannot pay for its own transfer, so the hot wallet funds it first — `gas_funding_tx_hash` is that leg.
+//
+// Corresponds with GET /admin/v1/sweeps (the `ListSweeps` operationId).
+func (c *Client) ListSweeps(ctx context.Context, params *ListSweepsParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListSweepsRequest(c.Server, params)
 	if err != nil {
 		return nil, err
 	}
@@ -1828,6 +1894,60 @@ func NewSetMarketStatusRequestWithBody(server string, symbol MarketSymbol, conte
 	return req, nil
 }
 
+// NewListSweepsRequest constructs an http.Request for the ListSweeps method
+func NewListSweepsRequest(server string, params *ListSweepsParams) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/admin/v1/sweeps")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		// queryValues collects non-styled parameters (passthrough, JSON)
+		// that are safe to round-trip through url.Values.Encode().
+		queryValues := queryURL.Query()
+		// rawQueryFragments collects pre-encoded query fragments from
+		// styled parameters, preserving literal commas as delimiters
+		// per the OpenAPI spec (e.g. "color=blue,black,brown").
+		var rawQueryFragments []string
+
+		if params.Limit != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "limit", *params.Limit, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "integer", Format: "int32"}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if encoded := queryValues.Encode(); encoded != "" {
+			rawQueryFragments = append(rawQueryFragments, encoded)
+		}
+		queryURL.RawQuery = strings.Join(rawQueryFragments, "&")
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
 // NewListWithdrawalsForReviewRequest constructs an http.Request for the ListWithdrawalsForReview method
 func NewListWithdrawalsForReviewRequest(server string, params *ListWithdrawalsForReviewParams) (*http.Request, error) {
 	var err error
@@ -2144,6 +2264,17 @@ type ClientWithResponsesInterface interface {
 	//
 	// Corresponds with PUT /admin/v1/markets/{symbol}/status (the `SetMarketStatus` operationId).
 	SetMarketStatusWithResponse(ctx context.Context, symbol MarketSymbol, body SetMarketStatusJSONRequestBody, reqEditors ...RequestEditorFn) (*SetMarketStatusResponse, error)
+
+	// ListSweepsWithResponse Recent collections into the hot wallet
+	//
+	// Sweeps move deposits from the per-account addresses they landed on to the hot wallet withdrawals are paid from (docs/plan-v1.0.md §6.4.3). No user balance is involved: a sweep moves the exchange's own custody between two of its own house accounts.
+	//
+	// A native sweep is one transaction. A token sweep is two, because an address that has only ever received tokens holds no ether and cannot pay for its own transfer, so the hot wallet funds it first — `gas_funding_tx_hash` is that leg.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /admin/v1/sweeps (the `ListSweeps` operationId).
+	ListSweepsWithResponse(ctx context.Context, params *ListSweepsParams, reqEditors ...RequestEditorFn) (*ListSweepsResponse, error)
 
 	// ListWithdrawalsForReviewWithResponse The withdrawal review queue
 	//
@@ -2885,6 +3016,61 @@ func (r SetMarketStatusResponse) ContentType() string {
 	return ""
 }
 
+type ListSweepsResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *SweepList
+	// ApplicationProblemJSON401 the response for an HTTP 401 `application/problem+json` response
+	ApplicationProblemJSON401 *Unauthorized
+	// ApplicationProblemJSON500 the response for an HTTP 500 `application/problem+json` response
+	ApplicationProblemJSON500 *InternalError
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r ListSweepsResponse) GetJSON200() *SweepList {
+	return r.JSON200
+}
+
+// GetApplicationProblemJSON401 returns the response for an HTTP 401 `application/problem+json` response
+func (r ListSweepsResponse) GetApplicationProblemJSON401() *Unauthorized {
+	return r.ApplicationProblemJSON401
+}
+
+// GetApplicationProblemJSON500 returns the response for an HTTP 500 `application/problem+json` response
+func (r ListSweepsResponse) GetApplicationProblemJSON500() *InternalError {
+	return r.ApplicationProblemJSON500
+}
+
+// GetBody returns the raw response body bytes
+func (r ListSweepsResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r ListSweepsResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListSweepsResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r ListSweepsResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
 type ListWithdrawalsForReviewResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -3305,6 +3491,23 @@ func (c *ClientWithResponses) SetMarketStatusWithResponse(ctx context.Context, s
 		return nil, err
 	}
 	return ParseSetMarketStatusResponse(rsp)
+}
+
+// ListSweepsWithResponse Recent collections into the hot wallet
+//
+// Sweeps move deposits from the per-account addresses they landed on to the hot wallet withdrawals are paid from (docs/plan-v1.0.md §6.4.3). No user balance is involved: a sweep moves the exchange's own custody between two of its own house accounts.
+//
+// A native sweep is one transaction. A token sweep is two, because an address that has only ever received tokens holds no ether and cannot pay for its own transfer, so the hot wallet funds it first — `gas_funding_tx_hash` is that leg.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /admin/v1/sweeps (the `ListSweeps` operationId).
+func (c *ClientWithResponses) ListSweepsWithResponse(ctx context.Context, params *ListSweepsParams, reqEditors ...RequestEditorFn) (*ListSweepsResponse, error) {
+	rsp, err := c.ListSweeps(ctx, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListSweepsResponse(rsp)
 }
 
 // ListWithdrawalsForReviewWithResponse The withdrawal review queue
@@ -3898,6 +4101,46 @@ func ParseSetMarketStatusResponse(rsp *http.Response) (*SetMarketStatusResponse,
 			return nil, err
 		}
 		response.ApplicationProblemJSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON500 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseListSweepsResponse parses an HTTP response from a ListSweepsWithResponse call
+func ParseListSweepsResponse(rsp *http.Response) (*ListSweepsResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListSweepsResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest SweepList
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON401 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
 		var dest InternalError

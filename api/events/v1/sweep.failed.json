@@ -1,0 +1,61 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/arc119226/crypto-exchange/api/events/v1/sweep.failed.json",
+  "title": "sweep.failed",
+  "description": "A sweep did not complete. The money is still on the deposit address and the next scan will try again; what is gone is the gas, if the transaction reached the chain at all. Worth an operator's attention when it repeats: deposits piling up on addresses the hot wallet cannot spend from show first as a withdrawal that cannot be paid.",
+  "type": "object",
+  "required": [
+    "sweep_id",
+    "chain_id",
+    "from_address",
+    "asset",
+    "amount",
+    "status",
+    "gas_cost",
+    "reason"
+  ],
+  "properties": {
+    "sweep_id": {
+      "type": "string",
+      "description": "Stable id of the sweep across every event about it."
+    },
+    "chain_id": {
+      "type": "integer",
+      "format": "int64"
+    },
+    "from_address": {
+      "type": "string",
+      "pattern": "^0x[0-9a-f]{40}$",
+      "description": "The deposit address that was emptied, lower-case."
+    },
+    "asset": {
+      "type": "string"
+    },
+    "amount": {
+      "type": "string",
+      "pattern": "^-?\\d{1,18}(\\.\\d{1,18})?$",
+      "description": "What the sweep moved, in the asset's own units."
+    },
+    "status": {
+      "type": "string",
+      "description": "The sweep's status after this event. An open string: a new state must not break a consumer."
+    },
+    "tx_hash": {
+      "type": "string",
+      "pattern": "^0x[0-9a-f]{64}$"
+    },
+    "gas_cost": {
+      "type": "string",
+      "pattern": "^-?\\d{1,18}(\\.\\d{1,18})?$",
+      "description": "What the sweep transaction burned, always in the chain's native coin -- which is not necessarily `asset`."
+    },
+    "block_number": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "reason": {
+      "type": "string",
+      "description": "Why it failed."
+    }
+  }
+}

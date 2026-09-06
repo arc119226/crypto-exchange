@@ -1,0 +1,23 @@
+{
+  "event_id": "01J8Z2K3M4N5P6Q7R8S9T0V1X8",
+  "event_type": "sweep.failed",
+  "schema_version": 1,
+  "tenant_id": "default",
+  "market_id": null,
+  "account_id": null,
+  "seq": null,
+  "occurred_at": "2026-09-05T08:15:23.412Z",
+  "correlation_id": "req_01J8Z2K2000000000000000000",
+  "payload": {
+    "sweep_id": "01J8Z2K3M4N5P6Q7R8S9T0V800",
+    "chain_id": 31337,
+    "from_address": "0x9858effd232b4033e47d90003d41ec34ecaeda94",
+    "asset": "ETH",
+    "amount": "1.999",
+    "status": "failed",
+    "tx_hash": "0x3d1e0f9a8b7c6d5e4f3a2b1c1f4b2c9d8e7a6b5c4d3e2f1a0b9c8d7e6f5a4b3c",
+    "gas_cost": "0.000021",
+    "block_number": 18240,
+    "reason": "on_chain"
+  }
+}

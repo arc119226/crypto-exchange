@@ -514,6 +514,39 @@ type Problem struct {
 	Type          string `json:"type"`
 }
 
+// Sweep defines model for Sweep.
+type Sweep struct {
+	// Amount Decimal serialized as a string (NUMERIC(36,18)); never a JSON number.
+	//
+	// Example: 1990.00
+	Amount        Amount    `json:"amount"`
+	Asset         string    `json:"asset"`
+	BlockNumber   *int64    `json:"block_number,omitempty"`
+	ChainID       int64     `json:"chain_id"`
+	CreatedAt     time.Time `json:"created_at"`
+	FailureReason *string   `json:"failure_reason,omitempty"`
+
+	// FromAddress The deposit address that was emptied, lower-case.
+	FromAddress string `json:"from_address"`
+
+	// GasCost What the sweep transaction burned, always in the chain's native coin — which is not necessarily `asset`.
+	GasCost *Amount `json:"gas_cost,omitempty"`
+
+	// GasFundingTxHash The ether the hot wallet sent so the address could pay for its own transfer; null for a native sweep.
+	GasFundingTxHash *string `json:"gas_funding_tx_hash,omitempty"`
+	ID               string  `json:"id"`
+
+	// Status requested, gas_funded, broadcast, confirmed or failed.
+	Status    string     `json:"status"`
+	TxHash    *string    `json:"tx_hash,omitempty"`
+	UpdatedAt *time.Time `json:"updated_at,omitempty"`
+}
+
+// SweepList defines model for SweepList.
+type SweepList struct {
+	Sweeps []Sweep `json:"sweeps"`
+}
+
 // TrialBalance defines model for TrialBalance.
 type TrialBalance struct {
 	// Balanced true when every diff is zero.
@@ -619,6 +652,11 @@ type ListEntriesParams struct {
 	Offset    *Offset `form:"offset,omitempty" json:"offset,omitempty"`
 }
 
+// ListSweepsParams defines parameters for ListSweeps.
+type ListSweepsParams struct {
+	Limit *Limit `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
 // ListWithdrawalsForReviewParams defines parameters for ListWithdrawalsForReview.
 type ListWithdrawalsForReviewParams struct {
 	Limit *Limit `form:"limit,omitempty" json:"limit,omitempty"`
@@ -677,6 +715,9 @@ type ServerInterface interface {
 	// SetMarketStatus Halt, resume or delist a market
 	// (PUT /admin/v1/markets/{symbol}/status)
 	SetMarketStatus(w http.ResponseWriter, r *http.Request, symbol MarketSymbol)
+	// ListSweeps Recent collections into the hot wallet
+	// (GET /admin/v1/sweeps)
+	ListSweeps(w http.ResponseWriter, r *http.Request, params ListSweepsParams)
 	// ListWithdrawalsForReview The withdrawal review queue
 	// (GET /admin/v1/withdrawals)
 	ListWithdrawalsForReview(w http.ResponseWriter, r *http.Request, params ListWithdrawalsForReviewParams)
@@ -755,6 +796,12 @@ func (_ Unimplemented) ListMarkets(w http.ResponseWriter, r *http.Request) {
 // SetMarketStatus Halt, resume or delist a market
 // (PUT /admin/v1/markets/{symbol}/status)
 func (_ Unimplemented) SetMarketStatus(w http.ResponseWriter, r *http.Request, symbol MarketSymbol) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ListSweeps Recent collections into the hot wallet
+// (GET /admin/v1/sweeps)
+func (_ Unimplemented) ListSweeps(w http.ResponseWriter, r *http.Request, params ListSweepsParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -1174,6 +1221,39 @@ func (siw *ServerInterfaceWrapper) SetMarketStatus(w http.ResponseWriter, r *htt
 	handler.ServeHTTP(w, r)
 }
 
+// ListSweeps operation middleware
+func (siw *ServerInterfaceWrapper) ListSweeps(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListSweepsParams
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: "int32"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListSweeps(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ListWithdrawalsForReview operation middleware
 func (siw *ServerInterfaceWrapper) ListWithdrawalsForReview(w http.ResponseWriter, r *http.Request) {
 
@@ -1401,6 +1481,9 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/admin/v1/withdrawals/{id}/resolve", wrapper.ResolveWithdrawal)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/admin/v1/sweeps", wrapper.ListSweeps)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/admin/v1/ledger/trial-balance", wrapper.GetTrialBalance)
@@ -2194,6 +2277,60 @@ func (response SetMarketStatus500ApplicationProblemPlusJSONResponse) VisitSetMar
 	return err
 }
 
+type ListSweepsRequestObject struct {
+	Params ListSweepsParams
+}
+
+type ListSweepsResponseObject interface {
+	VisitListSweepsResponse(w http.ResponseWriter) error
+}
+
+type ListSweeps200JSONResponse SweepList
+
+func (response ListSweeps200JSONResponse) VisitListSweepsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListSweeps401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response ListSweeps401ApplicationProblemPlusJSONResponse) VisitListSweepsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListSweeps500ApplicationProblemPlusJSONResponse struct {
+	InternalErrorApplicationProblemPlusJSONResponse
+}
+
+func (response ListSweeps500ApplicationProblemPlusJSONResponse) VisitListSweepsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type ListWithdrawalsForReviewRequestObject struct {
 	Params ListWithdrawalsForReviewParams
 }
@@ -2489,6 +2626,9 @@ type StrictServerInterface interface {
 	// SetMarketStatus Halt, resume or delist a market
 	// (PUT /admin/v1/markets/{symbol}/status)
 	SetMarketStatus(ctx context.Context, request SetMarketStatusRequestObject) (SetMarketStatusResponseObject, error)
+	// ListSweeps Recent collections into the hot wallet
+	// (GET /admin/v1/sweeps)
+	ListSweeps(ctx context.Context, request ListSweepsRequestObject) (ListSweepsResponseObject, error)
 	// ListWithdrawalsForReview The withdrawal review queue
 	// (GET /admin/v1/withdrawals)
 	ListWithdrawalsForReview(ctx context.Context, request ListWithdrawalsForReviewRequestObject) (ListWithdrawalsForReviewResponseObject, error)
@@ -2838,6 +2978,32 @@ func (sh *strictHandler) SetMarketStatus(w http.ResponseWriter, r *http.Request,
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(SetMarketStatusResponseObject); ok {
 		if err := validResponse.VisitSetMarketStatusResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListSweeps operation middleware
+func (sh *strictHandler) ListSweeps(w http.ResponseWriter, r *http.Request, params ListSweepsParams) {
+	var request ListSweepsRequestObject
+
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListSweeps(ctx, request.(ListSweepsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListSweeps")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListSweepsResponseObject); ok {
+		if err := validResponse.VisitListSweepsResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
