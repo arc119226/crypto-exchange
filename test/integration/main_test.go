@@ -15,8 +15,44 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/testcontainers/testcontainers-go"
+	tcnats "github.com/testcontainers/testcontainers-go/modules/nats"
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
 )
+
+// natsImage matches deploy/compose/compose.yaml.
+const natsImage = "nats:2.10.22-alpine"
+
+// startNATS returns the URL of a JetStream-enabled NATS server.
+//
+// Default: a testcontainer. TEST_NATS_URL=nats://host:port uses a running
+// server instead (start one with `nats-server -js`); tests purge the streams
+// they use, so a shared local server is fine.
+func startNATS(t *testing.T) string {
+	t.Helper()
+	if url := os.Getenv("TEST_NATS_URL"); url != "" {
+		return url
+	}
+	ctx := context.Background()
+	// the module's default command is `-DV -js`, so JetStream is already on;
+	// WithArgument("js", "") would append `--js ""` and crash the server
+	ctr, err := tcnats.Run(ctx, natsImage)
+	if err != nil {
+		if os.Getenv("CI") == "" {
+			t.Skipf("docker not available, skipping NATS integration test: %v", err)
+		}
+		t.Fatalf("start nats: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := testcontainers.TerminateContainer(ctr); err != nil {
+			t.Logf("terminate nats: %v", err)
+		}
+	})
+	url, err := ctr.ConnectionString(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return url
+}
 
 const pgPassword = "test"
 

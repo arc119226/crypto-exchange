@@ -142,7 +142,7 @@ jobs:
           cache-dependency-path: |
             go.sum
             tools/go.sum
-      - name: testcontainers (postgres) — migrate, seed, GET /v1/markets
+      - name: testcontainers (postgres, nats) — migrate, seed, registry API, ledger, admin API, trading engine, outbox relay
         env:
           CI: "true" # a missing Docker daemon fails instead of skipping
         run: make test-integration

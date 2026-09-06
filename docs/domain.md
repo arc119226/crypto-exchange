@@ -303,3 +303,28 @@ E1 是計畫的實質錯誤(會讓一條人工處置路徑在資料庫層失敗)
 | 精度約束 | `registry.ValidatePrecision`(`internal/registry/validate.go`) | 單元測試 `TestValidatePrecision` |
 | seed 值 | `internal/registry/seed.go` | ETH(scale 18 / display 6 / 1 確認)、USDC(6 / 2)、ETH-USDC(tick 0.01、step 0.0001、min_notional 5、maker 10 / taker 20、`cancel_newest`) |
 | 寫入權限 | `GRANT INSERT, UPDATE … TO ex_admin, ex_all` | 整合測試證明 `ex_api` 寫入得到 `42501` |
+
+## 12. Phase 3a 程式碼與 §6.2 / §7 的對應(trading + eventbus)
+
+Phase 3 分三個 PR:3a 引擎與事件(本節)、3b auth + public 交易端點 + 限流、3c NATS request-reply 多容器 + compose E2E。
+
+| 計畫 | 實作 | 備註 |
+|---|---|---|
+| 訂單欄位與狀態(§6.2) | `migrations/0005_trading_core.sql` `trading.orders`;`trading.Status` | 多加 `hold_asset / hold_amount / hold_remaining`:每張單「還凍結多少」,讓不變量 3 變成一句 SQL(見下);`rejected ⇔ reject_reason IS NOT NULL`、市價買 `qty IS NULL` 等以 CHECK 鎖住 |
+| 拒單 = 交易回滾、無 saga(§6.2) | `runner.place`:`BEGIN → 推進 seq → SAVEPOINT → ledger.Hold → matching.Apply → (Rejected ⇒ ROLLBACK TO SAVEPOINT) → 寫 orders / trades / 分錄 / outbox → COMMIT` | savepoint 讓「Hold 成功但簿拒單(空簿、quote 太小)」在同一交易內撤銷凍結,拒單仍持久化為 `rejected` 並帶 seq;policy(市場非 active、帳戶凍結)與參數錯誤在進簿前拒絕、不消耗 seq |
+| `client_order_id` 冪等 | UNIQUE `(tenant_id, account_id, client_order_id)`;runner 先查:相同內容 → 回原單 `Replayed=true`(含其成交);不同內容 → `ErrClientOrderIDMismatch`(3b 對應 HTTP 422) | 拒單也佔用 `client_order_id`:重送同一 id 得到同一張 rejected 單,語意明確 |
+| 每市場單一 goroutine、seq(§5.2、ADR-0002) | `trading.runner`;`trading.market_sequences.last_seq` 以 `UPDATE … WHERE last_seq = $2 − 1` 守衛推進 | 守衛失敗 = 有第二個寫入者 → `ErrSequenceConflict` 並標記重建;seq 只在到達 `Apply`(含 Hold 失敗)時消耗,policy 拒單不佔號 |
+| commit 失敗 → 簿標髒重建 | `runner.dirty` → 下一個命令前 `restore()`(從 `orders WHERE status IN (open, partially_filled)` + `last_seq`) | 命令的 DB 工作用 `context.WithoutCancel` + 10 s 逾時,客戶端中途離開不會把已 commit 的命令變成重建 |
+| Settle / Release 鍵(§6.1.3、§8 E4) | `settle:trade:{trade_id}`;`release:order:{order_id}:{seq}` 用於取消、IOC 剩餘、`filled` 殘值 | 買方限價價差 release 在 Settle entry 內(`ledger.BuildSettleEntry`);市價買剩餘預算在終態一次 Release |
+| 不變量 3:Σhold(order) = 未成交應凍結 | `Σ hold_remaining` over open orders per `(account, hold_asset)` == `ledger.balances.hold`(`assertHoldInvariant`,每個交易測試與屬性測試每輪皆驗) | 這是 Phase 2 唯一無法測的不變量,現在補齊 |
+| 事件 envelope(§7.1) | `eventbus.Envelope`;`event_id` ULID(單毫秒內單調);subject `ex.v1.<domain>.<type>.<tenant>.<scope>`,scope = 市場符號(市場域)或 account_id(帳戶域) | `event_type` 兩段式由 CHECK 與 `Validate` 雙重鎖住;`account_seq` 在同一交易內 `UPDATE ledger.accounts SET next_seq = next_seq + 1` |
+| 事件 catalog(§7.2) | 3a 發出 `order.accepted / updated / filled / cancelled / rejected`、`trade.executed`、`balance.updated`(每命令每 (account, asset) 一則,取最終餘額) | `ledger.posted` 留給 Phase 5 admin 投影首次消費時再發;payload 結構在 `internal/trading/events.go`,3b 產出 `api/events/v1/*.json` + golden 測試 |
+| outbox → JetStream(§7.3) | `migrations/0006_eventbus_core.sql`(`outbox` + `AFTER INSERT` statement trigger `pg_notify('outbox_new')`、`processed_events`);`eventbus.Relay`(LISTEN + 100 ms 輪詢、依 id 批次發布、`Nats-Msg-Id = event_id`、成功後 `published_at`);`eventbus.EnsureStreams`(`EX_TRADING / EX_CHAIN / EX_REGISTRY`,2 分鐘去重窗) | 只有 engine role(持 advisory lock)跑 relay;`TestOutboxRelayPublishesToJetStream` 證明重發同一批列 stream 訊息數不變 |
+| 單一引擎實例(§5.1) | `Engine.Start` 以 `pg_try_advisory_lock(hash("exchange-engine:"+tenant))` 在專用連線上取鎖,取不到每秒重試、`/readyz` 的 `engine` 檢查為 false | `TestEngineSingleInstanceLock`:第二個引擎在鎖釋放前無法啟動 |
+| policy 最小版(§8) | `policy.Basic`:`active` 才收新單;`halted / cancel_only` 只收取消;凍結帳戶可取消不可下單 | 限額與提現政策在 Phase 4/5 |
+| 指標(§15) | `trading_command_queue_depth / trading_apply_duration_seconds / trading_orders_total / trading_trades_total / engine_seq / engine_open_orders / engine_rebuild_duration_seconds / engine_rebuilds_total / outbox_backlog / outbox_relay_lag_seconds / outbox_published_total` | |
+
+**驗證(整合測試,`test/integration/trading_test.go`、`eventbus_test.go`)**:§6.1.4 (a)(b)(c) 經引擎逐數字相符(B `8004 / 1200`、`0.3992 ETH`、S `795.204`、fee `0.796 USDC + 0.0008 ETH`、取消後 `9204`);`client_order_id` 重送 10 次一張單一筆 hold;6 種拒單皆持久化且無分錄;市價買以 quote 預算 `floor(500/2010, 0.0001) = 0.2487`、剩餘 0.113 釋放;IOC、STP;60 筆隨機單後「停掉引擎再啟動」`Snapshot.Equal` 且 hold 不變量、試算平衡、seq 一致;500 輪隨機序列(rapid)每輪驗 hold 不變量;40 goroutine × 10 單無錯、seq 1..400 無缺口。
+
+**Phase 3a 學到的事**:`timestamptz` 只有微秒精度,命令時間戳要先 `Truncate(time.Microsecond)`,否則重建後的 `RestingOrder.Timestamp` 與記憶體不等;pgx 的 `tx.Begin` 在交易內就是 SAVEPOINT,正好對應「Hold 成功但簿拒單」;Prometheus 的 `float64` 不是錢,以 `metrics.go` 的 helper 集中 `//nolint:forbidigo`。
+

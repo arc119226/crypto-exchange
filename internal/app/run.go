@@ -60,18 +60,48 @@ func Run(ctx context.Context, cfg Config, roles []Role, bi BuildInfo) error {
 
 	httpMetrics := telemetry.NewHTTPMetrics(reg)
 	var (
-		servers     []*http.Server
-		adminLedger *ledger.Service
+		servers      []*http.Server
+		adminLedger  *ledger.Service
+		eng          engineComponents
+		sharedLedger *ledger.Service
 	)
+	// the ledger service is shared by every role in the process that needs it
+	ledgerFor := func() (*ledger.Service, error) {
+		if sharedLedger != nil {
+			return sharedLedger, nil
+		}
+		l, err := newLedger(ctx, cfg, log, d.pool, reg)
+		if err != nil {
+			return nil, err
+		}
+		sharedLedger = l
+		return l, nil
+	}
 	for _, role := range roles {
 		switch role {
 		case RoleAPI:
 			servers = append(servers, newAPIServer(cfg, log, httpMetrics, registry.NewStore(d.pool)))
+		case RoleEngine:
+			l, err := ledgerFor()
+			if err != nil {
+				return err
+			}
+			eng.engine = newEngine(cfg, log, d.pool, l, reg)
+			if d.nc != nil {
+				relay, err := newRelay(ctx, cfg, log, d.pool, d.nc, reg)
+				if err != nil {
+					return err
+				}
+				eng.relay = relay
+			} else {
+				log.Warn("engine running without NATS: events stay in the outbox until a relay runs")
+			}
+			checker.Register("engine", true, eng.engine.ReadyCheck)
 		case RoleAdmin:
 			if cfg.Admin.APIKey.Reveal() == "" {
 				return fmt.Errorf("config: ADMIN_API_KEY is required for the admin role")
 			}
-			l, err := newLedger(ctx, cfg, log, d.pool, reg)
+			l, err := ledgerFor()
 			if err != nil {
 				return err
 			}
@@ -89,6 +119,23 @@ func Run(ctx context.Context, cfg Config, roles []Role, bi BuildInfo) error {
 	}
 	if adminLedger != nil {
 		g.Go(func() error { return observeTrialBalance(gctx, log, adminLedger) })
+	}
+	if eng.engine != nil {
+		// Start blocks while another instance holds the lock and while books
+		// are rebuilt; the ops server is already up so /readyz reports it.
+		g.Go(func() error {
+			if err := retryUntil(gctx, log, "engine start", func(ctx context.Context) error {
+				return eng.engine.Start(ctx)
+			}); err != nil {
+				return err
+			}
+			<-gctx.Done()
+			eng.engine.Stop()
+			return nil
+		})
+		if eng.relay != nil {
+			g.Go(func() error { return eng.relay.Run(gctx) })
+		}
 	}
 	g.Go(func() error {
 		<-gctx.Done()

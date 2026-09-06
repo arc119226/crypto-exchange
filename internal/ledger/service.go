@@ -225,24 +225,50 @@ func (s *Service) Post(ctx context.Context, tx pgx.Tx, e Entry) (JournalEntry, b
 	}
 
 	// 5. balances cache (the CHECK constraints are the backstop for step 3)
+	balances := make([]Balance, 0, len(keys))
 	for _, k := range keys {
 		d := deltas[k]
-		if _, err := q.ApplyBalanceDelta(ctx, sqlcgen.ApplyBalanceDeltaParams{
+		updated, err := q.ApplyBalanceDelta(ctx, sqlcgen.ApplyBalanceDeltaParams{
 			AccountID: k.account, Asset: k.asset,
 			Available: pg.NumericFromAmount(d.available), Hold: pg.NumericFromAmount(d.hold),
-		}); err != nil {
+		})
+		if err != nil {
 			if pgErr := pgErrorCode(err); pgErr == "23514" {
 				return JournalEntry{}, false, fmt.Errorf("%w: %s %s", ErrInsufficient, k.account, k.asset)
 			}
 			return JournalEntry{}, false, fmt.Errorf("ledger: apply balance delta: %w", err)
 		}
+		available, err := pg.AmountFromNumeric(updated.Available)
+		if err != nil {
+			return JournalEntry{}, false, err
+		}
+		hold, err := pg.AmountFromNumeric(updated.Hold)
+		if err != nil {
+			return JournalEntry{}, false, err
+		}
+		balances = append(balances, Balance{AccountID: updated.AccountID, Asset: updated.Asset, Available: available, Hold: hold, Version: updated.Version})
 	}
 	if s.metrics != nil {
 		s.metrics.entries.WithLabelValues(e.Kind).Inc()
 	}
 	je := journalFromRow(row)
 	je.Postings = append([]Posting(nil), e.Postings...)
+	je.Balances = balances
 	return je, false, nil
+}
+
+// NextAccountSeq increments and returns the account's private event
+// sequence (docs/plan-v1.0.md §7.1). Call it in the transaction that writes
+// the outbox rows so account_seq and commit order agree.
+func (s *Service) NextAccountSeq(ctx context.Context, tx pgx.Tx, accountID string) (int64, error) {
+	seq, err := sqlcgen.New(tx).BumpAccountSeq(ctx, accountID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return 0, fmt.Errorf("%w: %s", ErrAccountNotFound, accountID)
+		}
+		return 0, fmt.Errorf("ledger: bump account seq: %w", err)
+	}
+	return seq, nil
 }
 
 // aggregateDeltas turns spot postings into per-(account, asset) liability

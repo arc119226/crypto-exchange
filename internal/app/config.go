@@ -32,7 +32,20 @@ type Config struct {
 	Chain    ChainConfig    `envPrefix:"ETH_"`
 	JWT      JWTConfig      `envPrefix:"JWT_"`
 	Admin    AdminConfig    `envPrefix:"ADMIN_"`
+	Engine   EngineConfig   `envPrefix:"ENGINE_"`
+	Outbox   OutboxConfig   `envPrefix:"OUTBOX_"`
 	Shutdown ShutdownConfig `envPrefix:"SHUTDOWN_"`
+}
+
+// EngineConfig tunes the trading engine (engine role).
+type EngineConfig struct {
+	QueueSize int `env:"QUEUE_SIZE" envDefault:"1024"` // commands waiting per market
+}
+
+// OutboxConfig tunes the outbox relay (engine role, needs NATS).
+type OutboxConfig struct {
+	PollInterval time.Duration `env:"POLL_INTERVAL" envDefault:"100ms"`
+	BatchSize    int32         `env:"BATCH_SIZE" envDefault:"100"`
 }
 
 // AdminConfig configures the operator API (admin role). APIKey is the static
@@ -137,6 +150,12 @@ func (c Config) Validate() error {
 	if c.DB.MaxConns <= 0 {
 		return fmt.Errorf("config: DATABASE_MAX_CONNS must be positive")
 	}
+	if c.Engine.QueueSize <= 0 {
+		return fmt.Errorf("config: ENGINE_QUEUE_SIZE must be positive")
+	}
+	if c.Outbox.PollInterval <= 0 || c.Outbox.BatchSize <= 0 {
+		return fmt.Errorf("config: OUTBOX_POLL_INTERVAL and OUTBOX_BATCH_SIZE must be positive")
+	}
 	if c.Shutdown.Timeout <= 0 || c.Shutdown.DrainDelay < 0 {
 		return fmt.Errorf("config: SHUTDOWN_TIMEOUT must be positive and SHUTDOWN_DRAIN_DELAY non-negative")
 	}
@@ -161,6 +180,8 @@ func (c Config) LogValue() slog.Value {
 		slog.Int64("eth_chain_id", c.Chain.ChainID),
 		slog.String("jwt_private_key_file", c.JWT.PrivateKeyFile),
 		slog.String("jwt_jwks_url", c.JWT.JWKSURL),
+		slog.Int("engine_queue_size", c.Engine.QueueSize),
+		slog.Duration("outbox_poll_interval", c.Outbox.PollInterval),
 		slog.Duration("shutdown_drain_delay", c.Shutdown.DrainDelay),
 		slog.Duration("shutdown_timeout", c.Shutdown.Timeout),
 	)
