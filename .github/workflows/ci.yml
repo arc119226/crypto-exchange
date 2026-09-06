@@ -70,7 +70,7 @@ jobs:
           make build
           bin/exchange version
           bin/exchangectl version
-          bin/exchange admin bootstrap && exit 1 || test $? -eq 3   # not implemented yet -> exit 3
+          bin/exchange keys import-mnemonic && exit 1 || test $? -eq 3   # not implemented yet -> exit 3
 
   fuzz-smoke:
     name: fuzz-smoke

@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Exchange Public API
-  version: 1.0.0-phase0
+  version: 1.0.0-phase3
   description: |
     Public REST API of the white-label exchange engine (docs/plan-v1.0.md §7.4).
 
@@ -13,6 +13,20 @@ info:
     - Clients may send `X-Request-Id`; the server echoes it (or generates one)
       and uses it as the correlation id in logs and problem responses.
     - Additive changes never bump the version; breaking changes go to `/v2`.
+
+    Authentication (ADR-0006)
+    - **Sessions**: `POST /v1/auth/register` or `/v1/auth/login` return an
+      Ed25519-signed JWT access token (15 min, `Authorization: Bearer …`) and
+      an opaque refresh token (7 days, single use: `/v1/auth/refresh` rotates
+      it). Public keys are served at `/.well-known/jwks.json`.
+    - **API keys** (programmatic trading): send `X-API-KEY` (the key id),
+      `X-API-TIMESTAMP` (unix milliseconds, within ±30 s of server time) and
+      `X-API-SIGNATURE` = hex(HMAC-SHA256(secret, canonical)) where canonical
+      is `timestamp + "\n" + METHOD + "\n" + request URI (path and query) +
+      "\n" + raw body`. Keys carry scopes: `read` for GET endpoints, `trade`
+      for orders, `withdraw` for withdrawals (Phase 4).
+    - Rate limits (`429`, `Retry-After`): login 10/min per IP and 5/min per
+      account; orders and cancels 20/s per account.
   contact:
     name: crypto-exchange
     url: https://github.com/arc119226/crypto-exchange
@@ -20,10 +34,273 @@ servers:
   - url: http://localhost:8080
     description: Local development (`make up-single`)
 tags:
+  - name: auth
+    description: Sessions and JWKS (reference implementation, replaceable by a customer IdP)
+  - name: api-keys
+    description: HMAC API keys for programmatic access
+  - name: account
+    description: The caller's account, balances and ledger entries
   - name: registry
     description: Listed assets and markets (read-only; edited via the admin API)
+  - name: trading
+    description: Orders and fills (one spot account per user)
+  - name: market-data
+    description: Public order book and trade history
 
 paths:
+  /v1/auth/register:
+    post:
+      tags: [auth]
+      operationId: register
+      summary: Register a user and open a spot account
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RegisterRequest"
+      responses:
+        "201":
+          description: Registered; a session is returned so the client can start immediately
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Session"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /v1/auth/login:
+    post:
+      tags: [auth]
+      operationId: login
+      summary: Log in with email and password
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+      responses:
+        "200":
+          description: Session
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Session"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /v1/auth/refresh:
+    post:
+      tags: [auth]
+      operationId: refresh
+      summary: Rotate a refresh token
+      description: The presented refresh token is revoked and a new pair is issued. Presenting an already-rotated token revokes every session of the user.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RefreshRequest"
+      responses:
+        "200":
+          description: New session
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Session"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /v1/auth/logout:
+    post:
+      tags: [auth]
+      operationId: logout
+      summary: Revoke a refresh token
+      description: Idempotent; unknown tokens are ignored. Access tokens stay valid until they expire (15 min).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RefreshRequest"
+      responses:
+        "204":
+          description: Revoked (or already unknown)
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /.well-known/jwks.json:
+    get:
+      tags: [auth]
+      operationId: getJWKS
+      summary: Public keys that verify access tokens
+      responses:
+        "200":
+          description: JSON Web Key Set (RFC 7517)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JWKS"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /v1/api-keys:
+    get:
+      tags: [api-keys]
+      operationId: listApiKeys
+      summary: List the caller's API keys
+      security:
+        - bearerAuth: []
+        - apiKeyAuth: []
+      responses:
+        "200":
+          description: Keys (secrets are never returned)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIKeyList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    post:
+      tags: [api-keys]
+      operationId: createApiKey
+      summary: Create an API key
+      description: Requires a session (JWT); API keys cannot mint API keys. The secret is returned once.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateAPIKeyRequest"
+      responses:
+        "201":
+          description: Created; store the secret now
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreatedAPIKey"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /v1/api-keys/{id}:
+    delete:
+      tags: [api-keys]
+      operationId: revokeApiKey
+      summary: Revoke an API key
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: Revoked
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /v1/account:
+    get:
+      tags: [account]
+      operationId: getAccount
+      summary: The caller's user and spot account
+      security:
+        - bearerAuth: []
+        - apiKeyAuth: []
+      responses:
+        "200":
+          description: Account
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Account"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /v1/balances:
+    get:
+      tags: [account]
+      operationId: listBalances
+      summary: Balances of the caller's spot account
+      security:
+        - bearerAuth: []
+        - apiKeyAuth: []
+      responses:
+        "200":
+          description: One entry per asset ever touched
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BalanceList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /v1/ledger/entries:
+    get:
+      tags: [account]
+      operationId: listLedgerEntries
+      summary: Journal entries that touched the caller's account
+      security:
+        - bearerAuth: []
+        - apiKeyAuth: []
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+      responses:
+        "200":
+          description: Entries, newest first, with the caller's postings only
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LedgerEntryList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
   /v1/assets:
     get:
       tags: [registry]
@@ -75,7 +352,243 @@ paths:
         "500":
           $ref: "#/components/responses/InternalError"
 
+  /v1/markets/{symbol}/depth:
+    get:
+      tags: [market-data]
+      operationId: getDepth
+      summary: Aggregated order book
+      parameters:
+        - $ref: "#/components/parameters/MarketSymbol"
+        - name: limit
+          in: query
+          description: Levels per side (default 20, max 200)
+          schema:
+            type: integer
+            format: int32
+            minimum: 1
+            maximum: 200
+      responses:
+        "200":
+          description: Depth snapshot with the engine sequence it reflects
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Depth"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /v1/markets/{symbol}/trades:
+    get:
+      tags: [market-data]
+      operationId: listTrades
+      summary: Recent public trades
+      parameters:
+        - $ref: "#/components/parameters/MarketSymbol"
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+      responses:
+        "200":
+          description: Trades, newest first
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TradeList"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /v1/orders:
+    post:
+      tags: [trading]
+      operationId: placeOrder
+      summary: Place an order
+      description: |
+        Limit orders carry `price` and `qty`; market sells carry `qty`; market
+        buys carry `quote_qty` (the quote budget). The response is the order in
+        its state right after the command with the trades it produced as
+        taker. Business rejections (tick, step, min notional, balance, market
+        status) are **201 with `status: rejected`**, not errors.
+
+        `client_order_id` is idempotent per account: resending the same
+        request returns the original order with **200**; reusing the id with
+        a different request is **422**.
+      security:
+        - bearerAuth: []
+        - apiKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PlaceOrderRequest"
+      responses:
+        "201":
+          description: Order accepted or rejected by the engine
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrderResult"
+        "200":
+          description: Replay of an earlier request with the same `client_order_id`
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrderResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+    get:
+      tags: [trading]
+      operationId: listOrders
+      summary: List the caller's orders
+      security:
+        - bearerAuth: []
+        - apiKeyAuth: []
+      parameters:
+        - name: market
+          in: query
+          schema:
+            type: string
+        - name: status
+          in: query
+          schema:
+            $ref: "#/components/schemas/OrderStatus"
+        - name: open_only
+          in: query
+          description: Only `open` and `partially_filled` orders
+          schema:
+            type: boolean
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+      responses:
+        "200":
+          description: Orders, newest first
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrderList"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /v1/orders/{id}:
+    get:
+      tags: [trading]
+      operationId: getOrder
+      summary: Get one of the caller's orders with its trades
+      security:
+        - bearerAuth: []
+        - apiKeyAuth: []
+      parameters:
+        - $ref: "#/components/parameters/OrderID"
+      responses:
+        "200":
+          description: Order and its trades
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrderResult"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    delete:
+      tags: [trading]
+      operationId: cancelOrder
+      summary: Cancel an order
+      description: Idempotent — a terminal order is returned as it is. The response is the order after the cancel.
+      security:
+        - bearerAuth: []
+        - apiKeyAuth: []
+      parameters:
+        - $ref: "#/components/parameters/OrderID"
+      responses:
+        "200":
+          description: Order after the cancel (or its terminal state)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Order"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /v1/fills:
+    get:
+      tags: [trading]
+      operationId: listFills
+      summary: The caller's fills (its side of each trade)
+      security:
+        - bearerAuth: []
+        - apiKeyAuth: []
+      parameters:
+        - name: market
+          in: query
+          schema:
+            type: string
+        - name: order_id
+          in: query
+          schema:
+            type: string
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+      responses:
+        "200":
+          description: Fills, newest first
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FillList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
 components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Access token from `/v1/auth/login`; Ed25519 (EdDSA), 15 minutes.
+    apiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-KEY
+      description: API key id; the request must also carry `X-API-TIMESTAMP` and `X-API-SIGNATURE` (see the introduction).
+
   parameters:
     MarketSymbol:
       name: symbol
@@ -86,10 +599,80 @@ components:
         type: string
         pattern: '^[A-Z0-9]{2,16}-[A-Z0-9]{2,16}$'
         example: ETH-USDC
+    OrderID:
+      name: id
+      in: path
+      required: true
+      description: Order id (ULID)
+      schema:
+        type: string
+    Limit:
+      name: limit
+      in: query
+      description: Page size (default 100, max 500)
+      schema:
+        type: integer
+        format: int32
+        minimum: 1
+        maximum: 500
+    Offset:
+      name: offset
+      in: query
+      schema:
+        type: integer
+        format: int32
+        minimum: 0
 
   responses:
+    BadRequest:
+      description: Malformed request (shape, missing fields, invalid amounts)
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+    Unauthorized:
+      description: Missing or invalid credentials
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+    Forbidden:
+      description: The credential lacks the scope, or the key is not allowed from this address
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
     NotFound:
       description: The resource does not exist
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+    Conflict:
+      description: The email is already registered
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+    UnprocessableEntity:
+      description: The request is well-formed but violates a rule (weak password, `client_order_id` reused with different content)
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+    TooManyRequests:
+      description: Rate limit exceeded; retry after `Retry-After` seconds
+      headers:
+        Retry-After:
+          schema:
+            type: integer
+          description: Seconds until a token is available
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+    ServiceUnavailable:
+      description: The trading engine is not reachable or not ready; retry with the same `client_order_id`
       content:
         application/problem+json:
           schema:
@@ -112,6 +695,255 @@ components:
       x-go-type: money.Amount
       x-go-type-import:
         path: github.com/arc119226/crypto-exchange/internal/money
+
+    # --- auth ---
+
+    RegisterRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+          example: alice@example.com
+        password:
+          type: string
+          minLength: 8
+          maxLength: 128
+          format: password
+
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          format: password
+
+    RefreshRequest:
+      type: object
+      required: [refresh_token]
+      properties:
+        refresh_token:
+          type: string
+
+    Session:
+      type: object
+      required: [user_id, account_id, role, access_token, token_type, expires_in, expires_at, refresh_token]
+      properties:
+        user_id:
+          type: string
+        account_id:
+          type: string
+          description: The spot account every trading call is keyed by
+        role:
+          type: string
+          enum: [user, admin]
+        access_token:
+          type: string
+          description: "JWT, send as `Authorization: Bearer <access_token>`"
+        token_type:
+          type: string
+          example: Bearer
+        expires_in:
+          type: integer
+          format: int64
+          description: Access token lifetime in seconds
+        expires_at:
+          type: string
+          format: date-time
+        refresh_token:
+          type: string
+          description: Opaque, single use; rotate with `/v1/auth/refresh`
+
+    JWKS:
+      type: object
+      description: "RFC 7517 key set; keys are OKP/Ed25519 with `use: sig`"
+      required: [keys]
+      properties:
+        keys:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+
+    # --- api keys ---
+
+    Scope:
+      type: string
+      enum: [read, trade, withdraw]
+
+    APIKey:
+      type: object
+      required: [id, key_id, label, scopes, ip_allowlist, created_at]
+      properties:
+        id:
+          type: string
+        key_id:
+          type: string
+          description: Public identifier sent in `X-API-KEY`
+          example: ak_3f1c9a2b7d4e6f8a0b1c2d3e
+        label:
+          type: string
+        scopes:
+          type: array
+          items:
+            $ref: "#/components/schemas/Scope"
+        ip_allowlist:
+          type: array
+          description: IPs or CIDRs the key may be used from; empty means any
+          items:
+            type: string
+        created_at:
+          type: string
+          format: date-time
+        last_used_at:
+          type: string
+          format: date-time
+        revoked_at:
+          type: string
+          format: date-time
+
+    APIKeyList:
+      type: object
+      required: [api_keys]
+      properties:
+        api_keys:
+          type: array
+          items:
+            $ref: "#/components/schemas/APIKey"
+
+    CreateAPIKeyRequest:
+      type: object
+      required: [scopes]
+      properties:
+        label:
+          type: string
+          maxLength: 64
+        scopes:
+          type: array
+          minItems: 1
+          items:
+            $ref: "#/components/schemas/Scope"
+        ip_allowlist:
+          type: array
+          items:
+            type: string
+
+    CreatedAPIKey:
+      allOf:
+        - $ref: "#/components/schemas/APIKey"
+        - type: object
+          required: [secret]
+          properties:
+            secret:
+              type: string
+              description: HMAC secret, shown exactly once
+
+    # --- account ---
+
+    Account:
+      type: object
+      required: [user_id, account_id, email, role, kyc_level, status, created_at]
+      properties:
+        user_id:
+          type: string
+        account_id:
+          type: string
+        email:
+          type: string
+        role:
+          type: string
+          enum: [user, admin]
+        kyc_level:
+          type: integer
+          format: int32
+          description: 0–2, written by the operator's systems through the admin API
+        status:
+          type: string
+          enum: [active, frozen]
+        created_at:
+          type: string
+          format: date-time
+
+    Balance:
+      type: object
+      required: [asset, available, hold, total]
+      properties:
+        asset:
+          type: string
+        available:
+          $ref: "#/components/schemas/Amount"
+        hold:
+          $ref: "#/components/schemas/Amount"
+        total:
+          $ref: "#/components/schemas/Amount"
+
+    BalanceList:
+      type: object
+      required: [balances]
+      properties:
+        balances:
+          type: array
+          items:
+            $ref: "#/components/schemas/Balance"
+
+    Posting:
+      type: object
+      required: [asset, bucket, direction, amount]
+      properties:
+        asset:
+          type: string
+        bucket:
+          type: string
+          enum: [available, hold]
+        direction:
+          type: string
+          enum: [debit, credit]
+        amount:
+          $ref: "#/components/schemas/Amount"
+
+    LedgerEntry:
+      type: object
+      required: [id, kind, created_at, postings]
+      properties:
+        id:
+          type: integer
+          format: int64
+        kind:
+          type: string
+          description: hold | release | settle | credit | adjustment | …
+        ref_type:
+          type: string
+          x-go-type-skip-optional-pointer: true
+        ref_id:
+          type: string
+          x-go-type-skip-optional-pointer: true
+        reason:
+          type: string
+          x-go-type-skip-optional-pointer: true
+        created_at:
+          type: string
+          format: date-time
+        postings:
+          type: array
+          description: Only the caller's own postings of the entry
+          items:
+            $ref: "#/components/schemas/Posting"
+
+    LedgerEntryList:
+      type: object
+      required: [entries]
+      properties:
+        entries:
+          type: array
+          items:
+            $ref: "#/components/schemas/LedgerEntry"
+
+    # --- registry ---
 
     AssetStatus:
       type: string
@@ -273,6 +1105,251 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/Market"
+
+    # --- trading ---
+
+    Side:
+      type: string
+      enum: [buy, sell]
+
+    OrderType:
+      type: string
+      enum: [limit, market]
+
+    TimeInForce:
+      type: string
+      description: "`gtc` rests the unfilled remainder in the book; `ioc` cancels it. Market orders are always `ioc`."
+      enum: [gtc, ioc]
+
+    OrderStatus:
+      type: string
+      description: docs/plan-v1.0.md §6.2; `filled`, `cancelled` and `rejected` are terminal
+      enum: [open, partially_filled, filled, cancelled, rejected]
+
+    PlaceOrderRequest:
+      type: object
+      required: [client_order_id, market, side, type]
+      properties:
+        client_order_id:
+          type: string
+          minLength: 1
+          maxLength: 64
+          description: Idempotency key per account; reuse with different content is 422
+        market:
+          type: string
+          example: ETH-USDC
+        side:
+          $ref: "#/components/schemas/Side"
+        type:
+          $ref: "#/components/schemas/OrderType"
+        time_in_force:
+          $ref: "#/components/schemas/TimeInForce"
+        price:
+          allOf:
+            - $ref: "#/components/schemas/Amount"
+          description: Limit orders only; must be a multiple of `price_tick`
+        qty:
+          allOf:
+            - $ref: "#/components/schemas/Amount"
+          description: Base quantity (limit orders and market sells); multiple of `qty_step`
+        quote_qty:
+          allOf:
+            - $ref: "#/components/schemas/Amount"
+          description: Quote budget of a market buy
+
+    Order:
+      type: object
+      required:
+        - id
+        - client_order_id
+        - market
+        - side
+        - type
+        - time_in_force
+        - filled_qty
+        - filled_quote
+        - remaining_qty
+        - hold_asset
+        - hold_amount
+        - hold_remaining
+        - status
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: string
+          description: ULID
+        client_order_id:
+          type: string
+        market:
+          type: string
+        side:
+          $ref: "#/components/schemas/Side"
+        type:
+          $ref: "#/components/schemas/OrderType"
+        time_in_force:
+          $ref: "#/components/schemas/TimeInForce"
+        price:
+          allOf:
+            - $ref: "#/components/schemas/Amount"
+          description: Absent for market orders
+        qty:
+          allOf:
+            - $ref: "#/components/schemas/Amount"
+          description: Absent for market buys
+        quote_qty:
+          allOf:
+            - $ref: "#/components/schemas/Amount"
+          description: Quote budget of a market buy
+        filled_qty:
+          $ref: "#/components/schemas/Amount"
+        filled_quote:
+          $ref: "#/components/schemas/Amount"
+        remaining_qty:
+          $ref: "#/components/schemas/Amount"
+        hold_asset:
+          type: string
+          description: Asset frozen for this order (quote for buys, base for sells)
+        hold_amount:
+          $ref: "#/components/schemas/Amount"
+        hold_remaining:
+          $ref: "#/components/schemas/Amount"
+        status:
+          $ref: "#/components/schemas/OrderStatus"
+        reject_reason:
+          type: string
+          x-go-type-skip-optional-pointer: true
+          description: invalid_price_tick | invalid_qty_step | below_min_notional | above_max_qty | market_not_active | insufficient_balance | empty_book | quote_qty_too_small | account_frozen | policy_denied
+        cancel_reason:
+          type: string
+          x-go-type-skip-optional-pointer: true
+          description: user | ioc | self_trade | price_protection
+        seq:
+          type: integer
+          format: int64
+          description: Engine sequence of the command that processed the order
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    OrderList:
+      type: object
+      required: [orders]
+      properties:
+        orders:
+          type: array
+          items:
+            $ref: "#/components/schemas/Order"
+
+    Trade:
+      type: object
+      description: One public fill; price is always the resting (maker) price
+      required: [trade_id, market, price, qty, quote_qty, taker_side, seq, executed_at]
+      properties:
+        trade_id:
+          type: string
+        market:
+          type: string
+        price:
+          $ref: "#/components/schemas/Amount"
+        qty:
+          $ref: "#/components/schemas/Amount"
+        quote_qty:
+          $ref: "#/components/schemas/Amount"
+        taker_side:
+          $ref: "#/components/schemas/Side"
+        seq:
+          type: integer
+          format: int64
+        executed_at:
+          type: string
+          format: date-time
+
+    TradeList:
+      type: object
+      required: [trades]
+      properties:
+        trades:
+          type: array
+          items:
+            $ref: "#/components/schemas/Trade"
+
+    Fill:
+      allOf:
+        - $ref: "#/components/schemas/Trade"
+        - type: object
+          description: The caller's side of a trade
+          required: [order_id, side, is_maker, fee, fee_asset]
+          properties:
+            order_id:
+              type: string
+            side:
+              $ref: "#/components/schemas/Side"
+            is_maker:
+              type: boolean
+            fee:
+              $ref: "#/components/schemas/Amount"
+            fee_asset:
+              type: string
+
+    FillList:
+      type: object
+      required: [fills]
+      properties:
+        fills:
+          type: array
+          items:
+            $ref: "#/components/schemas/Fill"
+
+    OrderResult:
+      type: object
+      required: [order, trades]
+      properties:
+        order:
+          $ref: "#/components/schemas/Order"
+        trades:
+          type: array
+          description: Fills of this order (for `POST`, those produced by the command)
+          items:
+            $ref: "#/components/schemas/Fill"
+
+    # --- market data ---
+
+    Level:
+      type: object
+      required: [price, qty, orders]
+      properties:
+        price:
+          $ref: "#/components/schemas/Amount"
+        qty:
+          $ref: "#/components/schemas/Amount"
+        orders:
+          type: integer
+          format: int32
+
+    Depth:
+      type: object
+      required: [market, last_seq, bids, asks]
+      properties:
+        market:
+          type: string
+        last_seq:
+          type: integer
+          format: int64
+          description: Engine sequence the snapshot reflects (WebSocket deltas resume from it, Phase 6)
+        bids:
+          type: array
+          description: Best (highest) bid first
+          items:
+            $ref: "#/components/schemas/Level"
+        asks:
+          type: array
+          description: Best (lowest) ask first
+          items:
+            $ref: "#/components/schemas/Level"
 
     Problem:
       type: object

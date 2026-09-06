@@ -26,15 +26,20 @@ type Config struct {
 	WSAddr    string `env:"WS_ADDR" envDefault:":8081"`
 	AdminAddr string `env:"ADMIN_ADDR" envDefault:":8082"`
 
-	DB       DBConfig       `envPrefix:"DATABASE_"`
-	NATS     NATSConfig     `envPrefix:"NATS_"`
-	Redis    RedisConfig    `envPrefix:"REDIS_"`
-	Chain    ChainConfig    `envPrefix:"ETH_"`
-	JWT      JWTConfig      `envPrefix:"JWT_"`
-	Admin    AdminConfig    `envPrefix:"ADMIN_"`
-	Engine   EngineConfig   `envPrefix:"ENGINE_"`
-	Outbox   OutboxConfig   `envPrefix:"OUTBOX_"`
-	Shutdown ShutdownConfig `envPrefix:"SHUTDOWN_"`
+	DB    DBConfig    `envPrefix:"DATABASE_"`
+	NATS  NATSConfig  `envPrefix:"NATS_"`
+	Redis RedisConfig `envPrefix:"REDIS_"`
+	Chain ChainConfig `envPrefix:"ETH_"`
+	JWT   JWTConfig   `envPrefix:"JWT_"`
+	Auth  AuthConfig  `envPrefix:"AUTH_"`
+	// APIKeyMasterKey (API_KEY_MASTER_KEY, 32 bytes hex) encrypts API key
+	// secrets at rest; the api role needs it (ADR-0006).
+	APIKeyMasterKey telemetry.Secret `env:"API_KEY_MASTER_KEY"`
+	RateLimit       RateLimitConfig  `envPrefix:"RATELIMIT_"`
+	Admin           AdminConfig      `envPrefix:"ADMIN_"`
+	Engine          EngineConfig     `envPrefix:"ENGINE_"`
+	Outbox          OutboxConfig     `envPrefix:"OUTBOX_"`
+	Shutdown        ShutdownConfig   `envPrefix:"SHUTDOWN_"`
 }
 
 // EngineConfig tunes the trading engine (engine role).
@@ -48,10 +53,27 @@ type OutboxConfig struct {
 	BatchSize    int32         `env:"BATCH_SIZE" envDefault:"100"`
 }
 
+// AuthConfig tunes sessions (api role).
+type AuthConfig struct {
+	Issuer     string        `env:"ISSUER" envDefault:"exchange"`
+	AccessTTL  time.Duration `env:"ACCESS_TTL" envDefault:"15m"`
+	RefreshTTL time.Duration `env:"REFRESH_TTL" envDefault:"168h"`
+}
+
+// RateLimitConfig holds the token-bucket limits of docs/plan-v1.0.md §14 as
+// "N/window" strings.
+type RateLimitConfig struct {
+	LoginPerIP       string `env:"LOGIN_PER_IP" envDefault:"10/1m"`
+	LoginPerAccount  string `env:"LOGIN_PER_ACCOUNT" envDefault:"5/1m"`
+	OrdersPerAccount string `env:"ORDERS_PER_ACCOUNT" envDefault:"20/1s"`
+}
+
 // AdminConfig configures the operator API (admin role). APIKey is the static
 // key of Phase 2–4 (docs/plan-v1.0.md §14); Phase 5 adds sessions + TOTP.
 type AdminConfig struct {
-	APIKey telemetry.Secret `env:"API_KEY"`
+	APIKey            telemetry.Secret `env:"API_KEY"`
+	BootstrapEmail    string           `env:"BOOTSTRAP_EMAIL"`
+	BootstrapPassword telemetry.Secret `env:"BOOTSTRAP_PASSWORD"`
 }
 
 // DBConfig configures the Postgres pool. URL is required for every role.
@@ -98,6 +120,7 @@ var secretsWithFileVariant = []string{
 	"WEBHOOK_SIGNING_KEY",
 	"ADMIN_BOOTSTRAP_PASSWORD",
 	"ADMIN_API_KEY",
+	"API_KEY_MASTER_KEY",
 }
 
 // LoadConfig reads the environment (after expanding *_FILE secrets) and
@@ -150,6 +173,9 @@ func (c Config) Validate() error {
 	if c.DB.MaxConns <= 0 {
 		return fmt.Errorf("config: DATABASE_MAX_CONNS must be positive")
 	}
+	if c.Auth.AccessTTL <= 0 || c.Auth.RefreshTTL <= 0 || strings.TrimSpace(c.Auth.Issuer) == "" {
+		return fmt.Errorf("config: AUTH_ACCESS_TTL / AUTH_REFRESH_TTL must be positive and AUTH_ISSUER non-empty")
+	}
 	if c.Engine.QueueSize <= 0 {
 		return fmt.Errorf("config: ENGINE_QUEUE_SIZE must be positive")
 	}
@@ -180,6 +206,13 @@ func (c Config) LogValue() slog.Value {
 		slog.Int64("eth_chain_id", c.Chain.ChainID),
 		slog.String("jwt_private_key_file", c.JWT.PrivateKeyFile),
 		slog.String("jwt_jwks_url", c.JWT.JWKSURL),
+		slog.String("auth_issuer", c.Auth.Issuer),
+		slog.Duration("auth_access_ttl", c.Auth.AccessTTL),
+		slog.Duration("auth_refresh_ttl", c.Auth.RefreshTTL),
+		slog.Bool("api_key_master_key_set", c.APIKeyMasterKey.IsSet()),
+		slog.String("ratelimit_login_per_ip", c.RateLimit.LoginPerIP),
+		slog.String("ratelimit_login_per_account", c.RateLimit.LoginPerAccount),
+		slog.String("ratelimit_orders_per_account", c.RateLimit.OrdersPerAccount),
 		slog.Int("engine_queue_size", c.Engine.QueueSize),
 		slog.Duration("outbox_poll_interval", c.Outbox.PollInterval),
 		slog.Duration("shutdown_drain_delay", c.Shutdown.DrainDelay),

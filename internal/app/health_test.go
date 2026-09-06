@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/arc119226/crypto-exchange/internal/api"
 	"github.com/arc119226/crypto-exchange/internal/registry"
 	"github.com/arc119226/crypto-exchange/internal/telemetry"
 )
@@ -118,8 +119,8 @@ func TestAPIServerFallbacks(t *testing.T) {
 	}
 
 	t.Run("without routes the catch-all still produces problem+json with correlation id", func(t *testing.T) {
-		srv := newAPIServer(cfg, log, telemetry.NewHTTPMetrics(prometheus.NewRegistry()), nil)
-		code, hdr, p := call(srv.Handler, http.MethodGet, "/v1/nothing")
+		h := newAPIRouter(log, telemetry.NewHTTPMetrics(prometheus.NewRegistry()), api.Deps{Tenant: cfg.TenantID})
+		code, hdr, p := call(h, http.MethodGet, "/v1/nothing")
 		assert.Equal(t, http.StatusNotFound, code)
 		assert.Equal(t, "application/problem+json", hdr.Get("Content-Type"))
 		assert.Equal(t, "corr-1", p["correlation_id"])
@@ -127,20 +128,20 @@ func TestAPIServerFallbacks(t *testing.T) {
 	})
 
 	t.Run("with routes: 200, 404 and 405 all carry the correlation id", func(t *testing.T) {
-		srv := newAPIServer(cfg, log, telemetry.NewHTTPMetrics(prometheus.NewRegistry()), emptyRegistry{})
+		h := newAPIRouter(log, telemetry.NewHTTPMetrics(prometheus.NewRegistry()), api.Deps{Tenant: cfg.TenantID, Registry: emptyRegistry{}})
 
-		code, hdr, body := call(srv.Handler, http.MethodGet, "/v1/markets")
+		code, hdr, body := call(h, http.MethodGet, "/v1/markets")
 		assert.Equal(t, http.StatusOK, code)
 		assert.Equal(t, "application/json", hdr.Get("Content-Type"))
 		assert.Equal(t, "corr-1", hdr.Get(telemetry.RequestIDHeader))
 		assert.Equal(t, []any{}, body["markets"], "empty list, not null")
 
-		code, hdr, p := call(srv.Handler, http.MethodGet, "/v1/nothing")
+		code, hdr, p := call(h, http.MethodGet, "/v1/nothing")
 		assert.Equal(t, http.StatusNotFound, code)
 		assert.Equal(t, "application/problem+json", hdr.Get("Content-Type"))
 		assert.Equal(t, "corr-1", p["correlation_id"])
 
-		code, hdr, p = call(srv.Handler, http.MethodPost, "/v1/markets")
+		code, hdr, p = call(h, http.MethodPost, "/v1/markets")
 		assert.Equal(t, http.StatusMethodNotAllowed, code, "a registered path with the wrong method is 405, not 404")
 		assert.Equal(t, "application/problem+json", hdr.Get("Content-Type"))
 		assert.Equal(t, "corr-1", p["correlation_id"])

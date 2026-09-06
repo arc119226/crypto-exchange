@@ -36,6 +36,7 @@ else
   for key in POSTGRES_PASSWORD WALLET_KEYSTORE_PASSPHRASE WEBHOOK_SIGNING_KEY ADMIN_BOOTSTRAP_PASSWORD ADMIN_API_KEY; do
     set_var .env "$key" "$(rand_hex)"
   done
+  set_var .env API_KEY_MASTER_KEY "$(openssl rand -hex 32)"   # AES-256 key: 32 bytes
   log "wrote .env"
 fi
 
