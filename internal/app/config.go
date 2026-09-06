@@ -26,12 +26,13 @@ type Config struct {
 	WSAddr    string `env:"WS_ADDR" envDefault:":8081"`
 	AdminAddr string `env:"ADMIN_ADDR" envDefault:":8082"`
 
-	DB    DBConfig    `envPrefix:"DATABASE_"`
-	NATS  NATSConfig  `envPrefix:"NATS_"`
-	Redis RedisConfig `envPrefix:"REDIS_"`
-	Chain ChainConfig `envPrefix:"ETH_"`
-	JWT   JWTConfig   `envPrefix:"JWT_"`
-	Auth  AuthConfig  `envPrefix:"AUTH_"`
+	DB     DBConfig     `envPrefix:"DATABASE_"`
+	NATS   NATSConfig   `envPrefix:"NATS_"`
+	Redis  RedisConfig  `envPrefix:"REDIS_"`
+	Chain  ChainConfig  `envPrefix:"ETH_"`
+	Wallet WalletConfig `envPrefix:"WALLET_"`
+	JWT    JWTConfig    `envPrefix:"JWT_"`
+	Auth   AuthConfig   `envPrefix:"AUTH_"`
 	// APIKeyMasterKey (API_KEY_MASTER_KEY, 32 bytes hex) encrypts API key
 	// secrets at rest; the api role needs it (ADR-0006).
 	APIKeyMasterKey telemetry.Secret `env:"API_KEY_MASTER_KEY"`
@@ -115,6 +116,20 @@ type RedisConfig struct {
 type ChainConfig struct {
 	RPCURL  string `env:"RPC_URL"`
 	ChainID int64  `env:"CHAIN_ID" envDefault:"31337"`
+}
+
+// WalletConfig locates the HD seed and sizes the deposit address pool
+// (docs/plan-v1.0.md §6.4.1, §14). Only the signer role reads KeystoreDir and
+// Passphrase; every other role fails to start if it is given them, because
+// holding them would defeat the split.
+type WalletConfig struct {
+	KeystoreDir string           `env:"KEYSTORE_DIR"`
+	Passphrase  telemetry.Secret `env:"KEYSTORE_PASSPHRASE"`
+	// AddressPoolMin is how many unassigned deposit addresses the signer keeps
+	// ahead of demand; the api role returns 503 when the pool runs dry.
+	AddressPoolMin int `env:"ADDRESS_POOL_MIN" envDefault:"50"`
+	// AddressPoolInterval is how often the signer tops the pool up.
+	AddressPoolInterval time.Duration `env:"ADDRESS_POOL_INTERVAL" envDefault:"30s"`
 }
 
 // JWTConfig locates the signing key (api role only) and the JWKS URL.
@@ -202,6 +217,15 @@ func (c Config) Validate() error {
 	if c.Shutdown.Timeout <= 0 || c.Shutdown.DrainDelay < 0 {
 		return fmt.Errorf("config: SHUTDOWN_TIMEOUT must be positive and SHUTDOWN_DRAIN_DELAY non-negative")
 	}
+	if c.Wallet.AddressPoolMin <= 0 {
+		return fmt.Errorf("config: WALLET_ADDRESS_POOL_MIN must be positive")
+	}
+	if c.Wallet.AddressPoolInterval <= 0 {
+		return fmt.Errorf("config: WALLET_ADDRESS_POOL_INTERVAL must be positive")
+	}
+	if c.Chain.ChainID <= 0 {
+		return fmt.Errorf("config: ETH_CHAIN_ID must be positive")
+	}
 	return nil
 }
 
@@ -221,6 +245,10 @@ func (c Config) LogValue() slog.Value {
 		slog.String("redis_addr", c.Redis.Addr),
 		slog.String("eth_rpc_url", c.Chain.RPCURL),
 		slog.Int64("eth_chain_id", c.Chain.ChainID),
+		slog.String("wallet_keystore_dir", c.Wallet.KeystoreDir),
+		slog.Bool("wallet_keystore_passphrase_set", c.Wallet.Passphrase.IsSet()),
+		slog.Int("wallet_address_pool_min", c.Wallet.AddressPoolMin),
+		slog.Duration("wallet_address_pool_interval", c.Wallet.AddressPoolInterval),
 		slog.String("jwt_private_key_file", c.JWT.PrivateKeyFile),
 		slog.String("jwt_jwks_url", c.JWT.JWKSURL),
 		slog.String("auth_issuer", c.Auth.Issuer),

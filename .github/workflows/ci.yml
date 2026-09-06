@@ -70,7 +70,10 @@ jobs:
           make build
           bin/exchange version
           bin/exchangectl version
-          bin/exchange keys import-mnemonic && exit 1 || test $? -eq 3   # not implemented yet -> exit 3
+          # the seed import is implemented now; without a mnemonic it must fail
+          # cleanly (exit 1) rather than panic or silently write a keystore
+          bin/exchange keys import-mnemonic --from /dev/null --keystore-dir "$RUNNER_TEMP/ks" && exit 1 || test $? -eq 1
+          test ! -e "$RUNNER_TEMP/ks/hd-seed.json"
 
   fuzz-smoke:
     name: fuzz-smoke

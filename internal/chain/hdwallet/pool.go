@@ -77,6 +77,18 @@ func (p *Pool) Ensure(ctx context.Context, min int) (int, error) {
 	return created, nil
 }
 
+// Free reports how many unassigned addresses remain, for the pool-depth
+// gauge and the signer's readiness check.
+func (p *Pool) Free(ctx context.Context) (int64, error) {
+	n, err := sqlcgen.New(p.db).CountFreeDepositAddresses(ctx, sqlcgen.CountFreeDepositAddressesParams{
+		TenantID: p.tenant, ChainID: p.chainID,
+	})
+	if err != nil {
+		return 0, fmt.Errorf("hdwallet: count free addresses: %w", err)
+	}
+	return n, nil
+}
+
 // HotWallet returns the address of m/44'/60'/1'/0/0. It is logged on startup
 // so an operator can see the signer opened the seed they expected — the
 // address is public, the key behind it is not.

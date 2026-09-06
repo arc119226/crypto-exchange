@@ -64,6 +64,7 @@ func Run(ctx context.Context, cfg Config, roles []Role, bi BuildInfo) error {
 		eng          engineComponents
 		sharedLedger *ledger.Service
 		apiRefresh   *registryRefresher
+		signer       *signerComponents
 	)
 	// the ledger service is shared by every role in the process that needs it
 	ledgerFor := func() (*ledger.Service, error) {
@@ -120,6 +121,14 @@ func Run(ctx context.Context, cfg Config, roles []Role, bi BuildInfo) error {
 			}
 			adminLedger = l
 			servers = append(servers, newAdminServer(cfg, log, httpMetrics, d.pool, l))
+		case RoleSigner:
+			s, err := newSigner(cfg, log, d.pool, reg)
+			if err != nil {
+				return err
+			}
+			signer = s
+			defer signer.close()
+			checker.Register("keystore", true, signer.ready)
 		default:
 			log.Info("role not implemented yet, serving ops endpoints only", slog.String("role", string(role)))
 		}
@@ -132,6 +141,9 @@ func Run(ctx context.Context, cfg Config, roles []Role, bi BuildInfo) error {
 	}
 	if adminLedger != nil {
 		g.Go(func() error { return observeTrialBalance(gctx, log, adminLedger) })
+	}
+	if signer != nil {
+		g.Go(func() error { return signer.run(gctx, log) })
 	}
 	if apiRefresh != nil {
 		g.Go(func() error { return apiRefresh.run(gctx) })
