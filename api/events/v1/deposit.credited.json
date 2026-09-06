@@ -1,0 +1,75 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/arc119226/crypto-exchange/api/events/v1/deposit.credited.json",
+  "title": "deposit.credited",
+  "description": "The deposit reached its required confirmations and has been posted to the ledger. The account's balance has already changed when this is published.",
+  "type": "object",
+  "required": [
+    "deposit_id",
+    "account_id",
+    "asset",
+    "amount",
+    "address",
+    "tx_hash",
+    "log_index",
+    "block_number",
+    "block_hash",
+    "confirmations",
+    "status",
+    "required_confirmations"
+  ],
+  "properties": {
+    "deposit_id": {
+      "type": "string",
+      "description": "Stable id of the deposit across every event about it."
+    },
+    "account_id": {
+      "type": "string"
+    },
+    "asset": {
+      "type": "string"
+    },
+    "amount": {
+      "type": "string",
+      "pattern": "^-?\\d{1,18}(\\.\\d{1,18})?$",
+      "description": "Decimal amount in the asset's own units, never wei."
+    },
+    "address": {
+      "type": "string",
+      "pattern": "^0x[0-9a-f]{40}$",
+      "description": "The controlled address that received it, lower-case."
+    },
+    "tx_hash": {
+      "type": "string",
+      "pattern": "^0x[0-9a-f]{64}$"
+    },
+    "log_index": {
+      "type": "integer",
+      "minimum": -1,
+      "description": "Index of the ERC-20 Transfer log, or -1 for a native transfer. Together with tx_hash and the chain it is the deduplication key."
+    },
+    "block_number": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Where it currently sits. A reorg can change this for the same deposit."
+    },
+    "block_hash": {
+      "type": "string",
+      "pattern": "^0x[0-9a-f]{64}$"
+    },
+    "confirmations": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "head - block_number + 1 at the time of the event."
+    },
+    "status": {
+      "type": "string",
+      "description": "The deposit's status after this event. An open string: a new state must not break a consumer."
+    },
+    "required_confirmations": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "The asset's threshold at the time, so progress can be rendered without reading the registry."
+    }
+  }
+}
