@@ -113,8 +113,11 @@ jobs:
       - uses: actions/checkout@v4
       - name: compose file renders with every profile
         run: make compose-config
-      - name: dev secrets script parses
-        run: bash -n scripts/gen-dev-secrets.sh
+      - name: dev scripts parse
+        # e2e.sh is checked here rather than only by the e2e job: this job
+        # finishes in seconds, and a syntax error found twelve minutes into a
+        # container run is twelve minutes wasted.
+        run: bash -n scripts/gen-dev-secrets.sh && bash -n scripts/e2e.sh
 
   contracts:
     name: contracts

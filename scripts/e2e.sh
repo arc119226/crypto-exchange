@@ -9,7 +9,7 @@
 # things a single-process run cannot show — that the engine recovers from
 # kill -9 with its book intact, and that halting a market through the admin
 # API reaches the engine as market.updated.
-set -euo pipefail
+set -Eeuo pipefail
 
 cd "$(dirname "$0")/.."
 
@@ -22,12 +22,19 @@ STAMP=$(date +%s)
 
 log() { printf '\n\033[1m== %s\033[0m\n' "$*"; }
 
+# The container dump below is 200 lines from a dozen services, which is more
+# than the tail CI shows: an error printed before it scrolls out of reach. So
+# remember where the script died and say it last, where it survives.
+FAILED_LINE=""
+trap 'FAILED_LINE=$LINENO' ERR
+
 cleanup() {
   local code=$?
   if [ "$code" -ne 0 ]; then
     log "container logs"
     "${COMPOSE[@]}" ps || true
     "${COMPOSE[@]}" logs --no-color --tail=200 || true
+    log "e2e failed: exit $code at $0:${FAILED_LINE:-?}"
   fi
   if [ "$KEEP" != "1" ]; then
     "${COMPOSE[@]}" down -v --remove-orphans >/dev/null 2>&1 || true
@@ -107,9 +114,15 @@ cast_run() {
   docker run --rm --network host --entrypoint cast \
     "ghcr.io/foundry-rs/foundry:${FOUNDRY_TAG}" "$@" --rpc-url "$ANVIL_RPC"
 }
-# the deployer wrote addresses.json into a volume the app services mount
-usdc=$("${COMPOSE[@]}" run --rm --no-deps --entrypoint cat seed /artifacts/addresses.json | jq -r .usdc)
-[ -n "$usdc" ] && [ "$usdc" != "null" ] || { echo "could not read the MockUSDC address"; exit 1; }
+# Where MockUSDC lives. The deployer wrote it to /artifacts/addresses.json, but
+# that file cannot be read from a container here: the exchange image is
+# distroless, so it holds no `cat` and no shell. Ask the registry instead —
+# `exchange seed` put the same address there, so this also proves the chain
+# deployer -> addresses.json -> seed -> registry is connected.
+usdc_contract=$("$CTL" assets list --output json \
+  | jq -r '.assets[] | select(.symbol=="USDC") | .contract_address')
+[ -n "$usdc_contract" ] && [ "$usdc_contract" != "null" ] \
+  || { echo "the registry has no USDC contract address"; exit 1; }
 
 balance_of() { "$CTL" balances --output json | jq -r --arg a "$1" '.balances[] | select(.asset==$a) | .available' | head -1; }
 
@@ -137,7 +150,12 @@ wait_for_credit ETH "$before_eth"
 
 log "an on-chain USDC deposit reaches the balance"
 before_usdc=$(balance_of USDC); before_usdc=${before_usdc:-0}
-cast_run send --unlocked --from "$sender" "$usdc" "transfer(address,uint256)" "$addr" 250500000 >/dev/null
+# Deploy.s.sol mints the 1,000,000 USDC to the hot wallet, not to the deployer,
+# so `sender` starts with none and a bare transfer would revert. Mint to it
+# first: that keeps the deposit itself an ordinary EOA-to-address transfer,
+# whose Transfer log carries a real `from` rather than the zero address.
+cast_run send --unlocked --from "$sender" "$usdc_contract" "mint(address,uint256)" "$sender" 250500000 >/dev/null
+cast_run send --unlocked --from "$sender" "$usdc_contract" "transfer(address,uint256)" "$addr" 250500000 >/dev/null
 wait_for_credit USDC "$before_usdc"
 
 log "a resting order survives kill -9 of the engine"
