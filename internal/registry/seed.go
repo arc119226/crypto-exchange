@@ -61,6 +61,14 @@ var (
 	seedPriceTick   = money.MustParse("0.01")
 	seedQtyStep     = money.MustParse("0.0001")
 	seedMinNotional = money.MustParse("5")
+
+	// The smallest withdrawal worth making. A zero minimum -- what these
+	// assets were seeded with until the withdrawal policy existed to enforce
+	// one -- accepts a one-wei withdrawal whose gas costs more than it moves.
+	// min_deposit stays zero on purpose: nothing enforces it yet, and a
+	// registry value no code honours is worse than an absent one.
+	seedMinWithdrawalETH  = money.MustParse("0.01")
+	seedMinWithdrawalUSDC = money.MustParse("5")
 )
 
 // Withdrawal limits per asset and KYC level (docs/plan-v1.0.md §6.4.2). The
@@ -117,9 +125,11 @@ func Seed(ctx context.Context, pool *pgxpool.Pool, fx Fixtures, opts SeedOptions
 	usdc := fx.USDC
 	for _, in := range []AssetInput{
 		{Symbol: "ETH", Name: "Ether", ChainID: fx.ChainID, IsNative: true, Scale: 18, DisplayScale: 6,
-			RequiredConfirmations: opts.RequiredConfirmations, DepositEnabled: true, WithdrawEnabled: true, Status: AssetActive},
+			RequiredConfirmations: opts.RequiredConfirmations, MinWithdrawal: seedMinWithdrawalETH,
+			DepositEnabled: true, WithdrawEnabled: true, Status: AssetActive},
 		{Symbol: "USDC", Name: "Mock USD Coin", ChainID: fx.ChainID, ContractAddress: &usdc, Scale: 6, DisplayScale: 2,
-			RequiredConfirmations: opts.RequiredConfirmations, DepositEnabled: true, WithdrawEnabled: true, Status: AssetActive},
+			RequiredConfirmations: opts.RequiredConfirmations, MinWithdrawal: seedMinWithdrawalUSDC,
+			DepositEnabled: true, WithdrawEnabled: true, Status: AssetActive},
 	} {
 		if _, err := store.UpsertAsset(ctx, tx, opts.TenantID, in); err != nil {
 			return res, err
