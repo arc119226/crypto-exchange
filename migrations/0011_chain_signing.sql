@@ -163,7 +163,11 @@ GRANT UPDATE (nonce, raw_tx, tx_hash, broadcast_at, replacements, block_number,
 -- the transaction columns: a role that could write tx_hash could make a
 -- withdrawal look sent without anything having been signed, and the whole
 -- point of §6.4.2 is that authorising and acting are different roles.
-GRANT UPDATE (resolve_action, resolve_note, resolve_requested_by, resolve_requested_at)
+--
+-- resolve_error is in the list because a new request clears the previous
+-- one's failure, which would otherwise be shown against a request that has
+-- not been tried yet. Admin can only null it, and it carries no authority.
+GRANT UPDATE (resolve_action, resolve_note, resolve_requested_by, resolve_requested_at, resolve_error)
   ON chain.withdrawals TO ex_admin;
 
 -- The signer must read the withdrawal it is asked to sign, to check the

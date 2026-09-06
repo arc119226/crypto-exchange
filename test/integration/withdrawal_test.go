@@ -530,10 +530,37 @@ func TestWithdrawalRolePrivileges(t *testing.T) {
 		// neither, so it may write the request columns and nothing else — a
 		// role that could write tx_hash could make a withdrawal look sent
 		// without anything having been signed.
+		//
+		// Admin does hold status, because reviewing writes it. What stops it
+		// declaring a withdrawal sent is the pair: the states that mean "on
+		// the chain" require the transaction columns (0011), and those are the
+		// ones it may not write. Neither half is sufficient alone, and this is
+		// the half a grant test alone would miss.
 		_, err := adminPool.Exec(ctx,
-			`UPDATE chain.withdrawals SET resolve_action = 'bump', resolve_note = 'why',
-			   resolve_requested_by = 'admin-api-key', resolve_requested_at = now() WHERE id = $1`, id)
+			`UPDATE chain.withdrawals SET status = 'confirmed' WHERE id = $1`, id)
+		var checkErr *pgconn.PgError
+		require.ErrorAs(t, err, &checkErr)
+		assert.Equal(t, "23514", checkErr.Code, "signed means signed")
+
+		// Put the withdrawal where a resolution applies, as the chain role
+		// would. This is ex_all because it is setup, not the thing under test.
+		_, err = h.all.Exec(ctx, `UPDATE chain.withdrawals
+			SET status = 'broadcast', nonce = 0, raw_tx = '\x00', tx_hash = $2, broadcast_at = now()
+			WHERE id = $1`, id, "0x"+strings.Repeat("e", 64))
 		require.NoError(t, err)
+
+		// The real query, not a hand-written UPDATE: it also touches version
+		// and updated_at and writes an audit row, and a missing grant on any
+		// of those is exactly the kind of thing that only shows up here.
+		adminLedger := ledger.New(adminPool, "default")
+		require.NoError(t, adminLedger.LoadHouseAccounts(ctx))
+		rec, err := withdrawal.NewReviewer(adminPool, "default", adminLedger, rec).
+			RequestResolve(ctx, withdrawal.ResolveParams{
+				ID: id, Action: withdrawal.ActionBump, Note: "stuck",
+				ActorType: audit.ActorAPIKey, ActorID: "admin-api-key",
+			})
+		require.NoError(t, err)
+		assert.Equal(t, withdrawal.ActionBump, rec.ResolveAction)
 
 		for _, stmt := range []string{
 			`UPDATE chain.withdrawals SET nonce = 3 WHERE id = $1`,
@@ -545,16 +572,6 @@ func TestWithdrawalRolePrivileges(t *testing.T) {
 			require.ErrorAs(t, err, &pgErr, stmt)
 			assert.Equal(t, "42501", pgErr.Code, stmt)
 		}
-
-		// Admin does hold status, because reviewing writes it. What stops it
-		// declaring a withdrawal sent is the pair: the states that mean "on
-		// the chain" require the transaction columns (0011), and those are the
-		// ones it may not write. Neither half is sufficient alone.
-		_, err = adminPool.Exec(ctx,
-			`UPDATE chain.withdrawals SET status = 'confirmed' WHERE id = $1`, id)
-		var checkErr *pgconn.PgError
-		require.ErrorAs(t, err, &checkErr)
-		assert.Equal(t, "23514", checkErr.Code, "signed means signed")
 
 		// The chain role is the one that clears the request it applied.
 		_, err = chainPool.Exec(ctx,

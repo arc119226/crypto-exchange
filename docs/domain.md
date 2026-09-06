@@ -477,6 +477,8 @@ Phase 4 分四段:4a 充值(再拆 4a-1 金鑰與地址、4a-2 掃描與入帳)�
 
 **`custody:hot` 會是負的,而且是誠實的。** 錢從 `custody:deposit_addresses` 進來、從 `custody:hot` 出去,中間的歸集是 4c。在那之前熱錢包付出去的比收進來的多,`custody_hot` 這個資產帳戶自然為負。這不會炸:`ledger.balances` 的 `available >= 0` CHECK 只作用在使用者的桶上(`aggregateDeltas` 跳過 house bucket),house 餘額由分錄推導,試算表照樣平衡。
 
+**又一個只有拆分部署才看得見的權限缺口**(第五個了):`RequestWithdrawalResolve` 除了四個請求欄還會把 `resolve_error` 清成 NULL——新的請求不該掛著上一次的失敗訊息——而 grant 裡沒有這一欄。手寫 UPDATE 四個欄位的測試會過,真正的查詢在 `ex_admin` 上是 42501。教訓與 3c、4a-2、4b-1 完全一樣:**權限測試要跑真正的那一句 SQL,不是它的近似**。
+
 **Phase 4b-2 學到的兩件事**,都在沒有測試碰過的程式碼裡:
 
 1. `evm.ToWei` 用「小數位數」而不是「小數的值」判斷精度,於是從 `NUMERIC(36,18)` 讀回來的金額對任何非 18 位的資產都顯得過度精確——**這會拒絕掉每一筆 ERC-20 提現**。50 USDC 從資料庫回來是 `50.000000000000000000`,而十二個零不是丟失的精度。
