@@ -31,7 +31,14 @@ type Config struct {
 	Redis    RedisConfig    `envPrefix:"REDIS_"`
 	Chain    ChainConfig    `envPrefix:"ETH_"`
 	JWT      JWTConfig      `envPrefix:"JWT_"`
+	Admin    AdminConfig    `envPrefix:"ADMIN_"`
 	Shutdown ShutdownConfig `envPrefix:"SHUTDOWN_"`
+}
+
+// AdminConfig configures the operator API (admin role). APIKey is the static
+// key of Phase 2–4 (docs/plan-v1.0.md §14); Phase 5 adds sessions + TOTP.
+type AdminConfig struct {
+	APIKey telemetry.Secret `env:"API_KEY"`
 }
 
 // DBConfig configures the Postgres pool. URL is required for every role.
@@ -77,6 +84,7 @@ var secretsWithFileVariant = []string{
 	"WALLET_KEYSTORE_PASSPHRASE",
 	"WEBHOOK_SIGNING_KEY",
 	"ADMIN_BOOTSTRAP_PASSWORD",
+	"ADMIN_API_KEY",
 }
 
 // LoadConfig reads the environment (after expanding *_FILE secrets) and

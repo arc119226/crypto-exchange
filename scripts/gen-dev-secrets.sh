@@ -33,7 +33,7 @@ if [[ -f .env && "$FORCE" != 1 ]]; then
 else
   cp .env.example .env
   chmod 600 .env
-  for key in POSTGRES_PASSWORD WALLET_KEYSTORE_PASSPHRASE WEBHOOK_SIGNING_KEY ADMIN_BOOTSTRAP_PASSWORD; do
+  for key in POSTGRES_PASSWORD WALLET_KEYSTORE_PASSPHRASE WEBHOOK_SIGNING_KEY ADMIN_BOOTSTRAP_PASSWORD ADMIN_API_KEY; do
     set_var .env "$key" "$(rand_hex)"
   done
   log "wrote .env"

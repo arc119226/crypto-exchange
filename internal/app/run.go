@@ -14,6 +14,7 @@ import (
 	"github.com/redis/go-redis/v9"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/arc119226/crypto-exchange/internal/ledger"
 	"github.com/arc119226/crypto-exchange/internal/platform/natsx"
 	"github.com/arc119226/crypto-exchange/internal/platform/pg"
 	"github.com/arc119226/crypto-exchange/internal/platform/redisx"
@@ -58,11 +59,24 @@ func Run(ctx context.Context, cfg Config, roles []Role, bi BuildInfo) error {
 	defer cleanup()
 
 	httpMetrics := telemetry.NewHTTPMetrics(reg)
-	var servers []*http.Server
+	var (
+		servers     []*http.Server
+		adminLedger *ledger.Service
+	)
 	for _, role := range roles {
 		switch role {
 		case RoleAPI:
 			servers = append(servers, newAPIServer(cfg, log, httpMetrics, registry.NewStore(d.pool)))
+		case RoleAdmin:
+			if cfg.Admin.APIKey.Reveal() == "" {
+				return fmt.Errorf("config: ADMIN_API_KEY is required for the admin role")
+			}
+			l, err := newLedger(ctx, cfg, log, d.pool, reg)
+			if err != nil {
+				return err
+			}
+			adminLedger = l
+			servers = append(servers, newAdminServer(cfg, log, httpMetrics, d.pool, l))
 		default:
 			log.Info("role not implemented yet, serving ops endpoints only", slog.String("role", string(role)))
 		}
@@ -72,6 +86,9 @@ func Run(ctx context.Context, cfg Config, roles []Role, bi BuildInfo) error {
 	g, gctx := errgroup.WithContext(ctx)
 	for _, s := range append(servers, ops) {
 		g.Go(listenAndServe(s, log))
+	}
+	if adminLedger != nil {
+		g.Go(func() error { return observeTrialBalance(gctx, log, adminLedger) })
 	}
 	g.Go(func() error {
 		<-gctx.Done()

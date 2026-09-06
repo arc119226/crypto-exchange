@@ -1,0 +1,12 @@
+# oapi-codegen config for the Go client of the admin API used by exchangectl.
+# Paths are relative to the repo root because `make gen` runs there.
+package: adminclient
+output: cmd/exchangectl/internal/adminclient/client.gen.go
+generate:
+  client: true
+  models: true
+output-options:
+  skip-prune: true
+  name-normalizer: ToCamelCaseWithInitialisms
+compatibility:
+  always-prefix-enum-values: true
