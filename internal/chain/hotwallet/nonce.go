@@ -155,10 +155,18 @@ func (m *Manager) holders(ctx context.Context) (map[uint64]string, error) {
 		return nil, fmt.Errorf("hotwallet: list allocated nonces: %w", err)
 	}
 	for _, r := range rows {
-		// Only a withdrawal that still has a transaction in flight holds its
-		// nonce. One that failed before broadcasting released it, and the gap
-		// it left is exactly what this scan is looking for.
-		if r.Nonce == nil || (r.Status != "signed" && r.Status != "broadcast" && r.Status != "confirmed") {
+		// A withdrawal holds its nonce from the moment the nonce is pinned to
+		// it, which happens while it is still funds_locked and before anything
+		// is signed. Counting only the signed states would treat that window
+		// as a gap and fill a nonce a signature is about to use. One that
+		// failed before broadcasting released its nonce, and the hole it left
+		// is exactly what this scan is looking for.
+		if r.Nonce == nil {
+			continue
+		}
+		switch r.Status {
+		case "funds_locked", "signed", "broadcast", "confirmed":
+		default:
 			continue
 		}
 		out[uint64(*r.Nonce)] = "withdrawal " + r.ID //nolint:gosec // CHECKed >= 0

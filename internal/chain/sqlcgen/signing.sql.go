@@ -34,6 +34,57 @@ func (q *Queries) AllocateNonce(ctx context.Context, arg AllocateNonceParams) (i
 	return nonce, err
 }
 
+const allocateWithdrawalNonce = `-- name: AllocateWithdrawalNonce :one
+UPDATE chain.withdrawals
+SET nonce = $3, version = version + 1, updated_at = now()
+WHERE tenant_id = $1 AND id = $2
+RETURNING id, tenant_id, account_id, asset, amount, to_address, chain_id, idempotency_key, request_hash, status, failure_reason, reviewed_by, reviewed_at, review_note, hold_entry_id, correlation_id, version, created_at, updated_at, nonce, raw_tx, tx_hash, broadcast_at, replacements, block_number, gas_cost
+`
+
+type AllocateWithdrawalNonceParams struct {
+	TenantID string
+	ID       string
+	Nonce    *int64
+}
+
+// Pins the nonce onto the withdrawal before anything is signed, so a crash
+// between allocating and recording the signature does not strand the nonce and
+// does not make the retry ask for a different transaction. The status stays
+// funds_locked: nothing has been signed yet.
+func (q *Queries) AllocateWithdrawalNonce(ctx context.Context, arg AllocateWithdrawalNonceParams) (ChainWithdrawal, error) {
+	row := q.db.QueryRow(ctx, allocateWithdrawalNonce, arg.TenantID, arg.ID, arg.Nonce)
+	var i ChainWithdrawal
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.AccountID,
+		&i.Asset,
+		&i.Amount,
+		&i.ToAddress,
+		&i.ChainID,
+		&i.IdempotencyKey,
+		&i.RequestHash,
+		&i.Status,
+		&i.FailureReason,
+		&i.ReviewedBy,
+		&i.ReviewedAt,
+		&i.ReviewNote,
+		&i.HoldEntryID,
+		&i.CorrelationID,
+		&i.Version,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Nonce,
+		&i.RawTx,
+		&i.TxHash,
+		&i.BroadcastAt,
+		&i.Replacements,
+		&i.BlockNumber,
+		&i.GasCost,
+	)
+	return i, err
+}
+
 const getHotWallet = `-- name: GetHotWallet :one
 SELECT tenant_id, chain_id, address, next_nonce, updated_at FROM chain.hot_wallets WHERE tenant_id = $1 AND chain_id = $2
 `
@@ -57,7 +108,7 @@ func (q *Queries) GetHotWallet(ctx context.Context, arg GetHotWalletParams) (Cha
 }
 
 const getSignature = `-- name: GetSignature :one
-SELECT id, tenant_id, kind, ref_id, attempt, chain_id, from_address, to_address, nonce, tx_hash, signed_at FROM chain.signing_log
+SELECT id, tenant_id, kind, ref_id, attempt, chain_id, from_address, to_address, nonce, tx_hash, raw_tx, signed_at FROM chain.signing_log
 WHERE tenant_id = $1 AND kind = $2 AND ref_id = $3 AND attempt = $4
 `
 
@@ -87,6 +138,7 @@ func (q *Queries) GetSignature(ctx context.Context, arg GetSignatureParams) (Cha
 		&i.ToAddress,
 		&i.Nonce,
 		&i.TxHash,
+		&i.RawTx,
 		&i.SignedAt,
 	)
 	return i, err
@@ -131,9 +183,9 @@ func (q *Queries) InsertNonceFill(ctx context.Context, arg InsertNonceFillParams
 
 const insertSignature = `-- name: InsertSignature :one
 INSERT INTO chain.signing_log (
-    tenant_id, kind, ref_id, attempt, chain_id, from_address, to_address, nonce, tx_hash
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-RETURNING id, tenant_id, kind, ref_id, attempt, chain_id, from_address, to_address, nonce, tx_hash, signed_at
+    tenant_id, kind, ref_id, attempt, chain_id, from_address, to_address, nonce, tx_hash, raw_tx
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+RETURNING id, tenant_id, kind, ref_id, attempt, chain_id, from_address, to_address, nonce, tx_hash, raw_tx, signed_at
 `
 
 type InsertSignatureParams struct {
@@ -146,6 +198,7 @@ type InsertSignatureParams struct {
 	ToAddress   string
 	Nonce       int64
 	TxHash      string
+	RawTx       []byte
 }
 
 // Appended by the signer role only. The UNIQUE (kind, ref_id, attempt) is what
@@ -162,6 +215,7 @@ func (q *Queries) InsertSignature(ctx context.Context, arg InsertSignatureParams
 		arg.ToAddress,
 		arg.Nonce,
 		arg.TxHash,
+		arg.RawTx,
 	)
 	var i ChainSigningLog
 	err := row.Scan(
@@ -175,6 +229,7 @@ func (q *Queries) InsertSignature(ctx context.Context, arg InsertSignatureParams
 		&i.ToAddress,
 		&i.Nonce,
 		&i.TxHash,
+		&i.RawTx,
 		&i.SignedAt,
 	)
 	return i, err

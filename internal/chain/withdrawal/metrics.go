@@ -7,8 +7,10 @@ import "github.com/prometheus/client_golang/prometheus"
 // withdrawal waiting for a person is a user waiting for their money, and
 // nothing else in the system will notice.
 type Metrics struct {
-	decided *prometheus.CounterVec
-	pending prometheus.Gauge
+	decided      *prometheus.CounterVec
+	pending      prometheus.Gauge
+	replacements *prometheus.CounterVec
+	stuck        *prometheus.CounterVec
 }
 
 // NewMetrics registers the collectors. A nil registerer returns unregistered
@@ -23,9 +25,17 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 			Name: "withdrawals_pending_review",
 			Help: "Withdrawals waiting for an administrator to approve or reject them.",
 		}),
+		replacements: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "withdrawals_replacements_total",
+			Help: "Withdrawal transactions re-sent with a higher fee.",
+		}, []string{"asset"}),
+		stuck: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "withdrawals_stuck_total",
+			Help: "Withdrawals that exhausted their fee bumps and are waiting for an operator.",
+		}, []string{"asset"}),
 	}
 	if reg != nil {
-		reg.MustRegister(m.decided, m.pending)
+		reg.MustRegister(m.decided, m.pending, m.replacements, m.stuck)
 	}
 	return m
 }

@@ -43,6 +43,16 @@ const (
 const (
 	FailureInsufficientBalance = "insufficient_balance"
 	FailurePolicy              = "policy"
+	// FailureBroadcast is a transaction the node refused that the chain
+	// confirms is not mined: the funds go back to available.
+	FailureBroadcast = "broadcast"
+	// FailureOnChain is a transaction that was mined and reverted. The gas is
+	// spent and the amount stays in pending_withdrawal for a person to
+	// resolve (§6.1.4 e).
+	FailureOnChain = "on_chain"
+	// FailureReplaced is a broadcast transaction cancelled by an admin with a
+	// same-nonce self-transfer.
+	FailureReplaced = "replaced"
 )
 
 // Errors callers distinguish.

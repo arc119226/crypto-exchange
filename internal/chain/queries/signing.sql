@@ -34,8 +34,8 @@ WHERE tenant_id = $1 AND chain_id = $2;
 -- makes signing unrepeatable: a retry or a replayed message collides here
 -- rather than producing a second valid transaction.
 INSERT INTO chain.signing_log (
-    tenant_id, kind, ref_id, attempt, chain_id, from_address, to_address, nonce, tx_hash
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+    tenant_id, kind, ref_id, attempt, chain_id, from_address, to_address, nonce, tx_hash, raw_tx
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 RETURNING *;
 
 -- name: GetSignature :one
@@ -103,3 +103,13 @@ RETURNING *;
 SELECT id, nonce, status, tx_hash, raw_tx FROM chain.withdrawals
 WHERE tenant_id = $1 AND chain_id = $2 AND nonce IS NOT NULL
 ORDER BY nonce;
+
+-- name: AllocateWithdrawalNonce :one
+-- Pins the nonce onto the withdrawal before anything is signed, so a crash
+-- between allocating and recording the signature does not strand the nonce and
+-- does not make the retry ask for a different transaction. The status stays
+-- funds_locked: nothing has been signed yet.
+UPDATE chain.withdrawals
+SET nonce = $3, version = version + 1, updated_at = now()
+WHERE tenant_id = $1 AND id = $2
+RETURNING *;

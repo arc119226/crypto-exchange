@@ -98,6 +98,7 @@ type ChainSigningLog struct {
 	ToAddress   string
 	Nonce       int64
 	TxHash      string
+	RawTx       []byte
 	SignedAt    time.Time
 }
 

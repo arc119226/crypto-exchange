@@ -37,6 +37,13 @@ CREATE TABLE chain.signing_log (
     to_address   text      NOT NULL CHECK (to_address ~ '^0x[0-9a-f]{40}$'),
     nonce      bigint      NOT NULL CHECK (nonce >= 0),
     tx_hash    text        NOT NULL CHECK (tx_hash ~ '^0x[0-9a-f]{64}$'),
+    -- The signed transaction itself. Kept so that asking to sign the same
+    -- intent twice returns the same bytes instead of failing: a caller that
+    -- crashed between signing and recording must be able to recover the
+    -- transaction it already caused to exist, and re-deriving it is not an
+    -- option once the fee market has moved. These bytes are public -- they are
+    -- broadcast to the world -- so storing them reveals nothing.
+    raw_tx     bytea       NOT NULL,
     signed_at  timestamptz NOT NULL DEFAULT now(),
     UNIQUE (tenant_id, kind, ref_id, attempt)
 );

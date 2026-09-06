@@ -105,8 +105,19 @@ func (s *KeystoreSigner) Sign(ctx context.Context, req Request) (Result, error) 
 	}
 	hash := strings.ToLower(tx.Hash().Hex())
 
-	if err := s.record(ctx, req, to, hash); err != nil {
+	if existing, err := s.record(ctx, req, to, hash, raw); err != nil {
 		return Result{}, err
+	} else if existing != nil {
+		// This intent was already signed. Return the transaction that exists
+		// rather than the one just built: a caller that crashed between
+		// signing and recording must be able to recover the transaction it
+		// already caused to exist, and by now the fees it would ask for have
+		// moved, so re-deriving would produce different bytes for the same
+		// nonce -- two valid transactions racing for one slot.
+		s.log.Warn("returning an already-signed transaction",
+			slog.String("kind", string(req.Kind)), slog.String("ref_id", req.RefID),
+			slog.Int("attempt", int(req.Attempt)), slog.String("tx_hash", existing.TxHash))
+		return *existing, nil
 	}
 	s.log.Info("signed",
 		slog.String("kind", string(req.Kind)), slog.String("ref_id", req.RefID),
@@ -197,13 +208,18 @@ func (s *KeystoreSigner) nonceFillTx(req Request) (common.Address, *big.Int, []b
 	return s.hot, new(big.Int), nil, nil
 }
 
-// record appends to chain.signing_log and the audit trail. The unique key on
-// (kind, ref_id, attempt) is what makes a second signature impossible; a
-// collision here is reported as ErrAlreadySigned, never as a retryable error.
-func (s *KeystoreSigner) record(ctx context.Context, req Request, to common.Address, hash string) error {
+// record appends to chain.signing_log and the audit trail, and reports whether
+// this intent had already been signed.
+//
+// The unique key on (kind, ref_id, attempt) is what makes a second *distinct*
+// signature impossible. A collision is not an error: it means the same intent
+// was signed before, and the recorded transaction is returned so the caller
+// converges on it. What the key prevents is two different transactions for one
+// intent, which is the thing that would actually cost money.
+func (s *KeystoreSigner) record(ctx context.Context, req Request, to common.Address, hash string, raw []byte) (*Result, error) {
 	tx, err := s.db.Begin(ctx)
 	if err != nil {
-		return fmt.Errorf("signer: begin: %w", err)
+		return nil, fmt.Errorf("signer: begin: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
@@ -211,13 +227,13 @@ func (s *KeystoreSigner) record(ctx context.Context, req Request, to common.Addr
 		TenantID: s.tenant, Kind: string(req.Kind), RefID: req.RefID, Attempt: req.Attempt,
 		ChainID: s.chainID, FromAddress: strings.ToLower(s.hot.Hex()),
 		ToAddress: strings.ToLower(to.Hex()), Nonce: int64(req.Nonce), //nolint:gosec // node nonces are far below 2^63
-		TxHash: hash,
+		TxHash: hash, RawTx: raw,
 	}); err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
-			return fmt.Errorf("%w: %s %s attempt %d", ErrAlreadySigned, req.Kind, req.RefID, req.Attempt)
+			return s.existing(ctx, req)
 		}
-		return fmt.Errorf("signer: record signature: %w", err)
+		return nil, fmt.Errorf("signer: record signature: %w", err)
 	}
 	if err := s.audit.Record(ctx, tx, audit.Event{
 		ActorType: audit.ActorSystem, ActorID: "signer", Action: "signer.sign",
@@ -227,7 +243,25 @@ func (s *KeystoreSigner) record(ctx context.Context, req Request, to common.Addr
 			"to": strings.ToLower(to.Hex()), "asset": req.Asset, "value": req.Value.String(),
 		},
 	}); err != nil {
-		return fmt.Errorf("signer: audit: %w", err)
+		return nil, fmt.Errorf("signer: audit: %w", err)
 	}
-	return tx.Commit(ctx)
+	return nil, tx.Commit(ctx)
+}
+
+// existing reads back a signature that was already made for this intent.
+func (s *KeystoreSigner) existing(ctx context.Context, req Request) (*Result, error) {
+	row, err := sqlcgen.New(s.db).GetSignature(ctx, sqlcgen.GetSignatureParams{
+		TenantID: s.tenant, Kind: string(req.Kind), RefID: req.RefID, Attempt: req.Attempt,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("%w: %s %s attempt %d, and it could not be read back: %w",
+			ErrAlreadySigned, req.Kind, req.RefID, req.Attempt, err)
+	}
+	if uint64(row.Nonce) != req.Nonce { //nolint:gosec // CHECKed >= 0
+		// The same intent was signed for a different nonce. Returning either
+		// transaction would be wrong, and signing a third is worse.
+		return nil, fmt.Errorf("%w: %s %s attempt %d was signed with nonce %d, not %d",
+			ErrAlreadySigned, req.Kind, req.RefID, req.Attempt, row.Nonce, req.Nonce)
+	}
+	return &Result{RawTx: row.RawTx, TxHash: row.TxHash, From: row.FromAddress, Nonce: req.Nonce}, nil
 }
