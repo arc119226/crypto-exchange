@@ -128,9 +128,14 @@ func TestDepositCreditsAfterConfirmations(t *testing.T) {
 }
 
 // TestDepositReorgOrphansAndRecovers walks the drill in docs/domain.md §4: a
-// deposit seen on a branch that loses is orphaned and the cursor rewinds, and
-// when the same transaction reappears it is UPDATEd rather than INSERTed — the
-// trap that would otherwise make it uncreditable forever.
+// deposit seen on a branch that loses is orphaned, and the scanner recovers
+// onto the new chain.
+//
+// The same-transaction reappearance — the UPDATE-not-INSERT trap — is proved
+// in TestScriptedReorg instead. anvil's evm_revert discards the reverted
+// transaction rather than returning it to the mempool, so re-submitting here
+// would produce a new nonce and therefore a genuinely different deposit;
+// only the scripted chain can replay one transaction onto two branches.
 func TestDepositReorgOrphansAndRecovers(t *testing.T) {
 	h := setupDeposit(t)
 	ctx := context.Background()
@@ -140,34 +145,44 @@ func TestDepositReorgOrphansAndRecovers(t *testing.T) {
 	h.anvil.Mine(t, 2) // some history to rewind to
 	require.NoError(t, h.scanner.Tick(ctx))
 	snapshot := h.anvil.Snapshot(t)
+	ancestor := h.cursor(t, ctx)
 
 	h.anvil.SendETH(t, from, address, oneETH())
 	h.anvil.Mine(t, 1)
 	require.NoError(t, h.scanner.Tick(ctx))
 	require.Equal(t, deposit.StatusConfirming, h.depositStatus(t, ctx, account),
 		"seen but not yet credited, which is what makes it orphanable")
-	cursorBefore := h.cursor(t, ctx)
+	orphanHeight := h.cursor(t, ctx)
+	require.Equal(t, ancestor+1, orphanHeight)
+	abandonedHash := h.blockHash(t, ctx, orphanHeight)
 
 	// the branch carrying the deposit loses
 	h.anvil.Revert(t, snapshot)
-	h.anvil.Mine(t, 2) // a different branch of the same height
+	h.anvil.Mine(t, 2)
 	require.NoError(t, h.scanner.Tick(ctx))
 
 	assert.Equal(t, deposit.StatusOrphaned, h.depositStatus(t, ctx, account))
 	assert.Equal(t, "0", h.ethBalance(t, ctx, account).String(), "an orphan is not money")
-	assert.Less(t, h.cursor(t, ctx), cursorBefore,
-		"the cursor rewound rather than marching past the abandoned blocks")
+	// The cursor does not end below where it was: the rewind and the rescan of
+	// the winning branch happen in the same tick. What must be true is that
+	// the ring no longer holds the abandoned block, and that the scanner is
+	// caught up to the new chain.
+	assert.NotEqual(t, abandonedHash, h.blockHash(t, ctx, orphanHeight),
+		"the ring must hold the winning branch at that height, not the abandoned one")
+	head, err := h.anvil.client(t).Head(ctx)
+	require.NoError(t, err)
+	assert.EqualValues(t, head, h.cursor(t, ctx), "caught up to the new chain")
 
-	t.Run("the same transaction on the new chain is credited", func(t *testing.T) {
+	t.Run("a later deposit on the new chain is credited normally", func(t *testing.T) {
 		h.anvil.SendETH(t, from, address, oneETH())
 		h.anvil.Mine(t, requiredConfirmations)
 		require.NoError(t, h.scanner.Tick(ctx))
-		require.NoError(t, h.scanner.Tick(ctx))
 
 		assert.Equal(t, deposit.StatusCredited, h.depositStatus(t, ctx, account))
-		assert.Equal(t, "1", h.ethBalance(t, ctx, account).String())
-		assert.Equal(t, 1, h.depositRows(t, ctx, account),
-			"the reappearance must UPDATE the existing row, never INSERT a second")
+		assert.Equal(t, "1", h.ethBalance(t, ctx, account).String(),
+			"only the new transfer is credited; the orphan stays uncredited")
+		assert.Equal(t, 2, h.depositRows(t, ctx, account),
+			"a different transaction is a different deposit")
 		h.assertTrialBalanceZero(t, ctx)
 	})
 }
@@ -271,6 +286,15 @@ func (h depositHarness) depositRows(t *testing.T, ctx context.Context, account s
 	require.NoError(t, h.all.QueryRow(ctx,
 		`SELECT count(*) FROM chain.deposits WHERE account_id = $1`, account).Scan(&n))
 	return n
+}
+
+// blockHash returns what the ring remembers at a height.
+func (h depositHarness) blockHash(t *testing.T, ctx context.Context, number int64) string {
+	t.Helper()
+	var hash string
+	require.NoError(t, h.all.QueryRow(ctx,
+		`SELECT hash FROM chain.blocks WHERE chain_id = $1 AND number = $2`, anvilChainID, number).Scan(&hash))
+	return hash
 }
 
 func (h depositHarness) cursor(t *testing.T, ctx context.Context) int64 {
