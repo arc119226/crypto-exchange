@@ -1,0 +1,611 @@
+openapi: 3.0.3
+info:
+  title: Exchange Admin API
+  version: 1.0.0-phase2
+  description: |
+    Operator API of the white-label exchange engine (docs/plan-v1.0.md §7.4).
+    Every write is recorded in the audit trail.
+
+    Phase 2 scope: ledger accounts, balances, journal entries, trial balance,
+    administrator adjustments and the audit log. Authentication is a static
+    admin API key (`X-Admin-Api-Key`, `ADMIN_API_KEY`) until Phase 5 adds
+    admin sessions with TOTP and scoped admin API keys.
+
+    Conventions are those of the public API: decimal strings for money,
+    RFC 7807 problems with `correlation_id`, `X-Request-Id` echo.
+servers:
+  - url: http://localhost:8082
+    description: Local development (`make up-single`, admin role on :8082)
+security:
+  - AdminApiKey: []
+tags:
+  - name: accounts
+  - name: ledger
+  - name: audit
+
+paths:
+  /admin/v1/accounts:
+    get:
+      tags: [accounts]
+      operationId: listAccounts
+      summary: List ledger accounts
+      parameters:
+        - name: kind
+          in: query
+          schema:
+            $ref: "#/components/schemas/AccountKind"
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+      responses:
+        "200":
+          description: Accounts
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AccountList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    post:
+      tags: [accounts]
+      operationId: createAccount
+      summary: Open a spot account
+      description: Phase 2 dev/admin path; from Phase 3 registration opens the account.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateAccountRequest"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Account"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /admin/v1/accounts/{id}:
+    get:
+      tags: [accounts]
+      operationId: getAccount
+      summary: Get one account
+      parameters:
+        - $ref: "#/components/parameters/AccountID"
+      responses:
+        "200":
+          description: Account
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Account"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /admin/v1/accounts/{id}/status:
+    put:
+      tags: [accounts]
+      operationId: setAccountStatus
+      summary: Freeze or reactivate an account
+      parameters:
+        - $ref: "#/components/parameters/AccountID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AccountStatusRequest"
+      responses:
+        "200":
+          description: Updated account
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Account"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /admin/v1/accounts/{id}/balances:
+    get:
+      tags: [ledger]
+      operationId: getAccountBalances
+      summary: Cached balances of a spot account
+      parameters:
+        - $ref: "#/components/parameters/AccountID"
+      responses:
+        "200":
+          description: Balances
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BalanceList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /admin/v1/ledger/trial-balance:
+    get:
+      tags: [ledger]
+      operationId: getTrialBalance
+      summary: Trial balance per asset (must be zero) and house account balances
+      responses:
+        "200":
+          description: Trial balance
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TrialBalance"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /admin/v1/ledger/entries:
+    get:
+      tags: [ledger]
+      operationId: listEntries
+      summary: Journal entries with postings, newest first
+      parameters:
+        - name: account_id
+          in: query
+          schema:
+            type: string
+        - name: ref_type
+          in: query
+          schema:
+            type: string
+        - name: ref_id
+          in: query
+          schema:
+            type: string
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+      responses:
+        "200":
+          description: Entries
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JournalEntryList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /admin/v1/ledger/adjustments:
+    post:
+      tags: [ledger]
+      operationId: createAdjustment
+      summary: Post a manual adjustment against the external account
+      description: |
+        `credit` adds to the account's available balance (the development
+        faucet, or a correction in the user's favour); `debit` removes from it.
+        A reason is mandatory and the call is recorded in the audit trail.
+        Repeating the same `idempotency_key` returns the original entry with
+        HTTP 200 instead of 201.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdjustmentRequest"
+      responses:
+        "201":
+          description: Posted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JournalEntry"
+        "200":
+          description: Already posted (idempotent replay)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JournalEntry"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          description: Insufficient balance for a debit adjustment
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /admin/v1/audit-events:
+    get:
+      tags: [audit]
+      operationId: listAuditEvents
+      summary: Audit trail, newest first
+      parameters:
+        - name: action
+          in: query
+          schema:
+            type: string
+        - name: target_type
+          in: query
+          schema:
+            type: string
+        - name: target_id
+          in: query
+          schema:
+            type: string
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+      responses:
+        "200":
+          description: Audit events
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuditEventList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+components:
+  securitySchemes:
+    AdminApiKey:
+      type: apiKey
+      in: header
+      name: X-Admin-Api-Key
+
+  parameters:
+    AccountID:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+    Limit:
+      name: limit
+      in: query
+      schema:
+        type: integer
+        format: int32
+        minimum: 1
+        maximum: 500
+        default: 100
+    Offset:
+      name: offset
+      in: query
+      schema:
+        type: integer
+        format: int32
+        minimum: 0
+        default: 0
+
+  responses:
+    BadRequest:
+      description: Malformed request
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+    Unauthorized:
+      description: Missing or wrong admin API key
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+    NotFound:
+      description: The resource does not exist
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+    InternalError:
+      description: Unexpected server error
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+
+  schemas:
+    Amount:
+      type: string
+      description: Decimal serialized as a string (NUMERIC(36,18)); never a JSON number.
+      pattern: '^-?[0-9]+(\.[0-9]+)?$'
+      example: "1990.00"
+      x-go-type: money.Amount
+      x-go-type-import:
+        path: github.com/arc119226/crypto-exchange/internal/money
+
+    AccountKind:
+      type: string
+      enum: [spot, house]
+
+    AccountStatus:
+      type: string
+      enum: [active, frozen]
+
+    HouseCode:
+      type: string
+      enum: [fee_revenue, gas_expense, custody_hot, custody_deposit_addresses, pending_withdrawal, external]
+
+    Account:
+      type: object
+      required: [id, kind, status, created_at, updated_at]
+      properties:
+        id:
+          type: string
+        kind:
+          $ref: "#/components/schemas/AccountKind"
+        house_code:
+          allOf:
+            - $ref: "#/components/schemas/HouseCode"
+          description: Present for house accounts only.
+        owner_user_id:
+          type: string
+          nullable: true
+        status:
+          $ref: "#/components/schemas/AccountStatus"
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    AccountList:
+      type: object
+      required: [accounts]
+      properties:
+        accounts:
+          type: array
+          items:
+            $ref: "#/components/schemas/Account"
+
+    CreateAccountRequest:
+      type: object
+      properties:
+        owner_user_id:
+          type: string
+          description: Optional until Phase 3 introduces users.
+
+    AccountStatusRequest:
+      type: object
+      required: [status, reason]
+      properties:
+        status:
+          $ref: "#/components/schemas/AccountStatus"
+        reason:
+          type: string
+          minLength: 1
+
+    Balance:
+      type: object
+      required: [asset, available, hold, total]
+      properties:
+        asset:
+          type: string
+        available:
+          $ref: "#/components/schemas/Amount"
+        hold:
+          $ref: "#/components/schemas/Amount"
+        total:
+          $ref: "#/components/schemas/Amount"
+
+    BalanceList:
+      type: object
+      required: [account_id, balances]
+      properties:
+        account_id:
+          type: string
+        balances:
+          type: array
+          items:
+            $ref: "#/components/schemas/Balance"
+
+    Posting:
+      type: object
+      required: [account_id, asset, bucket, direction, amount]
+      properties:
+        account_id:
+          type: string
+        asset:
+          type: string
+        bucket:
+          type: string
+          enum: [available, hold, house]
+        direction:
+          type: string
+          enum: [debit, credit]
+        amount:
+          $ref: "#/components/schemas/Amount"
+
+    JournalEntry:
+      type: object
+      required: [id, idempotency_key, kind, created_at, postings]
+      properties:
+        id:
+          type: integer
+          format: int64
+        idempotency_key:
+          type: string
+        kind:
+          type: string
+        ref_type:
+          type: string
+          x-go-type-skip-optional-pointer: true
+        ref_id:
+          type: string
+          x-go-type-skip-optional-pointer: true
+        reason:
+          type: string
+          x-go-type-skip-optional-pointer: true
+        correlation_id:
+          type: string
+          x-go-type-skip-optional-pointer: true
+        created_at:
+          type: string
+          format: date-time
+        postings:
+          type: array
+          items:
+            $ref: "#/components/schemas/Posting"
+
+    JournalEntryList:
+      type: object
+      required: [entries]
+      properties:
+        entries:
+          type: array
+          items:
+            $ref: "#/components/schemas/JournalEntry"
+
+    AdjustmentRequest:
+      type: object
+      required: [account_id, asset, amount, direction, reason]
+      properties:
+        account_id:
+          type: string
+        asset:
+          type: string
+          example: USDC
+        amount:
+          $ref: "#/components/schemas/Amount"
+        direction:
+          type: string
+          enum: [credit, debit]
+          description: credit adds to the user's available balance, debit removes.
+        reason:
+          type: string
+          minLength: 1
+          example: dev faucet
+        idempotency_key:
+          type: string
+          description: Defaults to a fresh key; pass one to make retries safe.
+          x-go-type-skip-optional-pointer: true
+
+    TrialBalanceLine:
+      type: object
+      required: [asset, debits, credits, diff]
+      properties:
+        asset:
+          type: string
+        debits:
+          $ref: "#/components/schemas/Amount"
+        credits:
+          $ref: "#/components/schemas/Amount"
+        diff:
+          $ref: "#/components/schemas/Amount"
+
+    HouseBalance:
+      type: object
+      required: [code, type, asset, balance]
+      properties:
+        code:
+          $ref: "#/components/schemas/HouseCode"
+        type:
+          type: string
+          enum: [liability, asset, revenue, expense, external]
+        asset:
+          type: string
+        balance:
+          $ref: "#/components/schemas/Amount"
+
+    TrialBalance:
+      type: object
+      required: [balanced, lines, house]
+      properties:
+        balanced:
+          type: boolean
+          description: true when every diff is zero.
+        lines:
+          type: array
+          items:
+            $ref: "#/components/schemas/TrialBalanceLine"
+        house:
+          type: array
+          items:
+            $ref: "#/components/schemas/HouseBalance"
+
+    AuditEvent:
+      type: object
+      required: [id, actor_type, action, created_at]
+      properties:
+        id:
+          type: integer
+          format: int64
+        actor_type:
+          type: string
+          enum: [user, admin, system, api_key]
+        actor_id:
+          type: string
+          x-go-type-skip-optional-pointer: true
+        action:
+          type: string
+        target_type:
+          type: string
+          x-go-type-skip-optional-pointer: true
+        target_id:
+          type: string
+          x-go-type-skip-optional-pointer: true
+        before: {}
+        after: {}
+        ip:
+          type: string
+          x-go-type-skip-optional-pointer: true
+        correlation_id:
+          type: string
+          x-go-type-skip-optional-pointer: true
+        created_at:
+          type: string
+          format: date-time
+
+    AuditEventList:
+      type: object
+      required: [events]
+      properties:
+        events:
+          type: array
+          items:
+            $ref: "#/components/schemas/AuditEvent"
+
+    Problem:
+      type: object
+      description: RFC 7807 problem details.
+      required: [type, title, status]
+      properties:
+        type:
+          type: string
+        title:
+          type: string
+        status:
+          type: integer
+        detail:
+          type: string
+          x-go-type-skip-optional-pointer: true
+        instance:
+          type: string
+          x-go-type-skip-optional-pointer: true
+        correlation_id:
+          type: string
+          x-go-type-skip-optional-pointer: true

@@ -1,8 +1,34 @@
 version: "2"
+# Global type overrides. NUMERIC stays pgtype.Numeric; the conversion to
+# money.Amount goes through internal/platform/pg so Exp != 0 is always
+# handled. uuid -> string keeps ids opaque to Go code.
+overrides:
+  go:
+    overrides:
+      - db_type: uuid
+        go_type: string
+      - db_type: uuid
+        nullable: true
+        go_type:
+          type: string
+          pointer: true
+      - db_type: timestamptz
+        go_type:
+          import: time
+          type: Time
+      - db_type: pg_catalog.numeric
+        go_type:
+          import: github.com/jackc/pgx/v5/pgtype
+          type: Numeric
+      - db_type: pg_catalog.numeric
+        nullable: true
+        go_type:
+          import: github.com/jackc/pgx/v5/pgtype
+          type: Numeric
 sql:
+  # goose migration files double as the schema source; sqlc ignores the
+  # goose annotations and only sees the DDL. One package per owning module.
   - engine: postgresql
-    # goose migration files double as the schema source; sqlc ignores the
-    # goose annotations and only sees the DDL.
     schema: migrations
     queries: internal/registry/queries
     gen:
@@ -12,26 +38,26 @@ sql:
         sql_package: pgx/v5
         emit_empty_slices: true
         emit_pointers_for_null_types: true
-        overrides:
-          - db_type: uuid
-            go_type: string
-          - db_type: uuid
-            nullable: true
-            go_type:
-              type: string
-              pointer: true
-          - db_type: timestamptz
-            go_type:
-              import: time
-              type: Time
-          # NUMERIC stays pgtype.Numeric; conversion to money.Amount goes
-          # through internal/platform/pg so Exp != 0 is always handled.
-          - db_type: pg_catalog.numeric
-            go_type:
-              import: github.com/jackc/pgx/v5/pgtype
-              type: Numeric
-          - db_type: pg_catalog.numeric
-            nullable: true
-            go_type:
-              import: github.com/jackc/pgx/v5/pgtype
-              type: Numeric
+        omit_unused_structs: true
+  - engine: postgresql
+    schema: migrations
+    queries: internal/ledger/queries
+    gen:
+      go:
+        package: sqlcgen
+        out: internal/ledger/sqlcgen
+        sql_package: pgx/v5
+        emit_empty_slices: true
+        emit_pointers_for_null_types: true
+        omit_unused_structs: true
+  - engine: postgresql
+    schema: migrations
+    queries: internal/audit/queries
+    gen:
+      go:
+        package: sqlcgen
+        out: internal/audit/sqlcgen
+        sql_package: pgx/v5
+        emit_empty_slices: true
+        emit_pointers_for_null_types: true
+        omit_unused_structs: true

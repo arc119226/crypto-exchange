@@ -32,14 +32,20 @@ tools: ## Show pinned tool versions (tools/go.mod)
 	$(GOTOOL) sqlc version
 	$(GOTOOL) golangci-lint version
 
+GEN_DIRS := internal/api/gen internal/admin/gen cmd/exchangectl/internal/apiclient cmd/exchangectl/internal/adminclient \
+            internal/registry/sqlcgen internal/ledger/sqlcgen internal/audit/sqlcgen
+
 gen: ## Regenerate OpenAPI server/client and sqlc code (outputs are committed)
 	$(GOTOOL) oapi-codegen -config internal/api/gen/oapi-codegen.yaml api/public/v1/openapi.yaml
 	$(GOTOOL) oapi-codegen -config cmd/exchangectl/internal/apiclient/oapi-codegen.yaml api/public/v1/openapi.yaml
+	$(GOTOOL) oapi-codegen -config internal/admin/gen/oapi-codegen.yaml api/admin/v1/openapi.yaml
+	$(GOTOOL) oapi-codegen -config cmd/exchangectl/internal/adminclient/oapi-codegen.yaml api/admin/v1/openapi.yaml
 	$(GOTOOL) sqlc generate -f sqlc.yaml
-	gofmt -w internal/api/gen cmd/exchangectl/internal/apiclient internal/registry/sqlcgen
+	gofmt -w $(GEN_DIRS)
 
 gen-check: gen ## Fail if generated code is out of date
-	git diff --exit-code -- internal/api/gen cmd/exchangectl/internal/apiclient internal/registry/sqlcgen
+	git diff --exit-code -- $(GEN_DIRS)
+	@test -z "$$(git status --porcelain -- $(GEN_DIRS))" || (git status --porcelain -- $(GEN_DIRS); echo "untracked generated files"; exit 1)
 
 fmt: ## gofmt + goimports via golangci-lint formatters (pinned in tools/go.mod)
 	$(GOTOOL) golangci-lint fmt ./...
@@ -94,7 +100,8 @@ run: ## Run one role on the host against infra-up (make run ROLE=api)
 	set -a; . ./$(ENV_FILE); set +a; \
 	export DATABASE_URL="postgres://ex_all:$${POSTGRES_PASSWORD}@localhost:5432/exchange?sslmode=disable" \
 	       NATS_URL=nats://localhost:4222 REDIS_ADDR=localhost:6379 ETH_RPC_URL=http://localhost:8545 \
-	       JWT_JWKS_URL=http://127.0.0.1:8080/.well-known/jwks.json; \
+	       JWT_JWKS_URL=http://127.0.0.1:8080/.well-known/jwks.json \
+	       EXCHANGE_ADMIN_API_KEY="$${ADMIN_API_KEY}"; \
 	go run -ldflags '$(LDFLAGS)' ./cmd/exchange serve --role=$(ROLE)
 
 migrate: ## Apply migrations to the local Postgres started by infra-up

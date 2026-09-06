@@ -277,7 +277,22 @@ E1 是計畫的實質錯誤(會讓一條人工處置路徑在資料庫層失敗)
 
 ---
 
-## 10. Phase 0 程式碼與 §6.6 的對應
+## 10. Phase 2 程式碼與 §6.1 的對應
+
+| §6.1 | 實作 | 備註 |
+|---|---|---|
+| 科目型別與方向(6.1.1) | `ledger.HouseCode.Type()`、`AccountType.DebitNormal()`;`HouseBalances` 依型別調整符號 | `external` 採 credit − debit(第 1.1 節約定),faucet 後為負 |
+| 三欄餘額(6.1.2) | `ledger.balances(available, hold, version)` 只存 spot 帳戶;`Balance.Total()` 推導 | `version` 每筆 posting +1,只作除錯與測試斷言,鎖用 `FOR UPDATE`(`LockBalance` 的 no-op upsert) |
+| 原子操作(6.1.3) | `Service.Hold / Release / Settle / Credit / Adjust / Post`;`idempotency_key` UNIQUE,`INSERT … ON CONFLICT DO NOTHING RETURNING` 判斷重放 | 重放回原 entry、`replayed=true`,不寫任何東西(admin API 以 200 而非 201 表示) |
+| 分錄範例 (a)(b)(c)(g) | `TestLedgerPlanExampleFlow`(整合測試)逐筆對數字;`TestBuildSettleEntry_PlanExample`(單元)對 8 筆 posting | (b) 的價差 release 屬於 Settle entry(第 8 節 E4) |
+| 手續費(6.5) | `ledger.ComputeFee` = ceil(amount × bps / 10000) 至資產 scale;買方費用在 base、賣方在 quote;maker/taker bps 依 `BuyerIsTaker` | `TestComputeFee` 含真的需要 ceil 的案例 |
+| 不變量(6.1.5) | 1 `Entry.Validate` + deferred trigger `ledger.check_entry_balanced`;2 `DerivedBalances` vs `Balances`(每個整合測試結尾)+ CHECK ≥ 0;4 冪等重放;5 `TrialBalance` 與 `ledger_trial_balance_diff` gauge | 3(open order hold 守恆)要等 Phase 3 有訂單才能測 |
+| 權限(§14) | 0003 只 GRANT:SELECT 給所有角色;INSERT entries/postings + INSERT/UPDATE balances 給 `ex_engine`、`ex_chain`、`ex_admin`、`ex_all`;INSERT accounts 給 `ex_api`(註冊);無人有 UPDATE/DELETE postings | `TestLedgerRejections` 證明 `ex_all` UPDATE postings → 42501、`ex_api` Hold → 42501 |
+| 管理員調帳(g) | `POST /admin/v1/ledger/adjustments`(reason 必填、寫 `audit.audit_events`)、`exchangectl admin fund` | Phase 2–4 以 `ADMIN_API_KEY` 保護,Phase 5 換 session + TOTP |
+
+**Phase 2 學到的事**:Postgres 對表不預設授 PUBLIC 權限,所以「只 GRANT 需要的」就夠,不需要 REVOKE;identity 欄位的 sequence 也要 `GRANT USAGE`;constraint trigger 必須 `FOR EACH ROW`,deferred 到 commit 後每筆 posting 各跑一次(小分錄可接受)。
+
+## 11. Phase 0 程式碼與 §6.6 的對應
 
 | §6.6 | 實作 | 備註 |
 |---|---|---|

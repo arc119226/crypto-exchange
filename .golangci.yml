@@ -129,8 +129,12 @@ linters:
     generated: lax
     paths:
       - internal/api/gen
+      - internal/admin/gen
       - internal/registry/sqlcgen
+      - internal/ledger/sqlcgen
+      - internal/audit/sqlcgen
       - cmd/exchangectl/internal/apiclient
+      - cmd/exchangectl/internal/adminclient
     rules:
       # forbidigo (no floats) is enforced only in the numeric-sensitive packages
       - path-except: internal/(money|matching|ledger|trading|chain|marketdata|policy)/
@@ -154,5 +158,9 @@ formatters:
     generated: lax
     paths:
       - internal/api/gen
+      - internal/admin/gen
       - internal/registry/sqlcgen
+      - internal/ledger/sqlcgen
+      - internal/audit/sqlcgen
       - cmd/exchangectl/internal/apiclient
+      - cmd/exchangectl/internal/adminclient

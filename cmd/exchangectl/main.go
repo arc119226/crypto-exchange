@@ -27,7 +27,7 @@ func newRootCmd() *cobra.Command {
 	}
 	root.PersistentFlags().String("base-url", envOr("EXCHANGE_API_URL", "http://localhost:8080"), "public API base URL")
 	root.PersistentFlags().String("output", "table", "output format: table|json")
-	root.AddCommand(newMarketsCmd(), newAssetsCmd(), newReplayCmd())
+	root.AddCommand(newMarketsCmd(), newAssetsCmd(), newReplayCmd(), newAdminCmd())
 	root.AddCommand(&cobra.Command{
 		Use:   "version",
 		Short: "Print build information",

@@ -31,4 +31,4 @@ v0.1 讓 account-service 凍結、ledger-service 解凍,兩者靠 NATS 對齊,�
 - 正面:試算平衡恆為 0 是可持續監控的指標;任何餘額都能追到分錄;冪等靠唯一鍵而非約定。
 - 負面:每筆成交 6~8 筆 posting,寫入量比單欄更新高;`balances` 行鎖要排序取得以避免死鎖。beta 規模可接受。
 - 已知修正:提現 `broadcast` 後的 `cancel_nonce` 路徑必須從 `pending_withdrawal` 退款而非對 hold 做 Release(`domain.md` E1,計畫已更正)。
-- Phase 0 已落地:`ledger` schema 與角色權限模型(GRANT-only)在 `migrations/0001`,表本體在 Phase 2 的 `0003_ledger_core.sql`。
+- Phase 2 落地(2026-09-06):`migrations/0003_ledger_core.sql`(accounts / journal_entries / postings / balances、deferred trigger、house 科目 seed、GRANT-only 權限)、`migrations/0004_audit_core.sql`、`internal/ledger`(`Post` 在呼叫方交易內:插入 entry → 帳戶種類檢查 → 依 (account, asset) 排序鎖 balances → 餘額預檢 → postings → 快取更新)、`internal/audit`、admin API(`api/admin/v1/openapi.yaml`、`internal/admin`)與 `exchangectl admin`。整合測試以 500 個隨機操作序列對 Go 模型驗證快取、試算平衡與冪等;100 個 goroutine 對敲轉帳證明排序鎖無死鎖。

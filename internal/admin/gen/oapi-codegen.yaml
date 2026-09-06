@@ -1,0 +1,13 @@
+# oapi-codegen config for the admin API server (chi + strict server + models).
+# Paths are relative to the repo root because `make gen` runs there.
+package: gen
+output: internal/admin/gen/api.gen.go
+generate:
+  chi-server: true
+  strict-server: true
+  models: true
+output-options:
+  skip-prune: true
+  name-normalizer: ToCamelCaseWithInitialisms
+compatibility:
+  always-prefix-enum-values: true
