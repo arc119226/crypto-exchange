@@ -151,3 +151,41 @@ func redactURL(raw string) string {
 	}
 	return raw
 }
+
+// Transfer is a decoded ERC-20 Transfer log.
+type Transfer struct {
+	Contract common.Address
+	From     common.Address
+	To       common.Address
+	Value    *big.Int
+	Removed  bool
+}
+
+// DecodeTransfer reads a standard ERC-20 Transfer log.
+//
+// It insists on the standard shape — topic0 plus two indexed addresses and a
+// 32-byte value — and refuses anything else. Some tokens index the value, or
+// pack all three arguments into data; guessing which layout a contract used
+// would mean crediting an account from a number we are not sure of, so an
+// unrecognised layout is an error the scanner can alert on instead.
+//
+// It does not decode by ABI because no contract call is involved: a binding
+// would be a large generated dependency for one topic and one uint256. Sweeps
+// in 4c call ERC-20 methods for real, and that is when abigen earns its place.
+func DecodeTransfer(l types.Log) (Transfer, error) {
+	switch {
+	case len(l.Topics) != 3:
+		return Transfer{}, fmt.Errorf("evm: transfer log has %d topics, want 3", len(l.Topics))
+	case l.Topics[0] != TransferTopic:
+		return Transfer{}, errors.New("evm: log is not a Transfer")
+	case len(l.Data) != 32:
+		return Transfer{}, fmt.Errorf("evm: transfer log has %d data bytes, want 32", len(l.Data))
+	}
+	return Transfer{
+		Contract: l.Address,
+		From:     common.BytesToAddress(l.Topics[1].Bytes()),
+		To:       common.BytesToAddress(l.Topics[2].Bytes()),
+		Value:    new(big.Int).SetBytes(l.Data),
+		Removed:  l.Removed,
+	}, nil
+}
