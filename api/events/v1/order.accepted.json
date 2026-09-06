@@ -1,0 +1,79 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/arc119226/crypto-exchange/api/events/v1/order.accepted.json",
+  "title": "order.accepted",
+  "description": "Emitted for every order that was not rejected, including one that fills immediately, so a private-stream client can map later events back to its client_order_id.",
+  "type": "object",
+  "required": [
+    "order_id",
+    "client_order_id",
+    "account_id",
+    "market",
+    "side",
+    "type",
+    "time_in_force",
+    "seq"
+  ],
+  "properties": {
+    "order_id": {
+      "type": "string",
+      "description": "ULID."
+    },
+    "client_order_id": {
+      "type": "string"
+    },
+    "account_id": {
+      "type": "string"
+    },
+    "market": {
+      "type": "string"
+    },
+    "side": {
+      "enum": [
+        "buy",
+        "sell"
+      ]
+    },
+    "type": {
+      "enum": [
+        "limit",
+        "market"
+      ]
+    },
+    "time_in_force": {
+      "enum": [
+        "gtc",
+        "ioc"
+      ]
+    },
+    "price": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^-?\\d{1,18}(\\.\\d{1,18})?$",
+      "description": "Limit price; null for market orders."
+    },
+    "qty": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^-?\\d{1,18}(\\.\\d{1,18})?$",
+      "description": "Base quantity; null for market buys."
+    },
+    "quote_qty": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^-?\\d{1,18}(\\.\\d{1,18})?$",
+      "description": "Quote budget of a market buy; null otherwise."
+    },
+    "seq": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Per-market engine sequence of the command that produced this event."
+    }
+  }
+}

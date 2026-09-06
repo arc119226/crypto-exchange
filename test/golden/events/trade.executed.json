@@ -1,0 +1,28 @@
+{
+  "event_id": "01J8Z2K3M4N5P6Q7R8S9T0V1W7",
+  "event_type": "trade.executed",
+  "schema_version": 1,
+  "tenant_id": "default",
+  "market_id": "ETH-USDC",
+  "account_id": null,
+  "seq": 18234,
+  "occurred_at": "2026-09-05T08:15:23.412Z",
+  "correlation_id": "req_01J8Z2K2000000000000000000",
+  "payload": {
+    "trade_id": "01J8Z2K3M4N5P6Q7R8S9T0V400",
+    "market": "ETH-USDC",
+    "maker_order_id": "01J8Z2K3M4N5P6Q7R8S9T0V200",
+    "taker_order_id": "01J8Z2K3M4N5P6Q7R8S9T0V100",
+    "maker_account_id": "acct-seller",
+    "taker_account_id": "acct-buyer",
+    "taker_side": "buy",
+    "price": "1990",
+    "qty": "0.4",
+    "quote_qty": "796",
+    "maker_fee": "0.796",
+    "maker_fee_asset": "USDC",
+    "taker_fee": "0.0008",
+    "taker_fee_asset": "ETH",
+    "seq": 18234
+  }
+}

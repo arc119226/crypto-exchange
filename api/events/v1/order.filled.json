@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/arc119226/crypto-exchange/api/events/v1/order.filled.json",
+  "title": "order.filled",
+  "description": "The order reached its final filled state.",
+  "type": "object",
+  "required": [
+    "order_id",
+    "account_id",
+    "market",
+    "filled_qty",
+    "filled_quote",
+    "seq"
+  ],
+  "properties": {
+    "order_id": {
+      "type": "string"
+    },
+    "account_id": {
+      "type": "string"
+    },
+    "market": {
+      "type": "string"
+    },
+    "filled_qty": {
+      "type": "string",
+      "pattern": "^-?\\d{1,18}(\\.\\d{1,18})?$",
+      "description": "Total base filled."
+    },
+    "filled_quote": {
+      "type": "string",
+      "pattern": "^-?\\d{1,18}(\\.\\d{1,18})?$",
+      "description": "Total quote filled."
+    },
+    "seq": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Per-market engine sequence of the command that produced this event."
+    }
+  }
+}

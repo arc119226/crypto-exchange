@@ -1,0 +1,19 @@
+{
+  "event_id": "01J8Z2K3M4N5P6Q7R8S9T0V1W8",
+  "event_type": "balance.updated",
+  "schema_version": 1,
+  "tenant_id": "default",
+  "market_id": null,
+  "account_id": "acct-buyer",
+  "seq": null,
+  "account_seq": 44,
+  "occurred_at": "2026-09-05T08:15:23.412Z",
+  "correlation_id": "req_01J8Z2K2000000000000000000",
+  "payload": {
+    "account_id": "acct-buyer",
+    "asset": "USDC",
+    "available": "8004",
+    "hold": "1200",
+    "account_seq": 44
+  }
+}

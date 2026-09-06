@@ -1,0 +1,22 @@
+{
+  "event_id": "01J8Z2K3M4N5P6Q7R8S9T0V1W3",
+  "event_type": "order.updated",
+  "schema_version": 1,
+  "tenant_id": "default",
+  "market_id": "ETH-USDC",
+  "account_id": "acct-buyer",
+  "seq": 18234,
+  "account_seq": 42,
+  "occurred_at": "2026-09-05T08:15:23.412Z",
+  "correlation_id": "req_01J8Z2K2000000000000000000",
+  "payload": {
+    "order_id": "01J8Z2K3M4N5P6Q7R8S9T0V100",
+    "account_id": "acct-buyer",
+    "market": "ETH-USDC",
+    "status": "partially_filled",
+    "filled_qty": "0.4",
+    "filled_quote": "796",
+    "remaining_qty": "0.6",
+    "seq": 18234
+  }
+}

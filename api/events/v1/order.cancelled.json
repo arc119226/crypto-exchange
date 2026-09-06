@@ -1,0 +1,72 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/arc119226/crypto-exchange/api/events/v1/order.cancelled.json",
+  "title": "order.cancelled",
+  "description": "A user cancel, an IOC remainder, self-trade prevention or price protection. released is the hold returned to available.",
+  "type": "object",
+  "required": [
+    "order_id",
+    "account_id",
+    "market",
+    "reason",
+    "filled_qty",
+    "filled_quote",
+    "remaining_qty",
+    "remaining_quote",
+    "released",
+    "released_asset",
+    "seq"
+  ],
+  "properties": {
+    "order_id": {
+      "type": "string"
+    },
+    "account_id": {
+      "type": "string"
+    },
+    "market": {
+      "type": "string"
+    },
+    "reason": {
+      "enum": [
+        "user",
+        "ioc",
+        "self_trade",
+        "price_protection"
+      ]
+    },
+    "filled_qty": {
+      "type": "string",
+      "pattern": "^-?\\d{1,18}(\\.\\d{1,18})?$",
+      "description": "Base filled before the cancel."
+    },
+    "filled_quote": {
+      "type": "string",
+      "pattern": "^-?\\d{1,18}(\\.\\d{1,18})?$",
+      "description": "Quote filled before the cancel."
+    },
+    "remaining_qty": {
+      "type": "string",
+      "pattern": "^-?\\d{1,18}(\\.\\d{1,18})?$",
+      "description": "Base that was cancelled."
+    },
+    "remaining_quote": {
+      "type": "string",
+      "pattern": "^-?\\d{1,18}(\\.\\d{1,18})?$",
+      "description": "Quote budget that was cancelled (market buys)."
+    },
+    "released": {
+      "type": "string",
+      "pattern": "^-?\\d{1,18}(\\.\\d{1,18})?$",
+      "description": "Hold returned to available."
+    },
+    "released_asset": {
+      "type": "string"
+    },
+    "seq": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Per-market engine sequence of the command that produced this event."
+    }
+  }
+}

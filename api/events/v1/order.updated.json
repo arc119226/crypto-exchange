@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/arc119226/crypto-exchange/api/events/v1/order.updated.json",
+  "title": "order.updated",
+  "description": "A partially filled order that stays in the book.",
+  "type": "object",
+  "required": [
+    "order_id",
+    "account_id",
+    "market",
+    "status",
+    "filled_qty",
+    "filled_quote",
+    "remaining_qty",
+    "seq"
+  ],
+  "properties": {
+    "order_id": {
+      "type": "string"
+    },
+    "account_id": {
+      "type": "string"
+    },
+    "market": {
+      "type": "string"
+    },
+    "status": {
+      "enum": [
+        "open",
+        "partially_filled",
+        "filled",
+        "cancelled",
+        "rejected"
+      ]
+    },
+    "filled_qty": {
+      "type": "string",
+      "pattern": "^-?\\d{1,18}(\\.\\d{1,18})?$",
+      "description": "Base filled so far."
+    },
+    "filled_quote": {
+      "type": "string",
+      "pattern": "^-?\\d{1,18}(\\.\\d{1,18})?$",
+      "description": "Quote filled so far."
+    },
+    "remaining_qty": {
+      "type": "string",
+      "pattern": "^-?\\d{1,18}(\\.\\d{1,18})?$",
+      "description": "Base still resting."
+    },
+    "seq": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Per-market engine sequence of the command that produced this event."
+    }
+  }
+}

@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/arc119226/crypto-exchange/api/events/v1/market.updated.json",
+  "title": "market.updated",
+  "description": "A registry change to a market. The engine consumes it and reloads its registry cache, so the new status applies to the next order without a restart.",
+  "type": "object",
+  "required": [
+    "market_id",
+    "symbol",
+    "status",
+    "changed_fields",
+    "version"
+  ],
+  "properties": {
+    "market_id": {
+      "type": "string"
+    },
+    "symbol": {
+      "type": "string"
+    },
+    "status": {
+      "enum": [
+        "active",
+        "halted",
+        "cancel_only",
+        "delisted"
+      ]
+    },
+    "changed_fields": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Which fields the write touched."
+    },
+    "version": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Registry row version after the change; increases on every real change."
+    },
+    "reason": {
+      "type": "string",
+      "description": "Operator's reason, recorded in the audit trail."
+    }
+  }
+}

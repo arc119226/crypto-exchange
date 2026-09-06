@@ -16,6 +16,9 @@ const (
 // schemaVersion of the payloads below.
 const schemaVersion = 1
 
+// EventTypes lists what registry changes publish (see trading.EventTypes).
+func EventTypes() []string { return []string{EventMarketUpdated} }
+
 // MarketUpdatedPayload is market.updated. ChangedFields names what the
 // write touched so a consumer can tell a status change from a fee change
 // without diffing; the engine reloads on any of them.

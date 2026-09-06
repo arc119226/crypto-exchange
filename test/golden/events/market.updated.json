@@ -1,0 +1,21 @@
+{
+  "event_id": "01J8Z2K3M4N5P6Q7R8S9T0V1W9",
+  "event_type": "market.updated",
+  "schema_version": 1,
+  "tenant_id": "default",
+  "market_id": "ETH-USDC",
+  "account_id": null,
+  "seq": null,
+  "occurred_at": "2026-09-05T08:15:23.412Z",
+  "correlation_id": "req_01J8Z2K2000000000000000000",
+  "payload": {
+    "market_id": "01J8Z2K3M4N5P6Q7R8S9T0V500",
+    "symbol": "ETH-USDC",
+    "status": "halted",
+    "changed_fields": [
+      "status"
+    ],
+    "version": 3,
+    "reason": "incident 42"
+  }
+}
