@@ -47,3 +47,6 @@ infra/contracts/artifacts/
 # Sepolia stack: operator-provided, names one deployment (see the README there)
 deploy/compose/sepolia/*.json
 !deploy/compose/sepolia/*.example
+
+# Produced by scripts/sepolia-results.sh: addresses and amounts from a real run
+sepolia-results.md
