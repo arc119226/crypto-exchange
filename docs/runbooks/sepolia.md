@@ -192,6 +192,8 @@ yourname@yourlaptop:~$
 - 灰底框裡的東西是要你貼進終端機的。
 - `<像這樣的角括號>` 是**你要換掉的東西**,連角括號一起換掉。例如看到 `<你的地址>`,而你的地址是 `0xAbC...`,就整個換成 `0xAbC...`,不要留角括號。
 - 有些指令會分好幾行,行尾有一個反斜線 `\`。**整段一起複製貼上**,那是同一個指令。
+- **`<...>` 漏換掉不會好好報錯。** 在終端機裡 `<` 是「從檔案讀入」的意思,所以漏換的症狀是 `No such file or directory` 指著一個看起來莫名其妙的詞,而不是「你忘了換」。看到這種錯,先回去找有沒有沒換掉的角括號。
+- **從哪裡複製會影響對錯。** 有些顯示方式會幫 markdown 的特殊字元加跳脫:行尾 `\` 變成 `\\`、`_` 變成 `\_`。貼進終端機前掃一眼有沒有這種多餘的反斜線。最保險是直接從 repo 裡的 `docs/runbooks/sepolia.md` 複製。
 
 ---
 
@@ -341,6 +343,8 @@ cd ~/crypto-exchange
 git checkout main
 git pull
 ```
+
+> 這一步在 **Part B 開頭還要再做一次**,不是多餘的。Part A 只用到很早就存在的東西;Part B 用的設定檔和指令是後來才加進 repo 的,中間如果有人推了新的 commit,你這裡拉到的就不夠新。
 
 **驗證你在對的地方**:
 
@@ -656,20 +660,46 @@ Transaction hash: 0xabc...    ← 這個也抄下來
 
 ### 查出部署在第幾個區塊
 
+先把 tx hash 存成變數。**要換的只有這一行**,而且很短:
+
+```
+TX=0x貼上forge印的TransactionHash
+```
+
+（把 `0x...` 整串換掉,不要留角括號、不要留中文。)
+
 ```
 docker run --rm --entrypoint cast ghcr.io/foundry-rs/foundry:v1.8.1 \
-  receipt <剛剛的 Transaction hash> --rpc-url "$SEPOLIA_RPC" blockNumber
+  receipt "$TX" blockNumber --rpc-url "$SEPOLIA_RPC"
 ```
 
 印出一個數字,例如 `11651234`。**抄下來**,這是「部署區塊高度」。
+
+順便讓鏈自己告訴你合約地址,不用相信抄寫:
+
+```
+docker run --rm --entrypoint cast ghcr.io/foundry-rs/foundry:v1.8.1 \
+  receipt "$TX" contractAddress --rpc-url "$SEPOLIA_RPC"
+```
+
+應該跟 `forge` 印的 `Deployed to:` 一模一樣。存成變數,A6 要用:
+
+```
+USDC=0x上面印出來的合約地址
+```
 
 ## A6. 鑄一些 USDC 給熱錢包
 
 `MockUSDC` 誰都可以鑄(這是測試用合約,故意這樣設計的)。
 
+兩個值先就位。合約地址是 A5 印出來的那個(換過終端機視窗的話變數就沒了,所以這裡重貼一次);熱錢包直接從 `.env` 讀,不用抄:
+
 ```
+USDC=0x貼上A5的合約地址
+HOT=$(sed -n 's/^HOT_WALLET_ADDRESS=//p' .env | tr -d '[:space:]')
+
 docker run --rm --entrypoint cast ghcr.io/foundry-rs/foundry:v1.8.1 \
-  send <A5 的合約地址> "mint(address,uint256)" <A1 的熱錢包地址> 1000000000000 \
+  send "$USDC" "mint(address,uint256)" "$HOT" 1000000000000 \
   --rpc-url "$SEPOLIA_RPC" \
   --private-key "$(cat secrets/sepolia-deployer.key)"
 ```
@@ -680,7 +710,7 @@ docker run --rm --entrypoint cast ghcr.io/foundry-rs/foundry:v1.8.1 \
 
 ```
 docker run --rm --entrypoint cast ghcr.io/foundry-rs/foundry:v1.8.1 \
-  call <A5 的合約地址> "balanceOf(address)(uint256)" <A1 的熱錢包地址> \
+  call "$USDC" "balanceOf(address)(uint256)" "$HOT" \
   --rpc-url "$SEPOLIA_RPC"
 ```
 
@@ -699,7 +729,49 @@ docker run --rm --entrypoint cast ghcr.io/foundry-rs/foundry:v1.8.1 \
 | **MockUSDC 合約地址(A5)** | `0x` |
 | **部署區塊高度(A5)** | |
 
-順便把 Part A 的實測數字記下來(`cast receipt <hash> --rpc-url "$SEPOLIA_RPC"` 會一次給你 `gasUsed` 和 `effectiveGasPrice`):
+### 順便記下這兩筆的實際成本
+
+**這不是附註,是 4d 要交付的東西本身**(`docs/plan-v1.0.md` §12:「Sepolia runbook 含 tx hash 記錄」)。
+
+整個 Sepolia 這一輪存在的理由,就是量出「真的鏈上要花多少錢、要等多久」。anvil 上 gas 幾乎是零、出塊瞬間完成,所以**這些數字只有這一次實跑拿得到**。
+
+**跑兩次**,一次填一列——先 A5 部署那筆,再 A6 鑄幣那筆:
+
+```
+TX=0x貼上要查的那一筆的hash
+```
+
+```
+docker run --rm --entrypoint cast ghcr.io/foundry-rs/foundry:v1.8.1 \
+  receipt "$TX" --rpc-url "$SEPOLIA_RPC"
+```
+
+印出一整份收據,裡面找這幾行:
+
+```
+blockNumber         11651234
+effectiveGasPrice   2000000000
+gasUsed             612345
+status              1 (success)
+transactionHash     0x...
+```
+
+`status` 是 `1` 就代表成功。
+
+**每一欄是什麼:**
+
+| 欄位 | 是什麼 |
+|---|---|
+| tx hash | 那筆交易的編號。`forge` 印過,Etherscan 上也有 |
+| gas used | 用掉多少**運算量**——是單位,不是錢。部署合約約 60 萬,單純轉帳固定 21000 |
+| effective gas price | 每單位 gas **實際**付了多少,單位是 wei |
+| 成本 (ETH) | gas used × effective gas price,換算成 ETH。這才是真的花掉的錢 |
+| 送出 → 上鏈(秒) | 你按 Enter 到它進區塊,中間等了多久 |
+
+**兩件你不用做的事:**
+
+- **成本那一欄不用自己算。** 回報 `gasUsed` 和 `effectiveGasPrice` 兩個數字就好,算是推導出來的,不是觀測到的——少一個步驟就少一個出錯的地方。
+- **時間不用精確。** 「大概十幾秒」「大概一分鐘」這種程度就夠了,我們要的是量級,不是碼表。
 
 | 步驟 | tx hash | gas used | effective gas price | 成本 (ETH) | 送出 → 上鏈(秒) |
 |---|---|---|---|---|---|
@@ -719,7 +791,49 @@ docker run --rm --entrypoint cast ghcr.io/foundry-rs/foundry:v1.8.1 \
 > ```
 > 忘了貼會看到 `set ETH_RPC_URL...` 或 `connection refused` 之類的錯誤。
 
+## B0. 先確認你的 checkout 夠新
+
+**Part B 用到的檔案有一部分是後來才加進 repo 的。** 先拉最新的,再確認它們真的到你機器上了:
+
+```
+cd ~/crypto-exchange
+git checkout main && git pull
+ls deploy/compose/sepolia/ deploy/seed-params/ deploy/compose/compose.sepolia.yaml
+```
+
+要看到這些(順序可能不同,內容要一樣):
+
+```
+deploy/compose/compose.sepolia.yaml
+
+deploy/compose/sepolia/:
+README.md
+seed-params.json.example
+sepolia-addresses.json.example
+
+deploy/seed-params/:
+README.md
+anvil.json
+sepolia.json
+```
+
+**少任何一個,就先不要往下走**,再 `git pull` 一次。還是少的話停在這裡跟我說。
+
+拉完再跑一次這個:
+
+```
+make gen-dev-secrets
+```
+
+**它不會覆蓋你的 `.env`** —— 你填的 RPC 網址、產生的密碼都留著。它做的是把 `.env` 裡跟著程式一起改過名的設定補上。`git pull` 只更新程式,不會動你機器上的 `.env`,所以這一步要自己跑。
+
+> 「第 4.2 節不是拉過了嗎?」拉過,但那是 Part A 開始之前。Part A 只用到 `make gen-dev-secrets` 和 foundry 的 image,那些很早就在了;Part B 用的 `compose.sepolia.yaml`、`make up-sepolia`、`deploy/seed-params/`、資料庫的 migration 是後來才進來的。中間 repo 有更新的話,你 Part A 開始時拉的那份就不夠。
+>
+> 這也是為什麼這一節不寫死某個版本號:**能驗證的是「這幾個路徑存在」,不是「你在第幾個 commit」。**
+
 ## B1. 寫兩個設定檔
+
+這一節要用的兩個範本檔(`deploy/compose/sepolia/` 底下那兩個 `.example`)是 B0 確認過的東西。**B0 沒過就不要往下**——下面第一個指令就會失敗。
 
 先複製範本:
 
@@ -794,8 +908,7 @@ make up-sepolia
 ### 看它有沒有正常起來
 
 ```
-docker compose -f deploy/compose/compose.yaml -f deploy/compose/compose.sepolia.yaml \
-  --env-file .env logs -f exchange-all
+make logs-sepolia FOLLOW=1
 ```
 
 畫面會一直滾。**這是正常的,它在持續印記錄。看夠了按 `Ctrl + C` 離開**(這只會關掉看記錄的畫面,不會關掉交易所)。
@@ -834,19 +947,30 @@ go run ./cmd/exchangectl assets list
 
 真正的交易所遇到這種事(老闆從冷錢包轉錢進來、或收到補助),做法就是這個:記一筆「這筆錢從系統外面進來」。
 
+金額直接問鏈,不要憑印象打——記錯的話對帳不會歸零:
+
 ```
-go run ./cmd/exchangectl admin house-adjust \
-  --code custody_hot --asset ETH \
-  --amount <A4 實際打進熱錢包的數量,例如 0.05> \
-  --direction credit \
-  --reason "sepolia faucet 注資熱錢包,tx <faucet 那筆的 tx hash,不知道就寫日期>" \
-  --idempotency-key "sepolia-hot-eth-1"
+HOT=$(sed -n 's/^HOT_WALLET_ADDRESS=//p' .env | tr -d '[:space:]')
+AMOUNT=$(docker run --rm --entrypoint cast ghcr.io/foundry-rs/foundry:v1.8.1 \
+  balance "$HOT" --rpc-url "$SEPOLIA_RPC" --ether | tr -d '[:space:]')
+echo "熱錢包目前有 $AMOUNT ETH,要記這個數字"
 ```
 
 ```
 go run ./cmd/exchangectl admin house-adjust \
+  --code custody_hot --asset ETH \
+  --amount "$AMOUNT" \
+  --direction credit \
+  --reason "sepolia faucet 注資熱錢包 $(date +%F)" \
+  --idempotency-key "sepolia-hot-eth-1"
+```
+
+> 有 faucet 那筆的 tx hash 的話,把它加進 `--reason` 更好(從 Etherscan 抄)。這條會進稽核紀錄,是給半年後的人看的。
+
+```
+go run ./cmd/exchangectl admin house-adjust \
   --code custody_hot --asset USDC --amount 1000000 --direction credit \
-  --reason "A6 鑄給熱錢包,tx <A6 的 tx hash>" \
+  --reason "A6 鑄給熱錢包 $(date +%F)" \
   --idempotency-key "sepolia-hot-usdc-1"
 ```
 
@@ -899,8 +1023,11 @@ go run ./cmd/exchangectl deposit-address --asset ETH
 順便也給它一些 USDC:
 
 ```
+USDC=$(sed -n 's/.*"usdc": *"\([^"]*\)".*/\1/p' deploy/compose/sepolia/sepolia-addresses.json)
+DEPOSIT=0x貼上上面拿到的充值地址
+
 docker run --rm --entrypoint cast ghcr.io/foundry-rs/foundry:v1.8.1 \
-  send <A5 的合約地址> "mint(address,uint256)" <B4 的充值地址> 250500000 \
+  send "$USDC" "mint(address,uint256)" "$DEPOSIT" 250500000 \
   --rpc-url "$SEPOLIA_RPC" \
   --private-key "$(cat secrets/sepolia-deployer.key)"
 ```
@@ -948,9 +1075,16 @@ go run ./cmd/exchangectl admin sweeps list
 
 ### 小額(自動)
 
+提現要有個收款地址。用 A2 的部署者地址就行——那是你自己的:
+
 ```
-go run ./cmd/exchangectl withdrawals create \
-  --asset ETH --amount 0.003 --to <隨便一個你控制的地址,用 A2 的部署者地址就行>
+TO=$(docker run --rm --entrypoint cast ghcr.io/foundry-rs/foundry:v1.8.1 \
+  wallet address --private-key "$(cat secrets/sepolia-deployer.key)" | tr -d '[:space:]')
+echo "提現會送到 $TO"
+```
+
+```
+go run ./cmd/exchangectl withdrawals create --asset ETH --amount 0.003 --to "$TO"
 ```
 
 ```
@@ -962,8 +1096,7 @@ go run ./cmd/exchangectl withdrawals list
 ### 大額(人工審核)
 
 ```
-go run ./cmd/exchangectl withdrawals create \
-  --asset ETH --amount 0.008 --to <同一個地址>
+go run ./cmd/exchangectl withdrawals create --asset ETH --amount 0.008 --to "$TO"
 ```
 
 這筆會停在等待審核。用管理員身分看:
@@ -972,10 +1105,14 @@ go run ./cmd/exchangectl withdrawals create \
 go run ./cmd/exchangectl admin withdrawals list
 ```
 
-抄下它的 `id`,然後核准:
+把它的 `id` 存起來再核准:
 
 ```
-go run ./cmd/exchangectl admin withdrawals review <那個 id> approve --note "sepolia 手動驗證"
+WID=貼上上面那筆的id
+```
+
+```
+go run ./cmd/exchangectl admin withdrawals review "$WID" approve --note "sepolia 手動驗證"
 ```
 
 再看:
@@ -1013,7 +1150,13 @@ make down-sepolia
 
 這是我要的東西,填好給我,我寫進最終文件。
 
-`docker run --rm --entrypoint cast ghcr.io/foundry-rs/foundry:v1.8.1 receipt <hash> --rpc-url "$SEPOLIA_RPC"` 一次給你 `gasUsed` 和 `effectiveGasPrice`。
+欄位的意思、怎麼拿、以及**哪兩件不用你做**(成本不用自己算、時間不用精確),都在 [A7](#順便記下這兩筆的實際成本) 說明過,這裡不重複。拿法一樣:
+
+```
+TX=0x那筆交易的hash
+docker run --rm --entrypoint cast ghcr.io/foundry-rs/foundry:v1.8.1 \
+  receipt "$TX" --rpc-url "$SEPOLIA_RPC"
+```
 
 | 步驟 | tx hash | block | gas used | effective gas price | 成本 (ETH) | 送出 → confirmed(秒) |
 |---|---|---|---|---|---|---|
@@ -1046,23 +1189,30 @@ make down-sepolia
 **看交易所在講什麼:**
 
 ```
-docker compose -f deploy/compose/compose.yaml -f deploy/compose/compose.sepolia.yaml \
-  --env-file .env logs --tail 100 exchange-all
+make logs-sepolia
+```
+
+預設印 `exchange-all` 最後 100 行。要看別的容器或看更多:
+
+```
+make logs-sepolia SERVICE=seed          # 換一個容器
+make logs-sepolia TAIL=300              # 印多一點
+make logs-sepolia FOLLOW=1              # 一直看下去,Ctrl + C 離開
 ```
 
 **看有哪些東西在跑:**
 
 ```
-docker compose -f deploy/compose/compose.yaml -f deploy/compose/compose.sepolia.yaml \
-  --env-file .env ps
+make ps-sepolia
 ```
+
+> 這兩個以前是很長的 `docker compose ...` 指令,現在收成 make 目標了。原因不是嫌長:那串指令**少了 `--profile`**,而少了它的兩種失敗都不會告訴你少了什麼 —— 看記錄會回 `no such service: nats`,`ps` 則是印一張空表,讓你以為什麼都沒在跑。
 
 **全部重來(會清掉這套 Sepolia 環境的資料,但不影響 anvil 那套):**
 
 ```
 make down-sepolia
-docker volume ls | grep sepolia          # 看有哪些
-docker volume rm <上面列出來的每一個>
+docker volume ls -q | grep '^crypto-exchange-sepolia' | xargs -r docker volume rm
 ```
 
 然後從 B2 重做。
@@ -1071,6 +1221,8 @@ docker volume rm <上面列出來的每一個>
 
 | 你看到 | 意思 | 怎麼辦 |
 |---|---|---|
+| `error: unrecognized subcommand '\'` | 貼進來的行尾是 `\\` 而不是 `\`,多半是從轉義過的顯示版本複製的 | 刪掉多餘的反斜線,順便檢查有沒有 `\_` |
+| `-bash: <某個詞>: No such file or directory`,而那個詞來自指令裡的中文說明 | 角括號佔位符沒換掉,`<` 被當成輸入重新導向 | 找到那個 `<...>`,連角括號一起換成真正的值 |
 | 指令印出 forge 或 cast 的**說明頁**,什麼都沒做 | `docker run` 少了 `--entrypoint`。這個 image 的進入點是 `/bin/sh -c`,只執行第一個參數 | 加 `--entrypoint forge`(或 `cast`),並把子指令後面那個重複的工具名拿掉 |
 | `Failed to resolve ENS name to an address` | 傳給 `cast` 的不是合法地址——多半是從 `.env` 取值時連註解行一起抓到了 | 用 `echo "[$HOT]"` 看它實際是什麼。取值要用 `sed -n 's/^KEY=//p'`(錨定行首);`grep KEY` 會連提到那個名字的註解一起抓 |
 | `command not found: docker` / `make` / `go` | 沒裝好,或終端機沒重開 | 回第 3 節;裝完要**關掉終端機重開** |
@@ -1083,6 +1235,11 @@ docker volume rm <上面列出來的每一個>
 | `set ETH_SCAN_START_BLOCK...` | `.env` 裡沒有那一行 | 回 B2 加上去 |
 | `connection refused` / 空白的表格 | 忘了貼 Part B 開頭那四行,或交易所沒起來 | 先貼那四行;還是不行看 6.1 的記錄 |
 | `no such file or directory` | 你不在專案資料夾 | `cd ~/crypto-exchange`,再 `ls` 確認 |
+| `cp: cannot stat '...json.example': No such file or directory` | 你在對的資料夾,但 checkout 比這份文件舊,那些檔案還沒進到你的機器 | 回 B0:`git checkout main && git pull`,再用 B0 那行 `ls` 確認三個路徑都在 |
+| `WARN[0000] The "CONTRACT_DEPLOYER_KEY" variable is not set` | 你的 `.env` 比程式舊,裡面還是舊名字 `ANVIL_DEPLOYER_KEY` | **Sepolia 這條路不受影響,可以繼續**(讀這個變數的服務在 Sepolia 上是關掉的)。但跑一次 `make gen-dev-secrets` 補上,不然之後回去跑 `make up-single` 會壞 |
+| `no such service: nats` | 你打的 `docker compose ... logs` 少了 `--profile`。指定服務名稱只會啟用那個服務,不會啟用它依賴的 `nats` | 改用 `make logs-sepolia`(見 6.1),它把 profile 都帶好了 |
+| `ps` 印出空的表,但交易所明明在跑 | 同上,少了 `--profile`,compose 解出來的是一個空的服務清單 | 改用 `make ps-sepolia` |
+| `container crypto-exchange-sepolia-exchange-all-1 is unhealthy` + `make: *** [up-sepolia] Error 1` | 交易所的容器起來了,但 80 秒內沒能就緒。`migrate` 和 `seed` 有 Exited 就代表那兩步是成功的 —— 問題在交易所自己,多半卡在連鏈 | 跑 `make logs-sepolia`。找 `chain rpc` 開頭的重試訊息(RPC 連不上或太慢)或 `different chain`(設定不對)。**把輸出貼給我** |
 | 記錄裡有 `pruned history unavailable` | 你的 RPC 背後某台機器刪掉了舊資料 | 換一個 RPC(A3),`make down-sepolia` 後重做 B2 |
 | `the node is on a different chain than the cursor` | 資料庫記的鏈跟你現在連的不是同一條,或 `ETH_SCAN_START_BLOCK` 被改過 | **這是保護不是故障。** 錯誤訊息會告訴你原本記的值,設回去。真的要換鏈就照 6.1 全部重來 |
 | 充值一直停在 `detected` 超過五分鐘 | 掃描器落後,或確認數還不夠 | 先等到兩分鐘以上。還是不動就看記錄,可能是 RPC 被限流 |
