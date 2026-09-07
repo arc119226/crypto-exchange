@@ -80,15 +80,95 @@
 
 ### 2.1 你的電腦需要是什麼
 
-- **macOS** 或 **Linux**:直接可以。
-- **Windows**:要先裝 **WSL2**(Windows 裡的 Linux 環境)。微軟官方教學搜尋「WSL install」,或在 PowerShell 執行 `wsl --install` 後重開機。**裝好之後,這份文件裡所有指令都在 WSL 的終端機裡打,不是在 PowerShell 裡。**
+- **macOS** 或 **Linux**:直接可以,跳到 2.3。
+- **Windows**:要先裝 **WSL2**(Windows 裡的 Linux 環境),看下面 2.2。
 - 硬碟至少留 **20 GB**,記憶體 **8 GB** 以上。
 
-### 2.2 打開終端機
+### 2.2 Windows 專屬:WSL2 設定
+
+在 **PowerShell** 執行:
+
+```
+wsl --install
+```
+
+跑完**重開機**。(已經裝過的人跳過這步。)
+
+#### ⚠️ 這裡有一個一定會踩的坑
+
+重開機後在 PowerShell 打:
+
+```
+wsl -l -v
+```
+
+你會看到類似這樣,而且很可能 **`docker-desktop` 被標成預設**:
+
+```
+  NAME              STATE           VERSION
+* docker-desktop    Running         2
+  Ubuntu            Stopped         2
+```
+
+**`docker-desktop` 不能拿來工作。** 它是 Docker Desktop 自己建來跑引擎的**內部發行版**:
+
+- 沒有正常的套件管理,`apt` 裝不了東西
+- Docker Desktop 更新或按 reset 的時候會被**整個重建**,你放在裡面的東西全部消失
+- Docker 官方文件明講它是內部用的
+
+**你要用的是 `Ubuntu`。** 沒有 Ubuntu 的話先裝:
+
+```
+wsl --install -d Ubuntu
+```
+
+然後把預設改掉:
+
+```
+wsl --set-default Ubuntu
+wsl -l -v
+```
+
+確認 `*` 跑到 `Ubuntu` 那一行,而且 `VERSION` 是 `2`:
+
+```
+  NAME              STATE           VERSION
+* Ubuntu            Stopped         2
+  docker-desktop    Running         2
+```
+
+> 第一次開 Ubuntu 會要你設一組 **UNIX 使用者名稱和密碼**。那組密碼跟 Windows 帳號無關,是之後打 `sudo` 用的——**記起來**。
+
+#### 讓 Docker 在 Ubuntu 裡用得到
+
+裝好 Docker Desktop(第 3.2 節)之後,還要做這一步:
+
+打開 Docker Desktop → 右上角齒輪 **Settings** → **Resources** → **WSL Integration** → 把 **Ubuntu** 的開關**打開** → 按 **Apply & Restart**。
+
+不做這步的話,在 Ubuntu 裡打 `docker` 會說 `command not found`。
+
+#### ⚠️ 第二個坑:專案不要放在 `/mnt/c/`
+
+WSL 看得到你的 Windows 磁碟(在 `/mnt/c/`),但**跨檔案系統存取慢到不合理**——git、Go 編譯、Docker 掛載都會慢好幾倍,原本 5 分鐘的東西可能變成 30 分鐘。
+
+所以第 4 節說的 `cd ~` 要照做,那是 Linux 自己的檔案系統(`/home/你的名字`),不要改成 Windows 的路徑。
+
+> 想用 VS Code 編輯檔案的話:在 Ubuntu 的終端機裡打 `code .`,它會自動用 Remote-WSL 模式開,那樣才是對的。
+
+### 2.3 打開終端機
 
 - **macOS**:按 `Command + 空白鍵`,輸入 `Terminal`,按 Enter。
 - **Ubuntu / Linux**:按 `Ctrl + Alt + T`。
-- **Windows**:開始選單搜尋 `Ubuntu`(WSL 裝好之後會有)。
+- **Windows**:開始選單搜尋 `Ubuntu` 點開,或在 PowerShell 打 `wsl` 按 Enter。
+  **不是 PowerShell 本身**——這份文件裡除了 2.2 那幾行 `wsl ...` 之外,所有指令都在 Ubuntu 裡打。
+
+**Windows 使用者確認一下你進對地方了:**
+
+```
+cat /etc/os-release | head -1
+```
+
+要印出 `PRETTY_NAME="Ubuntu ..."`。印出別的東西(或這個檔案根本不存在)就是你跑進 `docker-desktop` 了,回 2.2。
 
 你會看到一個視窗,最後一行有個游標在閃。那一行叫**提示字元(prompt)**,長得像:
 
@@ -135,7 +215,7 @@ xcode-select --install
 sudo apt update && sudo apt install -y git build-essential
 ```
 
-會問你密碼,打你電腦的登入密碼(**打的時候螢幕不會顯示任何東西,這是正常的**),按 Enter。
+會問你密碼。Linux 打你的登入密碼;**WSL 打 2.2 設的那組 UNIX 密碼**,不是 Windows 帳號密碼。(**打的時候螢幕不會顯示任何東西,這是正常的**),按 Enter。
 
 **驗證**:
 
@@ -152,7 +232,9 @@ git --version
 3. 安裝,然後**打開它**。第一次會要你同意條款、可能要你註冊帳號(可以跳過)。
 4. **確認它在跑**:Mac 看螢幕最上方選單列有沒有鯨魚圖示;Windows 看右下角。圖示要是穩定的,不是在轉。
 
-> Windows 使用者:Docker Desktop 設定裡要打開 **"Use the WSL 2 based engine"**,並在 Settings → Resources → WSL Integration 把你的 Ubuntu 打勾。
+> **Windows 使用者:裝完一定要回去做 2.2 的「讓 Docker 在 Ubuntu 裡用得到」**(Settings → Resources → WSL Integration → 打開 Ubuntu → Apply & Restart)。少了這步,Ubuntu 裡的 `docker` 是不存在的。
+>
+> 同時確認 Settings → General 的 **"Use the WSL 2 based engine"** 有打勾。
 
 **驗證**(在終端機):
 
@@ -199,7 +281,8 @@ git clone https://github.com/arc119226/crypto-exchange.git
 cd crypto-exchange
 ```
 
-- `cd ~` = 切換到你的家目錄(Mac 是 `/Users/你的名字`)。
+- `cd ~` = 切換到你的家目錄(Mac 是 `/Users/你的名字`,WSL 是 `/home/你的名字`)。
+  **WSL 使用者:不要改成 `/mnt/c/...` 底下的路徑**,原因見 2.2 第二個坑。
 - `git clone` = 把專案抄一份下來。
 - `cd crypto-exchange` = 走進那個資料夾。
 
@@ -884,6 +967,9 @@ docker volume rm <上面列出來的每一個>
 | 你看到 | 意思 | 怎麼辦 |
 |---|---|---|
 | `command not found: docker` / `make` / `go` | 沒裝好,或終端機沒重開 | 回第 3 節;裝完要**關掉終端機重開** |
+| Windows:Ubuntu 裡 `docker` 找不到,但 Docker Desktop 明明開著 | WSL Integration 沒打開 | Docker Desktop → Settings → Resources → WSL Integration → 打開 Ubuntu → Apply & Restart(見 2.2) |
+| Windows:`apt` 裝不了東西、家目錄怪怪的 | 你在 `docker-desktop` 那個發行版裡,不是 Ubuntu | `exit` 離開,在 PowerShell 打 `wsl --set-default Ubuntu`,重開(見 2.2) |
+| Windows:每個指令都慢得誇張 | 專案放在 `/mnt/c/` 底下 | 搬到 `~`:`cp -r /mnt/c/.../crypto-exchange ~/` 再從那裡跑(見 2.2) |
 | `Cannot connect to the Docker daemon` | Docker Desktop 沒開 | 開它,等鯨魚圖示穩定 |
 | `set ETH_RPC_URL to a Sepolia endpoint` | `.env` 裡沒有那一行 | 回 A3,確認 `grep ETH_RPC_URL .env` 印得出來 |
 | `set ETH_SCAN_START_BLOCK...` | `.env` 裡沒有那一行 | 回 B2 加上去 |
