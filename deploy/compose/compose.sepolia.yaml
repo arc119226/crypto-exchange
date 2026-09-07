@@ -31,6 +31,17 @@ x-sepolia-env: &sepolia-env
   # chain, so it cannot be changed later without clearing chain.chain_state.
   ETH_SCAN_START_BLOCK: ${ETH_SCAN_START_BLOCK:?set ETH_SCAN_START_BLOCK to the MockUSDC deployment block}
   ETH_SCAN_INTERVAL: 12s                    # one block, rather than anvil's two seconds
+  # A hosted endpoint's free tier caps the block range of one eth_getLogs
+  # call, and the default 200 is over every such cap: Alchemy's free tier
+  # allows 10 and answers a wider range with 400 Bad Request, so every scan
+  # tick failed and the chain readiness check never went green -- the whole
+  # stack reported "unhealthy" with a working RPC and correct settings.
+  #
+  # Ten blocks per 12s tick against a chain producing one block per 12s still
+  # gains ~45 blocks a minute, so a stack left off overnight catches up in
+  # about an hour. That is the price of the free tier; an endpoint with a
+  # wider limit can raise this back towards 200.
+  ETH_SCAN_BATCH_SIZE: "10"
   ETH_ORPHAN_EXPIRY_BLOCKS: "1000"          # §6.4.1: anvil 100, Sepolia 1000
   ETH_REQUIRED_CONFIRMATIONS_DEFAULT: "6"   # and `seed --confirmations 6`, which the registry row honours
   ETH_WITHDRAWAL_INTERVAL: 12s              # at 1s this polls a receipt 144 times to confirm one withdrawal

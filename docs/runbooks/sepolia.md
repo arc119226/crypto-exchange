@@ -452,6 +452,10 @@ RPC endpoint 是一個網址,你的電腦透過它跟 Sepolia 講話。你已經
 >
 > 回報結果給我的時候,**只要說「用 Alchemy」就好,不用給我網址。**
 
+> **免費方案有一個限制會直接影響掃描:** Alchemy 免費方案的 `eth_getLogs` 一次最多只能查 **10 個區塊**,超過就回 400。`compose.sepolia.yaml` 裡的 `ETH_SCAN_BATCH_SIZE` 已經設成 10 來配合它,所以你不用做什麼。
+>
+> 提這件事是因為**如果你換別家 RPC**,那個上限可能不一樣(有些家不限區塊數、改限回傳筆數)。換家之後掃描一直失敗的話,先想到這個。
+
 ### 把它寫進 `.env`
 
 `.env` 是 A1 產生的設定檔,放在專案資料夾裡,**不會上傳到 GitHub**。把網址寫進去,之後所有指令都自己讀得到,你不用每次重貼。
@@ -1239,6 +1243,7 @@ docker volume ls -q | grep '^crypto-exchange-sepolia' | xargs -r docker volume r
 | `WARN[0000] The "CONTRACT_DEPLOYER_KEY" variable is not set` | 你的 `.env` 比程式舊,裡面還是舊名字 `ANVIL_DEPLOYER_KEY` | **Sepolia 這條路不受影響,可以繼續**(讀這個變數的服務在 Sepolia 上是關掉的)。但跑一次 `make gen-dev-secrets` 補上,不然之後回去跑 `make up-single` 會壞 |
 | `no such service: nats` | 你打的 `docker compose ... logs` 少了 `--profile`。指定服務名稱只會啟用那個服務,不會啟用它依賴的 `nats` | 改用 `make logs-sepolia`(見 6.1),它把 profile 都帶好了 |
 | `ps` 印出空的表,但交易所明明在跑 | 同上,少了 `--profile`,compose 解出來的是一個空的服務清單 | 改用 `make ps-sepolia` |
+| 記錄裡一直重複 `deposit scan failed` + `Under the Free tier plan, you can make eth_getLogs requests with up to a 10 block range` | 你的 RPC 免費方案限制一次只能查 10 個區塊,而掃描器一次要 200 個。**每一輪都失敗,所以就緒檢查永遠不會綠** | 這在 4d-2 之後已經預設修好(`ETH_SCAN_BATCH_SIZE: "10"`)。還會發生就是你的 checkout 太舊,回 B0 拉最新的,然後 `make down-sepolia` 再 `make up-sepolia` |
 | `container crypto-exchange-sepolia-exchange-all-1 is unhealthy` + `make: *** [up-sepolia] Error 1` | 交易所的容器起來了,但 80 秒內沒能就緒。`migrate` 和 `seed` 有 Exited 就代表那兩步是成功的 —— 問題在交易所自己,多半卡在連鏈 | 跑 `make logs-sepolia`。找 `chain rpc` 開頭的重試訊息(RPC 連不上或太慢)或 `different chain`(設定不對)。**把輸出貼給我** |
 | 記錄裡有 `pruned history unavailable` | 你的 RPC 背後某台機器刪掉了舊資料 | 換一個 RPC(A3),`make down-sepolia` 後重做 B2 |
 | `the node is on a different chain than the cursor` | 資料庫記的鏈跟你現在連的不是同一條,或 `ETH_SCAN_START_BLOCK` 被改過 | **這是保護不是故障。** 錯誤訊息會告訴你原本記的值,設回去。真的要換鏈就照 6.1 全部重來 |

@@ -369,7 +369,7 @@ func (c Config) LogValue() slog.Value {
 		slog.Int("database_max_conns", int(c.DB.MaxConns)),
 		slog.String("nats_url", c.NATS.URL),
 		slog.String("redis_addr", c.Redis.Addr),
-		slog.String("eth_rpc_url", c.Chain.RPCURL),
+		slog.String("eth_rpc_url", telemetry.RedactEndpoint(c.Chain.RPCURL)),
 		slog.Int64("eth_chain_id", c.Chain.ChainID),
 		slog.Duration("eth_scan_interval", c.Chain.ScanInterval),
 		slog.Duration("eth_withdrawal_interval", c.Chain.WithdrawalInterval),

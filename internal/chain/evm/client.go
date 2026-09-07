@@ -12,6 +12,8 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
+
+	"github.com/arc119226/crypto-exchange/internal/telemetry"
 )
 
 // TransferTopic is keccak256("Transfer(address,address,uint256)"), topic 0 of
@@ -147,16 +149,7 @@ func (c *Client) Receipt(ctx context.Context, txHash string) (*types.Receipt, er
 
 // LogValue keeps the endpoint out of logs at full fidelity: a hosted RPC URL
 // often carries an API key in its path.
-func (c *Client) LogValue() string { return redactURL(c.url) }
-
-func redactURL(raw string) string {
-	if i := strings.Index(raw, "://"); i >= 0 {
-		if j := strings.Index(raw[i+3:], "/"); j >= 0 {
-			return raw[:i+3+j] + "/[redacted]"
-		}
-	}
-	return raw
-}
+func (c *Client) LogValue() string { return telemetry.RedactEndpoint(c.url) }
 
 // Transfer is a decoded ERC-20 Transfer log.
 type Transfer struct {

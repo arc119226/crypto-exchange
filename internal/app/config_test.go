@@ -130,6 +130,23 @@ func TestConfigLogValueRedacts(t *testing.T) {
 	assert.Contains(t, buf.String(), "postgres://ex_all:xxxxx@localhost:5432/exchange")
 }
 
+// A hosted RPC endpoint carries its API key in the path, not in userinfo, so
+// the Postgres-shaped redaction above does not cover it. This is not
+// hypothetical: the startup line printed a live Alchemy key in full.
+func TestConfigLogValueRedactsTheRPCKey(t *testing.T) {
+	clearEnv(t)
+	t.Setenv("DATABASE_URL", "postgres://ex_all:pw@localhost:5432/exchange")
+	t.Setenv("ETH_RPC_URL", "https://eth-sepolia.g.alchemy.com/v2/not-a-real-key")
+	cfg, err := LoadConfig()
+	require.NoError(t, err)
+	var buf bytes.Buffer
+	slog.New(slog.NewJSONHandler(&buf, nil)).Info("cfg", slog.Any("config", cfg))
+	assert.NotContains(t, buf.String(), "not-a-real-key")
+	// The host survives: which provider is in use is what an operator reading
+	// this line actually needs.
+	assert.Contains(t, buf.String(), "https://eth-sepolia.g.alchemy.com/[redacted]")
+}
+
 func TestParseRoles(t *testing.T) {
 	rs, err := ParseRoles("all")
 	require.NoError(t, err)
