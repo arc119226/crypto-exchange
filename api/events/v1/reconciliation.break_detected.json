@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/arc119226/crypto-exchange/api/events/v1/reconciliation.break_detected.json",
+  "title": "reconciliation.break_detected",
+  "description": "One asset's ledger custody and its on-chain balance did not agree, and the difference is not explained by anything this system knows about. Every term of the comparison is carried, not just the difference: a consumer that only knows the amount cannot tell an uncredited deposit from a lost key, and those two want very different people woken up. Emitted when a break appears or its size changes, not on every pass -- a break that stays open stays visible in the report and the metric, and repeating it every few minutes only teaches people to filter it out.",
+  "type": "object",
+  "required": [
+    "report_id",
+    "chain_id",
+    "asset",
+    "block_height",
+    "ledger_total",
+    "chain_total",
+    "uncredited",
+    "above_frontier",
+    "in_flight",
+    "diff"
+  ],
+  "properties": {
+    "report_id": {
+      "type": "string",
+      "description": "The reconciliation pass that found it."
+    },
+    "chain_id": {
+      "type": "integer",
+      "format": "int64"
+    },
+    "asset": {
+      "type": "string"
+    },
+    "block_height": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "The block every balance in this comparison was read at."
+    },
+    "ledger_total": {
+      "type": "string",
+      "pattern": "^-?\\d{1,18}(\\.\\d{1,18})?$",
+      "description": "custody_deposit_addresses + custody_hot. Can be negative: custody_hot goes negative between a withdrawal and the sweep that refills it."
+    },
+    "chain_total": {
+      "type": "string",
+      "pattern": "^-?\\d{1,18}(\\.\\d{1,18})?$",
+      "description": "Every controlled deposit address plus the hot wallet, at block_height."
+    },
+    "uncredited": {
+      "type": "string",
+      "pattern": "^-?\\d{1,18}(\\.\\d{1,18})?$",
+      "description": "Deposits the chain shows at or below block_height that the ledger has not credited yet. Makes the chain legitimately higher."
+    },
+    "above_frontier": {
+      "type": "string",
+      "pattern": "^-?\\d{1,18}(\\.\\d{1,18})?$",
+      "description": "The net effect the ledger booked for transactions mined above block_height, which the balance read cannot see."
+    },
+    "in_flight": {
+      "type": "string",
+      "pattern": "^-?\\d{1,18}(\\.\\d{1,18})?$",
+      "description": "What transactions mined at or below block_height have spent without the ledger having booked them yet."
+    },
+    "diff": {
+      "type": "string",
+      "pattern": "^-?\\d{1,18}(\\.\\d{1,18})?$",
+      "description": "chain_total - ledger_total + above_frontier - uncredited + in_flight, and never zero in this event. Positive means the chain holds more than the ledger claims -- money that arrived by a path the scanner cannot see. Negative means it holds less, which is the one that cannot wait."
+    }
+  }
+}

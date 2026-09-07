@@ -25,6 +25,7 @@ tags:
   - name: audit
   - name: withdrawals
   - name: chain
+  - name: reconciliation
 
 paths:
   /admin/v1/accounts:
@@ -431,6 +432,94 @@ paths:
             application/problem+json:
               schema:
                 $ref: "#/components/schemas/Problem"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /admin/v1/ledger/house-adjustments:
+    post:
+      tags: [ledger]
+      operationId: createHouseAdjustment
+      summary: Record value that entered or left custody outside this ledger
+      description: |
+        Books a custody account against `external` (docs/plan-v1.0.md §6.1.4 g).
+        `credit` means custody gains, `debit` means it loses.
+
+        This is how money that moved without a transaction this system produced
+        gets recorded: a faucet funding the hot wallet, coins moved in from cold
+        storage, or the resolution of a reconciliation break whose cause has
+        been established. Until it is recorded, `GET /admin/v1/reconciliation`
+        reports it as a break — correctly, because the ledger does not know
+        about it.
+
+        Only `custody_hot` and `custody_deposit_addresses` are accepted. They
+        are the accounts backed by an address somebody else can send to;
+        `fee_revenue`, `gas_expense` and `pending_withdrawal` are derived from
+        entries this system makes, so adjusting one of those would hide a bug
+        rather than record a fact.
+
+        A reason is mandatory and the call is recorded in the audit trail.
+        Repeating the same `idempotency_key` returns the original entry with
+        HTTP 200 instead of 201.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/HouseAdjustmentRequest"
+      responses:
+        "201":
+          description: Posted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JournalEntry"
+        "200":
+          description: Already posted (idempotent replay)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JournalEntry"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /admin/v1/reconciliation:
+    get:
+      tags: [reconciliation]
+      operationId: getReconciliation
+      summary: The latest comparison of ledger custody against on-chain balances
+      description: |
+        Per asset: what the ledger says the exchange holds on chain
+        (`custody_deposit_addresses + custody_hot`) against what the chain says
+        (every deposit address plus the hot wallet), read at one block
+        (docs/plan-v1.0.md §6.4.4).
+
+        The two sides never look at the same moment, so two corrections are
+        applied and both are reported: `uncredited` is what the chain shows at
+        or below the frontier that the ledger has not credited yet, and
+        `above_frontier` is what the ledger booked for transactions mined above
+        it. `in_flight` is what has been spent without being booked. `diff` is
+        what is left after all of them, and it should be exactly zero — the
+        arithmetic is exact, so there is no tolerance and no threshold.
+
+        A read, not a run. The admin role has no node, so it cannot produce a
+        report any more than it can sign a withdrawal; the chain role writes
+        one on its own schedule (`ETH_RECONCILE_INTERVAL`) and this shows the
+        most recent. 404 until the first one has been written.
+      responses:
+        "200":
+          description: The most recent reconciliation pass
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReconciliationReport"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
         "500":
           $ref: "#/components/responses/InternalError"
 
@@ -878,6 +967,99 @@ components:
           type: string
           description: Defaults to a fresh key; pass one to make retries safe.
           x-go-type-skip-optional-pointer: true
+
+    HouseAdjustmentRequest:
+      type: object
+      required: [code, asset, amount, direction, reason]
+      properties:
+        code:
+          type: string
+          enum: [custody_hot, custody_deposit_addresses]
+          description: The custody account to adjust. Only these two can gain or lose value outside this ledger.
+        asset:
+          type: string
+          example: ETH
+        amount:
+          $ref: "#/components/schemas/Amount"
+        direction:
+          type: string
+          enum: [credit, debit]
+          description: credit means custody gains, debit means it loses.
+        reason:
+          type: string
+          minLength: 1
+          example: anvil pre-funded the hot wallet before the exchange took it over
+        idempotency_key:
+          type: string
+          description: Defaults to a fresh key; pass one to make retries safe.
+          x-go-type-skip-optional-pointer: true
+
+    ReconciliationLine:
+      type: object
+      required:
+        [asset, block_height, ledger_total, chain_total, uncredited, above_frontier, in_flight, diff, balanced]
+      properties:
+        asset:
+          type: string
+        block_height:
+          type: integer
+          format: int64
+          description: The block every balance in this line was read at.
+        ledger_total:
+          allOf:
+            - $ref: "#/components/schemas/Amount"
+          description: >
+            custody_deposit_addresses + custody_hot. Can be negative: custody_hot
+            goes negative between a withdrawal and the sweep that refills it.
+        chain_total:
+          allOf:
+            - $ref: "#/components/schemas/Amount"
+          description: Every controlled deposit address plus the hot wallet, at block_height.
+        uncredited:
+          allOf:
+            - $ref: "#/components/schemas/Amount"
+          description: Deposits the chain shows at or below block_height that the ledger has not credited yet.
+        above_frontier:
+          allOf:
+            - $ref: "#/components/schemas/Amount"
+          description: The net effect the ledger booked for transactions mined above block_height.
+        in_flight:
+          allOf:
+            - $ref: "#/components/schemas/Amount"
+          description: What has been spent at or below block_height without the ledger having booked it.
+        diff:
+          allOf:
+            - $ref: "#/components/schemas/Amount"
+          description: >
+            chain_total - ledger_total + above_frontier - uncredited + in_flight.
+            Positive means the chain holds more than the ledger claims; negative
+            means it holds less, which is the one that cannot wait.
+        balanced:
+          type: boolean
+          description: true when diff is exactly zero.
+
+    ReconciliationReport:
+      type: object
+      required: [id, chain_id, started_at, finished_at, balanced, lines]
+      properties:
+        id:
+          type: string
+        chain_id:
+          type: integer
+          format: int64
+        started_at:
+          type: string
+          format: date-time
+        finished_at:
+          type: string
+          format: date-time
+        balanced:
+          type: boolean
+          description: true when every asset's diff is zero.
+        lines:
+          type: array
+          items:
+            $ref: "#/components/schemas/ReconciliationLine"
 
     TrialBalanceLine:
       type: object

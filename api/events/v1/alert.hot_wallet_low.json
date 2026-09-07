@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/arc119226/crypto-exchange/api/events/v1/alert.hot_wallet_low.json",
+  "title": "alert.hot_wallet_low",
+  "description": "The hot wallet's native balance fell below the operating minimum. Every withdrawal is paid out of it, so this is the warning before payouts start failing rather than a report that they have. Edge-triggered: emitted on the way down and not again until the balance has come back above the line, so that a wallet left low does not produce an alert every few minutes.",
+  "type": "object",
+  "required": [
+    "chain_id",
+    "address",
+    "asset",
+    "balance",
+    "threshold"
+  ],
+  "properties": {
+    "chain_id": {
+      "type": "integer",
+      "format": "int64"
+    },
+    "address": {
+      "type": "string",
+      "pattern": "^0x[0-9a-f]{40}$",
+      "description": "The hot wallet, lower-case."
+    },
+    "asset": {
+      "type": "string",
+      "description": "The chain's native coin, which is what gas and this threshold are denominated in."
+    },
+    "balance": {
+      "type": "string",
+      "pattern": "^-?\\d{1,18}(\\.\\d{1,18})?$"
+    },
+    "threshold": {
+      "type": "string",
+      "pattern": "^-?\\d{1,18}(\\.\\d{1,18})?$",
+      "description": "The configured minimum (HOT_WALLET_MIN_ETH in docs/plan-v1.0.md §6.4.3)."
+    }
+  }
+}

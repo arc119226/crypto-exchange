@@ -206,6 +206,14 @@ services:
       # takes three ticks to cross plan -> send -> confirm, so a dev stack that
       # waited a minute per tick would look broken.
       ETH_SWEEP_INTERVAL: 3s
+      # Reconciliation is the slowest clock in the role (§6.4.4 leaves the
+      # cadence open; 5 min is the production shape). The e2e asserts a
+      # difference of zero at the end of a run, so it has to see a pass while
+      # the script is still watching.
+      ETH_RECONCILE_INTERVAL: 5s
+      # Below this the hot wallet stops being able to pay withdrawals and
+      # alert.hot_wallet_low fires. The dev chain funds it with 100 ETH.
+      ETH_HOT_WALLET_MIN: "1"
       # Signing goes over NATS request-reply to exchange-signer, on
       # WALLET_SIGNER_SUBJECT_PREFIX + "." + TENANT_ID. Both roles take the
       # same default, so neither states it.
@@ -286,6 +294,8 @@ services:
       ETH_REQUIRED_CONFIRMATIONS_DEFAULT: "1"   # anvil: a deposit in the head block is already confirmed
       ETH_SCAN_INTERVAL: 2s
       ETH_SWEEP_INTERVAL: 3s                    # same reasoning as exchange-chain above
+      ETH_RECONCILE_INTERVAL: 5s                # same
+      ETH_HOT_WALLET_MIN: "1"                   # same
     volumes:
       - artifacts:/artifacts:ro
       - ../../secrets/jwt:/secrets/jwt:ro

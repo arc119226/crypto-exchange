@@ -16,6 +16,7 @@ func clearEnv(t *testing.T) {
 	t.Helper()
 	for _, k := range []string{"EXCHANGE_ENV", "TENANT_ID", "LOG_LEVEL", "OPS_ADDR", "HTTP_ADDR", "DATABASE_URL", "DATABASE_URL_FILE",
 		"DATABASE_MAX_CONNS", "DATABASE_CONNECT_TIMEOUT", "NATS_URL", "REDIS_ADDR", "REDIS_PASSWORD", "ETH_RPC_URL", "ETH_CHAIN_ID",
+		"ETH_RECONCILE_INTERVAL", "ETH_RECONCILE_ENABLED", "ETH_HOT_WALLET_MIN", "ETH_SWEEP_INTERVAL",
 		"JWT_PRIVATE_KEY_FILE", "JWT_JWKS_URL", "SHUTDOWN_DRAIN_DELAY", "SHUTDOWN_TIMEOUT"} {
 		t.Setenv(k, "")
 		_ = os.Unsetenv(k)
@@ -34,6 +35,14 @@ func TestLoadConfigDefaults(t *testing.T) {
 	assert.Equal(t, int32(10), cfg.DB.MaxConns)
 	assert.Equal(t, 5*time.Second, cfg.DB.ConnectTimeout)
 	assert.Equal(t, int64(31337), cfg.Chain.ChainID)
+	assert.Equal(t, 5*time.Minute, cfg.Chain.ReconcileInterval)
+	assert.True(t, cfg.Chain.ReconcileEnabled)
+	// Zero means the low-balance alert is off until an operator picks a floor:
+	// a default threshold would either fire on every fresh deployment or be so
+	// low it never fires at all.
+	min, err := cfg.Chain.MinHotWallet()
+	require.NoError(t, err)
+	assert.True(t, min.IsZero())
 	assert.Equal(t, 2*time.Second, cfg.Shutdown.DrainDelay)
 	assert.Equal(t, 20*time.Second, cfg.Shutdown.Timeout)
 	assert.Equal(t, "postgres://ex_all:pw@localhost:5432/exchange", cfg.DB.URL.Reveal())
@@ -90,6 +99,23 @@ func TestLoadConfigValidation(t *testing.T) {
 	t.Setenv("TENANT_ID", "  ")
 	_, err = LoadConfig()
 	assert.ErrorContains(t, err, "TENANT_ID")
+
+	t.Setenv("TENANT_ID", "default")
+	t.Setenv("ETH_RECONCILE_INTERVAL", "0s")
+	_, err = LoadConfig()
+	assert.ErrorContains(t, err, "ETH_RECONCILE_INTERVAL")
+
+	t.Setenv("ETH_RECONCILE_INTERVAL", "5m")
+	t.Setenv("ETH_HOT_WALLET_MIN", "not-a-number")
+	_, err = LoadConfig()
+	assert.ErrorContains(t, err, "ETH_HOT_WALLET_MIN")
+
+	// Negative is rejected rather than treated as "off": an operator who typed
+	// a minus sign meant something, and silently disabling the alert is the
+	// one reading that cannot be what they meant.
+	t.Setenv("ETH_HOT_WALLET_MIN", "-1")
+	_, err = LoadConfig()
+	assert.ErrorContains(t, err, "ETH_HOT_WALLET_MIN")
 }
 
 func TestConfigLogValueRedacts(t *testing.T) {

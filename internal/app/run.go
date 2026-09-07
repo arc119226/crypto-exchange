@@ -169,6 +169,7 @@ func Run(ctx context.Context, cfg Config, roles []Role, bi BuildInfo) error {
 		g.Go(func() error { return chainRole.runWithdrawals(gctx, log) })
 		g.Go(func() error { return chainRole.runSending(gctx, log) })
 		g.Go(func() error { return chainRole.runSweeping(gctx, log) })
+		g.Go(func() error { return chainRole.runReconciling(gctx, log) })
 	}
 	if apiRefresh != nil {
 		g.Go(func() error { return apiRefresh.run(gctx) })

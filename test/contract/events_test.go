@@ -21,6 +21,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/arc119226/crypto-exchange/internal/chain/deposit"
+	"github.com/arc119226/crypto-exchange/internal/chain/reconcile"
 	"github.com/arc119226/crypto-exchange/internal/chain/sweep"
 	"github.com/arc119226/crypto-exchange/internal/chain/withdrawal"
 	"github.com/arc119226/crypto-exchange/internal/eventbus"
@@ -65,6 +66,9 @@ var (
 		// the sweep of docs/plan-v1.0.md §6.4.3
 		"sweep.completed": "01J8Z2K3M4N5P6Q7R8S9T0V1X7",
 		"sweep.failed":    "01J8Z2K3M4N5P6Q7R8S9T0V1X8",
+		// what §6.4.4 finds once the money is where it should be
+		"reconciliation.break_detected": "01J8Z2K3M4N5P6Q7R8S9T0V1X9",
+		"alert.hot_wallet_low":          "01J8Z2K3M4N5P6Q7R8S9T0V1Y0",
 	}
 )
 
@@ -183,6 +187,21 @@ func sample(t *testing.T, eventType string) eventbus.Envelope {
 			p.Status, p.Reason = "failed", "on_chain"
 		}
 		payload = p
+	case reconcile.EventBreakDetected:
+		// The surplus 4c-1 deliberately leaves on chain: an internal contract
+		// transfer the scanner cannot see, so the chain holds more than the
+		// ledger was ever credited for. Nothing is uncredited, nothing is in
+		// flight, and it is still not zero -- which is what makes it a break.
+		payload = reconcile.BreakPayload{
+			ReportID: "01J8Z2K3M4N5P6Q7R8S9T0V900", ChainID: 31337, Asset: "ETH", BlockHeight: 18240,
+			LedgerTotal: amt("12.5"), ChainTotal: amt("12.75"), Uncredited: amt("0"),
+			AboveFrontier: amt("0"), InFlight: amt("0"), Diff: amt("0.25"),
+		}
+	case reconcile.EventHotWalletLow:
+		payload = reconcile.HotWalletLowPayload{
+			ChainID: 31337, Address: "0x14dc79964da2c08b23698b3d3cc7ca32193d9955",
+			Asset: "ETH", Balance: amt("0.42"), Threshold: amt("1"),
+		}
 	case registry.EventMarketUpdated:
 		env.MarketID = str(market)
 		payload = registry.MarketUpdatedPayload{
@@ -207,7 +226,8 @@ func allEventTypes() []string {
 	out = append(out, registry.EventTypes()...)
 	out = append(out, deposit.EventTypes()...)
 	out = append(out, withdrawal.EventTypes()...)
-	return append(out, sweep.EventTypes()...)
+	out = append(out, sweep.EventTypes()...)
+	return append(out, reconcile.EventTypes()...)
 }
 
 // TestSchemaFilesMatchEventTypes is the drift guard: a new event type with

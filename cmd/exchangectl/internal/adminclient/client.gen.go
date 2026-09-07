@@ -96,6 +96,42 @@ func (e AuditEventActorType) Valid() bool {
 	}
 }
 
+// Defines values for HouseAdjustmentRequestCode.
+const (
+	HouseAdjustmentRequestCodeCustodyDepositAddresses HouseAdjustmentRequestCode = "custody_deposit_addresses"
+	HouseAdjustmentRequestCodeCustodyHot              HouseAdjustmentRequestCode = "custody_hot"
+)
+
+// Valid indicates whether the value is a known member of the HouseAdjustmentRequestCode enum.
+func (e HouseAdjustmentRequestCode) Valid() bool {
+	switch e {
+	case HouseAdjustmentRequestCodeCustodyDepositAddresses:
+		return true
+	case HouseAdjustmentRequestCodeCustodyHot:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for HouseAdjustmentRequestDirection.
+const (
+	HouseAdjustmentRequestDirectionCredit HouseAdjustmentRequestDirection = "credit"
+	HouseAdjustmentRequestDirectionDebit  HouseAdjustmentRequestDirection = "debit"
+)
+
+// Valid indicates whether the value is a known member of the HouseAdjustmentRequestDirection enum.
+func (e HouseAdjustmentRequestDirection) Valid() bool {
+	switch e {
+	case HouseAdjustmentRequestDirectionCredit:
+		return true
+	case HouseAdjustmentRequestDirectionDebit:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for HouseBalanceType.
 const (
 	HouseBalanceTypeAsset     HouseBalanceType = "asset"
@@ -402,6 +438,35 @@ type CreateAccountRequest struct {
 	OwnerUserID *string `json:"owner_user_id,omitempty"`
 }
 
+// HouseAdjustmentRequest defines model for HouseAdjustmentRequest.
+type HouseAdjustmentRequest struct {
+	// Amount Decimal serialized as a string (NUMERIC(36,18)); never a JSON number.
+	//
+	// Example: 1990.00
+	Amount Amount `json:"amount"`
+
+	// Asset Example: ETH
+	Asset string `json:"asset"`
+
+	// Code The custody account to adjust. Only these two can gain or lose value outside this ledger.
+	Code HouseAdjustmentRequestCode `json:"code"`
+
+	// Direction credit means custody gains, debit means it loses.
+	Direction HouseAdjustmentRequestDirection `json:"direction"`
+
+	// IdempotencyKey Defaults to a fresh key; pass one to make retries safe.
+	IdempotencyKey string `json:"idempotency_key,omitempty"`
+
+	// Reason Example: anvil pre-funded the hot wallet before the exchange took it over
+	Reason string `json:"reason"`
+}
+
+// HouseAdjustmentRequestCode The custody account to adjust. Only these two can gain or lose value outside this ledger.
+type HouseAdjustmentRequestCode string
+
+// HouseAdjustmentRequestDirection credit means custody gains, debit means it loses.
+type HouseAdjustmentRequestDirection string
+
 // HouseBalance defines model for HouseBalance.
 type HouseBalance struct {
 	Asset string `json:"asset"`
@@ -513,6 +578,45 @@ type Problem struct {
 	Status        int    `json:"status"`
 	Title         string `json:"title"`
 	Type          string `json:"type"`
+}
+
+// ReconciliationLine defines model for ReconciliationLine.
+type ReconciliationLine struct {
+	// AboveFrontier The net effect the ledger booked for transactions mined above block_height.
+	AboveFrontier Amount `json:"above_frontier"`
+	Asset         string `json:"asset"`
+
+	// Balanced true when diff is exactly zero.
+	Balanced bool `json:"balanced"`
+
+	// BlockHeight The block every balance in this line was read at.
+	BlockHeight int64 `json:"block_height"`
+
+	// ChainTotal Every controlled deposit address plus the hot wallet, at block_height.
+	ChainTotal Amount `json:"chain_total"`
+
+	// Diff chain_total - ledger_total + above_frontier - uncredited + in_flight. Positive means the chain holds more than the ledger claims; negative means it holds less, which is the one that cannot wait.
+	Diff Amount `json:"diff"`
+
+	// InFlight What has been spent at or below block_height without the ledger having booked it.
+	InFlight Amount `json:"in_flight"`
+
+	// LedgerTotal custody_deposit_addresses + custody_hot. Can be negative: custody_hot goes negative between a withdrawal and the sweep that refills it.
+	LedgerTotal Amount `json:"ledger_total"`
+
+	// Uncredited Deposits the chain shows at or below block_height that the ledger has not credited yet.
+	Uncredited Amount `json:"uncredited"`
+}
+
+// ReconciliationReport defines model for ReconciliationReport.
+type ReconciliationReport struct {
+	// Balanced true when every asset's diff is zero.
+	Balanced   bool                 `json:"balanced"`
+	ChainID    int64                `json:"chain_id"`
+	FinishedAt time.Time            `json:"finished_at"`
+	ID         string               `json:"id"`
+	Lines      []ReconciliationLine `json:"lines"`
+	StartedAt  time.Time            `json:"started_at"`
 }
 
 // Sweep defines model for Sweep.
@@ -671,6 +775,9 @@ type SetAccountStatusJSONRequestBody = AccountStatusRequest
 
 // CreateAdjustmentJSONRequestBody defines body for CreateAdjustment for application/json ContentType.
 type CreateAdjustmentJSONRequestBody = AdjustmentRequest
+
+// CreateHouseAdjustmentJSONRequestBody defines body for CreateHouseAdjustment for application/json ContentType.
+type CreateHouseAdjustmentJSONRequestBody = HouseAdjustmentRequest
 
 // SetMarketStatusJSONRequestBody defines body for SetMarketStatus for application/json ContentType.
 type SetMarketStatusJSONRequestBody = MarketStatusRequest
@@ -838,6 +945,60 @@ type ClientInterface interface {
 	// Corresponds with GET /admin/v1/ledger/entries (the `ListEntries` operationId).
 	ListEntries(ctx context.Context, params *ListEntriesParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// CreateHouseAdjustmentWithBody Record value that entered or left custody outside this ledger
+	//
+	// Books a custody account against `external` (docs/plan-v1.0.md §6.1.4 g).
+	// `credit` means custody gains, `debit` means it loses.
+	//
+	// This is how money that moved without a transaction this system produced
+	// gets recorded: a faucet funding the hot wallet, coins moved in from cold
+	// storage, or the resolution of a reconciliation break whose cause has
+	// been established. Until it is recorded, `GET /admin/v1/reconciliation`
+	// reports it as a break — correctly, because the ledger does not know
+	// about it.
+	//
+	// Only `custody_hot` and `custody_deposit_addresses` are accepted. They
+	// are the accounts backed by an address somebody else can send to;
+	// `fee_revenue`, `gas_expense` and `pending_withdrawal` are derived from
+	// entries this system makes, so adjusting one of those would hide a bug
+	// rather than record a fact.
+	//
+	// A reason is mandatory and the call is recorded in the audit trail.
+	// Repeating the same `idempotency_key` returns the original entry with
+	// HTTP 200 instead of 201.
+	//
+	// Takes any type of body and a specified content type.
+	//
+	// Corresponds with POST /admin/v1/ledger/house-adjustments (the `CreateHouseAdjustment` operationId).
+	CreateHouseAdjustmentWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// CreateHouseAdjustment Record value that entered or left custody outside this ledger
+	//
+	// Books a custody account against `external` (docs/plan-v1.0.md §6.1.4 g).
+	// `credit` means custody gains, `debit` means it loses.
+	//
+	// This is how money that moved without a transaction this system produced
+	// gets recorded: a faucet funding the hot wallet, coins moved in from cold
+	// storage, or the resolution of a reconciliation break whose cause has
+	// been established. Until it is recorded, `GET /admin/v1/reconciliation`
+	// reports it as a break — correctly, because the ledger does not know
+	// about it.
+	//
+	// Only `custody_hot` and `custody_deposit_addresses` are accepted. They
+	// are the accounts backed by an address somebody else can send to;
+	// `fee_revenue`, `gas_expense` and `pending_withdrawal` are derived from
+	// entries this system makes, so adjusting one of those would hide a bug
+	// rather than record a fact.
+	//
+	// A reason is mandatory and the call is recorded in the audit trail.
+	// Repeating the same `idempotency_key` returns the original entry with
+	// HTTP 200 instead of 201.
+	//
+	// Takes a body of the `application/json` content type.
+	//
+	// Corresponds with POST /admin/v1/ledger/house-adjustments (the `CreateHouseAdjustment` operationId).
+	CreateHouseAdjustment(ctx context.Context, body CreateHouseAdjustmentJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// GetTrialBalance Trial balance per asset (must be zero) and house account balances
 	//
 	// Corresponds with GET /admin/v1/ledger/trial-balance (the `GetTrialBalance` operationId).
@@ -865,6 +1026,29 @@ type ClientInterface interface {
 	//
 	// Corresponds with PUT /admin/v1/markets/{symbol}/status (the `SetMarketStatus` operationId).
 	SetMarketStatus(ctx context.Context, symbol MarketSymbol, body SetMarketStatusJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetReconciliation The latest comparison of ledger custody against on-chain balances
+	//
+	// Per asset: what the ledger says the exchange holds on chain
+	// (`custody_deposit_addresses + custody_hot`) against what the chain says
+	// (every deposit address plus the hot wallet), read at one block
+	// (docs/plan-v1.0.md §6.4.4).
+	//
+	// The two sides never look at the same moment, so two corrections are
+	// applied and both are reported: `uncredited` is what the chain shows at
+	// or below the frontier that the ledger has not credited yet, and
+	// `above_frontier` is what the ledger booked for transactions mined above
+	// it. `in_flight` is what has been spent without being booked. `diff` is
+	// what is left after all of them, and it should be exactly zero — the
+	// arithmetic is exact, so there is no tolerance and no threshold.
+	//
+	// A read, not a run. The admin role has no node, so it cannot produce a
+	// report any more than it can sign a withdrawal; the chain role writes
+	// one on its own schedule (`ETH_RECONCILE_INTERVAL`) and this shows the
+	// most recent. 404 until the first one has been written.
+	//
+	// Corresponds with GET /admin/v1/reconciliation (the `GetReconciliation` operationId).
+	GetReconciliation(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// ListSweeps Recent collections into the hot wallet
 	//
@@ -1124,6 +1308,80 @@ func (c *Client) ListEntries(ctx context.Context, params *ListEntriesParams, req
 	return c.Client.Do(req)
 }
 
+// CreateHouseAdjustmentWithBody Record value that entered or left custody outside this ledger
+//
+// Books a custody account against `external` (docs/plan-v1.0.md §6.1.4 g).
+// `credit` means custody gains, `debit` means it loses.
+//
+// This is how money that moved without a transaction this system produced
+// gets recorded: a faucet funding the hot wallet, coins moved in from cold
+// storage, or the resolution of a reconciliation break whose cause has
+// been established. Until it is recorded, `GET /admin/v1/reconciliation`
+// reports it as a break — correctly, because the ledger does not know
+// about it.
+//
+// Only `custody_hot` and `custody_deposit_addresses` are accepted. They
+// are the accounts backed by an address somebody else can send to;
+// `fee_revenue`, `gas_expense` and `pending_withdrawal` are derived from
+// entries this system makes, so adjusting one of those would hide a bug
+// rather than record a fact.
+//
+// A reason is mandatory and the call is recorded in the audit trail.
+// Repeating the same `idempotency_key` returns the original entry with
+// HTTP 200 instead of 201.
+//
+// Takes any type of body and a specified content type.
+//
+// Corresponds with POST /admin/v1/ledger/house-adjustments (the `CreateHouseAdjustment` operationId).
+func (c *Client) CreateHouseAdjustmentWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCreateHouseAdjustmentRequestWithBody(c.Server, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// CreateHouseAdjustment Record value that entered or left custody outside this ledger
+//
+// Books a custody account against `external` (docs/plan-v1.0.md §6.1.4 g).
+// `credit` means custody gains, `debit` means it loses.
+//
+// This is how money that moved without a transaction this system produced
+// gets recorded: a faucet funding the hot wallet, coins moved in from cold
+// storage, or the resolution of a reconciliation break whose cause has
+// been established. Until it is recorded, `GET /admin/v1/reconciliation`
+// reports it as a break — correctly, because the ledger does not know
+// about it.
+//
+// Only `custody_hot` and `custody_deposit_addresses` are accepted. They
+// are the accounts backed by an address somebody else can send to;
+// `fee_revenue`, `gas_expense` and `pending_withdrawal` are derived from
+// entries this system makes, so adjusting one of those would hide a bug
+// rather than record a fact.
+//
+// A reason is mandatory and the call is recorded in the audit trail.
+// Repeating the same `idempotency_key` returns the original entry with
+// HTTP 200 instead of 201.
+//
+// Takes a body of the `application/json` content type.
+//
+// Corresponds with POST /admin/v1/ledger/house-adjustments (the `CreateHouseAdjustment` operationId).
+func (c *Client) CreateHouseAdjustment(ctx context.Context, body CreateHouseAdjustmentJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCreateHouseAdjustmentRequest(c.Server, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
 // GetTrialBalance Trial balance per asset (must be zero) and house account balances
 //
 // Corresponds with GET /admin/v1/ledger/trial-balance (the `GetTrialBalance` operationId).
@@ -1182,6 +1440,39 @@ func (c *Client) SetMarketStatusWithBody(ctx context.Context, symbol MarketSymbo
 // Corresponds with PUT /admin/v1/markets/{symbol}/status (the `SetMarketStatus` operationId).
 func (c *Client) SetMarketStatus(ctx context.Context, symbol MarketSymbol, body SetMarketStatusJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewSetMarketStatusRequest(c.Server, symbol, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// GetReconciliation The latest comparison of ledger custody against on-chain balances
+//
+// Per asset: what the ledger says the exchange holds on chain
+// (`custody_deposit_addresses + custody_hot`) against what the chain says
+// (every deposit address plus the hot wallet), read at one block
+// (docs/plan-v1.0.md §6.4.4).
+//
+// The two sides never look at the same moment, so two corrections are
+// applied and both are reported: `uncredited` is what the chain shows at
+// or below the frontier that the ledger has not credited yet, and
+// `above_frontier` is what the ledger booked for transactions mined above
+// it. `in_flight` is what has been spent without being booked. `diff` is
+// what is left after all of them, and it should be exactly zero — the
+// arithmetic is exact, so there is no tolerance and no threshold.
+//
+// A read, not a run. The admin role has no node, so it cannot produce a
+// report any more than it can sign a withdrawal; the chain role writes
+// one on its own schedule (`ETH_RECONCILE_INTERVAL`) and this shows the
+// most recent. 404 until the first one has been written.
+//
+// Corresponds with GET /admin/v1/reconciliation (the `GetReconciliation` operationId).
+func (c *Client) GetReconciliation(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetReconciliationRequest(c.Server)
 	if err != nil {
 		return nil, err
 	}
@@ -1793,6 +2084,46 @@ func NewListEntriesRequest(server string, params *ListEntriesParams) (*http.Requ
 	return req, nil
 }
 
+// NewCreateHouseAdjustmentRequest calls the generic CreateHouseAdjustment builder with application/json body
+func NewCreateHouseAdjustmentRequest(server string, body CreateHouseAdjustmentJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewCreateHouseAdjustmentRequestWithBody(server, "application/json", bodyReader)
+}
+
+// NewCreateHouseAdjustmentRequestWithBody constructs an http.Request for the CreateHouseAdjustment method, with any body, and a specified content type
+func NewCreateHouseAdjustmentRequestWithBody(server string, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/admin/v1/ledger/house-adjustments")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
 // NewGetTrialBalanceRequest constructs an http.Request for the GetTrialBalance method
 func NewGetTrialBalanceRequest(server string) (*http.Request, error) {
 	var err error
@@ -1890,6 +2221,33 @@ func NewSetMarketStatusRequestWithBody(server string, symbol MarketSymbol, conte
 	}
 
 	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewGetReconciliationRequest constructs an http.Request for the GetReconciliation method
+func NewGetReconciliationRequest(server string) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/admin/v1/reconciliation")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
 
 	return req, nil
 }
@@ -2233,6 +2591,60 @@ type ClientWithResponsesInterface interface {
 	// Corresponds with GET /admin/v1/ledger/entries (the `ListEntries` operationId).
 	ListEntriesWithResponse(ctx context.Context, params *ListEntriesParams, reqEditors ...RequestEditorFn) (*ListEntriesResponse, error)
 
+	// CreateHouseAdjustmentWithBodyWithResponse Record value that entered or left custody outside this ledger
+	//
+	// Books a custody account against `external` (docs/plan-v1.0.md §6.1.4 g).
+	// `credit` means custody gains, `debit` means it loses.
+	//
+	// This is how money that moved without a transaction this system produced
+	// gets recorded: a faucet funding the hot wallet, coins moved in from cold
+	// storage, or the resolution of a reconciliation break whose cause has
+	// been established. Until it is recorded, `GET /admin/v1/reconciliation`
+	// reports it as a break — correctly, because the ledger does not know
+	// about it.
+	//
+	// Only `custody_hot` and `custody_deposit_addresses` are accepted. They
+	// are the accounts backed by an address somebody else can send to;
+	// `fee_revenue`, `gas_expense` and `pending_withdrawal` are derived from
+	// entries this system makes, so adjusting one of those would hide a bug
+	// rather than record a fact.
+	//
+	// A reason is mandatory and the call is recorded in the audit trail.
+	// Repeating the same `idempotency_key` returns the original entry with
+	// HTTP 200 instead of 201.
+	//
+	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /admin/v1/ledger/house-adjustments (the `CreateHouseAdjustment` operationId).
+	CreateHouseAdjustmentWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateHouseAdjustmentResponse, error)
+
+	// CreateHouseAdjustmentWithResponse Record value that entered or left custody outside this ledger
+	//
+	// Books a custody account against `external` (docs/plan-v1.0.md §6.1.4 g).
+	// `credit` means custody gains, `debit` means it loses.
+	//
+	// This is how money that moved without a transaction this system produced
+	// gets recorded: a faucet funding the hot wallet, coins moved in from cold
+	// storage, or the resolution of a reconciliation break whose cause has
+	// been established. Until it is recorded, `GET /admin/v1/reconciliation`
+	// reports it as a break — correctly, because the ledger does not know
+	// about it.
+	//
+	// Only `custody_hot` and `custody_deposit_addresses` are accepted. They
+	// are the accounts backed by an address somebody else can send to;
+	// `fee_revenue`, `gas_expense` and `pending_withdrawal` are derived from
+	// entries this system makes, so adjusting one of those would hide a bug
+	// rather than record a fact.
+	//
+	// A reason is mandatory and the call is recorded in the audit trail.
+	// Repeating the same `idempotency_key` returns the original entry with
+	// HTTP 200 instead of 201.
+	//
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /admin/v1/ledger/house-adjustments (the `CreateHouseAdjustment` operationId).
+	CreateHouseAdjustmentWithResponse(ctx context.Context, body CreateHouseAdjustmentJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateHouseAdjustmentResponse, error)
+
 	// GetTrialBalanceWithResponse Trial balance per asset (must be zero) and house account balances
 	//
 	// Returns a wrapper object for the known response body format(s).
@@ -2264,6 +2676,31 @@ type ClientWithResponsesInterface interface {
 	//
 	// Corresponds with PUT /admin/v1/markets/{symbol}/status (the `SetMarketStatus` operationId).
 	SetMarketStatusWithResponse(ctx context.Context, symbol MarketSymbol, body SetMarketStatusJSONRequestBody, reqEditors ...RequestEditorFn) (*SetMarketStatusResponse, error)
+
+	// GetReconciliationWithResponse The latest comparison of ledger custody against on-chain balances
+	//
+	// Per asset: what the ledger says the exchange holds on chain
+	// (`custody_deposit_addresses + custody_hot`) against what the chain says
+	// (every deposit address plus the hot wallet), read at one block
+	// (docs/plan-v1.0.md §6.4.4).
+	//
+	// The two sides never look at the same moment, so two corrections are
+	// applied and both are reported: `uncredited` is what the chain shows at
+	// or below the frontier that the ledger has not credited yet, and
+	// `above_frontier` is what the ledger booked for transactions mined above
+	// it. `in_flight` is what has been spent without being booked. `diff` is
+	// what is left after all of them, and it should be exactly zero — the
+	// arithmetic is exact, so there is no tolerance and no threshold.
+	//
+	// A read, not a run. The admin role has no node, so it cannot produce a
+	// report any more than it can sign a withdrawal; the chain role writes
+	// one on its own schedule (`ETH_RECONCILE_INTERVAL`) and this shows the
+	// most recent. 404 until the first one has been written.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /admin/v1/reconciliation (the `GetReconciliation` operationId).
+	GetReconciliationWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*GetReconciliationResponse, error)
 
 	// ListSweepsWithResponse Recent collections into the hot wallet
 	//
@@ -2837,6 +3274,75 @@ func (r ListEntriesResponse) ContentType() string {
 	return ""
 }
 
+type CreateHouseAdjustmentResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *JournalEntry
+	// JSON201 the response for an HTTP 201 `application/json` response
+	JSON201 *JournalEntry
+	// ApplicationProblemJSON400 the response for an HTTP 400 `application/problem+json` response
+	ApplicationProblemJSON400 *BadRequest
+	// ApplicationProblemJSON401 the response for an HTTP 401 `application/problem+json` response
+	ApplicationProblemJSON401 *Unauthorized
+	// ApplicationProblemJSON500 the response for an HTTP 500 `application/problem+json` response
+	ApplicationProblemJSON500 *InternalError
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r CreateHouseAdjustmentResponse) GetJSON200() *JournalEntry {
+	return r.JSON200
+}
+
+// GetJSON201 returns the response for an HTTP 201 `application/json` response
+func (r CreateHouseAdjustmentResponse) GetJSON201() *JournalEntry {
+	return r.JSON201
+}
+
+// GetApplicationProblemJSON400 returns the response for an HTTP 400 `application/problem+json` response
+func (r CreateHouseAdjustmentResponse) GetApplicationProblemJSON400() *BadRequest {
+	return r.ApplicationProblemJSON400
+}
+
+// GetApplicationProblemJSON401 returns the response for an HTTP 401 `application/problem+json` response
+func (r CreateHouseAdjustmentResponse) GetApplicationProblemJSON401() *Unauthorized {
+	return r.ApplicationProblemJSON401
+}
+
+// GetApplicationProblemJSON500 returns the response for an HTTP 500 `application/problem+json` response
+func (r CreateHouseAdjustmentResponse) GetApplicationProblemJSON500() *InternalError {
+	return r.ApplicationProblemJSON500
+}
+
+// GetBody returns the raw response body bytes
+func (r CreateHouseAdjustmentResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r CreateHouseAdjustmentResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r CreateHouseAdjustmentResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r CreateHouseAdjustmentResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
 type GetTrialBalanceResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -3010,6 +3516,68 @@ func (r SetMarketStatusResponse) StatusCode() int {
 
 // ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
 func (r SetMarketStatusResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type GetReconciliationResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *ReconciliationReport
+	// ApplicationProblemJSON401 the response for an HTTP 401 `application/problem+json` response
+	ApplicationProblemJSON401 *Unauthorized
+	// ApplicationProblemJSON404 the response for an HTTP 404 `application/problem+json` response
+	ApplicationProblemJSON404 *NotFound
+	// ApplicationProblemJSON500 the response for an HTTP 500 `application/problem+json` response
+	ApplicationProblemJSON500 *InternalError
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r GetReconciliationResponse) GetJSON200() *ReconciliationReport {
+	return r.JSON200
+}
+
+// GetApplicationProblemJSON401 returns the response for an HTTP 401 `application/problem+json` response
+func (r GetReconciliationResponse) GetApplicationProblemJSON401() *Unauthorized {
+	return r.ApplicationProblemJSON401
+}
+
+// GetApplicationProblemJSON404 returns the response for an HTTP 404 `application/problem+json` response
+func (r GetReconciliationResponse) GetApplicationProblemJSON404() *NotFound {
+	return r.ApplicationProblemJSON404
+}
+
+// GetApplicationProblemJSON500 returns the response for an HTTP 500 `application/problem+json` response
+func (r GetReconciliationResponse) GetApplicationProblemJSON500() *InternalError {
+	return r.ApplicationProblemJSON500
+}
+
+// GetBody returns the raw response body bytes
+func (r GetReconciliationResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r GetReconciliationResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetReconciliationResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r GetReconciliationResponse) ContentType() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Header.Get("Content-Type")
 	}
@@ -3437,6 +4005,72 @@ func (c *ClientWithResponses) ListEntriesWithResponse(ctx context.Context, param
 	return ParseListEntriesResponse(rsp)
 }
 
+// CreateHouseAdjustmentWithBodyWithResponse Record value that entered or left custody outside this ledger
+//
+// Books a custody account against `external` (docs/plan-v1.0.md §6.1.4 g).
+// `credit` means custody gains, `debit` means it loses.
+//
+// This is how money that moved without a transaction this system produced
+// gets recorded: a faucet funding the hot wallet, coins moved in from cold
+// storage, or the resolution of a reconciliation break whose cause has
+// been established. Until it is recorded, `GET /admin/v1/reconciliation`
+// reports it as a break — correctly, because the ledger does not know
+// about it.
+//
+// Only `custody_hot` and `custody_deposit_addresses` are accepted. They
+// are the accounts backed by an address somebody else can send to;
+// `fee_revenue`, `gas_expense` and `pending_withdrawal` are derived from
+// entries this system makes, so adjusting one of those would hide a bug
+// rather than record a fact.
+//
+// A reason is mandatory and the call is recorded in the audit trail.
+// Repeating the same `idempotency_key` returns the original entry with
+// HTTP 200 instead of 201.
+//
+// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /admin/v1/ledger/house-adjustments (the `CreateHouseAdjustment` operationId).
+func (c *ClientWithResponses) CreateHouseAdjustmentWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateHouseAdjustmentResponse, error) {
+	rsp, err := c.CreateHouseAdjustmentWithBody(ctx, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCreateHouseAdjustmentResponse(rsp)
+}
+
+// CreateHouseAdjustmentWithResponse Record value that entered or left custody outside this ledger
+//
+// Books a custody account against `external` (docs/plan-v1.0.md §6.1.4 g).
+// `credit` means custody gains, `debit` means it loses.
+//
+// This is how money that moved without a transaction this system produced
+// gets recorded: a faucet funding the hot wallet, coins moved in from cold
+// storage, or the resolution of a reconciliation break whose cause has
+// been established. Until it is recorded, `GET /admin/v1/reconciliation`
+// reports it as a break — correctly, because the ledger does not know
+// about it.
+//
+// Only `custody_hot` and `custody_deposit_addresses` are accepted. They
+// are the accounts backed by an address somebody else can send to;
+// `fee_revenue`, `gas_expense` and `pending_withdrawal` are derived from
+// entries this system makes, so adjusting one of those would hide a bug
+// rather than record a fact.
+//
+// A reason is mandatory and the call is recorded in the audit trail.
+// Repeating the same `idempotency_key` returns the original entry with
+// HTTP 200 instead of 201.
+//
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /admin/v1/ledger/house-adjustments (the `CreateHouseAdjustment` operationId).
+func (c *ClientWithResponses) CreateHouseAdjustmentWithResponse(ctx context.Context, body CreateHouseAdjustmentJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateHouseAdjustmentResponse, error) {
+	rsp, err := c.CreateHouseAdjustment(ctx, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCreateHouseAdjustmentResponse(rsp)
+}
+
 // GetTrialBalanceWithResponse Trial balance per asset (must be zero) and house account balances
 //
 // Returns a wrapper object for the known response body format(s).
@@ -3491,6 +4125,37 @@ func (c *ClientWithResponses) SetMarketStatusWithResponse(ctx context.Context, s
 		return nil, err
 	}
 	return ParseSetMarketStatusResponse(rsp)
+}
+
+// GetReconciliationWithResponse The latest comparison of ledger custody against on-chain balances
+//
+// Per asset: what the ledger says the exchange holds on chain
+// (`custody_deposit_addresses + custody_hot`) against what the chain says
+// (every deposit address plus the hot wallet), read at one block
+// (docs/plan-v1.0.md §6.4.4).
+//
+// The two sides never look at the same moment, so two corrections are
+// applied and both are reported: `uncredited` is what the chain shows at
+// or below the frontier that the ledger has not credited yet, and
+// `above_frontier` is what the ledger booked for transactions mined above
+// it. `in_flight` is what has been spent without being booked. `diff` is
+// what is left after all of them, and it should be exactly zero — the
+// arithmetic is exact, so there is no tolerance and no threshold.
+//
+// A read, not a run. The admin role has no node, so it cannot produce a
+// report any more than it can sign a withdrawal; the chain role writes
+// one on its own schedule (`ETH_RECONCILE_INTERVAL`) and this shows the
+// most recent. 404 until the first one has been written.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /admin/v1/reconciliation (the `GetReconciliation` operationId).
+func (c *ClientWithResponses) GetReconciliationWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*GetReconciliationResponse, error) {
+	rsp, err := c.GetReconciliation(ctx, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetReconciliationResponse(rsp)
 }
 
 // ListSweepsWithResponse Recent collections into the hot wallet
@@ -3980,6 +4645,60 @@ func ParseListEntriesResponse(rsp *http.Response) (*ListEntriesResponse, error) 
 	return response, nil
 }
 
+// ParseCreateHouseAdjustmentResponse parses an HTTP response from a CreateHouseAdjustmentWithResponse call
+func ParseCreateHouseAdjustmentResponse(rsp *http.Response) (*CreateHouseAdjustmentResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &CreateHouseAdjustmentResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest JournalEntry
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 201:
+		var dest JournalEntry
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON201 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest BadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON500 = &dest
+
+	}
+
+	return response, nil
+}
+
 // ParseGetTrialBalanceResponse parses an HTTP response from a GetTrialBalanceWithResponse call
 func ParseGetTrialBalanceResponse(rsp *http.Response) (*GetTrialBalanceResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
@@ -4087,6 +4806,53 @@ func ParseSetMarketStatusResponse(rsp *http.Response) (*SetMarketStatusResponse,
 			return nil, err
 		}
 		response.ApplicationProblemJSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON500 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetReconciliationResponse parses an HTTP response from a GetReconciliationWithResponse call
+func ParseGetReconciliationResponse(rsp *http.Response) (*GetReconciliationResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetReconciliationResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest ReconciliationReport
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
 		var dest Unauthorized
