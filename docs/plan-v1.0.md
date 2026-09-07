@@ -806,7 +806,7 @@ services:
     command:
       - >
         forge script script/Deploy.s.sol --rpc-url http://anvil:8545 --broadcast
-        --private-key ${ANVIL_DEPLOYER_KEY} --json
+        --private-key ${CONTRACT_DEPLOYER_KEY} --json
     # Deploy.s.sol 以 vm.writeJson 直接寫 /artifacts/addresses.json(forge 的 out/ 是編譯產物,不會有這個檔);
     # foundry.toml 需設 fs_permissions = [{ access = "write", path = "/artifacts" }]
     environment:
@@ -1431,7 +1431,7 @@ lint ──► unit ──► fuzz-smoke ──► integration ──► e2e ─
 | `ADMIN_BOOTSTRAP_EMAIL/PASSWORD` | 首個 admin(啟動時建立,之後可刪) | admin |
 | `WEBHOOK_SIGNING_KEY` | 加密儲存各 endpoint secret 的主金鑰 | worker、admin |
 | `ADMIN_API_KEY`(Phase 2 過渡)/ admin API key(Phase 3 起由系統簽發) | 客戶系統寫 kyc_level | api、admin |
-| `ANVIL_DEPLOYER_KEY`、`HOT_WALLET_ADDRESS` | 開發鏈部署與注資 | contracts-deployer |
+| `CONTRACT_DEPLOYER_KEY`、`HOT_WALLET_ADDRESS` | 開發鏈部署與注資 | contracts-deployer |
 | `REDIS_PASSWORD`、`NATS_USER/PASSWORD`(beta 起) | 基礎設施 | 各 role |
 | `GRAFANA_ADMIN_PASSWORD` | 觀測 | grafana |
 

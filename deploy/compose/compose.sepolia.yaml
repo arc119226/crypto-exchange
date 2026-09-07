@@ -1,0 +1,121 @@
+# Sepolia overlay (docs/plan-v1.0.md §12 Phase 4d, and the compose.prod.yaml
+# sketch in §11). Apply it on top of compose.yaml:
+#
+#   docker compose -f deploy/compose/compose.yaml -f deploy/compose/compose.sepolia.yaml \
+#     --env-file .env --profile single up -d          # or: make up-sepolia
+#
+# Not in CI, and not a substitute for `make up-single`: Sepolia has faucet
+# cooldowns, rate limits and twelve-second blocks, so a test that needed it
+# would be intermittently red, and an intermittently red test trains everyone
+# to ignore red.
+#
+# Read docs/runbooks/sepolia.md first -- it says which two files under
+# ./sepolia/ this expects and where their contents come from.
+
+# A separate project name, so this gets its own postgres/nats volumes and the
+# anvil stack next to it is untouched. That is not tidiness, it is required:
+# registry.assets is UNIQUE (tenant_id, symbol), so seeding Sepolia rewrites
+# the ETH and USDC rows in place rather than adding a second chain's. One
+# database cannot hold both.
+name: crypto-exchange-sepolia
+
+# Settings that differ from anvil, with the reason. Anything not listed here
+# keeps the value in compose.yaml.
+x-sepolia-env: &sepolia-env
+  ETH_RPC_URL: ${ETH_RPC_URL:?set ETH_RPC_URL to a Sepolia endpoint}
+  ETH_CHAIN_ID: "11155111"
+  # Not optional. Left at 0 this means "scan from genesis", and Sepolia's head
+  # is past 11,000,000: at ETH_SCAN_BATCH_SIZE 200 that is tens of thousands of
+  # ticks and millions of eth_getBlockByNumber calls before the first deposit
+  # could be seen. It is also the anchor whose hash pins this database to this
+  # chain, so it cannot be changed later without clearing chain.chain_state.
+  ETH_SCAN_START_BLOCK: ${ETH_SCAN_START_BLOCK:?set ETH_SCAN_START_BLOCK to the MockUSDC deployment block}
+  ETH_SCAN_INTERVAL: 12s                    # one block, rather than anvil's two seconds
+  ETH_ORPHAN_EXPIRY_BLOCKS: "1000"          # §6.4.1: anvil 100, Sepolia 1000
+  ETH_REQUIRED_CONFIRMATIONS_DEFAULT: "6"   # and `seed --confirmations 6`, which the registry row honours
+  ETH_WITHDRAWAL_INTERVAL: 12s              # at 1s this polls a receipt 144 times to confirm one withdrawal
+  ETH_REPLACE_AFTER: 3m                     # §6.4.2. At 60s the whole escalation ladder burns out in four minutes
+  ETH_MAX_REPLACEMENTS: "3"
+  # A real ceiling, for the first time. Empty means no ceiling at all, and on
+  # anvil the base fee is zero so this path was never taken. Sepolia sits
+  # around 1 gwei; 50 gwei is roughly fifty times that, which is high enough
+  # never to fire in normal weather and low enough to stop a spike.
+  ETH_MAX_FEE_PER_GAS: "50000000000"
+  ETH_SWEEP_INTERVAL: 120s                  # each pass costs one balance call per address per asset
+  ETH_RECONCILE_INTERVAL: 5m                # the default; anvil's 5s exists only to make e2e quick
+  ETH_HOT_WALLET_MIN: "0.02"                # anvil's 1 ETH would alert continuously against a faucet
+  # Reconciliation reads every pool slot, including the unassigned ones (that
+  # is deliberate: money in a slot nobody was given is exactly what it exists
+  # to find). 50 free slots is 100 extra archive reads per pass on a free
+  # endpoint, for a manual run that needs two addresses.
+  WALLET_ADDRESS_POOL_MIN: "5"
+
+services:
+  # Nothing local to run or deploy to. `profiles: !override` puts them in a
+  # profile nothing activates; simply omitting them is not enough, because
+  # compose activates a dependency's profile on its behalf.
+  anvil:
+    profiles: !override ["never"]
+  contracts-deployer:
+    profiles: !override ["never"]
+
+  seed:
+    # The fixtures come from a deploy done by hand against Sepolia, so the
+    # deployer job is not in the chain of dependencies any more.
+    depends_on: !override
+      migrate: { condition: service_completed_successfully }
+    command: !override
+      - seed
+      - --fixtures=/config/sepolia-addresses.json
+      - --params=/config/seed-params.json
+      - --confirmations=6
+    # ETH_CHAIN_ID is what Fixtures.Validate checks the file against, so the
+    # seed job needs it as much as the chain role does: with anvil's value
+    # still in scope it would refuse a Sepolia addresses.json, which is the
+    # guard working correctly against the wrong question.
+    environment:
+      <<: *sepolia-env
+    volumes:
+      - ./sepolia:/config:ro
+
+  exchange-all:
+    environment:
+      <<: *sepolia-env
+    depends_on: !override
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      nats: { condition: service_healthy }
+      migrate: { condition: service_completed_successfully }
+      seed: { condition: service_completed_successfully }
+
+  # The split-role profile works too, for anyone who wants it. Only the chain
+  # role talks to the node, but every role needs the chain id: the api assigns
+  # deposit addresses on it, the signer derives them, the admin API reports on
+  # them. A role with the wrong chain id would be wrong quietly.
+  exchange-api:
+    environment:
+      <<: *sepolia-env
+  exchange-engine:
+    environment:
+      <<: *sepolia-env
+  exchange-signer:
+    environment:
+      <<: *sepolia-env
+  exchange-stream:
+    environment:
+      <<: *sepolia-env
+  exchange-admin:
+    environment:
+      <<: *sepolia-env
+  exchange-worker:
+    environment:
+      <<: *sepolia-env
+  exchange-chain:
+    environment:
+      <<: *sepolia-env
+    depends_on: !override
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      nats: { condition: service_healthy }
+      migrate: { condition: service_completed_successfully }
+      seed: { condition: service_completed_successfully }

@@ -12,9 +12,14 @@ solc_version = "0.8.28"
 evm_version = "cancun"
 optimizer = true
 optimizer_runs = 200
-# Deploy.s.sol writes the deployed addresses here (compose mounts the
-# `artifacts` volume at /artifacts in the deployer and in every exchange role).
-fs_permissions = [{ access = "read-write", path = "/artifacts" }]
+# Deploy.s.sol writes the deployed addresses to ADDRESSES_OUT. /artifacts is
+# where compose mounts the shared volume (the deployer and every exchange role
+# see it); "." is the project directory, so a testnet deploy run by hand can
+# write the fixtures file somewhere the operator can reach.
+fs_permissions = [
+    { access = "read-write", path = "/artifacts" },
+    { access = "read-write", path = "." },
+]
 
 [fmt]
 line_length = 120

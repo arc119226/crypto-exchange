@@ -132,8 +132,8 @@ services:
         cp -r /contracts /tmp/work && cd /tmp/work &&
         forge script script/Deploy.s.sol --rpc-url http://anvil:8545 --broadcast
     environment:
-      ANVIL_DEPLOYER_KEY: ${ANVIL_DEPLOYER_KEY}   # anvil account #0 (public dev key; test chain only)
-      HOT_WALLET_ADDRESS: ${HOT_WALLET_ADDRESS}   # funded with 100 ETH + 1,000,000 USDC
+      CONTRACT_DEPLOYER_KEY: ${CONTRACT_DEPLOYER_KEY}   # anvil account #0 (public dev key; test chain only)
+      HOT_WALLET_ADDRESS: ${HOT_WALLET_ADDRESS}         # funded with 100 ETH + 1,000,000 USDC
     volumes:
       - ../../infra/contracts:/contracts:ro
       - artifacts:/artifacts

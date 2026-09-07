@@ -43,3 +43,7 @@ infra/contracts/cache/
 infra/contracts/broadcast/
 coverage.out
 infra/contracts/artifacts/
+
+# Sepolia stack: operator-provided, names one deployment (see the README there)
+deploy/compose/sepolia/*.json
+!deploy/compose/sepolia/*.example

@@ -73,6 +73,11 @@ cast call $(jq -r .usdc deploy/compose/artifacts/addresses.json) "decimals()(uin
 
 make down               # 停止(保留資料)
 make reset              # 停止並清空 postgres / nats / anvil 狀態與合約產物
+
+# 真的鏈(Sepolia,手動、不進 CI)
+# 逐步操作在 docs/runbooks/sepolia.md;它的 Part A 不需要這裡的任何東西就能開始
+make up-sepolia         # compose.yaml + compose.sepolia.yaml,獨立的 project name 與 volume
+make down-sepolia
 ```
 
 `make up` 改為每個 role 一個容器(api / engine / chain / signer / stream / admin / worker);`OBS=0` 可略過 prometheus / grafana。
