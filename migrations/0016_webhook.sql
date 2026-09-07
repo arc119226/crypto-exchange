@@ -11,8 +11,10 @@ CREATE TABLE webhook.endpoints (
     tenant_id  text        NOT NULL DEFAULT 'default',
     url        text        NOT NULL CHECK (url ~ '^https?://'),
     -- AES-256-GCM(nonce || ciphertext) of the signing secret, under
-    -- API_KEY_MASTER_KEY -- the same envelope auth.api_keys.secret_enc uses.
-    -- A second scheme for the same job would be a second thing to get wrong.
+    -- WEBHOOK_SIGNING_KEY (docs/plan-v1.0.md §16 names it, and compose has
+    -- fed it to worker and admin since before anything read it). Same
+    -- envelope as auth.api_keys.secret_enc, different key: one master key per
+    -- secret domain, so rotating webhook secrets never touches API keys.
     secret_enc bytea       NOT NULL,
     -- Event types this endpoint wants, matched against the envelope's
     -- event_type. Empty would mean "an endpoint that receives nothing", which
@@ -52,6 +54,10 @@ CREATE TABLE webhook.deliveries (
     -- customer which one it was is most of the support conversation.
     response_status int,
     error       text        NOT NULL DEFAULT '',
+    -- How long the attempt took. §7.6 asks for it, and it is the number that
+    -- separates "they rejected us" from "they never answered" when both show
+    -- up as a failure.
+    duration_ms int         NOT NULL DEFAULT 0 CHECK (duration_ms >= 0),
     created_at  timestamptz NOT NULL DEFAULT now(),
     delivered_at timestamptz,
     -- delivered means a 2xx came back, and only then.
@@ -79,6 +85,40 @@ CREATE UNIQUE INDEX deliveries_delivered_uniq
 CREATE INDEX deliveries_recent_idx
     ON webhook.deliveries (tenant_id, endpoint_id, created_at DESC);
 
+-- The work list.
+--
+-- deliveries records what happened; this records what is still owed, and the
+-- two have opposite natures -- one is append-only history, the other is
+-- mutable state -- so they are separate tables rather than one table doing
+-- both badly.
+--
+-- It exists because §7.6's retry schedule (1m, 5m, 30m, 2h, 12h, 24h) cannot
+-- live in JetStream. A nak delay is a single flat value with a 30s AckWait
+-- and a MaxDeliver of 10, so holding the message until the next attempt is
+-- not expressible past the first minute. The dispatcher acks as soon as it
+-- has enqueued, and owns the timeline from here -- which means it has to keep
+-- the bytes, because after the ack JetStream will not hand them over again.
+CREATE TABLE webhook.queue (
+    tenant_id   text        NOT NULL DEFAULT 'default',
+    endpoint_id uuid        NOT NULL REFERENCES webhook.endpoints (id),
+    event_id    text        NOT NULL,
+    event_type  text        NOT NULL,
+    -- bytea, not jsonb: what is signed and what is sent must be the same
+    -- bytes, and jsonb normalises key order and whitespace. A body that came
+    -- back from jsonb would no longer match the signature computed over it.
+    body        bytea       NOT NULL,
+    attempts    int         NOT NULL DEFAULT 0 CHECK (attempts >= 0),
+    next_attempt_at timestamptz NOT NULL DEFAULT now(),
+    created_at  timestamptz NOT NULL DEFAULT now(),
+    -- One row per endpoint per event, so the enqueue is idempotent under
+    -- JetStream's at-least-once redelivery: ON CONFLICT DO NOTHING and the
+    -- second copy of an event is a no-op instead of a second POST.
+    PRIMARY KEY (tenant_id, endpoint_id, event_id)
+);
+
+-- The dispatcher's only read: what is due now.
+CREATE INDEX queue_due_idx ON webhook.queue (next_attempt_at);
+
 -- Privileges (docs/plan-v1.0.md §14).
 --
 -- The worker delivers, so it reads endpoints and writes its own attempts. It
@@ -94,3 +134,11 @@ GRANT INSERT, UPDATE ON webhook.endpoints TO ex_admin, ex_all;
 -- Nobody gets UPDATE or DELETE on deliveries. An attempt is what happened,
 -- and a replay is a new attempt with a new row -- not an edit of the one that
 -- failed. Same reasoning as admin.reconciliation_reports in 0013.
+
+-- The queue is the exception, and only because it is the opposite kind of
+-- table: it is the worker's own scratch space for work in progress, so the
+-- worker owns every operation on it. A row leaves by being delivered or by
+-- exhausting the schedule, and in both cases what survives is the delivery
+-- rows -- deleting the queue entry loses nothing that mattered.
+GRANT SELECT, INSERT, UPDATE, DELETE ON webhook.queue TO ex_worker, ex_all;
+GRANT SELECT ON webhook.queue TO ex_admin;

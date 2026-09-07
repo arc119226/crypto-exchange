@@ -18,8 +18,13 @@ import (
 	"time"
 )
 
-// SignatureHeader carries the timestamp and the HMAC.
-const SignatureHeader = "X-Exchange-Signature"
+// Headers every delivery carries (docs/plan-v1.0.md §7.6).
+const (
+	SignatureHeader = "X-Exchange-Signature" // v1=<hex>
+	TimestampHeader = "X-Exchange-Timestamp" // unix milliseconds
+	EventIDHeader   = "X-Exchange-Event-Id"
+	EventTypeHeader = "X-Exchange-Event-Type"
+)
 
 // ErrBadSignature is every way a signature can fail to check out. The reason
 // is deliberately not distinguished: telling a caller whether the secret was
@@ -27,9 +32,15 @@ const SignatureHeader = "X-Exchange-Signature"
 // developer, and the developer has the request in front of them.
 var ErrBadSignature = errors.New("webhook: signature does not verify")
 
-// Sign returns the value for SignatureHeader:
+// Sign returns the SignatureHeader value and the TimestampHeader value:
 //
-//	t=<unix milliseconds>,v1=<hex HMAC-SHA256(secret, "<t>.<body>")>
+//	v1=<hex HMAC-SHA256(secret, "<timestamp>.<body>")>, <unix milliseconds>
+//
+// The timestamp travels in its own header rather than inside the signature
+// value, because docs/plan-v1.0.md §7.6 wrote that shape down before this
+// code existed and it is a contract with customers. It is still covered by
+// the HMAC -- as a header field alone it could be swapped for a fresh one and
+// an old body replayed under a signature that still checked out.
 //
 // This is deliberately NOT auth.SignRequest, which signs
 // "<ts>\n<METHOD>\n<requestURI>\n<body>" for inbound API-key requests. Two
@@ -42,46 +53,38 @@ var ErrBadSignature = errors.New("webhook: signature does not verify")
 //     middleware. Here the *customer* checks it, from a header, using
 //     whatever library they have -- so the format has to be the one their
 //     ecosystem already knows. This is Stripe's and GitHub's shape.
-//
-// The timestamp is inside the signed payload, not merely alongside it: as a
-// header field alone it could be swapped for a fresh one and an old body
-// replayed under a signature that still checked out.
-func Sign(secret string, body []byte, at time.Time) string {
+func Sign(secret string, body []byte, at time.Time) (signature, timestamp string) {
 	ts := strconv.FormatInt(at.UnixMilli(), 10)
-	return "t=" + ts + ",v1=" + mac(secret, ts, body)
+	return "v1=" + mac(secret, ts, body), ts
 }
 
 // Verify checks a signature against the body and the clock. tolerance bounds
 // how old -- and how far in the future -- a delivery may be; a signature with
 // no age limit is one that can be replayed forever, and a clock ahead of ours
 // is as suspect as one behind.
-func Verify(secret, header string, body []byte, now time.Time, tolerance time.Duration) error {
-	var ts, v1 string
-	for _, part := range strings.Split(header, ",") {
-		k, v, ok := strings.Cut(part, "=")
-		if !ok {
-			continue
-		}
-		switch k {
-		case "t":
-			ts = v
-		case "v1":
+func Verify(secret, signature, timestamp string, body []byte, now time.Time, tolerance time.Duration) error {
+	// Only v1 exists. Parsing rather than comparing the whole string leaves
+	// room for a v2 alongside it, which is how a scheme gets replaced without
+	// a flag day for every customer.
+	var v1 string
+	for _, part := range strings.Split(signature, ",") {
+		if k, v, ok := strings.Cut(part, "="); ok && k == "v1" {
 			v1 = v
 		}
 	}
-	if ts == "" || v1 == "" {
-		return fmt.Errorf("%w: header must be t=<unix ms>,v1=<hex>", ErrBadSignature)
+	if v1 == "" || timestamp == "" {
+		return fmt.Errorf("%w: need %s: v1=<hex> and %s", ErrBadSignature, SignatureHeader, TimestampHeader)
 	}
-	ms, err := strconv.ParseInt(ts, 10, 64)
+	ms, err := strconv.ParseInt(timestamp, 10, 64)
 	if err != nil {
-		return fmt.Errorf("%w: t must be unix milliseconds", ErrBadSignature)
+		return fmt.Errorf("%w: %s must be unix milliseconds", ErrBadSignature, TimestampHeader)
 	}
 	if skew := now.Sub(time.UnixMilli(ms)); skew > tolerance || skew < -tolerance {
 		return fmt.Errorf("%w: timestamp is %s away", ErrBadSignature, skew.Round(time.Second))
 	}
 	// Constant time, and on the hex text rather than the bytes: a decode step
 	// would need its own error path for input an attacker controls.
-	if !hmac.Equal([]byte(v1), []byte(mac(secret, ts, body))) {
+	if !hmac.Equal([]byte(v1), []byte(mac(secret, timestamp, body))) {
 		return ErrBadSignature
 	}
 	return nil
