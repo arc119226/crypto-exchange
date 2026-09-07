@@ -105,6 +105,15 @@ usdc=$("$CTL" deposit-address --asset USDC --output json | jq -r .address)
 # and it must not be the hot wallet, which is a different BIP-44 account
 [ "$addr" != "$HOT_WALLET_ADDRESS" ] || { echo "handed out the hot wallet as a deposit address"; exit 1; }
 
+# The same address in the two representations this system deliberately keeps.
+# GET /v1/deposit-address hands out the EIP-55 checksummed form, because a user
+# pastes it into a wallet and the mixed case is what catches a typo. The chain
+# tables store it normalised to lower case, so anything read back from the
+# admin API or a container log comes out that way. Comparing across the two is
+# the one place they meet, and it needs the conversion spelled out rather than
+# both sides flattened: flattening would hide a mismatch that is real.
+addr_lc=$(echo "$addr" | tr 'A-Z' 'a-z')
+
 # The chain half of the flow (docs/plan-v1.0.md §2.3 step 1): real ETH and
 # real MockUSDC move on anvil, the chain role sees them, and the balance
 # changes. `cast` runs in the same foundry image compose already pins, on the
@@ -280,13 +289,13 @@ log "deposits are collected into the hot wallet"
 wait_for_sweep() {
   for _ in $(seq 1 60); do
     if "$CTL" admin sweeps list --output json \
-       | jq -e --arg a "$addr" --arg s "$1" \
+       | jq -e --arg a "$addr_lc" --arg s "$1" \
          '[.sweeps[] | select(.from_address==$a and .asset==$s and .status=="confirmed")] | length > 0' >/dev/null 2>&1; then
       return 0
     fi
     sleep 2
   done
-  echo "no confirmed $1 sweep of $addr"
+  echo "no confirmed $1 sweep of $addr_lc"
   "$CTL" admin sweeps list || true
   "${COMPOSE[@]}" logs --no-color --tail=80 exchange-chain || true
   return 1
