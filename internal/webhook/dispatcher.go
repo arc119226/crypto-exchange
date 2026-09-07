@@ -101,13 +101,28 @@ func (d *Dispatcher) Enqueue(ctx context.Context, e eventbus.Envelope) error {
 	if err != nil {
 		return fmt.Errorf("webhook: marshal envelope: %w", err)
 	}
+	wanted := make([]sqlcgen.ListActiveEndpointsRow, 0, len(endpoints))
 	for _, ep := range endpoints {
-		if !slices.Contains(ep.Events, e.EventType) {
-			continue
+		if slices.Contains(ep.Events, e.EventType) {
+			wanted = append(wanted, ep)
 		}
+	}
+	if len(wanted) == 0 {
+		// Nobody subscribes. Recording the body anyway would grow the table
+		// with events no endpoint can ever be sent, and a subscription added
+		// later starts from the stream, not from history.
+		return nil
+	}
+	// The body first: the queue's foreign key points at it, and it is stored
+	// once however many endpoints want it.
+	if err := q.RecordEvent(ctx, sqlcgen.RecordEventParams{
+		TenantID: d.cfg.Tenant, EventID: e.EventID, EventType: e.EventType, Body: body,
+	}); err != nil {
+		return fmt.Errorf("webhook: record event: %w", err)
+	}
+	for _, ep := range wanted {
 		n, err := q.Enqueue(ctx, sqlcgen.EnqueueParams{
 			TenantID: d.cfg.Tenant, EndpointID: ep.ID, EventID: e.EventID,
-			EventType: e.EventType, Body: body,
 		})
 		if err != nil {
 			return fmt.Errorf("webhook: enqueue: %w", err)

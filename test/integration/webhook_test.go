@@ -310,6 +310,56 @@ func TestWebhookEnqueueIsIdempotent(t *testing.T) {
 	assert.Equal(t, 1, delivered, "but only one row records a success, whatever JetStream does")
 }
 
+// Replay can only re-send what still exists. The queue row is deleted the
+// moment a delivery reaches a terminal state, so before 0017 the body went
+// with it and there was nothing left to replay -- deliveries records what
+// happened, not what was sent.
+func TestWebhookKeepsTheBodyAfterDeliverySoItCanBeReplayed(t *testing.T) {
+	ctx := context.Background()
+	h := setupWebhook(t, []time.Duration{time.Second})
+
+	require.NoError(t, h.dispatcher.Enqueue(ctx, event("ev-keep")))
+	_, err := h.dispatcher.Deliver(ctx)
+	require.NoError(t, err)
+	require.Zero(t, h.queued(t, ctx), "delivered, so the queue row is gone")
+
+	var body []byte
+	var eventType string
+	require.NoError(t, h.all.QueryRow(ctx,
+		`SELECT body, event_type FROM webhook.events WHERE event_id = $1`, "ev-keep").
+		Scan(&body, &eventType))
+	assert.Equal(t, "trade.executed", eventType)
+
+	// And it is the same bytes, not an equivalent re-encoding: a replay signs
+	// what it sends, so anything that round-trips through a normaliser would
+	// produce a signature the customer's first delivery did not have.
+	assert.Equal(t, h.received.got()[0].body, body)
+}
+
+// One row per event, however many endpoints want it. Storing the body per
+// subscriber would mean three copies of one JSON document and a replay having
+// to choose between them.
+func TestWebhookStoresTheBodyOncePerEvent(t *testing.T) {
+	ctx := context.Background()
+	h := setupWebhook(t, []time.Duration{time.Second})
+
+	// A second endpoint on the same event.
+	sealed, err := secretbox.Seal(make([]byte, secretbox.KeySize), "other")
+	require.NoError(t, err)
+	_, err = h.all.Exec(ctx,
+		`INSERT INTO webhook.endpoints (url, secret_enc, events) VALUES ($1, $2, $3)`,
+		h.received.srv.URL, sealed, []string{"trade.executed"})
+	require.NoError(t, err)
+
+	require.NoError(t, h.dispatcher.Enqueue(ctx, event("ev-two")))
+	assert.Equal(t, 2, h.queued(t, ctx), "one queue row per endpoint")
+
+	var events int
+	require.NoError(t, h.all.QueryRow(ctx,
+		`SELECT count(*) FROM webhook.events WHERE event_id = $1`, "ev-two").Scan(&events))
+	assert.Equal(t, 1, events, "but one body")
+}
+
 // An event nobody subscribes to is acked rather than queued: delivered, in
 // the only sense that applies.
 func TestWebhookIgnoresEventsNobodyWants(t *testing.T) {

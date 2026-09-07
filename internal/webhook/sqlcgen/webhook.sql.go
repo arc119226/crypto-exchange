@@ -13,10 +13,11 @@ import (
 )
 
 const claimDue = `-- name: ClaimDue :many
-SELECT q.tenant_id, q.endpoint_id, q.event_id, q.event_type, q.body, q.attempts,
+SELECT q.tenant_id, q.endpoint_id, q.event_id, ev.event_type, ev.body, q.attempts,
        e.url, e.secret_enc
 FROM webhook.queue q
 JOIN webhook.endpoints e ON e.id = q.endpoint_id
+JOIN webhook.events ev ON ev.tenant_id = q.tenant_id AND ev.event_id = q.event_id
 WHERE q.tenant_id = $1 AND q.next_attempt_at <= now() AND e.status = 'active'
 ORDER BY q.next_attempt_at
 LIMIT $2
@@ -89,8 +90,8 @@ func (q *Queries) Dequeue(ctx context.Context, arg DequeueParams) error {
 }
 
 const enqueue = `-- name: Enqueue :execrows
-INSERT INTO webhook.queue (tenant_id, endpoint_id, event_id, event_type, body)
-VALUES ($1, $2, $3, $4, $5)
+INSERT INTO webhook.queue (tenant_id, endpoint_id, event_id)
+VALUES ($1, $2, $3)
 ON CONFLICT DO NOTHING
 `
 
@@ -98,21 +99,13 @@ type EnqueueParams struct {
 	TenantID   string
 	EndpointID string
 	EventID    string
-	EventType  string
-	Body       []byte
 }
 
 // Idempotent under JetStream's at-least-once redelivery: the primary key is
 // (tenant, endpoint, event), so the same event arriving twice is a no-op
 // rather than a second POST. Returns 0 when it was already queued.
 func (q *Queries) Enqueue(ctx context.Context, arg EnqueueParams) (int64, error) {
-	result, err := q.db.Exec(ctx, enqueue,
-		arg.TenantID,
-		arg.EndpointID,
-		arg.EventID,
-		arg.EventType,
-		arg.Body,
-	)
+	result, err := q.db.Exec(ctx, enqueue, arg.TenantID, arg.EndpointID, arg.EventID)
 	if err != nil {
 		return 0, err
 	}
@@ -201,6 +194,31 @@ func (q *Queries) RecordAttempt(ctx context.Context, arg RecordAttemptParams) er
 		arg.Error,
 		arg.DurationMs,
 		arg.DeliveredAt,
+	)
+	return err
+}
+
+const recordEvent = `-- name: RecordEvent :exec
+INSERT INTO webhook.events (tenant_id, event_id, event_type, body)
+VALUES ($1, $2, $3, $4)
+ON CONFLICT DO NOTHING
+`
+
+type RecordEventParams struct {
+	TenantID  string
+	EventID   string
+	EventType string
+	Body      []byte
+}
+
+// The event body, stored once however many endpoints want it. Must run before
+// Enqueue: the queue's foreign key points here.
+func (q *Queries) RecordEvent(ctx context.Context, arg RecordEventParams) error {
+	_, err := q.db.Exec(ctx, recordEvent,
+		arg.TenantID,
+		arg.EventID,
+		arg.EventType,
+		arg.Body,
 	)
 	return err
 }

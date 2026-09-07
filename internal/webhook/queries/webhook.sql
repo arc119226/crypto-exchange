@@ -8,21 +8,29 @@ FROM webhook.endpoints
 WHERE tenant_id = $1 AND status = 'active'
 ORDER BY created_at;
 
+-- name: RecordEvent :exec
+-- The event body, stored once however many endpoints want it. Must run before
+-- Enqueue: the queue's foreign key points here.
+INSERT INTO webhook.events (tenant_id, event_id, event_type, body)
+VALUES ($1, $2, $3, $4)
+ON CONFLICT DO NOTHING;
+
 -- name: Enqueue :execrows
 -- Idempotent under JetStream's at-least-once redelivery: the primary key is
 -- (tenant, endpoint, event), so the same event arriving twice is a no-op
 -- rather than a second POST. Returns 0 when it was already queued.
-INSERT INTO webhook.queue (tenant_id, endpoint_id, event_id, event_type, body)
-VALUES ($1, $2, $3, $4, $5)
+INSERT INTO webhook.queue (tenant_id, endpoint_id, event_id)
+VALUES ($1, $2, $3)
 ON CONFLICT DO NOTHING;
 
 -- name: ClaimDue :many
 -- What is owed now. FOR UPDATE SKIP LOCKED so two workers can drain the same
 -- queue without either waiting on the other or sending the same event twice.
-SELECT q.tenant_id, q.endpoint_id, q.event_id, q.event_type, q.body, q.attempts,
+SELECT q.tenant_id, q.endpoint_id, q.event_id, ev.event_type, ev.body, q.attempts,
        e.url, e.secret_enc
 FROM webhook.queue q
 JOIN webhook.endpoints e ON e.id = q.endpoint_id
+JOIN webhook.events ev ON ev.tenant_id = q.tenant_id AND ev.event_id = q.event_id
 WHERE q.tenant_id = $1 AND q.next_attempt_at <= now() AND e.status = 'active'
 ORDER BY q.next_attempt_at
 LIMIT $2
