@@ -58,6 +58,32 @@ func TestSecretNeverLogs(t *testing.T) {
 	assert.Equal(t, Redacted, RedactURL("not a url at all"))
 }
 
+// RedactURL only removes userinfo, which is where a Postgres DSN keeps its
+// password. A hosted RPC endpoint keeps its API key in the path instead, so
+// it needs the other function -- this is not hypothetical, the startup config
+// line printed a live Alchemy key in full until it used this.
+func TestRedactEndpoint(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"alchemy key in the path", "https://eth-sepolia.g.alchemy.com/v2/abc123", "https://eth-sepolia.g.alchemy.com/[redacted]"},
+		{"infura project id", "https://sepolia.infura.io/v3/deadbeef", "https://sepolia.infura.io/[redacted]"},
+		{"a trailing slash is still a path", "https://rpc.example.com/", "https://rpc.example.com/[redacted]"},
+		{"websocket", "wss://eth-sepolia.g.alchemy.com/v2/abc123", "wss://eth-sepolia.g.alchemy.com/[redacted]"},
+		{"nothing to hide", "http://anvil:8545", "http://anvil:8545"},
+		// Not a URL: returned as-is. When the endpoint is malformed, the
+		// malformed value is exactly what the operator needs to see.
+		{"not a url", "eth-sepolia.g.alchemy.com", "eth-sepolia.g.alchemy.com"},
+		{"empty", "", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, RedactEndpoint(tc.in))
+		})
+	}
+}
+
 func TestCorrelationMiddleware(t *testing.T) {
 	var buf bytes.Buffer
 	base := NewLogger(&buf, slog.LevelInfo, "api", "dev")
