@@ -18,7 +18,7 @@ func newUserCmd() *cobra.Command {
 	register := &cobra.Command{
 		Use: "register", Short: "Register a user and open a spot account (POST /v1/auth/register)", Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			client, base, err := newClient(cmd)
+			client, base, err := newAnonymousClient(cmd)
 			if err != nil {
 				return err
 			}
@@ -35,7 +35,7 @@ func newUserCmd() *cobra.Command {
 	login := &cobra.Command{
 		Use: "login", Short: "Log in (POST /v1/auth/login)", Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			client, base, err := newClient(cmd)
+			client, base, err := newAnonymousClient(cmd)
 			if err != nil {
 				return err
 			}
@@ -60,7 +60,7 @@ func newUserCmd() *cobra.Command {
 	logout := &cobra.Command{
 		Use: "logout", Short: "Revoke a refresh token (POST /v1/auth/logout)", Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			client, base, err := newClient(cmd)
+			client, base, err := newAnonymousClient(cmd)
 			if err != nil {
 				return err
 			}
