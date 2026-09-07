@@ -39,13 +39,25 @@ if [[ -f .env && "$FORCE" != 1 ]]; then
     set_var .env CONTRACT_DEPLOYER_KEY "$(sed -n 's/^ANVIL_DEPLOYER_KEY=//p' .env)"
     log "renamed ANVIL_DEPLOYER_KEY to CONTRACT_DEPLOYER_KEY in .env"
   fi
+  # 5a made WEBHOOK_SIGNING_KEY load-bearing: it is now the AES-256 key that
+  # seals each endpoint's signing secret, so it has to be 32 bytes. Nothing
+  # read it before, so it was generated at 16 like the passwords, and an
+  # existing .env would now fail config validation on every role that starts
+  # the worker -- with an accurate message, but only after the container has
+  # already exited.
+  webhook_key="$(sed -n 's/^WEBHOOK_SIGNING_KEY=//p' .env | tr -d '[:space:]')"
+  if [[ ! "$webhook_key" =~ ^[0-9a-fA-F]{64}$ ]]; then
+    set_var .env WEBHOOK_SIGNING_KEY "$(openssl rand -hex 32)"
+    log "WEBHOOK_SIGNING_KEY was not 32 bytes hex; regenerated it (it now encrypts webhook endpoint secrets)"
+  fi
 else
   cp .env.example .env
   chmod 600 .env
-  for key in POSTGRES_PASSWORD WALLET_KEYSTORE_PASSPHRASE WEBHOOK_SIGNING_KEY ADMIN_BOOTSTRAP_PASSWORD ADMIN_API_KEY; do
+  for key in POSTGRES_PASSWORD WALLET_KEYSTORE_PASSPHRASE ADMIN_BOOTSTRAP_PASSWORD ADMIN_API_KEY; do
     set_var .env "$key" "$(rand_hex)"
   done
-  set_var .env API_KEY_MASTER_KEY "$(openssl rand -hex 32)"   # AES-256 key: 32 bytes
+  set_var .env API_KEY_MASTER_KEY "$(openssl rand -hex 32)"    # AES-256 key: 32 bytes
+  set_var .env WEBHOOK_SIGNING_KEY "$(openssl rand -hex 32)"   # AES-256 key: 32 bytes
   log "wrote .env"
 fi
 

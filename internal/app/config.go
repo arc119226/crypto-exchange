@@ -4,6 +4,7 @@
 package app
 
 import (
+	"encoding/hex"
 	"fmt"
 	"log/slog"
 	"math/big"
@@ -14,6 +15,7 @@ import (
 	"github.com/caarlos0/env/v11"
 
 	"github.com/arc119226/crypto-exchange/internal/money"
+	"github.com/arc119226/crypto-exchange/internal/platform/secretbox"
 	"github.com/arc119226/crypto-exchange/internal/telemetry"
 )
 
@@ -43,6 +45,7 @@ type Config struct {
 	Engine          EngineConfig     `envPrefix:"ENGINE_"`
 	Registry        RegistryConfig   `envPrefix:"REGISTRY_"`
 	Outbox          OutboxConfig     `envPrefix:"OUTBOX_"`
+	Webhook         WebhookConfig    `envPrefix:"WEBHOOK_"`
 	Shutdown        ShutdownConfig   `envPrefix:"SHUTDOWN_"`
 }
 
@@ -305,6 +308,40 @@ func expandFileEnv(names []string) error {
 	return nil
 }
 
+// WebhookConfig is outbound delivery (docs/plan-v1.0.md §7.6).
+type WebhookConfig struct {
+	// Backoff is the wait before each retry, and its length is the attempt
+	// budget: running off the end is what marks a delivery dead. §7.6 fixes
+	// the default; integration tests inject a short one.
+	Backoff []time.Duration `env:"BACKOFF" envDefault:"1m,5m,30m,2h,12h,24h"`
+	// SigningKey (WEBHOOK_SIGNING_KEY, 32 bytes hex) encrypts each endpoint's
+	// signing secret at rest. A different key from API_KEY_MASTER_KEY on
+	// purpose: one master key per secret domain, so rotating webhook secrets
+	// never touches API keys.
+	SigningKey telemetry.Secret `env:"SIGNING_KEY"`
+	// Timeout bounds one POST to a customer.
+	Timeout time.Duration `env:"TIMEOUT" envDefault:"10s"`
+	// Interval is how often the queue is drained. It is not the retry
+	// schedule -- a delivery due in five minutes is simply not claimed until
+	// then -- so it only bounds how late a due delivery goes out.
+	Interval  time.Duration `env:"INTERVAL" envDefault:"5s"`
+	BatchSize int32         `env:"BATCH_SIZE" envDefault:"50"`
+}
+
+// Master decodes SigningKey. An empty key is not an error here: a deployment
+// with no webhook endpoints has no use for one, so the worker warns rather
+// than refusing to start.
+func (w WebhookConfig) Master() ([]byte, error) {
+	if !w.SigningKey.IsSet() {
+		return nil, nil
+	}
+	k, err := hex.DecodeString(strings.TrimSpace(w.SigningKey.Reveal()))
+	if err != nil || len(k) != secretbox.KeySize {
+		return nil, fmt.Errorf("config: WEBHOOK_SIGNING_KEY must be %d bytes hex-encoded", secretbox.KeySize)
+	}
+	return k, nil
+}
+
 // Validate checks cross-field constraints that struct tags cannot express.
 func (c Config) Validate() error {
 	if _, err := telemetry.ParseLevel(c.LogLevel); err != nil {
@@ -348,6 +385,25 @@ func (c Config) Validate() error {
 	}
 	if c.Chain.ReconcileInterval <= 0 {
 		return fmt.Errorf("config: ETH_RECONCILE_INTERVAL must be positive")
+	}
+	if len(c.Webhook.Backoff) == 0 {
+		// An empty schedule would make the first failure the last one, which
+		// is not a policy anybody chooses deliberately.
+		return fmt.Errorf("config: WEBHOOK_BACKOFF must list at least one delay")
+	}
+	for _, d := range c.Webhook.Backoff {
+		if d <= 0 {
+			return fmt.Errorf("config: every WEBHOOK_BACKOFF delay must be positive, got %s", d)
+		}
+	}
+	if c.Webhook.Interval <= 0 || c.Webhook.Timeout <= 0 {
+		return fmt.Errorf("config: WEBHOOK_INTERVAL and WEBHOOK_TIMEOUT must be positive")
+	}
+	if c.Webhook.BatchSize <= 0 {
+		return fmt.Errorf("config: WEBHOOK_BATCH_SIZE must be positive")
+	}
+	if _, err := c.Webhook.Master(); err != nil {
+		return err
 	}
 	if _, err := c.Chain.MinHotWallet(); err != nil {
 		return err
@@ -395,6 +451,8 @@ func (c Config) LogValue() slog.Value {
 		slog.Duration("auth_access_ttl", c.Auth.AccessTTL),
 		slog.Duration("auth_refresh_ttl", c.Auth.RefreshTTL),
 		slog.Bool("api_key_master_key_set", c.APIKeyMasterKey.IsSet()),
+		slog.Bool("webhook_signing_key_set", c.Webhook.SigningKey.IsSet()),
+		slog.Int("webhook_attempts", len(c.Webhook.Backoff)),
 		slog.String("ratelimit_login_per_ip", c.RateLimit.LoginPerIP),
 		slog.String("ratelimit_login_per_account", c.RateLimit.LoginPerAccount),
 		slog.String("ratelimit_orders_per_account", c.RateLimit.OrdersPerAccount),

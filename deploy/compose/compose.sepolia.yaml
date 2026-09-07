@@ -55,6 +55,13 @@ x-sepolia-env: &sepolia-env
   ETH_SWEEP_INTERVAL: 120s                  # each pass costs one balance call per address per asset
   ETH_RECONCILE_INTERVAL: 5m                # the default; anvil's 5s exists only to make e2e quick
   ETH_HOT_WALLET_MIN: "0.02"                # anvil's 1 ETH would alert continuously against a faucet
+  # §7.6's real schedule, restored for the same reason as the clocks above:
+  # this environment exists to behave the way production does. The anvil
+  # override (2s,5s,15s) is there so a developer can watch a retry happen; on
+  # a testnet run nobody is watching for 24 hours, and a webhook that gave up
+  # in 22 seconds here would not be the system anyone is going to deploy.
+  WEBHOOK_BACKOFF: 1m,5m,30m,2h,12h,24h
+  WEBHOOK_INTERVAL: 5s
   # Reconciliation reads every pool slot, including the unassigned ones (that
   # is deliberate: money in a slot nobody was given is exactly what it exists
   # to find). 50 free slots is 100 extra archive reads per pass on a free

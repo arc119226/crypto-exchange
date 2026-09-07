@@ -1,18 +1,17 @@
 package auth
 
 import (
-	"crypto/aes"
-	"crypto/cipher"
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/hex"
-	"errors"
 	"fmt"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/arc119226/crypto-exchange/internal/platform/secretbox"
 )
 
 // Request headers of the API key scheme (ADR-0006).
@@ -62,40 +61,25 @@ func newSecret() (string, error) {
 }
 
 // encryptSecret seals the secret under the master key: nonce || ciphertext.
+//
+// The envelope moved to internal/platform/secretbox when webhook endpoints
+// needed the identical one. The format is unchanged, so rows written before
+// the move still open.
 func encryptSecret(master []byte, secret string) ([]byte, error) {
-	block, err := aes.NewCipher(master)
+	sealed, err := secretbox.Seal(master, secret)
 	if err != nil {
-		return nil, fmt.Errorf("auth: cipher: %w", err)
+		return nil, fmt.Errorf("auth: %w", err)
 	}
-	gcm, err := cipher.NewGCM(block)
-	if err != nil {
-		return nil, fmt.Errorf("auth: gcm: %w", err)
-	}
-	nonce := make([]byte, gcm.NonceSize())
-	if _, err := rand.Read(nonce); err != nil {
-		return nil, fmt.Errorf("auth: nonce: %w", err)
-	}
-	return append(nonce, gcm.Seal(nil, nonce, []byte(secret), nil)...), nil
+	return sealed, nil
 }
 
 // decryptSecret is the inverse of encryptSecret.
 func decryptSecret(master, sealed []byte) (string, error) {
-	block, err := aes.NewCipher(master)
+	secret, err := secretbox.Open(master, sealed)
 	if err != nil {
-		return "", fmt.Errorf("auth: cipher: %w", err)
+		return "", fmt.Errorf("auth: %w", err)
 	}
-	gcm, err := cipher.NewGCM(block)
-	if err != nil {
-		return "", fmt.Errorf("auth: gcm: %w", err)
-	}
-	if len(sealed) < gcm.NonceSize() {
-		return "", errors.New("auth: sealed secret too short")
-	}
-	plain, err := gcm.Open(nil, sealed[:gcm.NonceSize()], sealed[gcm.NonceSize():], nil)
-	if err != nil {
-		return "", fmt.Errorf("auth: decrypt secret: %w", err)
-	}
-	return string(plain), nil
+	return secret, nil
 }
 
 // CanonicalRequest is the string a client signs:
