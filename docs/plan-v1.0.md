@@ -806,7 +806,7 @@ services:
     command:
       - >
         forge script script/Deploy.s.sol --rpc-url http://anvil:8545 --broadcast
-        --private-key ${ANVIL_DEPLOYER_KEY} --json
+        --private-key ${CONTRACT_DEPLOYER_KEY} --json
     # Deploy.s.sol 以 vm.writeJson 直接寫 /artifacts/addresses.json(forge 的 out/ 是編譯產物,不會有這個檔);
     # foundry.toml 需設 fs_permissions = [{ access = "write", path = "/artifacts" }]
     environment:
@@ -1236,7 +1236,7 @@ exchangectl book ETH-USDC                       # 與 kill 前一致
 - [ ] sweeper(ETH、ERC-20 兩段)、custody 分錄、低水位事件;整合測試「歸集後用戶餘額不變、custody 總額不變」(2 d)
 - [ ] 對帳查詢 + `exchangectl admin reconcile`;指標 `hot_wallet_balance`、`withdrawals_pending_review`、`withdrawal_state_duration_seconds`(1 d)
 - [ ] `exchangectl e2e` 擴為完整:充值(`cast send` 到用戶地址 / USDC `transfer`)→ 入帳 → 下單成交 → 提現 → 確認 → 歸集 → 對帳零差異(1 d)
-- [ ] 4d Sepolia:設定、部署、手動流程、runbook(2–4 d)
+- [~] 4d Sepolia:設定、部署、runbook 已備(4d-1);手動實跑與結果記錄待 4d-2(2–4 d)
 
 **DoD(CI)**:`integration` 新增 anvil 套件全綠(確認數、reorg、卡單重送、重啟不重複廣播、提現冪等、歸集守恆);`e2e` 跑完 2.3 第 1 條全流程且 `reconcile` 差異為 0;無私鑰進 log:整合測試以 `gen-dev-secrets` 產生的測試私鑰、助記詞、passphrase 為已知字串,啟動全流程後斷言所有容器 log 不含這些字串(含去 `0x` 形式),且 `internal/telemetry` 對 `SignRequest`、`*ecdsa.PrivateKey`、raw tx bytes 實作 `slog.LogValuer` 回 `[redacted]` 並有單元測試(tx hash / block hash 本來就會出現在 log,不能用「不含 0x + 64 hex」斷言;`gosec` 是靜態掃描,不檢查執行期 log);Sepolia runbook 含 tx hash 記錄。
 
@@ -1411,6 +1411,9 @@ lint ──► unit ──► fuzz-smoke ──► integration ──► e2e ─
 - `compose-config`:`docker compose -f compose.yaml config` 與 `-f compose.yaml -f compose.prod.yaml config` 皆可解析(用假 `.env`)。
 - `image`:multi-arch 可選;`main` 推 `dev`,tag 推版本。
 - 版本釘住:Go 以 `go.mod`;容器 image 以 tag;foundry 以 `.env` / CI 變數 `FOUNDRY_TAG`,本機與 CI 一致。
+- **純文件的 PR 不跑**:`pull_request` 加 `paths-ignore: ['**/*.md', 'docs/**']`。一輪完整 CI 是九個 job、約 30 分鐘 runner 時間,而沒有任何 job 讀 `docs/**` 或 `.md`——測試載入的非 Go 檔案只有 `.env.example`、`deploy/seed-params/*.json`、`test/fixtures/*.json`,三者都不在濾除範圍內。`pull_request` 的 path filter 是對整個 PR diff 判定,所以同時碰程式與文件的分支照跑。
+  **刻意不套用在 `push` 上**:在純文件 commit 上打 `v*` tag 會讓 `image` 不跑而發出沒有 image 的 release;而 main 是所有分支的基準,每個 commit 都驗過是值得一輪的性質。
+  未來若在 main 開 branch protection 並把這些檢查設為 required,純文件 PR 會因為 required check 永不回報而合不起來——那時要補一個同名 job 的 workflow 在被濾路徑上直接成功。
 
 ## 14. 安全邊界與密鑰清單
 
@@ -1431,7 +1434,7 @@ lint ──► unit ──► fuzz-smoke ──► integration ──► e2e ─
 | `ADMIN_BOOTSTRAP_EMAIL/PASSWORD` | 首個 admin(啟動時建立,之後可刪) | admin |
 | `WEBHOOK_SIGNING_KEY` | 加密儲存各 endpoint secret 的主金鑰 | worker、admin |
 | `ADMIN_API_KEY`(Phase 2 過渡)/ admin API key(Phase 3 起由系統簽發) | 客戶系統寫 kyc_level | api、admin |
-| `ANVIL_DEPLOYER_KEY`、`HOT_WALLET_ADDRESS` | 開發鏈部署與注資 | contracts-deployer |
+| `CONTRACT_DEPLOYER_KEY`、`HOT_WALLET_ADDRESS` | 開發鏈部署與注資 | contracts-deployer |
 | `REDIS_PASSWORD`、`NATS_USER/PASSWORD`(beta 起) | 基礎設施 | 各 role |
 | `GRAFANA_ADMIN_PASSWORD` | 觀測 | grafana |
 

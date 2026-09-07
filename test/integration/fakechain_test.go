@@ -98,8 +98,19 @@ func (c *fakeChain) rewind(height uint64) {
 	c.blocks = c.blocks[:height+1]
 }
 
-func (c *fakeChain) ChainID(context.Context) (int64, error)      { return c.chainID, nil }
-func (c *fakeChain) GenesisHash(context.Context) (string, error) { return c.genesis, nil }
+func (c *fakeChain) ChainID(context.Context) (int64, error) { return c.chainID, nil }
+
+// AnchorHash answers from the chain itself rather than from a fixed field, so
+// a test that rewinds past the anchor sees the same disagreement a real node
+// would report.
+func (c *fakeChain) AnchorHash(_ context.Context, block uint64) (string, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if block >= uint64(len(c.blocks)) {
+		return "", fmt.Errorf("fakechain: no block %d", block)
+	}
+	return c.blocks[block].hash, nil
+}
 
 func (c *fakeChain) Head(context.Context) (uint64, error) {
 	c.mu.Lock()

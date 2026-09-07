@@ -9,6 +9,9 @@ interface Vm {
     // environment
     function envUint(string calldata name) external view returns (uint256);
     function envAddress(string calldata name) external view returns (address);
+    function envOr(string calldata name, uint256 defaultValue) external view returns (uint256);
+    function envOr(string calldata name, address defaultValue) external view returns (address);
+    function envOr(string calldata name, string calldata defaultValue) external view returns (string memory);
     function addr(uint256 privateKey) external pure returns (address);
     function getNonce(address account) external view returns (uint64);
     function label(address account, string calldata newLabel) external;

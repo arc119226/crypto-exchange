@@ -7,6 +7,8 @@ TOOLS_MOD     := tools/go.mod
 COMPOSE_FILE  := deploy/compose/compose.yaml
 ENV_FILE      ?= .env
 COMPOSE       := docker compose -f $(COMPOSE_FILE) --env-file $(ENV_FILE)
+SEPOLIA_FILE  := deploy/compose/compose.sepolia.yaml
+COMPOSE_SEP   := docker compose -f $(COMPOSE_FILE) -f $(SEPOLIA_FILE) --env-file $(ENV_FILE)
 OBS           ?= 1
 OBS_PROFILE   := $(if $(filter 1,$(OBS)),--profile observability,)
 VERSION       ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
@@ -21,7 +23,7 @@ FOUNDRY_IMAGE := ghcr.io/foundry-rs/foundry:$(FOUNDRY_TAG)
 ALL_PROFILES  := --profile infra --profile observability --profile app --profile single
 
 .PHONY: help tools gen gen-check fmt tidy lint test test-fuzz test-integration e2e cover-money build image \
-	    up up-single down reset infra-up run migrate seed artifacts compose-config contracts-test \
+	    up up-single up-sepolia down down-sepolia reset infra-up run migrate seed artifacts compose-config contracts-test \
 	    gen-dev-secrets demo trace loadgen
 
 help: ## Show this help
@@ -87,6 +89,14 @@ up: ## Start infra + all roles as separate containers (+observability unless OBS
 up-single: ## Start infra + single all-in-one container (+observability unless OBS=0)
 	$(COMPOSE) --profile infra $(OBS_PROFILE) --profile single up -d --build --wait
 
+up-sepolia: ## Start the all-in-one container against Sepolia (see docs/runbooks/sepolia.md)
+	@test -f deploy/compose/sepolia/sepolia-addresses.json || 	  (echo "missing deploy/compose/sepolia/sepolia-addresses.json — see deploy/compose/sepolia/README.md" && exit 2)
+	@test -f deploy/compose/sepolia/seed-params.json || 	  (echo "missing deploy/compose/sepolia/seed-params.json — see deploy/compose/sepolia/README.md" && exit 2)
+	$(COMPOSE_SEP) --profile infra $(OBS_PROFILE) --profile single up -d --build --wait
+
+down-sepolia: ## Stop the Sepolia stack (keeps volumes; a separate project from the anvil one)
+	$(COMPOSE_SEP) $(ALL_PROFILES) down
+
 down: ## Stop everything (keeps volumes)
 	$(COMPOSE) $(ALL_PROFILES) down
 
@@ -123,9 +133,12 @@ artifacts: ## Copy addresses.json out of the compose artifacts volume (for make 
 e2e: ## Multi-container end-to-end test (compose app profile + exchangectl e2e; needs Docker)
 	bash scripts/e2e.sh
 
-compose-config: ## Validate the compose file with every profile (no daemon needed)
+compose-config: ## Validate both compose files with every profile (no daemon needed)
 	docker compose -f $(COMPOSE_FILE) --env-file .env.example $(ALL_PROFILES) config -q
 	@echo "compose.yaml OK"
+	ETH_RPC_URL=https://example.invalid ETH_SCAN_START_BLOCK=1 \
+	  docker compose -f $(COMPOSE_FILE) -f $(SEPOLIA_FILE) --env-file .env.example $(ALL_PROFILES) config -q
+	@echo "compose.sepolia.yaml OK"
 
 contracts-test: ## forge build + test inside the pinned foundry image (no local foundry needed)
 	docker run --rm -v $(CURDIR)/infra/contracts:/contracts:ro --entrypoint sh $(FOUNDRY_IMAGE) \

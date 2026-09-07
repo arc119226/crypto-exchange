@@ -84,7 +84,18 @@ func (w *Worker) Send(ctx context.Context) error {
 	}
 	var firstErr error
 	for _, row := range rows {
-		if err := w.advanceSend(ctx, row.ID); err != nil {
+		err := w.advanceSend(ctx, row.ID)
+		switch {
+		case err == nil:
+		case errors.Is(err, evm.ErrFeeCeiling):
+			// Not a failure: the operator's stop-loss says this is not worth
+			// sending yet. The row is untouched, so the next tick tries again
+			// at the market's next price.
+			w.log.Info("withdrawal is waiting for the fee market",
+				slog.String("withdrawal_id", row.ID), slog.String("asset", row.Asset),
+				slog.String("reason", err.Error()))
+			w.metrics.feeCeiling.WithLabelValues(row.Asset).Inc()
+		default:
 			w.log.Error("withdrawal send step failed",
 				slog.String("withdrawal_id", row.ID), slog.String("err", err.Error()))
 			if firstErr == nil {
@@ -499,6 +510,47 @@ func (w *Worker) postGas(ctx context.Context, tx pgx.Tx, row sqlcgen.ChainWithdr
 	return nil
 }
 
+// replacementRefused records an attempt the node would not take.
+//
+// The counting is the point. The send error used to return straight out of
+// replace, above the transaction that increments `replacements`, so a node
+// answering "replacement transaction underpriced" produced a withdrawal that
+// retried every REPLACE_AFTER for as long as the process lived: MaxReplacements
+// was never reached, the stuck metric never moved, and no operator was ever
+// asked. Nothing on anvil can refuse a replacement, so nothing noticed.
+//
+// The row keeps the hash it actually broadcast (see the query's comment) --
+// only the counter and the window move.
+func (w *Worker) replacementRefused(
+	ctx context.Context, row sqlcgen.ChainWithdrawal, reason string, cause error,
+) error {
+	if err := inTx(ctx, w.db, func(tx pgx.Tx) error {
+		updated, err := sqlcgen.New(tx).MarkWithdrawalReplacementFailed(ctx,
+			sqlcgen.MarkWithdrawalReplacementFailedParams{TenantID: w.cfg.Tenant, ID: row.ID})
+		if err != nil {
+			return fmt.Errorf("withdrawal: count refused replacement %s: %w", row.ID, err)
+		}
+		return w.audit.Record(ctx, tx, audit.Event{
+			ActorType: audit.ActorSystem, ActorID: "chain", Action: "withdrawal.replacement_refused",
+			TargetType: "withdrawal", TargetID: row.ID,
+			Before: map[string]any{"replacements": row.Replacements},
+			After: map[string]any{
+				"replacements": updated.Replacements, "reason": reason,
+				"tx_hash": deref(row.TxHash),
+				// Named separately from the error text so a query can count
+				// underpriced bumps without matching on strings.
+				"underpriced": errors.Is(cause, evm.ErrUnderpriced),
+				"error":       cause.Error(),
+			},
+			CorrelationID: deref(row.CorrelationID),
+		})
+	}); err != nil {
+		return err
+	}
+	w.metrics.refused.WithLabelValues(row.Asset).Inc()
+	return fmt.Errorf("withdrawal: send replacement for %s: %w", row.ID, cause)
+}
+
 // maybeReplace re-sends a transaction that has sat unmined too long (§6.4.2).
 func (w *Worker) maybeReplace(ctx context.Context, row sqlcgen.ChainWithdrawal) error {
 	if row.BroadcastAt.Valid && time.Since(row.BroadcastAt.Time) < w.send.ReplaceAfter {
@@ -536,7 +588,16 @@ func (w *Worker) replace(ctx context.Context, row sqlcgen.ChainWithdrawal, reaso
 	// Bump from the current suggestion rather than from the original fees: a
 	// market that has moved makes the old numbers irrelevant, and the protocol
 	// only requires beating what was actually sent.
-	fees = fees.Bump(int64(10 + 10*row.Replacements)).CapAt(w.send.MaxFeePerGas)
+	//
+	// The ceiling is re-checked after the bump, not just inside fees(): a
+	// suggestion comfortably under the limit can be pushed over it by the
+	// third 10% rung, and a replacement is exactly where the old clamping
+	// behaviour did the most damage -- it sent an underpriced bump that the
+	// node then refused, over and over, without ever counting an attempt.
+	fees = fees.Bump(int64(10 + 10*row.Replacements))
+	if err := w.underCeiling(fees); err != nil {
+		return err
+	}
 	to := common.HexToAddress(row.ToAddress)
 	gas, err := w.estimate(ctx, asset, to, amount)
 	if err != nil {
@@ -551,7 +612,7 @@ func (w *Worker) replace(ctx context.Context, row sqlcgen.ChainWithdrawal, reaso
 		return fmt.Errorf("withdrawal: sign replacement for %s: %w", row.ID, err)
 	}
 	if err := w.chain.SendRawTransaction(ctx, res.RawTx); err != nil && !errors.Is(err, evm.ErrKnownTransaction) {
-		return fmt.Errorf("withdrawal: send replacement for %s: %w", row.ID, err)
+		return w.replacementRefused(ctx, row, reason, err)
 	}
 	return inTx(ctx, w.db, func(tx pgx.Tx) error {
 		updated, err := sqlcgen.New(tx).ReplaceWithdrawalTx(ctx, sqlcgen.ReplaceWithdrawalTxParams{
@@ -601,13 +662,26 @@ func (w *Worker) failTx(ctx context.Context, tx pgx.Tx, row sqlcgen.ChainWithdra
 	return emit(ctx, tx, w.ledger, w.cfg.Tenant, EventStateChanged, updated, row.Status, reason)
 }
 
-// fees reads the current suggestion and applies the operator's ceiling.
+// fees reads the current suggestion and checks it against the operator's
+// ceiling. Over the ceiling it returns evm.ErrFeeCeiling, which every caller
+// treats as "not now" rather than as a failure.
 func (w *Worker) fees(ctx context.Context) (evm.Fees, error) {
 	f, err := w.chain.SuggestFees(ctx)
 	if err != nil {
 		return evm.Fees{}, fmt.Errorf("withdrawal: fees: %w", err)
 	}
-	return f.CapAt(w.send.MaxFeePerGas), nil
+	return f, w.underCeiling(f)
+}
+
+// underCeiling turns a breach into evm.ErrFeeCeiling carrying both numbers,
+// because an operator reading the log needs to know how far over it is to
+// decide whether to wait or to raise the ceiling.
+func (w *Worker) underCeiling(f evm.Fees) error {
+	if !f.Over(w.send.MaxFeePerGas) {
+		return nil
+	}
+	return fmt.Errorf("%w: fee cap %s wei exceeds ETH_MAX_FEE_PER_GAS %s",
+		evm.ErrFeeCeiling, f.FeeCap, w.send.MaxFeePerGas)
 }
 
 // estimate returns the gas limit. A native transfer is exactly the intrinsic

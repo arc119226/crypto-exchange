@@ -5,6 +5,7 @@ package integration
 import (
 	"context"
 	"crypto/ecdsa"
+	"fmt"
 	"io"
 	"log/slog"
 	"math/big"
@@ -338,4 +339,101 @@ func TestScriptedIgnoresWhatTheExchangeSentItself(t *testing.T) {
 		assert.Equal(t, "1", h.available(t, ctx, account, "ETH").String())
 		h.assertTrialBalanceZero(t, ctx)
 	})
+}
+
+// TestScriptedAnchorsAtTheStartBlock is the 4d change to §6.4.1 step 5.
+//
+// The guard used to compare the genesis hash. Genesis is the deepest read in
+// the startup path and the one a pruned node is least likely to serve, and a
+// public testnet endpoint is a pool of backends that have pruned different
+// depths -- the same request for block 0 answers a block one minute and
+// "pruned history unavailable" the next. The anchor is now the block the
+// scanner's own view starts at, which asks the same question at a depth the
+// node still has.
+func TestScriptedAnchorsAtTheStartBlock(t *testing.T) {
+	ctx := context.Background()
+	h := setupScriptedAt(t, 4)
+
+	var block int64
+	var hash string
+	require.NoError(t, h.all.QueryRow(ctx,
+		`SELECT anchor_block, anchor_hash FROM chain.chain_state WHERE chain_id = $1`,
+		anvilChainID).Scan(&block, &hash))
+	assert.Equal(t, int64(4), block, "the anchor is StartBlock, not genesis")
+
+	// And it is the hash of that block, not of block 0 -- the point of the
+	// change is lost if the recorded value still comes from the deepest read.
+	genesis, err := h.fake.AnchorHash(ctx, 0)
+	require.NoError(t, err)
+	fourth, err := h.fake.AnchorHash(ctx, 4)
+	require.NoError(t, err)
+	assert.Equal(t, fourth, hash)
+	assert.NotEqual(t, genesis, hash)
+}
+
+// TestScriptedAnchorRefusesADifferentChain: same height, different hash. The
+// wiped-anvil case, and the reason the guard exists at all.
+func TestScriptedAnchorRefusesADifferentChain(t *testing.T) {
+	ctx := context.Background()
+	h := setupScriptedAt(t, 4)
+
+	_, err := h.all.Exec(ctx,
+		`UPDATE chain.chain_state SET anchor_hash = $1 WHERE chain_id = $2`,
+		fakeHash("99"), anvilChainID)
+	require.NoError(t, err)
+
+	err = h.scanner.Start(ctx)
+	require.ErrorIs(t, err, deposit.ErrChainChanged)
+	assert.Contains(t, err.Error(), "make reset")
+}
+
+// TestScriptedAnchorRefusesAMovedStartBlock is new behaviour, not a port of an
+// old guard: ETH_SCAN_START_BLOCK decides what "already scanned" means on a
+// fresh database, and until the anchor recorded it, editing it under a live
+// one went unnoticed. The message has to name the recorded block, because the
+// fix is a setting -- telling an operator to reset would cost them a database
+// over a typo.
+func TestScriptedAnchorRefusesAMovedStartBlock(t *testing.T) {
+	ctx := context.Background()
+	h := setupScriptedAt(t, 4)
+
+	_, err := h.all.Exec(ctx,
+		`UPDATE chain.chain_state SET anchor_block = 2 WHERE chain_id = $1`, anvilChainID)
+	require.NoError(t, err)
+
+	err = h.scanner.Start(ctx)
+	require.ErrorIs(t, err, deposit.ErrChainChanged)
+	assert.Contains(t, err.Error(), "anchored at block 2")
+	assert.Contains(t, err.Error(), "ETH_SCAN_START_BLOCK is 4")
+	assert.NotContains(t, err.Error(), "make reset")
+}
+
+// setupScriptedAt mines a few blocks before the scanner starts, so StartBlock
+// can be something other than zero. With StartBlock 0 the anchor is genesis
+// and the change under test is invisible.
+func setupScriptedAt(t *testing.T, start uint64) scriptedHarness {
+	t.Helper()
+	lh := setupLedger(t)
+	ctx := context.Background()
+
+	fx, err := registry.LoadFixtures(fixtures)
+	require.NoError(t, err)
+	_, err = registry.Seed(ctx, lh.all, fx, registry.SeedOptions{
+		TenantID: "default", RequiredConfirmations: requiredConfirmations,
+	})
+	require.NoError(t, err)
+
+	fake := newFakeChain(anvilChainID)
+	for i := uint64(1); i <= start+2; i++ {
+		fake.mine(fmt.Sprintf("b%d", i))
+	}
+	cfg := deposit.Config{
+		Tenant: "default", ChainID: anvilChainID, StartBlock: start,
+		DefaultConfirmations: requiredConfirmations,
+	}
+	s := deposit.New(lh.all, fake, lh.svc, registry.NewStore(lh.all), cfg,
+		slog.New(slog.NewTextHandler(io.Discard, nil)))
+	require.NoError(t, s.Start(ctx))
+	return scriptedHarness{ledgerHarness: lh, fake: fake, scanner: s,
+		addresses: chain.NewAddresses(lh.all, "default", anvilChainID)}
 }

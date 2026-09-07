@@ -2,7 +2,7 @@
 
 白牌交易引擎(white-label exchange engine)的商業化原型:現貨撮合、複式記帳帳本、EVM 充提與歸集、行情推播、管理後台,以單一 Go binary 多角色的模組化單體交付,客戶透過 REST / WebSocket / Webhook 與事件契約整合。
 
-**目前狀態:Phase 4c-2 進行中(鏈上對帳;本 PR)。Phase 3、4a、4b 與 4c-1 歸集已完成。** 已合併:Phase 0 walking skeleton、Phase 1 `internal/matching`(無 I/O、確定性訂單簿)、Phase 2 `internal/ledger`(複式記帳、凍結即分錄、冪等鍵)與 admin API、Phase 3a `internal/trading` + `internal/eventbus`(每市場 runner、一筆交易內 Hold → Apply → 成交 / 分錄 / outbox、重啟重建、JetStream relay)、Phase 3b `internal/auth` + `internal/ratelimit` + public API(JWT / refresh / API key HMAC、限流、`client_order_id` 冪等)。3c 讓拆分部署真的能交易:`internal/cmdbus`(NATS request-reply 命令匯流排,跨容器仍保持 404 / 422 / 503 的錯誤語意,命令帶 `aud=internal` JWT)、`eventbus` 消費端與引擎的`market.updated` 熱載入、`PUT /admin/v1/markets/{symbol}/status`、`api/events/v1/*.json` + `docs/events.md` 事件契約(golden + JSON Schema 測試),以及每個 PR 都跑的多容器 `make e2e`。
+**目前狀態:Phase 4d-1 進行中(Sepolia 的設定與程式準備;本 PR)。Phase 3、4a、4b、4c-1 歸集與 4c-2 對帳已完成;4d 的實跑見 [`docs/runbooks/sepolia.md`](docs/runbooks/sepolia.md)。** 已合併:Phase 0 walking skeleton、Phase 1 `internal/matching`(無 I/O、確定性訂單簿)、Phase 2 `internal/ledger`(複式記帳、凍結即分錄、冪等鍵)與 admin API、Phase 3a `internal/trading` + `internal/eventbus`(每市場 runner、一筆交易內 Hold → Apply → 成交 / 分錄 / outbox、重啟重建、JetStream relay)、Phase 3b `internal/auth` + `internal/ratelimit` + public API(JWT / refresh / API key HMAC、限流、`client_order_id` 冪等)。3c 讓拆分部署真的能交易:`internal/cmdbus`(NATS request-reply 命令匯流排,跨容器仍保持 404 / 422 / 503 的錯誤語意,命令帶 `aud=internal` JWT)、`eventbus` 消費端與引擎的`market.updated` 熱載入、`PUT /admin/v1/markets/{symbol}/status`、`api/events/v1/*.json` + `docs/events.md` 事件契約(golden + JSON Schema 測試),以及每個 PR 都跑的多容器 `make e2e`。
 
 4a-1 已合併:`internal/chain/hdwallet`(BIP-44 派生、scrypt + AES-256-GCM 的 `hd-seed.json`)、`exchange keys import-mnemonic`、signer role 維護的**預生成充值地址池**、`GET /v1/deposit-address`——api role 只認領地址,永遠拿不到金鑰。
 
@@ -73,6 +73,11 @@ cast call $(jq -r .usdc deploy/compose/artifacts/addresses.json) "decimals()(uin
 
 make down               # 停止(保留資料)
 make reset              # 停止並清空 postgres / nats / anvil 狀態與合約產物
+
+# 真的鏈(Sepolia,手動、不進 CI)
+# 逐步操作在 docs/runbooks/sepolia.md;它的 Part A 不需要這裡的任何東西就能開始
+make up-sepolia         # compose.yaml + compose.sepolia.yaml,獨立的 project name 與 volume
+make down-sepolia
 ```
 
 `make up` 改為每個 role 一個容器(api / engine / chain / signer / stream / admin / worker);`OBS=0` 可略過 prometheus / grafana。
@@ -142,4 +147,4 @@ docs                  計畫、審查、ADR、領域文件
 
 ## 下一步
 
-Phase 3(`docs/plan-v1.0.md` §12)分三個 PR 全數合併,DoD 全滿足。Phase 4 鏈上分 4a 充值、4b 提現、4c 歸集與對帳、4d Sepolia 驗證;4a 再拆 4a-1(金鑰與地址,已合併)與 4a-2(掃描與入帳,本 PR)。DoD 不過不進下一階段。
+Phase 3(`docs/plan-v1.0.md` §12)分三個 PR 全數合併,DoD 全滿足。Phase 4 鏈上分 4a 充值、4b 提現、4c 歸集與對帳、4d Sepolia 驗證,每一項再拆兩個 PR。4d-1(本 PR)是把設定與程式準備好——並且在準備的過程中,對真的 Sepolia 節點做讀取實測,抓到四個只在真鏈上才會踩到的缺陷(見 [`docs/domain.md`](docs/domain.md) §21);4d-2 是手動實跑與結果記錄。DoD 不過不進下一階段。

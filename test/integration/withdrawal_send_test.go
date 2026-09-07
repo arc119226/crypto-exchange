@@ -16,6 +16,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/arc119226/crypto-exchange/internal/audit"
+	"github.com/arc119226/crypto-exchange/internal/chain/evm"
 	"github.com/arc119226/crypto-exchange/internal/chain/hdwallet"
 	"github.com/arc119226/crypto-exchange/internal/chain/hotwallet"
 	"github.com/arc119226/crypto-exchange/internal/chain/signer"
@@ -62,7 +63,11 @@ func setupSendWith(t *testing.T, send withdrawal.SendConfig) sendHarness {
 	// the state machine, not about running out.
 	chain.fund(hot, new(big.Int).Mul(big.NewInt(100), oneETH()))
 	chain.fundToken(common.HexToAddress(usdcContract), hot, big.NewInt(1_000_000_000_000))
-	nonces := hotwallet.New(h.all, "default", anvilChainID, hot, chain, s, log)
+	// The ceiling reaches the nonce manager the same way it reaches the
+	// worker, because chain_role.go wires both from ETH_MAX_FEE_PER_GAS: a
+	// harness that gave it to only one of them would test a deployment that
+	// does not exist.
+	nonces := hotwallet.New(h.all, "default", anvilChainID, hot, chain, s, log).WithMaxFee(send.MaxFeePerGas)
 	require.NoError(t, nonces.Start(ctx))
 
 	send.ChainID = anvilChainID
@@ -587,5 +592,119 @@ func TestWithdrawalOfATokenBooksGasInTheNativeCoin(t *testing.T) {
 	gas := h.houseBalance(t, ctx, "gas_expense", "ETH")
 	assert.True(t, gas.IsPositive(), "gas is in ETH even for a USDC withdrawal")
 	assert.Equal(t, "0", h.houseBalance(t, ctx, "gas_expense", "USDC").String())
+	h.assertTrialBalanceZero(t, ctx)
+}
+
+// gwei is a readable fee in wei.
+func gwei(n int64) *big.Int { return new(big.Int).Mul(big.NewInt(n), big.NewInt(1_000_000_000)) }
+
+// TestWithdrawalWaitsAboveTheFeeCeiling pins the 4d behaviour change.
+//
+// ETH_MAX_FEE_PER_GAS used to be applied by Fees.CapAt, which lowered the fee
+// cap to the limit and sent anyway -- while its own comment, and the config
+// field's, both said a transaction over the ceiling "waits instead". On anvil
+// the base fee is zero, so the ceiling was never reached and nothing noticed.
+// On a real fee market the old behaviour broadcasts at a price the market has
+// already left behind, which is the opposite of a stop-loss.
+func TestWithdrawalWaitsAboveTheFeeCeiling(t *testing.T) {
+	// The scripted chain suggests 2*baseFee + tip = 3.5 gwei by default.
+	h := setupSendWith(t, withdrawal.SendConfig{MaxFeePerGas: gwei(3)})
+	ctx := context.Background()
+	account := h.newSpot(t, ctx)
+	h.fund(t, ctx, account, "ETH", "5", "faucet-ceiling")
+	id := h.locked(t, ctx, account, "ETH", "0.05", "ceiling-1")
+
+	// Send returns nil: this is a decision, not a failure, and a tick that
+	// reported an error here would page somebody for working as configured.
+	require.NoError(t, h.worker.Send(ctx))
+	status, nonce, txHash, _ := h.row(t, ctx, id)
+	assert.Equal(t, withdrawal.StatusFundsLocked, status, "it waits where it was")
+	assert.Nil(t, nonce, "and has not consumed a nonce it would have to give back")
+	assert.Nil(t, txHash)
+	assert.Equal(t, 0, h.chain.sentCount(), "nothing was broadcast at a clamped price")
+
+	// Nothing about the withdrawal changed -- only the market. It goes out on
+	// the next tick, which is what makes this waiting rather than failing.
+	h.chain.setBaseFee(gwei(0))
+	require.NoError(t, h.worker.Send(ctx)) // sign
+	require.NoError(t, h.worker.Send(ctx)) // broadcast
+	status, nonce, txHash, _ = h.row(t, ctx, id)
+	assert.Equal(t, withdrawal.StatusBroadcast, status)
+	require.NotNil(t, nonce)
+	require.NotNil(t, txHash)
+	h.assertTrialBalanceZero(t, ctx)
+}
+
+// A replacement the ceiling forbids is not counted. The operator's stop-loss
+// must not spend the withdrawal's escalation budget: when the market calms
+// down the bumps are still there to be used, and MaxReplacements still means
+// "this many attempts", not "this many minutes of an expensive market".
+func TestWithdrawalCeilingDoesNotSpendReplacements(t *testing.T) {
+	// The scripted suggestion is 2*baseFee + tip = 3.5 gwei, and the first
+	// bump is +10% of a fresh suggestion. 3.6 sits between the two, so the
+	// send is allowed and only the replacement is over.
+	h := setupSendWith(t, withdrawal.SendConfig{
+		ReplaceAfter: time.Nanosecond, MaxReplacements: 2, MaxFeePerGas: big.NewInt(3_600_000_000),
+	})
+	ctx := context.Background()
+	account := h.newSpot(t, ctx)
+	h.fund(t, ctx, account, "ETH", "5", "faucet-ceiling-replace")
+	id := h.locked(t, ctx, account, "ETH", "0.05", "ceiling-replace-1")
+
+	require.NoError(t, h.worker.Send(ctx)) // sign at 3.5 gwei, under the ceiling
+	require.NoError(t, h.worker.Send(ctx)) // broadcast
+	sent := h.chain.sentCount()
+
+	// The first bump is 3.85 gwei, over the ceiling. Under CapAt this went out
+	// clamped back to exactly the ceiling -- a "replacement" priced at 3.6
+	// gwei, which does not outbid the 3.5 gwei transaction by the 10% the
+	// protocol requires, so the node would refuse it anyway.
+	require.NoError(t, h.worker.Send(ctx))
+	_, _, _, replacements := h.row(t, ctx, id)
+	assert.Equal(t, int32(0), replacements, "the ceiling is not an attempt")
+	assert.Equal(t, sent, h.chain.sentCount(), "and nothing was sent at a price that cannot displace anything")
+
+	h.chain.setBaseFee(gwei(0))
+	require.NoError(t, h.worker.Send(ctx))
+	_, _, _, replacements = h.row(t, ctx, id)
+	assert.Equal(t, int32(1), replacements, "the budget survived the wait")
+	assert.Equal(t, sent+1, h.chain.sentCount())
+}
+
+// TestWithdrawalCountsARefusedReplacement covers the defect that made
+// MAX_REPLACEMENTS unreachable: replace() returned the send error above the
+// statement that increments `replacements`, so a node answering "replacement
+// transaction underpriced" produced a withdrawal that retried every
+// REPLACE_AFTER for as long as the process lived. Nothing on anvil can refuse
+// a replacement, so nothing noticed.
+func TestWithdrawalCountsARefusedReplacement(t *testing.T) {
+	h := setupSendWith(t, withdrawal.SendConfig{ReplaceAfter: time.Nanosecond, MaxReplacements: 2})
+	ctx := context.Background()
+	account := h.newSpot(t, ctx)
+	h.fund(t, ctx, account, "ETH", "5", "faucet-refused")
+	id := h.locked(t, ctx, account, "ETH", "0.05", "refused-1")
+
+	require.NoError(t, h.worker.Send(ctx)) // sign
+	require.NoError(t, h.worker.Send(ctx)) // broadcast
+	_, _, broadcast, _ := h.row(t, ctx, id)
+	require.NotNil(t, broadcast)
+	sent := h.chain.sentCount()
+
+	for attempt := int32(1); attempt <= 2; attempt++ {
+		h.chain.failNextSend(evm.ErrUnderpriced)
+		// The error still surfaces -- a node refusing our bumps is worth a log
+		// line -- but the attempt is recorded first.
+		require.ErrorIs(t, h.worker.Send(ctx), evm.ErrUnderpriced)
+		_, _, txHash, replacements := h.row(t, ctx, id)
+		assert.Equal(t, attempt, replacements, "a refused bump is still a bump")
+		require.NotNil(t, txHash)
+		assert.Equal(t, *broadcast, *txHash,
+			"and the row keeps the hash that is actually in the mempool: the refused one is nowhere")
+	}
+
+	// Which is the whole point: the ladder now ends, and a person is asked.
+	require.NoError(t, h.worker.Send(ctx))
+	assert.Equal(t, sent, h.chain.sentCount(), "no further bids after MaxReplacements")
+	assert.Equal(t, withdrawal.StatusBroadcast, h.status(t, ctx, account, id))
 	h.assertTrialBalanceZero(t, ctx)
 }

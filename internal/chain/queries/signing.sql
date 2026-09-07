@@ -87,6 +87,26 @@ SET raw_tx = $3, tx_hash = $4, broadcast_at = now(), replacements = replacements
 WHERE tenant_id = $1 AND id = $2
 RETURNING *;
 
+-- name: MarkWithdrawalReplacementFailed :one
+-- A replacement the node refused (underpriced, or anything else that is not
+-- "already known").
+--
+-- The attempt still counts. Until now the send error returned before
+-- ReplaceWithdrawalTx ran, so `replacements` never moved and MAX_REPLACEMENTS
+-- was unreachable: a withdrawal whose bumps the node kept refusing retried
+-- every REPLACE_AFTER forever instead of escalating to a person. Restarting
+-- the window at the same time stops the retry turning into a hot loop.
+--
+-- raw_tx and tx_hash are deliberately untouched. The refused transaction is
+-- nowhere -- writing its hash would send the tracker chasing something that
+-- will never appear -- and the transaction it was meant to displace is still
+-- live in the mempool and still the one that might mine.
+UPDATE chain.withdrawals
+SET broadcast_at = now(), replacements = replacements + 1,
+    version = version + 1, updated_at = now()
+WHERE tenant_id = $1 AND id = $2
+RETURNING *;
+
 -- name: MarkWithdrawalConfirmed :one
 UPDATE chain.withdrawals
 SET status = 'confirmed', block_number = $3, gas_cost = $4,

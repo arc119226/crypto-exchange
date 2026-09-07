@@ -14,6 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/arc119226/crypto-exchange/internal/audit"
+	"github.com/arc119226/crypto-exchange/internal/chain/evm"
 	"github.com/arc119226/crypto-exchange/internal/chain/hdwallet"
 	"github.com/arc119226/crypto-exchange/internal/chain/hotwallet"
 	"github.com/arc119226/crypto-exchange/internal/chain/signer"
@@ -269,4 +270,43 @@ func (h nonceHarness) fillReason(t *testing.T, ctx context.Context, nonce int64)
 		`SELECT reason FROM chain.nonce_fills WHERE chain_id = $1 AND nonce = $2`,
 		anvilChainID, nonce).Scan(&reason))
 	return reason
+}
+
+// TestNonceManagerWaitsAboveTheFeeCeiling: a gap fill is the one transaction
+// nothing else can proceed without -- every nonce behind it is stuck -- and it
+// still respects ETH_MAX_FEE_PER_GAS.
+//
+// That is deliberate rather than an oversight in the other direction. A
+// stop-loss that exempts the transaction most likely to be sent during a fee
+// spike is not a stop-loss, and nothing is lost by waiting: the same ceiling
+// has already stopped every withdrawal and every sweep, so the queue the fill
+// would unblock is not moving anyway. Before 4d the manager never saw the
+// ceiling at all.
+func TestNonceManagerWaitsAboveTheFeeCeiling(t *testing.T) {
+	h := setupNonces(t)
+	ctx := context.Background()
+	// The scripted chain suggests 2*baseFee + tip = 3.5 gwei.
+	m := h.manager().WithMaxFee(gwei(3))
+	require.NoError(t, m.Start(ctx))
+
+	var first uint64
+	require.NoError(t, inTx(ctx, h.all, func(tx pgx.Tx) error {
+		var err error
+		if first, err = m.Allocate(ctx, tx); err != nil {
+			return err
+		}
+		_, err = m.Allocate(ctx, tx) // so `first` is no longer the last one out
+		return err
+	}))
+
+	err := m.Recycle(ctx, first, "broadcast_failed")
+	require.ErrorIs(t, err, evm.ErrFeeCeiling)
+	assert.Equal(t, 0, h.fillCount(t, ctx), "nothing was sent")
+	assert.Equal(t, int64(2), h.storedNonce(t, ctx), "and the counter did not move backwards over a gap")
+
+	// The gap is still there to be filled when the market allows it.
+	h.chain.setBaseFee(gwei(0))
+	require.NoError(t, m.Recycle(ctx, first, "broadcast_failed"))
+	assert.Equal(t, 1, h.fillCount(t, ctx))
+	assert.Equal(t, "broadcast_failed", h.fillReason(t, ctx, int64(first)))
 }

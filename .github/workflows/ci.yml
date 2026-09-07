@@ -11,7 +11,26 @@ on:
   push:
     branches: [main]
     tags: ["v*"]
+  # Documentation-only pull requests skip CI. A full run is ~30 minutes of
+  # runner time across nine jobs, and nothing here reads docs/ or any .md --
+  # the only non-Go files the tests load are .env.example,
+  # deploy/seed-params/*.json and test/fixtures/*.json, none of which are
+  # filtered below. Path filters on pull_request are evaluated against the
+  # whole PR diff, so a branch that touches code *and* docs still runs.
+  #
+  # Deliberately not applied to push: a v* tag cut from a docs-only commit
+  # would skip the image job and ship a release with no image, and main is
+  # every branch's base -- it is worth one full run per merge to know that
+  # every commit on it has been verified.
+  #
+  # If main ever gains branch protection with these checks marked required,
+  # this filter makes docs-only PRs unmergeable: the required check never
+  # reports. The fix then is GitHub's documented pattern -- a second workflow
+  # with the same job names that succeeds on the filtered paths.
   pull_request:
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
 
 concurrency:
   group: ci-${{ github.ref }}

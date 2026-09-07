@@ -49,8 +49,9 @@ type ChainBlock struct {
 type ChainChainState struct {
 	TenantID    string
 	ChainID     int64
-	GenesisHash string
+	AnchorHash  string
 	CreatedAt   time.Time
+	AnchorBlock int64
 }
 
 type ChainDeposit struct {

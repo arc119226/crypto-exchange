@@ -117,6 +117,9 @@ type SeedOptions struct {
 	TenantID              string
 	ChainID               int64
 	RequiredConfirmations int32
+	// ParamsPath is an optional overlay on the built-in seed values; empty
+	// keeps every one of them.
+	ParamsPath string
 }
 
 // Seed upserts the registry fixtures (fee schedule, ETH, USDC, ETH-USDC).
@@ -129,12 +132,18 @@ func Seed(ctx context.Context, opts SeedOptions, out io.Writer) error {
 	if err := fx.Validate(opts.ChainID); err != nil {
 		return err
 	}
+	params, err := registry.LoadSeedParams(opts.ParamsPath)
+	if err != nil {
+		return err
+	}
 	pool, err := pg.Open(ctx, pg.PoolConfig{DSN: opts.DSN, MaxConns: 2, ApplicationName: "exchange-seed"})
 	if err != nil {
 		return fmt.Errorf("seed: %w", err)
 	}
 	defer pool.Close()
-	res, err := registry.Seed(ctx, pool, fx, registry.SeedOptions{TenantID: opts.TenantID, RequiredConfirmations: opts.RequiredConfirmations})
+	res, err := registry.Seed(ctx, pool, fx, registry.SeedOptions{
+		TenantID: opts.TenantID, RequiredConfirmations: opts.RequiredConfirmations, Params: params,
+	})
 	if err != nil {
 		return fmt.Errorf("seed: %w", err)
 	}

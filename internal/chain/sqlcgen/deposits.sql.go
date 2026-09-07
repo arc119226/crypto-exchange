@@ -95,7 +95,7 @@ func (q *Queries) GetBlock(ctx context.Context, arg GetBlockParams) (ChainBlock,
 }
 
 const getChainState = `-- name: GetChainState :one
-SELECT tenant_id, chain_id, genesis_hash, created_at FROM chain.chain_state WHERE tenant_id = $1 AND chain_id = $2
+SELECT tenant_id, chain_id, anchor_hash, created_at, anchor_block FROM chain.chain_state WHERE tenant_id = $1 AND chain_id = $2
 `
 
 type GetChainStateParams struct {
@@ -109,8 +109,9 @@ func (q *Queries) GetChainState(ctx context.Context, arg GetChainStateParams) (C
 	err := row.Scan(
 		&i.TenantID,
 		&i.ChainID,
-		&i.GenesisHash,
+		&i.AnchorHash,
 		&i.CreatedAt,
+		&i.AnchorBlock,
 	)
 	return i, err
 }
@@ -186,18 +187,28 @@ func (q *Queries) GetScanCursor(ctx context.Context, arg GetScanCursorParams) (C
 }
 
 const insertChainState = `-- name: InsertChainState :exec
-INSERT INTO chain.chain_state (tenant_id, chain_id, genesis_hash)
-VALUES ($1, $2, $3)
+INSERT INTO chain.chain_state (tenant_id, chain_id, anchor_block, anchor_hash)
+VALUES ($1, $2, $3, $4)
 `
 
 type InsertChainStateParams struct {
 	TenantID    string
 	ChainID     int64
-	GenesisHash string
+	AnchorBlock int64
+	AnchorHash  string
 }
 
+// The anchor is the block this database's view of the chain starts at
+// (ETH_SCAN_START_BLOCK) together with its hash. Recorded once, compared on
+// every start: a different hash is a different chain, and a different block
+// means the setting moved under a live database.
 func (q *Queries) InsertChainState(ctx context.Context, arg InsertChainStateParams) error {
-	_, err := q.db.Exec(ctx, insertChainState, arg.TenantID, arg.ChainID, arg.GenesisHash)
+	_, err := q.db.Exec(ctx, insertChainState,
+		arg.TenantID,
+		arg.ChainID,
+		arg.AnchorBlock,
+		arg.AnchorHash,
+	)
 	return err
 }
 

@@ -100,6 +100,9 @@ var seedWithdrawalLimits = []WithdrawalLimitInput{
 type SeedOptions struct {
 	TenantID              string
 	RequiredConfirmations int32 // anvil: 1, Sepolia: 6+
+	// Params overlays the constants above. The zero value keeps every one of
+	// them, which is what anvil uses.
+	Params SeedParams
 }
 
 // SeedResult summarises what was upserted.
@@ -133,7 +136,7 @@ func Seed(ctx context.Context, pool *pgxpool.Pool, fx Fixtures, opts SeedOptions
 	res.FeeSchedules++
 
 	usdc := fx.USDC
-	for _, in := range []AssetInput{
+	assets := []AssetInput{
 		{Symbol: "ETH", Name: "Ether", ChainID: fx.ChainID, IsNative: true, Scale: 18, DisplayScale: 6,
 			RequiredConfirmations: opts.RequiredConfirmations, MinWithdrawal: seedMinWithdrawalETH,
 			SweepThreshold: seedSweepThresholdETH,
@@ -142,25 +145,51 @@ func Seed(ctx context.Context, pool *pgxpool.Pool, fx Fixtures, opts SeedOptions
 			RequiredConfirmations: opts.RequiredConfirmations, MinWithdrawal: seedMinWithdrawalUSDC,
 			SweepThreshold: seedSweepThresholdUSDC,
 			DepositEnabled: true, WithdrawEnabled: true, Status: AssetActive},
-	} {
+	}
+	// An overlay key naming an asset this seed does not create is refused
+	// rather than ignored. `exchange seed` writes exactly these two rows, so
+	// "SUDC": {...} can only be a typo, and one that would otherwise be
+	// discovered by a threshold not doing what the file says it does.
+	known := map[string]bool{}
+	for _, in := range assets {
+		known[in.Symbol] = true
+	}
+	for symbol := range opts.Params.Assets {
+		if !known[symbol] {
+			return res, fmt.Errorf("%w: seed params name asset %q, which this seed does not create", ErrInvalid, symbol)
+		}
+	}
+	for _, in := range assets {
+		in, err := opts.Params.applyAsset(in)
+		if err != nil {
+			return res, err
+		}
 		if _, err := store.UpsertAsset(ctx, tx, opts.TenantID, in); err != nil {
 			return res, err
 		}
 		res.Assets++
 	}
 
-	if _, err := store.UpsertMarket(ctx, tx, opts.TenantID, MarketInput{
+	market, err := opts.Params.applyMarket(MarketInput{
 		Symbol: DefaultMarketSymbol, BaseSymbol: "ETH", QuoteSymbol: "USDC",
 		PriceTick: seedPriceTick, QtyStep: seedQtyStep, MinNotional: seedMinNotional,
 		FeeSchedule: DefaultFeeScheduleName, SelfTradePolicy: STPCancelNewest, Status: MarketActive,
-	}); err != nil {
+	})
+	if err != nil {
+		return res, err
+	}
+	if _, err := store.UpsertMarket(ctx, tx, opts.TenantID, market); err != nil {
 		return res, err
 	}
 	res.Markets++
 
 	// After the assets: the upsert resolves the asset by symbol, so the row
 	// has to exist first.
-	for _, in := range seedWithdrawalLimits {
+	limits, err := opts.Params.applyLimits(seedWithdrawalLimits)
+	if err != nil {
+		return res, err
+	}
+	for _, in := range limits {
 		if _, err := store.UpsertWithdrawalLimit(ctx, tx, opts.TenantID, in); err != nil {
 			return res, err
 		}

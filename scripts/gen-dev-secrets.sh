@@ -31,6 +31,14 @@ mkdir -p secrets/jwt secrets/keystore
 # 1. .env
 if [[ -f .env && "$FORCE" != 1 ]]; then
   log ".env exists, keeping it (FORCE=1 to regenerate)"
+  # 4d renamed ANVIL_DEPLOYER_KEY to CONTRACT_DEPLOYER_KEY: the deployer signs
+  # on whatever chain it is pointed at, and on a testnet that key is real. An
+  # existing .env would otherwise leave compose interpolating an empty value,
+  # and the deploy would fail with something that does not mention the rename.
+  if grep -q '^ANVIL_DEPLOYER_KEY=' .env && ! grep -q '^CONTRACT_DEPLOYER_KEY=' .env; then
+    set_var .env CONTRACT_DEPLOYER_KEY "$(sed -n 's/^ANVIL_DEPLOYER_KEY=//p' .env)"
+    log "renamed ANVIL_DEPLOYER_KEY to CONTRACT_DEPLOYER_KEY in .env"
+  fi
 else
   cp .env.example .env
   chmod 600 .env

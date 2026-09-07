@@ -39,8 +39,12 @@ var ErrChainChanged = errors.New("deposit: the node is on a different chain than
 
 // Config tunes the scanner.
 type Config struct {
-	Tenant     string
-	ChainID    int64
+	Tenant  string
+	ChainID int64
+	// StartBlock is the last block treated as already scanned on a fresh
+	// database, and also the anchor: its hash is recorded on the first start
+	// and re-checked on every start after, which is how this database knows
+	// it is still looking at the same chain (see verifyAnchor).
 	StartBlock uint64
 	// BatchSize caps how many blocks one tick scans, so catching up on a long
 	// chain cannot hold a transaction open for minutes.
@@ -78,7 +82,7 @@ func (c Config) withDefaults() Config {
 type Chain interface {
 	ChainID(ctx context.Context) (int64, error)
 	Head(ctx context.Context) (uint64, error)
-	GenesisHash(ctx context.Context) (string, error)
+	AnchorHash(ctx context.Context, block uint64) (string, error)
 	BlockByNumber(ctx context.Context, number uint64) (evm.Block, error)
 	TransferLogs(ctx context.Context, from, to uint64, contracts []common.Address) ([]types.Log, error)
 	Receipt(ctx context.Context, txHash string) (*types.Receipt, error)
@@ -139,26 +143,8 @@ func (s *Scanner) Start(ctx context.Context) error {
 	if id != s.cfg.ChainID {
 		return fmt.Errorf("%w: node says chain %d, configured %d", ErrChainChanged, id, s.cfg.ChainID)
 	}
-	genesis, err := s.chain.GenesisHash(ctx)
-	if err != nil {
+	if err := s.verifyAnchor(ctx); err != nil {
 		return err
-	}
-	q := sqlcgen.New(s.db)
-	state, err := q.GetChainState(ctx, sqlcgen.GetChainStateParams{TenantID: s.cfg.Tenant, ChainID: s.cfg.ChainID})
-	switch {
-	case errors.Is(err, pgx.ErrNoRows):
-		if err := q.InsertChainState(ctx, sqlcgen.InsertChainStateParams{
-			TenantID: s.cfg.Tenant, ChainID: s.cfg.ChainID, GenesisHash: genesis,
-		}); err != nil {
-			return fmt.Errorf("deposit: record chain state: %w", err)
-		}
-		s.log.Info("chain recorded", slog.Int64("chain_id", s.cfg.ChainID), slog.String("genesis", genesis))
-	case err != nil:
-		return fmt.Errorf("deposit: read chain state: %w", err)
-	case state.GenesisHash != genesis:
-		// The usual cause is a wiped anvil volume against a surviving database.
-		return fmt.Errorf("%w: genesis %s, expected %s (run `make reset` to start both over)",
-			ErrChainChanged, genesis, state.GenesisHash)
 	}
 
 	head, err := s.chain.Head(ctx)
@@ -174,6 +160,61 @@ func (s *Scanner) Start(ctx context.Context) error {
 			ErrChainChanged, cursor, head)
 	}
 	return s.refreshAddresses(ctx)
+}
+
+// verifyAnchor records, or re-checks, which chain this database belongs to.
+//
+// The anchor is StartBlock — the block the scanner's view begins at — and its
+// hash. Both are stored, and both are compared on every start:
+//
+//   - a different hash at the same height is a different chain, whatever its
+//     chain id says. That is the wiped-anvil case, and refusing to start is
+//     the only honest answer: resuming would silently skip every deposit
+//     between the old cursor and the new chain's head.
+//   - a different height means ETH_SCAN_START_BLOCK moved under a live
+//     database. Nothing used to notice, because StartBlock is only read when
+//     no cursor exists, so a typo would quietly change what "already scanned"
+//     means on the next fresh start. It is refused too, with the recorded
+//     value in the message, because the fix is a setting and not a reset.
+func (s *Scanner) verifyAnchor(ctx context.Context) error {
+	q := sqlcgen.New(s.db)
+	state, err := q.GetChainState(ctx, sqlcgen.GetChainStateParams{TenantID: s.cfg.Tenant, ChainID: s.cfg.ChainID})
+	switch {
+	case errors.Is(err, pgx.ErrNoRows):
+		hash, err := s.chain.AnchorHash(ctx, s.cfg.StartBlock)
+		if err != nil {
+			return err
+		}
+		if err := q.InsertChainState(ctx, sqlcgen.InsertChainStateParams{
+			TenantID: s.cfg.Tenant, ChainID: s.cfg.ChainID,
+			AnchorBlock: int64(s.cfg.StartBlock), //nolint:gosec // block numbers are far below 2^63
+			AnchorHash:  hash,
+		}); err != nil {
+			return fmt.Errorf("deposit: record chain state: %w", err)
+		}
+		s.log.Info("chain recorded", slog.Int64("chain_id", s.cfg.ChainID),
+			slog.Uint64("anchor_block", s.cfg.StartBlock), slog.String("anchor_hash", hash))
+		return nil
+	case err != nil:
+		return fmt.Errorf("deposit: read chain state: %w", err)
+	}
+
+	recorded := uint64(state.AnchorBlock) //nolint:gosec // CHECKed >= 0
+	if recorded != s.cfg.StartBlock {
+		return fmt.Errorf("%w: this database is anchored at block %d but ETH_SCAN_START_BLOCK is %d "+
+			"(set it back to %d, or clear chain.chain_state if this really is a different chain)",
+			ErrChainChanged, recorded, s.cfg.StartBlock, recorded)
+	}
+	hash, err := s.chain.AnchorHash(ctx, recorded)
+	if err != nil {
+		return err
+	}
+	if state.AnchorHash != hash {
+		// The usual cause is a wiped anvil volume against a surviving database.
+		return fmt.Errorf("%w: block %d hashes to %s, expected %s (run `make reset` to start both over)",
+			ErrChainChanged, recorded, hash, state.AnchorHash)
+	}
+	return nil
 }
 
 // Tick advances the scanner by at most one batch. It is safe to call on a

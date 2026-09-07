@@ -1,0 +1,10 @@
+{
+  "assets": {
+    "ETH": { "minWithdrawal": "0.002", "sweepThreshold": "0.01" }
+  },
+  "withdrawalLimits": [
+    { "asset": "ETH", "kycLevel": 0, "autoApproveLimit": "0.005", "dailyLimit": "0.02" },
+    { "asset": "ETH", "kycLevel": 1, "autoApproveLimit": "0.02",  "dailyLimit": "0.1" },
+    { "asset": "ETH", "kycLevel": 2, "autoApproveLimit": "0.1",   "dailyLimit": "0.5" }
+  ]
+}

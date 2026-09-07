@@ -14,6 +14,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math/big"
 	"strings"
 	"sync"
 
@@ -60,6 +61,9 @@ type Manager struct {
 	chain   Chain
 	signer  signer.Signer
 	log     *slog.Logger
+	// maxFee is the operator's stop-loss, shared with the withdrawal worker
+	// and the sweeper. nil means no ceiling.
+	maxFee *big.Int
 
 	// mu is §6.4.2's "single goroutine", held as a lock: allocation and
 	// recycling must not interleave, or a recycled nonce could be handed out
@@ -71,6 +75,19 @@ type Manager struct {
 // New builds a manager. Start must be called before Allocate.
 func New(db *pgxpool.Pool, tenant string, chainID int64, hot common.Address, chain Chain, s signer.Signer, log *slog.Logger) *Manager {
 	return &Manager{db: db, tenant: tenant, chainID: chainID, hot: hot, chain: chain, signer: s, log: log}
+}
+
+// WithMaxFee applies ETH_MAX_FEE_PER_GAS to gap fills.
+//
+// A fill is the one transaction here that nothing else can do without: every
+// nonce after the gap is stuck behind it. It still respects the ceiling, and
+// deliberately so -- a stop-loss that exempts the transaction most likely to
+// be sent during a fee spike is not a stop-loss. Nothing is lost by waiting
+// either: the same ceiling has already paused every withdrawal and sweep, so
+// the queue the fill would unblock is not moving anyway.
+func (m *Manager) WithMaxFee(limit *big.Int) *Manager {
+	m.maxFee = limit
+	return m
 }
 
 // HotWallet is the address nonces are allocated for.
@@ -229,6 +246,12 @@ func (m *Manager) fill(ctx context.Context, nonce uint64, reason string) error {
 	fees, err := m.chain.SuggestFees(ctx)
 	if err != nil {
 		return err
+	}
+	if fees.Over(m.maxFee) {
+		// Caller-visible on purpose: Start's retry loop comes back to this,
+		// and Recycle's caller has already recorded why the nonce was freed.
+		return fmt.Errorf("%w: filling nonce %d would cost a fee cap of %s wei, over ETH_MAX_FEE_PER_GAS %s",
+			evm.ErrFeeCeiling, nonce, fees.FeeCap, m.maxFee)
 	}
 	res, err := m.signer.Sign(ctx, signer.Request{
 		Kind: signer.KindNonceFill, RefID: fmt.Sprintf("%d:%d", m.chainID, nonce),

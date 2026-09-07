@@ -1,0 +1,15 @@
+{
+  "assets": {
+    "ETH":  { "minWithdrawal": "0.01", "sweepThreshold": "0.05" },
+    "USDC": { "minWithdrawal": "5",    "sweepThreshold": "10" }
+  },
+  "market": { "priceTick": "0.01", "qtyStep": "0.0001", "minNotional": "5" },
+  "withdrawalLimits": [
+    { "asset": "ETH",  "kycLevel": 0, "autoApproveLimit": "0.1",   "dailyLimit": "1" },
+    { "asset": "ETH",  "kycLevel": 1, "autoApproveLimit": "1",     "dailyLimit": "10" },
+    { "asset": "ETH",  "kycLevel": 2, "autoApproveLimit": "10",    "dailyLimit": "100" },
+    { "asset": "USDC", "kycLevel": 0, "autoApproveLimit": "200",   "dailyLimit": "2000" },
+    { "asset": "USDC", "kycLevel": 1, "autoApproveLimit": "2000",  "dailyLimit": "20000" },
+    { "asset": "USDC", "kycLevel": 2, "autoApproveLimit": "20000", "dailyLimit": "200000" }
+  ]
+}

@@ -87,7 +87,17 @@ func (w *Worker) advanceAll(ctx context.Context) error {
 	}
 	var firstErr error
 	for _, row := range rows {
-		if err := w.advance(ctx, row.ID); err != nil {
+		err := w.advance(ctx, row.ID)
+		switch {
+		case err == nil:
+		case errors.Is(err, evm.ErrFeeCeiling):
+			// The operator's stop-loss, not a failure. The sweep keeps its
+			// status and is picked up again next tick.
+			w.log.Info("sweep is waiting for the fee market",
+				slog.String("sweep_id", row.ID), slog.String("asset", row.Asset),
+				slog.String("reason", err.Error()))
+			w.metrics.feeCeiling.WithLabelValues(row.Asset).Inc()
+		default:
 			// Keep going: one address that cannot be emptied must not stop the
 			// rest, and every sweep is independent of every other.
 			w.log.Error("sweep step failed",
@@ -160,6 +170,7 @@ func (w *Worker) plan(ctx context.Context) error {
 	// Assets outside, addresses inside. The order matters: whether an asset
 	// can be read at all is a property of the asset, so finding out once per
 	// tick is both cheaper and the only way to skip it as a unit.
+planning:
 	for _, asset := range assets {
 		if asset.ChainID != w.cfg.ChainID || asset.Status != registry.AssetActive {
 			continue
@@ -187,6 +198,17 @@ func (w *Worker) plan(ctx context.Context) error {
 					slog.String("asset", asset.Symbol), slog.String("err", err.Error()))
 				w.metrics.unreadable.WithLabelValues(asset.Symbol).Inc()
 				break
+			}
+			// The fee ceiling is a property of the chain, not of this asset or
+			// this address: deciding what is worth sweeping needs a gas budget,
+			// and there is no budget above the operator's stop-loss. Stop
+			// planning altogether rather than repeat the same finding once per
+			// address per asset.
+			if errors.Is(err, evm.ErrFeeCeiling) {
+				w.log.Info("not planning sweeps while fees are above the ceiling",
+					slog.String("reason", err.Error()))
+				w.metrics.feeCeiling.WithLabelValues(asset.Symbol).Inc()
+				break planning
 			}
 			w.log.Error("could not plan a sweep",
 				slog.String("address", addr.Address), slog.String("asset", asset.Symbol),
@@ -336,12 +358,21 @@ func (w *Worker) gasBudget(ctx context.Context, gas uint64) (money.Amount, error
 	return evm.FromWei(wei, evm.MaxScale)
 }
 
+// fees reads the current suggestion and checks it against the operator's
+// ceiling, returning evm.ErrFeeCeiling when it is over. Sweeping is
+// housekeeping -- nobody is waiting for it -- so waiting for a cheaper block
+// costs nothing, whereas a clamped fee cap would leave a sweep in the mempool
+// holding a hot-wallet nonce that everything behind it needs.
 func (w *Worker) fees(ctx context.Context) (evm.Fees, error) {
 	f, err := w.chain.SuggestFees(ctx)
 	if err != nil {
 		return evm.Fees{}, fmt.Errorf("sweep: fees: %w", err)
 	}
-	return f.CapAt(w.cfg.MaxFeePerGas), nil
+	if f.Over(w.cfg.MaxFeePerGas) {
+		return f, fmt.Errorf("%w: fee cap %s wei exceeds ETH_MAX_FEE_PER_GAS %s",
+			evm.ErrFeeCeiling, f.FeeCap, w.cfg.MaxFeePerGas)
+	}
+	return f, nil
 }
 
 // requiredConfirmations is the asset's threshold, or the configured default.

@@ -208,7 +208,7 @@ func attachSigning(ctx context.Context, cfg Config, log *slog.Logger, db *pgxpoo
 	if err != nil {
 		return nil, err
 	}
-	nonces := hotwallet.New(db, cfg.TenantID, cfg.Chain.ChainID, hot, client, s, log)
+	nonces := hotwallet.New(db, cfg.TenantID, cfg.Chain.ChainID, hot, client, s, log).WithMaxFee(maxFee)
 	// Fatal by design (§6.4.2): a nonce manager that cannot reconcile with the
 	// chain would allocate nonces that collide with transactions already in
 	// flight, and ErrForeignTransaction means someone else holds the key. It

@@ -210,7 +210,15 @@ func (w *Worker) cancelNonce(ctx context.Context, row sqlcgen.ChainWithdrawal, p
 	}
 	// A displacement must outbid the transaction it replaces, and the original
 	// has already been bumped `replacements` times.
-	fees = fees.Bump(int64(20 + 10*row.Replacements)).CapAt(w.send.MaxFeePerGas)
+	//
+	// If that price is above the ceiling the answer goes back to the
+	// administrator rather than being clamped: they asked for this
+	// cancellation knowing what it was for, and sending it at a price that
+	// cannot displace anything would tell them it was done when it was not.
+	fees = fees.Bump(int64(20 + 10*row.Replacements))
+	if err := w.underCeiling(fees); err != nil {
+		return err
+	}
 	hot := w.nonces.HotWallet()
 	res, err := w.signer.Sign(ctx, signer.Request{
 		Kind: signer.KindNonceFill, RefID: fmt.Sprintf("%d:%d", row.ChainID, nonce),

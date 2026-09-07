@@ -2,8 +2,12 @@
 SELECT * FROM chain.chain_state WHERE tenant_id = $1 AND chain_id = $2;
 
 -- name: InsertChainState :exec
-INSERT INTO chain.chain_state (tenant_id, chain_id, genesis_hash)
-VALUES ($1, $2, $3);
+-- The anchor is the block this database's view of the chain starts at
+-- (ETH_SCAN_START_BLOCK) together with its hash. Recorded once, compared on
+-- every start: a different hash is a different chain, and a different block
+-- means the setting moved under a live database.
+INSERT INTO chain.chain_state (tenant_id, chain_id, anchor_block, anchor_hash)
+VALUES ($1, $2, $3, $4);
 
 -- name: GetScanCursor :one
 SELECT * FROM chain.scan_cursors WHERE tenant_id = $1 AND chain_id = $2;
