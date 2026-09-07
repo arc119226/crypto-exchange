@@ -91,6 +91,74 @@ if [ "$signer_hot" != "$HOT_WALLET_ADDRESS" ]; then
   exit 1
 fi
 
+# Reconciliation (§6.4.4): what the ledger says the exchange holds on chain
+# against what the chain says.
+#
+# It starts out disagreeing, and it is right to. The deployer funded the hot
+# wallet with 100 ETH and a million MockUSDC straight from anvil, and no
+# transaction this ledger produced put them there -- so the very first pass
+# finds money the ledger knows nothing about. That is exactly what a break is
+# for, and the fix is a ledger entry, not a special case in the comparison.
+#
+# This runs before anything else moves, so the figures are still.
+#
+# Assumes a clean stack. cleanup() takes the volumes down after every run, so
+# `make e2e` gives one; after `KEEP=1 make e2e`, run `make reset` first.
+log "reconciliation starts by finding what the ledger was never told about"
+
+# The chain role writes a pass every ETH_RECONCILE_INTERVAL, and cannot write a
+# useful one until the scanner's cursor has reached the block the hot wallet
+# was funded in -- the frontier is held back to that cursor on purpose. So wait
+# for a pass that can actually see the hot wallet rather than reading the first
+# one that appears.
+wait_for_reconcile_report() {
+  for _ in $(seq 1 60); do
+    if out=$("$CTL" admin reconcile --output json 2>/dev/null) \
+       && echo "$out" | jq -e '[.lines[] | select(.asset=="ETH") | (.chain_total|tonumber) > 0] | any' \
+          >/dev/null 2>&1; then
+      echo "$out"
+      return 0
+    fi
+    sleep 2
+  done
+  echo "no reconciliation pass that can see the hot wallet after 120s" >&2
+  "$CTL" admin reconcile >&2 || true
+  "${COMPOSE[@]}" logs --no-color --tail=80 exchange-chain >&2 || true
+  return 1
+}
+
+# wait_for_reconciled — polls until the latest pass has nothing left over.
+wait_for_reconciled() {
+  for _ in $(seq 1 60); do
+    if "$CTL" admin reconcile --output json 2>/dev/null | jq -e '.balanced == true' >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 2
+  done
+  echo "reconciliation never reached zero: $1" >&2
+  "$CTL" admin reconcile >&2 || true
+  "${COMPOSE[@]}" logs --no-color --tail=80 exchange-chain >&2 || true
+  return 1
+}
+
+opening=$(wait_for_reconcile_report)
+opening_eth=$(echo "$opening" | jq -r '.lines[] | select(.asset=="ETH") | .diff')
+awk -v v="$opening_eth" 'BEGIN { exit !(v + 0 > 0) }' \
+  || { echo "the first pass should have found the pre-funded hot wallet, got diff $opening_eth"; exit 1; }
+
+# Book it, the way an operator who has established where it came from would:
+# custody gains, external loses (§6.1.4 g). One entry per asset that is over.
+unbooked=$(echo "$opening" | jq -r '.lines[] | select((.diff|tonumber) > 0) | "\(.asset)=\(.diff)"')
+for line in $unbooked; do
+  a=${line%%=*}
+  d=${line#*=}
+  "$CTL" admin house-adjust --code custody_hot --asset "$a" --amount "$d" --direction credit \
+    --reason "the dev chain funded the hot wallet before the exchange took it over" \
+    --idempotency-key "e2e-opening:$a" >/dev/null
+done
+wait_for_reconciled "after booking the hot wallet's opening balance"
+log "the opening balance is booked and reconciliation is at zero"
+
 log "exchangectl e2e (api -> NATS -> engine)"
 "$CTL" e2e --verbose
 
@@ -326,6 +394,21 @@ echo "$tb" | jq -e '.balanced == true' >/dev/null \
 # however much turns up on an address.
 echo "$tb" | jq -e '[.house[] | select(.code=="custody_deposit_addresses") | (.balance|tonumber) < 0] | any | not' >/dev/null \
   || { echo "custody_deposit_addresses went negative"; "$CTL" admin trial-balance; exit 1; }
+
+# And the whole of it against the chain (§6.4.4, and the Phase 4 DoD).
+#
+# Nothing is booked here. The opening balance was recorded before any of this
+# started, so everything that has happened since -- deposits credited, a trade
+# settled, two withdrawals paid and confirmed, both addresses collected into
+# the hot wallet, and every wei of gas all of that burned -- had to be booked
+# by the exchange itself for this to come back to zero.
+#
+# That is what makes the assertion worth making: the first pass proved the
+# comparison can find money the ledger does not know about, and this one proves
+# it has been told about all of it.
+log "ledger custody matches the chain"
+wait_for_reconciled "after the full deposit, trade, withdraw and collect cycle"
+"$CTL" admin reconcile
 
 log "a resting order survives kill -9 of the engine"
 session=$("$CTL" user register --email "restart-$STAMP@e2e.local" --password "restart-$STAMP-pw" --output json)

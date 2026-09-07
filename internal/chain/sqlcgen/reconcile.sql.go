@@ -179,17 +179,17 @@ func (q *Queries) InsertReconciliationReport(ctx context.Context, arg InsertReco
 }
 
 const listOpenChainWork = `-- name: ListOpenChainWork :many
-SELECT 'withdrawal'::text AS kind, w.id AS ref_id, w.asset, w.amount, w.tx_hash
+SELECT 'withdrawal'::text AS kind, w.id::text AS ref_id, w.asset, w.amount, w.tx_hash
   FROM chain.withdrawals w
  WHERE w.tenant_id = $1::text AND w.chain_id = $2::bigint
    AND w.status IN ('signed', 'broadcast') AND w.tx_hash IS NOT NULL
 UNION ALL
-SELECT 'sweep', s.id, s.asset, s.amount, s.tx_hash
+SELECT 'sweep', s.id::text, s.asset, s.amount, s.tx_hash
   FROM chain.sweeps s
  WHERE s.tenant_id = $1::text AND s.chain_id = $2::bigint
    AND s.status = 'broadcast' AND s.tx_hash IS NOT NULL
 UNION ALL
-SELECT 'gas_funding', f.id, f.asset, f.amount, f.gas_funding_tx_hash
+SELECT 'gas_funding', f.id::text, f.asset, f.amount, f.gas_funding_tx_hash
   FROM chain.sweeps f
  WHERE f.tenant_id = $1::text AND f.chain_id = $2::bigint
    AND f.status IN ('requested', 'gas_funded')

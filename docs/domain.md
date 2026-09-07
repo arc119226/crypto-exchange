@@ -522,3 +522,90 @@ Phase 4 分四段:4a 充值(再拆 4a-1 金鑰與地址、4a-2 掃描與入帳)�
 同一段 e2e 還踩到第二個坑,它跟時間無關而是**表示法**:`GET /v1/deposit-address` 刻意回 EIP-55 checksum(使用者要貼進錢包,大小寫就是防打錯的校驗),而 `chain.*` 的資料表把位址正規化成小寫存,所以 admin API 與 container log 讀回來的都是小寫。腳本把這兩個直接比字串,於是「找不到這個地址的歸集」——兩邊各自都對,錯的是把它們當成同一個字串。跨層比位址前要先確定哪一邊正規化過;`Deposit.address` 的 schema 原本沒寫明大小寫,現在寫了,因為沒寫正是這個錯誤有機會發生的原因。
 
 改法是把兩層迴圈對調(資產在外、地址在內),因為「這個資產讀不讀得到」是資產的性質,一輪問一次就夠,也才能把它當成一個單位跳過。讀不到就 log 一次、`sweeps_unreadable_total{asset}` 加一、換下一個資產,**不讓 tick 失敗**——sweeper 不知道那裡有多少錢所以不能收它,但這不該讓它連讀得到的資產也停手。可見性交給指標,不是交給一個會誤導的失敗。anvil 測試刻意**不**把 USDC 停用來閃過這件事,而是留著它並斷言「以太照樣收到了」,把這次 CI 紅的原因變成它自己的回歸測試。
+
+---
+
+## 20. Phase 4c-2 程式碼與 §6.4.4 / §6.4.3 的對應(鏈上對帳)
+
+4c-1 刻意留了一個缺口:歸集金額的上限是「帳本真的入過帳的數」,鏈上可以合法地更高,多出來的留在鏈上。README 和 §19 都寫著「4c-2 的對帳會看到它」。這一節是那雙眼睛。
+
+| 計畫 | 實作 | 備註 |
+|---|---|---|
+| `Σ ledger custody` vs `Σ 鏈上餘額` | `reconcile.Worker.Tick`,每個資產一列 | 未指派的池位**也算**:對帳要找的正是帳本不知道的錢,而掃描器同樣跳過池位,所以錢掉在那裡永遠不會入帳 |
+| 差異 = 在途 ± 未入帳充值 | `uncredited` + `above_frontier` + `in_flight` 三個修正項 | 每一項都是**精確算出來的**,不是估的,所以容差是 0 |
+| 差異超過閾值寫 breaks | `admin.reconciliation_reports` + `admin.reconciliation_breaks` | 沒有閾值:`NUMERIC(36,18)` 是精確的,gas 從 receipt 讀,兩個修正項也精確 |
+| 發 `reconciliation.break_detected` | 邊緣觸發:出現或金額改變才發 | 一直存在的 break 留在報告與指標裡;每五分鐘重發一次只會教人設過濾器 |
+| 熱錢包低於 `HOT_WALLET_MIN_ETH` 發 `alert.hot_wallet_low`(§6.4.3) | 同上,狀態記在 `chain.hot_wallets.low_alerted_at` | 記在資料庫不是記在行程裡:重啟不該把同一個沒變的狀況再喊一次 |
+| worker 排程 | **跑在 `chain` role** | 見下 |
+| `exchangectl admin reconcile` | 讀最新一份報告 | admin 沒有節點,量不到餘額,和它簽不了提現是同一條界線 |
+| 指標(§15) | `reconciliation_diff{asset}`(符號)、`reconciliation_breaks`、`hot_wallet_balance{asset}`(量值) | 差異用符號的理由和 `ledger_trial_balance_diff` 一樣:要問的是「是不是零」,float64 對 18 位小數會編出不存在的位數 |
+
+### 20.1 為什麼跑在 chain 而不是 worker
+
+§6.4.4 的標題寫 worker,§7.2 的事件表也寫 worker。**這裡刻意不照做。**
+
+對帳要讀鏈上餘額,而只有 `chain` role 撥號到節點(`internal/app/chain_role.go`)。compose 裡 `exchange-worker` 沒有 `depends_on: anvil`。為了照抄一個字而多養一條 RPC 連線與一組授權,買不到任何東西。`chain` 本來就握有節點、地址清單、`deposits/withdrawals/sweeps` 的在途狀態與 ledger 讀取權。
+
+界線沒有變鬆:**產生報告的角色和顯示報告的角色仍然是兩個**,和提現「admin 記錄意圖、chain 動手」同一個形狀。`POST /reconciliation/run`(§7.4 列了)這一輪不做,因為 admin 量不到東西;要做也該是 4b-2 那種「記下請求、chain 執行」的樣子,不是一個同步端點。
+
+### 20.2 恆等式,以及「同一條邊界」
+
+設 `L` 為帳本的 `custody_deposit_addresses + custody_hot`,`C` 為在區塊 `B` 讀到的「全部充值地址 + 熱錢包」。把 `L` 拆成「只記了 ≤ B 的movement」的 `L_B` 加上「>B 的 movement 帶來的淨額」`Δ_above`:
+
+```
+L   = L_B + Δ_above
+C   = L_B + uncredited − in_flight
+⇒  diff = C − L + Δ_above − uncredited + in_flight = 0
+```
+
+- `uncredited`:`≤ B` 鏈上看得到、帳本還沒入帳的充值(狀態 `detected`/`confirming`)。鏈上合法地比較高。
+- `Δ_above`(`above_frontier`):`> B` 的區塊上帳本已經記了的淨額——入帳的充值 `+`,確認的提現 `−(金額+gas)`,確認的歸集 `−gas`(資產在 `C` 的兩個端點之間移動,淨額 0),補 gas `−gas`,nonce fill `−gas`。
+- `in_flight`:`≤ B` 已經挖出來、帳本還沒記的花費。**只有提現**會把價值移出被計算的那組地址;歸集、補 gas、nonce fill 的兩端都在 `C` 裡面,所以它們只花 gas。
+
+**`B` 是哪一個區塊,是這一節最要緊的一行:**
+
+```
+B = min(head − required + 1, chain.scan_cursors.last_scanned_block)
+```
+
+第一項是掃描器(`scan.go:251`)、提現 worker(`broadcast.go:371`)和歸集(`run.go` 的 `track`)**三個都用的同一條規則**:各自算 `head − block + 1` 再和資產的確認數比,所以 `block ≤ head − required + 1` 就等於「已經記帳了」。少一個區塊會開出一個窗:帳本記了,餘額看不到。而且那個窗**三種 movement 裡有三種會讓 `diff` 變正**(確認的提現、確認的歸集、補 gas),所以它連「保守」都算不上——它會製造假的 break,而假的 break 比沒有對帳更糟。
+
+第二項是因為**帳本對鏈的認識是掃描器的游標,不是節點的 head**。游標之上掃描器連 `chain.deposits` 列都還沒建,所以那裡的一筆充值是「鏈上看得到、帳本沒入帳、`uncredited` 也加不到」——無上限的正差,而且掃描器每落後一個 tick 就會發生一次。
+
+**兩個 process 永遠不共用同一個 head**,所以光把算式對齊還不夠:對帳在 T 讀 head,歸集 worker 在 T+ε 讀到 head+1 並確認一筆挖在 `B+1` 的交易。這就是 `above_frontier` 存在的理由——它從那些列**已經記下來的 block_number** 把帳本在邊界之上做的事精確扣回來。為了讓它精確,這一輪補上了幾個原本沒記的地方:`FailSweep` 記 `block_number`,補 gas 那一腿有了 `gas_funding_block`,失敗的補 gas 走 `FailSweepFunding` 寫進 funding 那一對欄位——**成本和區塊必須成對**,把 funding 的成本配上一個沒發生過的 sweep 區塊,分類就是錯的。
+
+`in_flight` 則是**對每一筆非終態的交易打一次 `Receipt`**,就是擁有它的 worker 自己會打的那一次。列上答不出來:成本要到記帳時才寫,而且沒有存 gas limit 可以當上界,所以任何從列推出來的數字都是估計值——而這個比較沒有容差可以吸收估計值。
+
+### 20.3 兩個快照
+
+鏈那一側靠**把餘額釘在 `B`** 解決:一個一個地址問要花時間,問到第三十個時鏈已經走了幾個區塊,一筆中途被挖出來的歸集會被「來源已經扣掉、目的地還沒加上」地數兩次。`eth_getBalance` 和 `eth_call` 都吃 block 參數,釘住幾乎不花錢(`evm.BalanceAt` / `TokenBalanceAt`)。
+
+但 `BalanceAt` 吃的是**號碼不是 hash**,所以一輪讀到一半發生 reorg,答案會靜靜地混到兩條鏈。所以整輪讀之前與之後各取一次那些高度的 block hash,不一樣就**把這一輪丟掉**——沒有報告好過一份沒人能信的報告。
+
+帳本那一側有兩個以上的查詢,而入帳是一個交易:它把金額同時移出 `detected/confirming` 並移入 custody。分兩次讀會看到金額**兩邊都沒有**(或都有),於是報出一個不存在的 break。所以整組帳本查詢跑在同一個 `REPEATABLE READ` 交易裡。
+
+### 20.4 帳本外進來的錢:這是一筆真的 break
+
+e2e 的熱錢包由 anvil 直接注資 100 ETH + 1,000,000 USDC,帳本完全不知道。第一次跑對帳,兩個資產都會出現百分之百正確的 break。
+
+**不做特例把它藏起來。** §6.1.4(g) 早就寫明這類資金進出的科目是 `external`(「dev faucet、管理員調帳、對帳沖銷、Sepolia faucet 注資熱錢包」),所以補的是**把它記進帳本的路**:`ledger.AdjustHouse`(custody 一腿、`external` 一腿,帶 `Direction`)+ `POST /admin/v1/ledger/house-adjustments` + `exchangectl admin house-adjust`。只允許兩個 custody 科目——它們是「有一個別人可以匯錢進來的地址」在背後撐著的科目;`fee_revenue`、`gas_expense`、`pending_withdrawal` 都是本系統自己的分錄推導出來的,調它們不是記錄事實而是藏 bug。
+
+方向不能省。第一個真的 break 很可能是**少**了錢(見 20.5),只能加不能減的調整補不回來。
+
+e2e 因此走三步:開頭斷言差異是正的(證明偵測不是空話)→ 記下正好那個數 → 跑完整流程 → 結尾**一個字都不記**地回到零。第三步不是套套邏輯:第一步只沖掉了交易所接手之前就在那裡的錢,第三步證明中間每一分錢的移動——入帳、成交、兩筆提現、兩條歸集,以及這些燒掉的每一 wei gas——都被正確記了。
+
+### 20.5 對帳還沒寫完就找到兩個真的缺陷
+
+**一、nonce 補洞的 gas 從來沒進帳本。** §6.4.2 的缺口回收送一筆 0 值自轉吃掉一個 nonce。它移動不了任何東西,但**燒掉熱錢包的 ETH**,而 `internal/chain/hotwallet` 整個套件沒有 import `ledger`:簽名、寫列、送出、忘掉。`chain.nonce_fills` 甚至早就有一個 `status IN ('broadcast','confirmed','failed')` 欄位,但沒有東西會把它推離 `broadcast`——receipt 從來沒被抓過。每補一次洞,`custody_hot` 就比鏈上多一點,永遠不會修正。現在對帳每一輪開頭先追這些 receipt 並記 `debit gas_expense / credit custody_hot`。放在開頭而不是結尾:**系統自己造成的 break 是 bug,不是發現**。
+
+**二、`gas_funding_amount` 會被記成一筆沒發生過的轉帳。** `FundSweepGas` 在釘 nonce 時就寫了金額,而那是**問 signer 之前**——因為簽完沒記就崩潰必須回來問同一個意圖。如果簽名失敗,列上就留著一個正的金額配 NULL 的 tx_hash。下一個 tick 發現地址現在自己付得起 gas,走了捷徑跳過補 gas,而 `markGasFunded` 的金額是**從列上讀的**:於是記了一筆熱錢包從來沒送出去的 ETH。同一條路徑還把釘住的 nonce 丟在那裡,變成之後每一筆熱錢包交易都要排在後面的洞。一次失敗的呼叫,一個永久的帳本錯誤加一個永久的 nonce 洞——而對帳會正確地、永遠地報這兩件事。
+
+兩個都在這一輪修掉,各有一支先確認紅過的回歸測試。
+
+### 20.6 這一輪學到的事
+
+**「保守一點」不是設計。** 邊界如果選 `head − required`(少一個區塊),直覺會說那比較安全。實際上三種 movement 裡有三種會因此讓 `diff` 變**正**,而正的差異在這個系統裡的意思是「鏈上有帳本不知道的錢」——最需要有人立刻去看的那一類。一個猜錯方向的保守設計,會把每一筆確認的提現都變成一次假警報。要知道方向,只能把四種 movement 各推一遍。
+
+**假的東西越像真的,越早撞到真的問題**(第三次)。腳本鏈原本只記「現在的餘額」,那樣的話「釘在區塊 B 讀」和「讀 head」在測試裡看起來一模一樣——而那正是這一節整段算式存在的理由。給它加上每個區塊的餘額快照之後,把 `+1` 拿掉會讓五支測試變紅;不加的話一支都不會。
+
+**容差是設計上的懶惰。** 計畫寫「差異超過閾值」。真的把每一項都算精確之後,閾值就不需要了——而且更重要的是,一個有閾值的比較沒辦法證明自己是對的:低於閾值的錯誤永遠不會被發現,而閾值該設多少沒有人能回答。`NUMERIC(36,18)` 是精確的,gas 從 receipt 讀是精確的,兩個修正項也是精確的,所以零就是零。
