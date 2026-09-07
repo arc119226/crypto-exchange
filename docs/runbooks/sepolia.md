@@ -212,7 +212,7 @@ xcode-select --install
 **Ubuntu / WSL**:
 
 ```
-sudo apt update && sudo apt install -y git build-essential
+sudo apt update && sudo apt install -y git build-essential curl
 ```
 
 會問你密碼。Linux 打你的登入密碼;**WSL 打 2.2 設的那組 UNIX 密碼**,不是 Windows 帳號密碼。(**打的時候螢幕不會顯示任何東西,這是正常的**),按 Enter。
@@ -247,17 +247,56 @@ docker compose version
 
 ### 3.3 Go(編譯交易所程式用的)
 
-1. 打開 **https://go.dev/dl/**
-2. 下載最新版(Mac 選 `.pkg`,Linux 照網頁上的指示)。
-3. 安裝完**把終端機關掉重開**(不然它找不到新裝的東西)。
+> ⚠️ **Linux / WSL 不要用 `apt install golang-go`。** Ubuntu 套件庫裡的 Go 通常太舊,而這個專案要 1.26 以上。用官方 tarball。
 
-**驗證**:
+**macOS**
+
+1. 打開 **https://go.dev/dl/**
+2. 下載最新版的 `.pkg`(Apple Silicon 選 `darwin-arm64`,Intel 選 `darwin-amd64`)。
+3. 點兩下安裝,然後**把終端機關掉重開**(不然它找不到新裝的東西)。
+
+**Linux / WSL**
+
+先看你的 CPU 架構:
+
+```
+uname -m
+```
+
+`x86_64` 就用下面的 `amd64`(絕大多數人是這個);`aarch64` 的話把下面每個 `amd64` 都換成 `arm64`。
+
+整段一起貼:
+
+```
+sudo apt update && sudo apt install -y curl
+cd ~
+GOVER=$(curl -s https://go.dev/VERSION?m=text | head -1)
+echo "要裝的版本:$GOVER"
+curl -LO https://go.dev/dl/${GOVER}.linux-amd64.tar.gz
+sudo rm -rf /usr/local/go
+sudo tar -C /usr/local -xzf ${GOVER}.linux-amd64.tar.gz
+```
+
+> - `GOVER` 那行是去官網問「現在最新的穩定版是哪個」,免得這份文件寫死一個版本號然後過期。
+> - `sudo rm -rf /usr/local/go` 是官方文件要求的:先清掉舊的再解壓,不然新舊檔案會混在一起。它只刪 Go 自己那個目錄。
+> - `sudo` 問密碼時,**WSL 打的是 2.2 設的 UNIX 密碼**,不是 Windows 帳號密碼。螢幕不會有反應是正常的。
+
+然後讓終端機找得到它:
+
+```
+echo 'export PATH=$PATH:/usr/local/go/bin' >> ~/.bashrc
+source ~/.bashrc
+```
+
+第一行寫進 shell 設定檔(以後每次開終端機都生效),第二行讓現在這個視窗立刻生效。
+
+**驗證**(兩個平台都一樣):
 
 ```
 go version
 ```
 
-要印出 `go version go1.26...` 之類的。版本 1.26 以上比較保險;比較舊的話 Go 會自己去下載需要的版本,通常也行。
+要印出 `go version go1.27...` 之類的,**1.26 以上**就可以。印 `command not found` 的話關掉終端機重開再試。
 
 ### 3.4 確認 make 有了
 
@@ -967,6 +1006,7 @@ docker volume rm <上面列出來的每一個>
 | 你看到 | 意思 | 怎麼辦 |
 |---|---|---|
 | `command not found: docker` / `make` / `go` | 沒裝好,或終端機沒重開 | 回第 3 節;裝完要**關掉終端機重開** |
+| `go version` 印出 1.26 以下 | 你用 `apt install golang-go` 裝的,那個版本太舊 | `sudo apt remove -y golang-go`,再照 3.3 用官方 tarball 裝一次 |
 | Windows:Ubuntu 裡 `docker` 找不到,但 Docker Desktop 明明開著 | WSL Integration 沒打開 | Docker Desktop → Settings → Resources → WSL Integration → 打開 Ubuntu → Apply & Restart(見 2.2) |
 | Windows:`apt` 裝不了東西、家目錄怪怪的 | 你在 `docker-desktop` 那個發行版裡,不是 Ubuntu | `exit` 離開,在 PowerShell 打 `wsl --set-default Ubuntu`,重開(見 2.2) |
 | Windows:每個指令都慢得誇張 | 專案放在 `/mnt/c/` 底下 | 搬到 `~`:`cp -r /mnt/c/.../crypto-exchange ~/` 再從那裡跑(見 2.2) |
