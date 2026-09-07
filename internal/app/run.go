@@ -165,6 +165,10 @@ func Run(ctx context.Context, cfg Config, roles []Role, bi BuildInfo) error {
 		g.Go(func() error { return signer.run(gctx, log) })
 	}
 	if chainRole != nil {
+		// start blocks while the node is verified and the signer answers; the
+		// ops server is already up so /readyz reports why. The tick loops
+		// below wait on it themselves.
+		g.Go(func() error { return chainRole.start(gctx) })
 		g.Go(func() error { return chainRole.run(gctx, log) })
 		g.Go(func() error { return chainRole.runWithdrawals(gctx, log) })
 		g.Go(func() error { return chainRole.runSending(gctx, log) })
