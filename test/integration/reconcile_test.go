@@ -18,6 +18,7 @@ import (
 
 	"github.com/arc119226/crypto-exchange/internal/chain/evm"
 	"github.com/arc119226/crypto-exchange/internal/chain/reconcile"
+	"github.com/arc119226/crypto-exchange/internal/chain/sweep"
 	"github.com/arc119226/crypto-exchange/internal/ledger"
 	"github.com/arc119226/crypto-exchange/internal/money"
 	"github.com/arc119226/crypto-exchange/internal/platform/pg"
@@ -407,4 +408,53 @@ func (h reconcileHarness) outboxCount(t *testing.T, ctx context.Context, eventTy
 	require.NoError(t, h.all.QueryRow(ctx,
 		`SELECT count(*) FROM eventbus.outbox WHERE event_type = $1`, eventType).Scan(&n))
 	return n
+}
+
+// drive runs the sweeper the way the chain role does: tick, mine, repeat.
+func (h reconcileHarness) drive(t *testing.T, ctx context.Context, ticks int) {
+	t.Helper()
+	for range ticks {
+		require.NoError(t, h.sweepHarness.worker.Tick(ctx))
+		h.chain.mineAll()
+		h.chain.advance(1)
+	}
+}
+
+// TestReconcileAfterATokenSweepFundsItsOwnGas is the sequence the e2e runs and
+// none of the tests above did: one address collected twice, the second time
+// through the two-leg token path where the hot wallet has to fund the gas.
+//
+// That leg is the only shape reconciliation had never been shown. It is also
+// the only place the e2e broke.
+func TestReconcileAfterATokenSweepFundsItsOwnGas(t *testing.T) {
+	h := setupReconcile(t, money.Zero)
+	ctx := context.Background()
+	h.bookHotWalletOpening(t, ctx)
+
+	account := h.newSpot(t, ctx)
+	addr, err := h.addresses.Assign(ctx, account)
+	require.NoError(t, err)
+	address := common.HexToAddress(addr)
+	// In order, the way the e2e sees it: the ether arrives and is collected,
+	// and only then does a token deposit need the emptied address funded.
+	h.creditDeposit(t, ctx, account, addr, "ETH", "1")
+	h.drive(t, ctx, 6)
+	h.creditDeposit(t, ctx, account, addr, "USDC", "250.5")
+	h.drive(t, ctx, 10)
+	for _, s := range h.sweeps(t, ctx) {
+		require.Equal(t, sweep.StatusConfirmed, s.Status, "sweep %s (%s) did not finish", s.ID, s.Asset)
+	}
+
+	report := h.pass(t, ctx)
+	eth := lineFor(t, report, "ETH")
+	if !report.Balanced {
+		// The four numbers side by side, so which side is short is obvious.
+		t.Logf("ETH ledger=%s chain=%s uncredited=%s above=%s in_flight=%s diff=%s",
+			eth.LedgerTotal, eth.ChainTotal, eth.Uncredited, eth.AboveFrontier, eth.InFlight, eth.Diff)
+		t.Logf("ledger custody_hot=%s custody_deposit_addresses=%s",
+			h.houseBalance(t, ctx, "custody_hot", "ETH"),
+			h.houseBalance(t, ctx, "custody_deposit_addresses", "ETH"))
+		t.Logf("chain hot=%s address=%s", h.chain.mustBalance(t, ctx, h.hot), h.chain.mustBalance(t, ctx, address))
+	}
+	assert.True(t, report.Balanced, "diff %s", eth.Diff)
 }

@@ -137,6 +137,12 @@ wait_for_reconciled() {
   done
   echo "reconciliation never reached zero: $1" >&2
   "$CTL" admin reconcile >&2 || true
+  # The report gives the two sides as one number each, which says a difference
+  # exists but not which account holds it. The house balances split the ledger
+  # side into custody_hot and custody_deposit_addresses, and that is the first
+  # thing anyone diagnosing this needs: a difference in the hot wallet and one
+  # on the deposit addresses have nothing in common except the arithmetic.
+  "$CTL" admin trial-balance >&2 || true
   "${COMPOSE[@]}" logs --no-color --tail=80 exchange-chain >&2 || true
   return 1
 }
