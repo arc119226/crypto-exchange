@@ -727,7 +727,49 @@ docker run --rm --entrypoint cast ghcr.io/foundry-rs/foundry:v1.8.1 \
 | **MockUSDC 合約地址(A5)** | `0x` |
 | **部署區塊高度(A5)** | |
 
-順便把 Part A 的實測數字記下來(`cast receipt <hash> --rpc-url "$SEPOLIA_RPC"` 會一次給你 `gasUsed` 和 `effectiveGasPrice`):
+### 順便記下這兩筆的實際成本
+
+**這不是附註,是 4d 要交付的東西本身**(`docs/plan-v1.0.md` §12:「Sepolia runbook 含 tx hash 記錄」)。
+
+整個 Sepolia 這一輪存在的理由,就是量出「真的鏈上要花多少錢、要等多久」。anvil 上 gas 幾乎是零、出塊瞬間完成,所以**這些數字只有這一次實跑拿得到**。
+
+**跑兩次**,一次填一列——先 A5 部署那筆,再 A6 鑄幣那筆:
+
+```
+TX=0x貼上要查的那一筆的hash
+```
+
+```
+docker run --rm --entrypoint cast ghcr.io/foundry-rs/foundry:v1.8.1 \
+  receipt "$TX" --rpc-url "$SEPOLIA_RPC"
+```
+
+印出一整份收據,裡面找這幾行:
+
+```
+blockNumber         11651234
+effectiveGasPrice   2000000000
+gasUsed             612345
+status              1 (success)
+transactionHash     0x...
+```
+
+`status` 是 `1` 就代表成功。
+
+**每一欄是什麼:**
+
+| 欄位 | 是什麼 |
+|---|---|
+| tx hash | 那筆交易的編號。`forge` 印過,Etherscan 上也有 |
+| gas used | 用掉多少**運算量**——是單位,不是錢。部署合約約 60 萬,單純轉帳固定 21000 |
+| effective gas price | 每單位 gas **實際**付了多少,單位是 wei |
+| 成本 (ETH) | gas used × effective gas price,換算成 ETH。這才是真的花掉的錢 |
+| 送出 → 上鏈(秒) | 你按 Enter 到它進區塊,中間等了多久 |
+
+**兩件你不用做的事:**
+
+- **成本那一欄不用自己算。** 回報 `gasUsed` 和 `effectiveGasPrice` 兩個數字就好,算是推導出來的,不是觀測到的——少一個步驟就少一個出錯的地方。
+- **時間不用精確。** 「大概十幾秒」「大概一分鐘」這種程度就夠了,我們要的是量級,不是碼表。
 
 | 步驟 | tx hash | gas used | effective gas price | 成本 (ETH) | 送出 → 上鏈(秒) |
 |---|---|---|---|---|---|
@@ -1065,7 +1107,13 @@ make down-sepolia
 
 這是我要的東西,填好給我,我寫進最終文件。
 
-`docker run --rm --entrypoint cast ghcr.io/foundry-rs/foundry:v1.8.1 receipt <hash> --rpc-url "$SEPOLIA_RPC"` 一次給你 `gasUsed` 和 `effectiveGasPrice`。
+欄位的意思、怎麼拿、以及**哪兩件不用你做**(成本不用自己算、時間不用精確),都在 [A7](#順便記下這兩筆的實際成本) 說明過,這裡不重複。拿法一樣:
+
+```
+TX=0x那筆交易的hash
+docker run --rm --entrypoint cast ghcr.io/foundry-rs/foundry:v1.8.1 \
+  receipt "$TX" --rpc-url "$SEPOLIA_RPC"
+```
 
 | 步驟 | tx hash | block | gas used | effective gas price | 成本 (ETH) | 送出 → confirmed(秒) |
 |---|---|---|---|---|---|---|
