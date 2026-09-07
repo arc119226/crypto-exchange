@@ -1,113 +1,443 @@
-# Runbook:在 Sepolia 上手動走一次全流程
+# 在 Sepolia 測試網上手動走一次全流程
 
-`docs/plan-v1.0.md` §12 Phase 4d、§2.3 第 5 條。這份文件的目的是**用一條真的鏈拆穿只在 anvil 上成立的假設**——確認數、真實出塊時間、真實費用市場、會剪歷史的公開節點。不進 CI:Sepolia 有 faucet 限制、RPC 限流與真實出塊時間,放進 CI 只會製造間歇性紅燈,而間歇性紅燈會訓練所有人忽略紅燈。
-
-相關:[`reconciliation-break.md`](reconciliation-break.md)、[`stuck-withdrawal.md`](stuck-withdrawal.md)、[`reorg-alert.md`](reorg-alert.md)。
-
-> **底線(`docs/plan-v1.0.md` §0):不接主網、不碰真錢。** 這裡用到的每一把私鑰都只控制測試資產。這份文件裡沒有任何一步該在主網上重複。
+> **這份文件假設你什麼都不知道。** 沒碰過終端機、沒裝過 Docker、不知道什麼是私鑰,都沒關係——每一步都會說在哪裡做、要打什麼、應該看到什麼。看到不懂的名詞就往上翻第 1 節。
+>
+> 對應 `docs/plan-v1.0.md` §12 Phase 4d、§2.3 第 5 條。
 
 ---
 
-## 這份文件分兩部分
+## 0. 你要做的是什麼
 
-| | 內容 |
-|---|---|
-| **Part A** | 領測試幣、部署 MockUSDC、記下三個數字 |
-| **Part B** | 起 Sepolia stack、走完充值 → 提現 → 歸集 → 對帳,填結果表 |
+我們寫了一個加密貨幣交易所。到目前為止它只在**一條假的區塊鏈**上跑過——那條鏈叫 anvil,跑在你自己的電腦裡,錢是假的、出塊瞬間完成、永遠不會出錯。
 
-Part A 最慢的是 faucet(有冷卻時間、有 captcha),而且它不依賴這個 repo 的任何東西,所以先做。
+現在要把同一套程式接到**一條真的區塊鏈**上跑一次。這條鏈叫 **Sepolia**,是以太坊官方的測試網:規則跟真的以太坊一模一樣,但上面的幣沒有價值,可以免費領。
+
+用個比喻:前面都是在駕訓班場地練車,現在要第一次開上真的馬路——路一樣是路,但會塞車、會有紅綠燈、會有你沒預料到的事。
+
+**你要完成的一圈:**
+
+```
+   有人把錢匯進來                       錢被收攏到金庫
+   (充值)                              (歸集)
+       │                                    ▲
+       ▼                                    │
+   交易所記帳  ──────────────────────────────┤
+       │                                    │
+       ▼                                    │
+   有人把錢領走 ◄───────────────────────────┘
+   (提現)
+
+   最後:對帳 —— 帳本上的數字和鏈上真實的錢,一分不差
+```
+
+最後那個「一分不差」就是通過的標準。
+
+> **不會花到真錢。** 這裡每一個步驟都在測試網上,幣是免費領的、沒有市場價值。這是專案的鐵則(`docs/plan-v1.0.md` §0):不接主網、不碰真錢。
+
+**大概要花多久:** 順利的話兩到三小時,其中大半在等——等 faucet 的冷卻時間、等區塊確認。第一次裝軟體可能再加一小時。
 
 ---
 
-# Part A — 現在就能做
+## 1. 名詞:五分鐘看完
 
-## A0. 你需要準備什麼
+先大致有印象就好,用到的時候會再解釋一次。
 
-**一把全新的 Sepolia 私鑰。** 不要用你已經在用的任何錢包。這把 key 只做兩件事:部署 MockUSDC、鑄 USDC。
-
-```sh
-# 用 repo 已經 pin 好的 foundry image,不必在本機裝 foundry
-docker run --rm --entrypoint cast ghcr.io/foundry-rs/foundry:v1.8.1 wallet new
-```
-
-輸出會給你 `Address` 與 `Private key`。**私鑰放哪裡:**
-
-```sh
-mkdir -p secrets
-umask 077
-printf '0x...\n' > secrets/sepolia-deployer.key   # secrets/ 已經在 .gitignore
-```
-
-不要放進 `.env`、不要貼進 chat、不要寫進任何會進 git 的檔案。之後所有指令都用 `--private-key "$(cat secrets/sepolia-deployer.key)"` 帶進去。
-
-**一個 RPC endpoint。** 我實測過(2026-09-07):
-
-| Endpoint | 狀況 |
+| 名詞 | 白話解釋 |
 |---|---|
-| `https://ethereum-sepolia-rpc.publicnode.com` | 可用,免註冊。但**是一池異質節點**:同一個「讀很舊的區塊」請求會時好時壞,回過 `{"code":4444,"message":"pruned history unavailable"}` |
-| `https://1rpc.io/sepolia` | 可用,免註冊,深度歷史比較穩 |
-| `https://rpc.sepolia.org` | **已死**,回 404 |
-| `https://sepolia.drpc.org` | 免費方案不含 Sepolia |
+| **區塊鏈** | 一本所有人都能看、只能往後加、不能塗改的帳本。 |
+| **以太坊 / ETH** | 最有名的區塊鏈之一。ETH 是它的原生貨幣。 |
+| **Sepolia** | 以太坊的**測試網**。規則一樣,幣免費,沒有價值。我們全程只用它。 |
+| **測試幣 / SepoliaETH** | Sepolia 上的 ETH。免費領,不能換錢。 |
+| **faucet(水龍頭)** | 免費發測試幣的網站。你給它一個地址,它打幣給你。通常一天一次。 |
+| **地址** | 像銀行帳號,長得像 `0x` 開頭的 42 個字。**可以公開給任何人。** |
+| **私鑰** | 那個帳號的密碼,`0x` 開頭 66 個字。**握有它就等於握有裡面的錢。絕對不能給任何人、不能截圖、不能貼到聊天室。** |
+| **gas(手續費)** | 在鏈上做任何事都要付的費用,用 ETH 付。轉一次帳大約 0.00005 ETH——很少,但不是零。 |
+| **區塊 / 出塊** | 帳本一頁一頁往後加,每一頁叫一個區塊。Sepolia 大約 **12 秒**出一塊。 |
+| **確認數** | 你的交易被寫進去之後,又疊了幾頁上去。我們要求 **6** 個確認才承認一筆充值,所以大約要等 **72 秒**。 |
+| **智能合約** | 部署在鏈上的一段程式。我們要部署一個叫 `MockUSDC` 的假美元代幣。 |
+| **RPC endpoint** | 一個網址,你的電腦透過它跟區塊鏈說話。像是「區塊鏈的客服電話」。 |
+| **終端機 / Terminal** | 打指令的黑底白字視窗。第 2 節教你打開。 |
+| **Docker** | 一個把整套軟體打包起來執行的工具。我們用它跑資料庫和交易所本體,你不用一個一個裝。 |
+| **熱錢包** | 交易所自己的錢包,提現的錢從這裡出去。 |
+| **充值地址** | 交易所發給每個使用者、專屬的收款地址。 |
+| **歸集(sweep)** | 把散在各個充值地址的錢,收攏進熱錢包。 |
+| **對帳(reconcile)** | 比對「帳本上說有多少錢」和「鏈上真的有多少錢」。 |
 
-**建議去 Alchemy 或 Infura 開一個免費帳號拿專屬 URL**——穩定、有配額看板、不會半途換成剪過歷史的後端。沒有的話用 `1rpc.io/sepolia`,`publicnode` 當備援。
+---
 
-把它存起來(這個不是密鑰,但也不必進 git):
+## 2. 東西在哪裡跑?
 
-```sh
-export SEPOLIA_RPC="https://..."
+這件事最容易搞混,先講清楚:
+
+| 東西 | 在哪裡 |
+|---|---|
+| 你打的每一行指令 | **你自己的筆電**,在終端機裡 |
+| 資料庫、交易所程式 | **你自己的筆電**,在 Docker 裡跑(你看不到,但它在) |
+| 領測試幣的 faucet | **網頁**,用瀏覽器開 |
+| Sepolia 區塊鏈本身 | 網際網路上,別人的電腦。你的筆電透過 RPC endpoint 跟它講話 |
+
+**沒有任何「遠端伺服器」要你登入。** 全部在你自己的機器上,只有兩件事會連到外面:瀏覽器開 faucet 網站,以及程式連到 RPC endpoint。
+
+### 2.1 你的電腦需要是什麼
+
+- **macOS** 或 **Linux**:直接可以。
+- **Windows**:要先裝 **WSL2**(Windows 裡的 Linux 環境)。微軟官方教學搜尋「WSL install」,或在 PowerShell 執行 `wsl --install` 後重開機。**裝好之後,這份文件裡所有指令都在 WSL 的終端機裡打,不是在 PowerShell 裡。**
+- 硬碟至少留 **20 GB**,記憶體 **8 GB** 以上。
+
+### 2.2 打開終端機
+
+- **macOS**:按 `Command + 空白鍵`,輸入 `Terminal`,按 Enter。
+- **Ubuntu / Linux**:按 `Ctrl + Alt + T`。
+- **Windows**:開始選單搜尋 `Ubuntu`(WSL 裝好之後會有)。
+
+你會看到一個視窗,最後一行有個游標在閃。那一行叫**提示字元(prompt)**,長得像:
+
+```
+yourname@yourlaptop ~ %
 ```
 
-## A1. 產生本機密鑰,拿到熱錢包位址
+或
 
-如果你還沒跑過:
+```
+yourname@yourlaptop:~$
+```
 
-```sh
+**怎麼用:**
+- 「執行某個指令」= 把那行字貼進去,按 Enter。
+- 貼上:macOS 是 `Command + V`,Linux/WSL 通常是 `Ctrl + Shift + V`(注意有 Shift)。
+- 指令跑完,提示字元會再出現。**提示字元沒出現就是還在跑,等它。**
+- 想中斷正在跑的東西:按 `Ctrl + C`。
+
+**這份文件裡的規矩:**
+- 灰底框裡的東西是要你貼進終端機的。
+- `<像這樣的角括號>` 是**你要換掉的東西**,連角括號一起換掉。例如看到 `<你的地址>`,而你的地址是 `0xAbC...`,就整個換成 `0xAbC...`,不要留角括號。
+- 有些指令會分好幾行,行尾有一個反斜線 `\`。**整段一起複製貼上**,那是同一個指令。
+
+---
+
+## 3. 安裝四樣東西
+
+一個一個來,每裝完一個就用「驗證」那行確認。
+
+### 3.1 git(拿專案原始碼用的)
+
+**macOS**:在終端機執行
+
+```
+xcode-select --install
+```
+
+會跳出一個安裝視窗,按「安裝」,等它跑完(可能十幾分鐘)。這一步同時也裝好了 `make`。
+
+**Ubuntu / WSL**:
+
+```
+sudo apt update && sudo apt install -y git build-essential
+```
+
+會問你密碼,打你電腦的登入密碼(**打的時候螢幕不會顯示任何東西,這是正常的**),按 Enter。
+
+**驗證**:
+
+```
+git --version
+```
+
+看到類似 `git version 2.39.5` 就對了。
+
+### 3.2 Docker Desktop(跑資料庫和交易所用的)
+
+1. 用瀏覽器打開 **https://www.docker.com/products/docker-desktop/**
+2. 下載對應你系統的版本(Mac 要注意選 Apple Silicon 還是 Intel——不確定的話,點左上角蘋果 →「關於這台 Mac」,寫 M1/M2/M3/M4 就是 Apple Silicon)。
+3. 安裝,然後**打開它**。第一次會要你同意條款、可能要你註冊帳號(可以跳過)。
+4. **確認它在跑**:Mac 看螢幕最上方選單列有沒有鯨魚圖示;Windows 看右下角。圖示要是穩定的,不是在轉。
+
+> Windows 使用者:Docker Desktop 設定裡要打開 **"Use the WSL 2 based engine"**,並在 Settings → Resources → WSL Integration 把你的 Ubuntu 打勾。
+
+**驗證**(在終端機):
+
+```
+docker --version
+docker compose version
+```
+
+兩行都要印出版本號。如果說 `command not found` 或 `Cannot connect to the Docker daemon`,回去確認 Docker Desktop 真的開著。
+
+### 3.3 Go(編譯交易所程式用的)
+
+1. 打開 **https://go.dev/dl/**
+2. 下載最新版(Mac 選 `.pkg`,Linux 照網頁上的指示)。
+3. 安裝完**把終端機關掉重開**(不然它找不到新裝的東西)。
+
+**驗證**:
+
+```
+go version
+```
+
+要印出 `go version go1.26...` 之類的。版本 1.26 以上比較保險;比較舊的話 Go 會自己去下載需要的版本,通常也行。
+
+### 3.4 確認 make 有了
+
+```
+make --version
+```
+
+沒有的話:Mac 回去做 3.1 的 `xcode-select --install`;Ubuntu 執行 `sudo apt install -y build-essential`。
+
+---
+
+## 4. 把專案拿到你的電腦上
+
+**如果你已經有這個專案資料夾了,跳到 4.2。**
+
+### 4.1 下載
+
+```
+cd ~
+git clone https://github.com/arc119226/crypto-exchange.git
+cd crypto-exchange
+```
+
+- `cd ~` = 切換到你的家目錄(Mac 是 `/Users/你的名字`)。
+- `git clone` = 把專案抄一份下來。
+- `cd crypto-exchange` = 走進那個資料夾。
+
+### 4.2 走進資料夾,並確認是最新的
+
+**從現在開始,每一個指令都要在這個資料夾裡打。** 每次新開終端機,第一件事就是:
+
+```
+cd ~/crypto-exchange
+```
+
+(如果你放在別的地方,就換成你的路徑。)
+
+然後把程式更新到最新:
+
+```
+git checkout main
+git pull
+```
+
+**驗證你在對的地方**:
+
+```
+ls
+```
+
+應該看到一串資料夾名稱,包括 `cmd`、`docs`、`deploy`、`infra`、`Makefile`。看不到就是走錯資料夾了。
+
+---
+
+# Part A — 準備錢和合約
+
+這一段的目標:拿到三樣東西給下一段用。最慢的是領測試幣(有冷卻時間),所以先做。
+
+## A1. 產生交易所自己的密鑰
+
+執行:
+
+```
 make gen-dev-secrets
 ```
 
-這會產生 `.env`、JWT 金鑰、一組新的 BIP-39 助記詞(`secrets/dev-mnemonic.txt`),並把 `m/44'/60'/1'/0/0` 推導出來的熱錢包位址寫進 `.env` 的 `HOT_WALLET_ADDRESS`。全部 gitignore。
+**這一步做了什麼:**它幫交易所產生了一組全新的密鑰,包括**熱錢包**——交易所自己的錢包。這些檔案都存在 `secrets/` 資料夾裡,而那個資料夾被設定成**永遠不會上傳到 GitHub**。
 
-```sh
+跑的時候會印一堆訊息,最後一行大概是 `done — next: make up-single`。
+
+> 如果它說 `WARNING: docker daemon not reachable`,表示 Docker Desktop 沒開。開起來再跑一次。
+
+**拿到熱錢包地址:**
+
+```
 grep HOT_WALLET_ADDRESS .env
 ```
 
-**這個位址就是熱錢包。** 記下來,A3 要用它領錢。
+會印出類似:
 
-> 已經跑過而想沿用現有助記詞:直接用現有的就好,同一顆種子在哪條 EVM 鏈上都成立。**不要**為了 Sepolia 跑 `FORCE=1` 重生——那會讓 anvil 那套已經發出去的充值地址全部失效。
-
-## A2. 領測試幣給部署者
-
-你總共需要大約 **0.12 SepoliaETH**,分三個位址:
-
-| 收款位址 | 金額 | 用途 |
-|---|---|---|
-| A0 的部署者位址 | ~0.02 | 部署 MockUSDC + 鑄幣的 gas |
-| `.env` 的 `HOT_WALLET_ADDRESS` | ~0.05 | 付提現、付歸集的補 gas,以及提現金額本身 |
-| (Part B 才會知道的充值地址) | ~0.05 | 這一筆**就是那次充值** |
-
-多數 faucet 一天給 0.05,而且**可以指定任意收款位址**——所以你可以在同一時間從三個不同 faucet 分別打到三個位址,不必自己轉帳。
-
-先領前兩個(第三個要等 Part B 拿到充值地址)。常見 faucet(這類服務變動很快,死掉就換一個或直接搜 "sepolia faucet"):
-
-- Google Cloud Web3 faucet
-- Alchemy Sepolia faucet(要 Alchemy 帳號)
-- Infura Sepolia faucet(要 Infura 帳號)
-- `sepolia-faucet.pk910.de`(PoW,不需帳號,掛著跑就會累積)
-
-確認收到:
-
-```sh
-docker run --rm --entrypoint cast ghcr.io/foundry-rs/foundry:v1.8.1 \
-  balance <位址> --rpc-url "$SEPOLIA_RPC" --ether
+```
+HOT_WALLET_ADDRESS=0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC
 ```
 
-## A3. 部署 MockUSDC
+**把等號後面那串 `0x...` 抄下來**,貼到記事本。這是**熱錢包地址**,等一下要用它領錢。
 
-`MockUSDC` 沒有建構子參數,`mint` 也刻意不設權限(測試鏈專用,合約註解裡寫得很明白)。所以不需要部署腳本,一行 `forge create` 就夠:
+> **⚠️ 已經跑過這個專案的人注意:** 如果你之前就跑過 `make gen-dev-secrets`,直接用現有的就好。**不要**加 `FORCE=1` 重新產生——那會讓你之前發出去的所有充值地址失效。
 
-在 repo 根目錄跑:
+## A2. 做一把新的私鑰(部署合約用)
 
-```sh
+我們需要一把**全新的、乾淨的**私鑰,專門用來把 `MockUSDC` 合約放到鏈上。
+
+> **為什麼要新的?** 這把鑰匙等一下會被你貼進指令裡。用一把只在測試網上、除了這件事什麼都沒做過的鑰匙,就算不小心外洩也不痛不癢。**永遠不要拿有真錢的錢包私鑰做這種事。**
+
+執行:
+
+```
+docker run --rm --entrypoint cast ghcr.io/foundry-rs/foundry:v1.8.1 wallet new
+```
+
+第一次跑會先下載工具,等一兩分鐘。跑完印出兩行:
+
+```
+Successfully created new keypair.
+Address:     0x1234...
+Private key: 0xabcd...
+```
+
+**兩個都抄下來。**
+
+現在把私鑰存進檔案(這樣後面的指令可以自動讀,不用一直貼):
+
+```
+mkdir -p secrets
+umask 077
+echo '<把 Private key 那串 0x... 貼在這裡>' > secrets/sepolia-deployer.key
+umask 022
+```
+
+`umask 077` 是讓這個檔案只有你自己讀得到。`secrets/` 資料夾一樣不會上傳到 GitHub。
+
+**驗證存對了:**
+
+```
+cat secrets/sepolia-deployer.key
+```
+
+要印出你剛剛那串 `0x...`(66 個字)。
+
+## A3. 拿到你的 RPC 網址(Alchemy)
+
+RPC endpoint 是一個網址,你的電腦透過它跟 Sepolia 講話。你已經有 Alchemy 免費帳號了,用它——比免註冊的公開節點穩得多。
+
+### 拿網址的步驟
+
+1. 瀏覽器打開 **https://dashboard.alchemy.com/** 並登入。
+2. 左邊選單找 **Apps**(有些版面叫 **Instances**),點 **Create new app**。
+3. 填:
+   - **Name**:隨便打,例如 `crypto-exchange-sepolia`
+   - **Chain / Network**:選 **Ethereum**,網路選 **Ethereum Sepolia**
+4. 建好之後進到那個 app,找 **API Key** 或 **Endpoints** 區塊,把 **HTTPS** 那個網址複製起來。長得像:
+
+   ```
+   https://eth-sepolia.g.alchemy.com/v2/AbCdEf123456...
+   ```
+
+> **⚠️ 網址最後那一長串是你的 API key,等於密碼。** 不要貼到聊天室、不要放進任何會上傳到 GitHub 的檔案、不要截圖給人。這份流程裡它只會存在終端機的環境變數,不會被寫進檔案。
+>
+> 回報結果給我的時候,**只要說「用 Alchemy」就好,不用給我網址。**
+
+### 把它寫進 `.env`
+
+`.env` 是 A1 產生的設定檔,放在專案資料夾裡,**不會上傳到 GitHub**。把網址寫進去,之後所有指令都自己讀得到,你不用每次重貼。
+
+打開它:
+
+```
+nano .env
+```
+
+> **`nano` 怎麼用**(第一次會用到,之後還會用):
+> - 用**方向鍵**移動游標(滑鼠沒用)。
+> - 直接打字就是修改。
+> - 貼上:macOS `Command + V`,Linux/WSL `Ctrl + Shift + V`。
+> - 存檔:`Ctrl + O`,然後按 **Enter** 確認檔名。
+> - 離開:`Ctrl + X`。
+> - 不想存了:`Ctrl + X`,它問你要不要存時按 `N`。
+
+用方向鍵移到檔案**最後一行的結尾**,按 Enter 換一行,加上這一行(把角括號連同裡面的字換成你的網址):
+
+```
+ETH_RPC_URL=<貼上你的 Alchemy HTTPS 網址>
+```
+
+> 等號兩邊**不要有空格**,網址**不要加引號**。
+
+`Ctrl + O` → Enter → `Ctrl + X` 存檔離開。
+
+**確認寫進去了:**
+
+```
+grep ETH_RPC_URL .env
+```
+
+要印出 `ETH_RPC_URL=https://eth-sepolia...`(你的網址)。
+
+### 讓這個終端機視窗也讀得到
+
+```
+export SEPOLIA_RPC=$(sed -n 's/^ETH_RPC_URL=//p' .env)
+```
+
+這行的意思是「從 `.env` 裡把那個網址挖出來,設成 `SEPOLIA_RPC`」——所以你不用再貼一次 API key。
+
+> **⚠️ `export` 只在「這個終端機視窗」有效。** 關掉或開新視窗就沒了,要重打上面那一行。好消息是它從 `.env` 讀,所以永遠不用重貼網址。文件後面會再提醒你。
+
+### 驗證它通
+
+```
+docker run --rm --entrypoint cast ghcr.io/foundry-rs/foundry:v1.8.1 \
+  chain-id --rpc-url "$SEPOLIA_RPC"
+```
+
+要印出 **`11155111`**。這是 Sepolia 的身分證號碼。
+
+| 結果 | 意思 | 怎麼辦 |
+|---|---|---|
+| `11155111` | 對了 | 繼續 |
+| 別的數字 | 你的 app 建在別條鏈上 | 回 Alchemy 確認網路選的是 Ethereum **Sepolia** |
+| `401` / `Unauthorized` | 網址複製錯了或少了字 | 重新複製一次完整網址 |
+| 連不上 / timeout | 網址打錯,或引號沒包好 | 檢查 `export` 那行,網址兩邊要有雙引號 |
+
+### 備援
+
+Alchemy 出問題時可以臨時換成 `https://1rpc.io/sepolia`(不用註冊)。
+
+> 我實測過其他幾家(2026-09-07):`https://rpc.sepolia.org` 已經掛了(回 404);`https://sepolia.drpc.org` 免費方案不含 Sepolia;`https://ethereum-sepolia-rpc.publicnode.com` 能用,但它背後是一群機器、有些刪掉了舊資料,偶爾會回 `pruned history unavailable`。這就是為什麼有專屬帳號比較好。
+
+## A4. 領測試幣
+
+你總共需要大約 **0.12 SepoliaETH**,分給**三個不同的地址**:
+
+| 收款地址 | 大約要多少 | 用途 |
+|---|---|---|
+| A2 的 **Address**(部署者) | 0.02 | 付部署合約的手續費 |
+| A1 的 **HOT_WALLET_ADDRESS**(熱錢包) | 0.05 | 交易所付提現和手續費用 |
+| 一個等一下才會知道的地址 | 0.05 | **這一筆本身就是「充值」** |
+
+**現在先領前兩個**,第三個要等 Part B 拿到充值地址。
+
+### 怎麼領
+
+faucet 是網站,用**瀏覽器**打開。多數 faucet 一天只給一次,但**你可以指定任何收款地址**,所以可以從不同 faucet 分別打給不同地址。
+
+常見的(這類服務變動很快,連不上就換一個,或直接 Google 搜尋 `sepolia faucet`):
+
+- **Alchemy 的 faucet** — 你已經有帳號了,直接開 **https://www.alchemy.com/faucets/ethereum-sepolia**,用同一個帳號登入。
+  > 它可能會要求你的**主網**錢包有一點點 ETH 才給全額。沒有的話它通常還是會給比較少的量,或者就換下面幾家。
+- **Google Cloud Web3 Faucet** — 搜尋 `google cloud sepolia faucet`,用 Google 帳號登入
+- **https://sepolia-faucet.pk910.de/** — 不用任何帳號。它讓你的瀏覽器算數學題換幣,**開著分頁讓它跑**就會慢慢累積,要多少就跑久一點。幾家都領不到的時候這家最可靠
+- **Infura Sepolia Faucet** — 要 Infura 帳號
+
+流程都差不多:貼上收款地址 → 過驗證(打勾、或登入)→ 按領取 → 等幾十秒。
+
+### 確認收到了
+
+```
+docker run --rm --entrypoint cast ghcr.io/foundry-rs/foundry:v1.8.1 \
+  balance <要查的地址> --rpc-url "$SEPOLIA_RPC" --ether
+```
+
+印出來是數字,例如 `0.05`。是 `0` 就是還沒到,等一下再查。
+
+**兩個地址都拿到錢了再繼續。**
+
+## A5. 部署 MockUSDC 合約
+
+`MockUSDC` 是一個假的美元代幣,交易所拿它當「另一種可以交易的資產」。
+
+確認你在專案資料夾裡,然後執行:
+
+```
 docker run --rm -v "$PWD/infra/contracts:/w" -w /w \
   ghcr.io/foundry-rs/foundry:v1.8.1 \
   forge create src/MockUSDC.sol:MockUSDC \
@@ -116,197 +446,388 @@ docker run --rm -v "$PWD/infra/contracts:/w" -w /w \
     --broadcast
 ```
 
-> `$(cat ...)` 是**你的 shell** 展開的(不是容器裡),所以路徑相對於 repo 根目錄,私鑰也不會被掛進容器。但它**會留在 shell history** 裡——跑完記得清掉,或改用 `--interactive` 手動貼。
+第一次會下載編譯器,等一兩分鐘。成功的話印出:
+
+```
+Deployer: 0x...
+Deployed to: 0x5FbD...        ← 這個是「合約地址」,抄下來!
+Transaction hash: 0xabc...    ← 這個也抄下來
+```
+
+> `$(cat secrets/sepolia-deployer.key)` 是「把那個檔案的內容放在這裡」的意思——由你的終端機處理,私鑰不會被送進 Docker 容器。但它**會留在終端機的歷史紀錄裡**。這是測試網的鑰匙所以還好;真錢的鑰匙絕對不能這樣用。
 >
-> 這一步會在 `infra/contracts/` 底下留下 `out/` 與 `cache/`(第一次還會下載 solc 0.8.28)。兩個都已經 gitignore,刪掉無妨。
+> 跑完 `infra/contracts/` 底下會多出 `out/` 和 `cache/` 兩個資料夾。它們已經被設定成不會上傳,刪不刪都行。
 
-輸出會有 `Deployed to:` 與 `Transaction hash:`。拿 tx hash 問出**部署區塊高度**——這個數字很重要,Part B 的 `ETH_SCAN_START_BLOCK` 要用它:
+**失敗了怎麼辦:**
 
-```sh
+| 訊息裡有 | 意思 | 怎麼辦 |
+|---|---|---|
+| `insufficient funds` | 部署者沒錢 | 回 A4 領錢給 A2 的 Address |
+| `nonce is not 0` | 這把鑰匙之前用過 | 回 A2 做一把全新的 |
+| 連不上 / timeout | RPC 有問題 | 換一個 endpoint,重做 A3 |
+
+### 查出部署在第幾個區塊
+
+```
 docker run --rm --entrypoint cast ghcr.io/foundry-rs/foundry:v1.8.1 \
-  receipt <tx hash> --rpc-url "$SEPOLIA_RPC" blockNumber
+  receipt <剛剛的 Transaction hash> --rpc-url "$SEPOLIA_RPC" blockNumber
 ```
 
-## A4. 鑄一些 USDC 給熱錢包
+印出一個數字,例如 `11651234`。**抄下來**,這是「部署區塊高度」。
 
-```sh
+## A6. 鑄一些 USDC 給熱錢包
+
+`MockUSDC` 誰都可以鑄(這是測試用合約,故意這樣設計的)。
+
+```
 docker run --rm --entrypoint cast ghcr.io/foundry-rs/foundry:v1.8.1 \
-  send <MockUSDC 位址> "mint(address,uint256)" <HOT_WALLET_ADDRESS> 1000000000000 \
-    --rpc-url "$SEPOLIA_RPC" --private-key "$(cat secrets/sepolia-deployer.key)"
+  send <A5 的合約地址> "mint(address,uint256)" <A1 的熱錢包地址> 1000000000000 \
+  --rpc-url "$SEPOLIA_RPC" \
+  --private-key "$(cat secrets/sepolia-deployer.key)"
 ```
 
-`1000000000000` = 1,000,000 USDC(6 位小數)。
+`1000000000000` 是 1,000,000 USDC(這個代幣用 6 位小數,所以 100 萬要寫成 100 萬乘以 100 萬)。
 
-確認:
+**驗證:**
 
-```sh
+```
 docker run --rm --entrypoint cast ghcr.io/foundry-rs/foundry:v1.8.1 \
-  call <MockUSDC 位址> "balanceOf(address)(uint256)" <HOT_WALLET_ADDRESS> --rpc-url "$SEPOLIA_RPC"
+  call <A5 的合約地址> "balanceOf(address)(uint256)" <A1 的熱錢包地址> \
+  --rpc-url "$SEPOLIA_RPC"
 ```
 
-## A5. 把這三個數字給我
+要印出 `1000000000000`(可能後面跟著 `[1e12]`)。
 
-| 項目 | 值 |
+## A7. 檢查點:你現在應該有這些
+
+抄在記事本上,Part B 全部會用到:
+
+| 項目 | 你的值 |
 |---|---|
-| MockUSDC 合約位址 | `0x` |
-| 部署區塊高度 | |
-| 你選的 RPC endpoint | (如果是 Alchemy/Infura 這種帶 API key 的,**只要告訴我是哪家就好,不必給我 URL**) |
+| 熱錢包地址(A1) | `0x` |
+| 部署者地址(A2) | `0x` |
+| 部署者私鑰(A2) | 已存在 `secrets/sepolia-deployer.key` |
+| RPC endpoint(A3) | |
+| **MockUSDC 合約地址(A5)** | `0x` |
+| **部署區塊高度(A5)** | |
 
-順便記一下 Part A 的實測數字,這些會進最終 runbook:
+順便把 Part A 的實測數字記下來(`cast receipt <hash> --rpc-url "$SEPOLIA_RPC"` 會一次給你 `gasUsed` 和 `effectiveGasPrice`):
 
-| 步驟 | tx hash | gas used | effective gas price | 實際成本 (ETH) | 送出 → 上鏈 (秒) |
+| 步驟 | tx hash | gas used | effective gas price | 成本 (ETH) | 送出 → 上鏈(秒) |
 |---|---|---|---|---|---|
 | 部署 MockUSDC | | | | | |
-| mint USDC | | | | | |
-
-（`cast receipt <hash> --rpc-url "$SEPOLIA_RPC"` 會一次給你 `gasUsed` 與 `effectiveGasPrice`。）
+| 鑄 USDC | | | | | |
 
 ---
 
-# Part B — 起 Sepolia stack,走完一次
+# Part B — 把交易所接上去,走完一圈
 
-4d-1 已經落地,下面的指令可以直接打。
+> **每次新開終端機視窗,先貼這四行**(全部從 `.env` 自己讀,不用你貼任何密碼):
+> ```
+> cd ~/crypto-exchange
+> export SEPOLIA_RPC=$(sed -n 's/^ETH_RPC_URL=//p' .env)
+> export EXCHANGE_ADMIN_URL=http://localhost:8082
+> export EXCHANGE_ADMIN_API_KEY=$(sed -n 's/^ADMIN_API_KEY=//p' .env)
+> ```
+> 忘了貼會看到 `set ETH_RPC_URL...` 或 `connection refused` 之類的錯誤。
 
 ## B1. 寫兩個設定檔
 
-```sh
+先複製範本:
+
+```
 cp deploy/compose/sepolia/sepolia-addresses.json.example deploy/compose/sepolia/sepolia-addresses.json
 cp deploy/compose/sepolia/seed-params.json.example       deploy/compose/sepolia/seed-params.json
 ```
 
-編輯 `sepolia-addresses.json`,填 A5 的三個欄位(`chainId` 保持 `11155111`):
+用任何文字編輯器打開 `deploy/compose/sepolia/sepolia-addresses.json`。不知道用什麼的話:
+
+```
+open deploy/compose/sepolia/sepolia-addresses.json          # macOS
+nano deploy/compose/sepolia/sepolia-addresses.json          # Linux / WSL
+```
+
+> `nano` 的用法在 A3 講過了:方向鍵移動、直接打字、`Ctrl + O` → Enter 存檔、`Ctrl + X` 離開。
+
+把 A7 的值填進去,**`chainId` 保持 `11155111` 不要動**:
 
 ```json
 {
   "chainId": 11155111,
-  "deployer":  "<A0 的部署者位址>",
-  "hotWallet": "<.env 的 HOT_WALLET_ADDRESS>",
-  "usdc":      "<A3 的 MockUSDC 位址>",
-  "deployedAtBlock": <A3 的部署區塊>
+  "deployer": "<A2 的部署者地址>",
+  "hotWallet": "<A1 的熱錢包地址>",
+  "usdc": "<A5 的 MockUSDC 合約地址>",
+  "deployedAtBlock": <A5 的部署區塊高度,不用引號>
 }
 ```
 
-`seed-params.json` 已經是 faucet 尺寸的門檻(歸集 0.01 ETH、最小提現 0.002、level-0 自動核可 0.005 / 每日 0.02),為什麼是這些數字寫在 [`deploy/seed-params/README.md`](../../deploy/seed-params/README.md)。要改就改,它只是覆蓋層,沒寫的鍵保留內建值。
+> 注意 `deployedAtBlock` 是數字,**不加引號**;其他三個是文字,**要加引號**。逗號不要漏也不要多。
 
-兩個檔都 gitignore。
+另一個檔 `seed-params.json` **不用改**,它已經是配合 faucet 金額調過的門檻(歸集門檻 0.01 ETH、最小提現 0.002、自動核可上限 0.005)。想知道為什麼是這些數字,看 `deploy/seed-params/README.md`。
 
-## B2. 起 stack
+## B2. 啟動
 
-```sh
-export ETH_RPC_URL="$SEPOLIA_RPC"
-export ETH_SCAN_START_BLOCK=<A3 的部署區塊 − 10>
+再打開一次 `.env`:
+
+```
+nano .env
+```
+
+加一行(算法:A5 的部署區塊高度**減 10**):
+
+```
+ETH_SCAN_START_BLOCK=<部署區塊高度減 10>
+```
+
+例:部署區塊是 `11651234`,就寫 `ETH_SCAN_START_BLOCK=11651224`。
+
+`Ctrl + O` → Enter → `Ctrl + X`。確認一下:
+
+```
+grep -E 'ETH_RPC_URL|ETH_SCAN_START_BLOCK' .env
+```
+
+兩行都要在。然後啟動:
+
+```
 make up-sepolia
 ```
 
-`ETH_SCAN_START_BLOCK` **一定要設**,而且之後不能改:它同時是掃描起點與**錨點**——它那個區塊的雜湊被記進 `chain.chain_state`,每次啟動都會重驗一次,所以改了會被拒絕(訊息會告訴你原本記的是哪一塊)。減 10 是給 reorg 一點餘裕。
+> **為什麼要減 10、為什麼一定要設?**
+>
+> 交易所要從某個區塊開始往後掃描,找有沒有人匯錢進來。不設的話它會**從第 0 塊開始掃**——而 Sepolia 現在已經超過 1,165 萬塊,那要掃好幾天。設成部署區塊往前一點點,是留一點餘裕。
+>
+> **這個數字設定之後不能再改。** 它同時被拿來當「身分標記」:交易所會記住那個區塊的指紋,每次啟動重新核對一次,確保自己還在跟同一條鏈講話。改了會被拒絕啟動(錯誤訊息會告訴你原本記的是多少)。
 
-這是**獨立的 compose project**(`crypto-exchange-sepolia`),有自己的 postgres volume,anvil 那套原封不動。
+`make up-sepolia` 第一次要幾分鐘(要編譯程式、下載映像檔)。它結束時不會有什麼特別的訊息,提示字元回來就是好了。
 
-看它起來:
+**這是一套獨立的環境**,有自己的資料庫。你之前用 anvil 跑的那套完全不受影響。
 
-```sh
+### 看它有沒有正常起來
+
+```
 docker compose -f deploy/compose/compose.yaml -f deploy/compose/compose.sepolia.yaml \
   --env-file .env logs -f exchange-all
 ```
 
-第一次啟動應該看到 `chain recorded`,帶著 `anchor_block` 與 `anchor_hash`。
+畫面會一直滾。**這是正常的,它在持續印記錄。看夠了按 `Ctrl + C` 離開**(這只會關掉看記錄的畫面,不會關掉交易所)。
 
-```sh
-export EXCHANGE_ADMIN_URL=http://localhost:8082
-export EXCHANGE_ADMIN_API_KEY=$(sed -n 's/^ADMIN_API_KEY=//p' .env)
-go run ./cmd/exchangectl markets list       # ETH-USDC,確認數 6
+要找的是這一行:
+
 ```
+chain recorded  chain_id=11155111  anchor_block=...  anchor_hash=0x...
+```
+
+看到它就表示交易所成功連上 Sepolia 並認明了這條鏈。
+
+**沒看到的話**,往上翻找紅色的 `error`,對照第 6 節的表。
+
+### 確認交易所回應得了
+
+(如果你還沒貼 Part B 開頭那四行,現在貼。)
+
+```
+go run ./cmd/exchangectl markets list
+```
+
+第一次 `go run` 要編譯,等一兩分鐘。應該印出一個表格,裡面有 `ETH-USDC`。
+
+```
+go run ./cmd/exchangectl assets list
+```
+
+確認 ETH 和 USDC 的 **`CONFIRMATIONS` 欄是 6**。
 
 ## B3. 把 faucet 給熱錢包的錢記進帳本
 
-鏈上有、帳本不知道,對帳一定會報一筆**完全正確**的差異。`external` 科目就是為這件事存在的(§6.1.4 g):
+**這一步不能跳過,而且理由值得懂。**
 
-```sh
+交易所的帳本不知道 faucet 給了熱錢包錢——鏈上有,帳本上沒有。如果不處理,等一下對帳一定會報一筆差異,而那筆差異是**完全正確的**:帳本確實不知道那些錢從哪來。
+
+真正的交易所遇到這種事(老闆從冷錢包轉錢進來、或收到補助),做法就是這個:記一筆「這筆錢從系統外面進來」。
+
+```
 go run ./cmd/exchangectl admin house-adjust \
-  --code custody_hot --asset ETH --amount <A2 實際打進去的數量> --direction credit \
-  --reason "sepolia faucet 注資熱錢包,tx <A2 的 tx hash>" \
+  --code custody_hot --asset ETH \
+  --amount <A4 實際打進熱錢包的數量,例如 0.05> \
+  --direction credit \
+  --reason "sepolia faucet 注資熱錢包,tx <faucet 那筆的 tx hash,不知道就寫日期>" \
   --idempotency-key "sepolia-hot-eth-1"
+```
 
+```
 go run ./cmd/exchangectl admin house-adjust \
   --code custody_hot --asset USDC --amount 1000000 --direction credit \
-  --reason "A4 mint 給熱錢包,tx <A4 的 tx hash>" \
+  --reason "A6 鑄給熱錢包,tx <A6 的 tx hash>" \
   --idempotency-key "sepolia-hot-usdc-1"
 ```
 
-`--reason` 要寫得讓半年後的人看得懂,理想上放 tx hash——這條會進 `audit.audit_events`。細節與判斷順序見 [`reconciliation-break.md`](reconciliation-break.md) §3。
+> - `--amount` 要跟鏈上**實際的數量一致**。不確定的話用 A4 那個查餘額的指令看一次。
+> - `--reason` 是給半年後的人看的,寫清楚。這條會被寫進稽核紀錄。
+> - `--idempotency-key` 讓你重打同一個指令也不會記兩次。
 
-確認回到零(對帳每 5 分鐘一輪):
+**確認回到零:**
 
-```sh
+```
 go run ./cmd/exchangectl admin reconcile
 ```
 
-## B4. 開使用者、要一個充值地址
+看到類似:
 
-```sh
+```
+ASSET  LEDGER   CHAIN    UNCREDITED  ABOVE  IN FLIGHT  DIFF
+ETH    0.05     0.05     0           0      0          0     ok
+USDC   1000000  1000000  0           0      0          0     ok
+```
+
+**每一列最後都是 `0` / `ok`** 就對了。
+
+> 對帳每 5 分鐘跑一次,所以剛記完可能還是舊資料,等一下再看。不是 0 的話**先不要再記任何帳**,看第 6 節。
+
+## B4. 開一個使用者,拿一個充值地址
+
+```
 go run ./cmd/exchangectl user register --email alice@sepolia.test --password 'correct horse battery'
-export EXCHANGE_TOKEN=...          # 上一步的輸出
+```
+
+它會印出一行 `export EXCHANGE_TOKEN=...`。**把那一整行複製,貼回終端機執行。**(這是那個使用者的登入憑證。)
+
+然後:
+
+```
 go run ./cmd/exchangectl deposit-address --asset ETH
 ```
 
-## B5. 充值:直接把 faucet 打進那個地址
+印出一個 `0x...` 地址。**抄下來——這就是 A4 表格裡的第三個地址。**
 
-**這是刻意的:faucet 本身就是外部匯款方**,所以你不用另外準備一個有錢的錢包。要 0.05 ETH 左右(高於 0.01 的歸集門檻)。
+## B5. 充值:讓 faucet 直接打進那個地址
 
-USDC 那筆用 A0 的 key 直接鑄進去:
+回瀏覽器,找一個 faucet,收款地址填 **B4 拿到的充值地址**,領大約 **0.05 SepoliaETH**。
 
-```sh
+> **為什麼可以這樣?** 充值的定義是「錢從交易所外面進來」。faucet 就是外面。所以你不需要另外準備一個有錢的錢包來模擬「別人匯錢給你」——faucet 本身就扮演那個角色。
+>
+> (順帶一提:這個交易所有一條規則是「交易所自己送給自己的錢不算充值」。這條規則是上一輪對帳抓到的真實 bug 才補上的。)
+
+順便也給它一些 USDC:
+
+```
 docker run --rm --entrypoint cast ghcr.io/foundry-rs/foundry:v1.8.1 \
-  send <MockUSDC 位址> "mint(address,uint256)" <充值地址> 250500000 \
-  --rpc-url "$SEPOLIA_RPC" --private-key "$(cat secrets/sepolia-deployer.key)"
+  send <A5 的合約地址> "mint(address,uint256)" <B4 的充值地址> 250500000 \
+  --rpc-url "$SEPOLIA_RPC" \
+  --private-key "$(cat secrets/sepolia-deployer.key)"
 ```
 
-然後**看它跑**。6 個確認 × 12 秒 ≈ 72 秒起跳:
+`250500000` = 250.5 USDC。
 
-```sh
-go run ./cmd/exchangectl deposits list       # detected → confirming → credited
+### 看它跑
+
+```
+go run ./cmd/exchangectl deposits list
+```
+
+狀態會這樣變:
+
+```
+detected  →  confirming  →  credited
+(看到了)     (等確認中)      (入帳了)
+```
+
+**大約要 72 秒以上**(6 個確認 × 12 秒)。每隔一會兒重打一次上面的指令看變化。
+
+到 `credited` 之後:
+
+```
 go run ./cmd/exchangectl balances
 ```
 
-歸集會在下一輪(120 秒)自己啟動,ETH 一筆、USDC 兩筆(補 gas + 轉帳):
+會看到那個使用者的餘額。**錢進來了。**
 
-```sh
+### 歸集會自己發生
+
+充值入帳之後,交易所會自動把錢從充值地址收攏進熱錢包。大約兩分鐘後:
+
+```
 go run ./cmd/exchangectl admin sweeps list
 ```
 
-## B6. 提現,兩條路都走
+狀態跑到 `confirmed` 就完成了。
 
-```sh
-# 自動核可:低於 level-0 的 0.005
-go run ./cmd/exchangectl withdrawals create --asset ETH --amount 0.003 --to <你自己的位址>
+> ETH 是一筆交易;USDC 是兩筆——因為那個充值地址只有 USDC、沒有 ETH 可以付手續費,所以熱錢包要先送一點 ETH 過去給它付油錢,再叫它轉帳。這就是記錄裡會看到 `deposit address funded` 的原因。
 
-# 人工審核:高於它
-go run ./cmd/exchangectl withdrawals create --asset ETH --amount 0.008 --to <你自己的位址>
-go run ./cmd/exchangectl admin withdrawals list
-go run ./cmd/exchangectl admin withdrawals review <id> approve --note "sepolia 手動驗證"
+## B6. 提現,兩條路都走一次
+
+交易所對提現有兩種處理:小額自動放行,大額要人工審核。**兩種都要走過。**
+
+### 小額(自動)
+
+```
+go run ./cmd/exchangectl withdrawals create \
+  --asset ETH --amount 0.003 --to <隨便一個你控制的地址,用 A2 的部署者地址就行>
+```
+
+```
 go run ./cmd/exchangectl withdrawals list
 ```
 
-卡住的話見 [`stuck-withdrawal.md`](stuck-withdrawal.md);`ETH_REPLACE_AFTER` 在這裡是 3 分鐘。
+會自己一路跑到 `confirmed`。
 
-## B7. 對帳歸零
+### 大額(人工審核)
 
-```sh
+```
+go run ./cmd/exchangectl withdrawals create \
+  --asset ETH --amount 0.008 --to <同一個地址>
+```
+
+這筆會停在等待審核。用管理員身分看:
+
+```
+go run ./cmd/exchangectl admin withdrawals list
+```
+
+抄下它的 `id`,然後核准:
+
+```
+go run ./cmd/exchangectl admin withdrawals review <那個 id> approve --note "sepolia 手動驗證"
+```
+
+再看:
+
+```
+go run ./cmd/exchangectl withdrawals list
+```
+
+一樣會跑到 `confirmed`。
+
+> 卡住超過幾分鐘的話,看第 6 節,或 `docs/runbooks/stuck-withdrawal.md`。
+
+## B7. 對帳:最後的判定
+
+```
 go run ./cmd/exchangectl admin reconcile
 go run ./cmd/exchangectl admin trial-balance
 ```
 
-**每一列 `DIFF` 都是 0** 就是 `docs/plan-v1.0.md` §2.3 第 5 條的判定條件。不是 0 的話**先不要記帳**,照 [`reconciliation-break.md`](reconciliation-break.md) 走——那份文件的第一句就是「在知道錢在哪裡之前不要動任何東西」。
+**`reconcile` 每一列的 `DIFF` 都是 `0`**,就通過了。這就是 `docs/plan-v1.0.md` §2.3 第 5 條的標準。
+
+不是 0 的話:**先不要記任何帳**。`docs/runbooks/reconciliation-break.md` 的第一句就是「在知道錢在哪裡之前不要動任何東西」。把 `reconcile` 的輸出貼給我。
 
 ## B8. 收工
 
-```sh
-make down-sepolia          # 保留 volume,之後還能回來看
+```
+make down-sepolia
 ```
 
-## B 的結果表(待填)
+資料會留著,之後還能再開起來看。
 
-| 步驟 | tx hash | block | gas used | effective gas price | 成本 (ETH) | 送出 → confirmed (秒) |
+---
+
+## 5. 把結果填回來
+
+這是我要的東西,填好給我,我寫進最終文件。
+
+`docker run --rm --entrypoint cast ghcr.io/foundry-rs/foundry:v1.8.1 receipt <hash> --rpc-url "$SEPOLIA_RPC"` 一次給你 `gasUsed` 和 `effectiveGasPrice`。
+
+| 步驟 | tx hash | block | gas used | effective gas price | 成本 (ETH) | 送出 → confirmed(秒) |
 |---|---|---|---|---|---|---|
 | 熱錢包 faucet 注資 | | | | | | |
 | ETH 充值(faucet → 充值地址) | | | | | | |
@@ -319,43 +840,122 @@ make down-sepolia          # 保留 volume,之後還能回來看
 
 | 觀察 | 值 |
 |---|---|
-| 充值從上鏈到 `credited` 的實際時間 | |
-| 對帳一輪的耗時 | |
-| 整段期間 base fee 範圍 | |
-| RPC 有沒有被限流 / 出現 `pruned history unavailable` | |
-| 有沒有遇到 reorg(`chain.deposits` 出現 `orphaned`) | |
+| 充值從上鏈到 `credited` 實際花多久 | |
+| 對帳一輪要多久 | |
+| 整段期間 gas 價格大概多少 | |
+| RPC 有沒有被限流,或出現 `pruned history unavailable` | |
+| 有沒有遇到 reorg(`deposits list` 出現 `orphaned`) | |
+| **有沒有哪一步的說明看不懂 / 跟實際不一樣** | |
 
-（`cast receipt <hash> --rpc-url "$SEPOLIA_RPC"` 一次給你 `gasUsed` 與 `effectiveGasPrice`。）
-
-把這兩張表填好給我,我寫成 4d-2 收尾。
-
----
-
-## 症狀與處置
-
-| 症狀 | 意思 | 處置 |
-|---|---|---|
-| chain role 一直重試啟動,log 有 `evm: genesis` 或 `pruned history unavailable` | endpoint 這一刻的後端剪掉了那個區塊 | 4d-1 之後錨點會釘在 `ETH_SCAN_START_BLOCK` 而不是創世,深度大幅變淺。仍然發生就換 endpoint |
-| `the node is on a different chain than the cursor` | `ETH_CHAIN_ID` 或錨點與資料庫記的不合 | **不要清資料庫了事**,先確認你指到的是哪條鏈。這是保護不是障礙 |
-| 掃描器一直落後,`chain_scanner_lag_blocks` 很大 | `ETH_SCAN_START_BLOCK` 沒設或設太小 | Sepolia head 約 1,165 萬;沒設就是從創世掃,batch 200 要跑約 58,000 輪 |
-| `admin reconcile` 一直失敗,log 有讀不到餘額 | 對帳把餘額釘在 `min(head−確認數+1, 掃描游標)` 讀。chain role 停超過約 128 區塊(~26 分鐘)之後,那個高度的**狀態**已經被節點剪掉 | 讓掃描器追上就會自己好。對帳**刻意**整輪失敗而不是把讀不到的當成 0——當成 0 會報「這個資產全部不見了」 |
-| 提現停在 `funds_locked` 沒動,log 有費用上限 | base fee 高過 `ETH_MAX_FEE_PER_GAS` | 這是**設計行為**(4d-1 之後):操作者的停損。等費用降,或調高上限 |
-| 提現停在 `broadcast` 很久 | 費用不夠或網路壅塞 | 見 [`stuck-withdrawal.md`](stuck-withdrawal.md)。`REPLACE_AFTER` 在 Sepolia 是 3 分鐘 |
-| 對帳報 `DIFF > 0` 而金額等於某次 faucet | 你忘了做第 3 步 | 見 [`reconciliation-break.md`](reconciliation-break.md) §3 |
-| faucet 領不到 | 冷卻時間 / captcha / 該 faucet 死了 | 換一家。`pk910` 那種 PoW faucet 掛著跑就會累積 |
+最後一列最重要——這份文件寫得對不對,只有你知道。
 
 ---
 
-## Sepolia 與 anvil 的差別(一覽)
+## 6. 出事了怎麼辦
 
-| | anvil | Sepolia |
+### 6.1 通用招數
+
+**看交易所在講什麼:**
+
+```
+docker compose -f deploy/compose/compose.yaml -f deploy/compose/compose.sepolia.yaml \
+  --env-file .env logs --tail 100 exchange-all
+```
+
+**看有哪些東西在跑:**
+
+```
+docker compose -f deploy/compose/compose.yaml -f deploy/compose/compose.sepolia.yaml \
+  --env-file .env ps
+```
+
+**全部重來(會清掉這套 Sepolia 環境的資料,但不影響 anvil 那套):**
+
+```
+make down-sepolia
+docker volume ls | grep sepolia          # 看有哪些
+docker volume rm <上面列出來的每一個>
+```
+
+然後從 B2 重做。
+
+### 6.2 症狀對照表
+
+| 你看到 | 意思 | 怎麼辦 |
 |---|---|---|
-| chain id | 31337 | 11155111 |
-| 出塊 | 2 秒,穩定 | ~12 秒,會漏槽 |
-| 確認數 | 1 | 6 |
-| reorg | 只有 cheatcode 造出來的 | 真的會發生,通常 1–2 個區塊 |
-| base fee | ≈ 0 | ~1 gwei,會浮動 |
-| 費用上限 | 從沒被觸發過 | 會被觸發 |
-| 歷史 | 全部都在 | 公開節點會剪,而且是一池異質後端 |
-| 資金 | 想要多少有多少 | faucet,有冷卻時間 |
-| 掃描起點 | 0(創世) | 部署區塊(**一定要設**) |
+| `command not found: docker` / `make` / `go` | 沒裝好,或終端機沒重開 | 回第 3 節;裝完要**關掉終端機重開** |
+| `Cannot connect to the Docker daemon` | Docker Desktop 沒開 | 開它,等鯨魚圖示穩定 |
+| `set ETH_RPC_URL to a Sepolia endpoint` | `.env` 裡沒有那一行 | 回 A3,確認 `grep ETH_RPC_URL .env` 印得出來 |
+| `set ETH_SCAN_START_BLOCK...` | `.env` 裡沒有那一行 | 回 B2 加上去 |
+| `connection refused` / 空白的表格 | 忘了貼 Part B 開頭那四行,或交易所沒起來 | 先貼那四行;還是不行看 6.1 的記錄 |
+| `no such file or directory` | 你不在專案資料夾 | `cd ~/crypto-exchange`,再 `ls` 確認 |
+| 記錄裡有 `pruned history unavailable` | 你的 RPC 背後某台機器刪掉了舊資料 | 換一個 RPC(A3),`make down-sepolia` 後重做 B2 |
+| `the node is on a different chain than the cursor` | 資料庫記的鏈跟你現在連的不是同一條,或 `ETH_SCAN_START_BLOCK` 被改過 | **這是保護不是故障。** 錯誤訊息會告訴你原本記的值,設回去。真的要換鏈就照 6.1 全部重來 |
+| 充值一直停在 `detected` 超過五分鐘 | 掃描器落後,或確認數還不夠 | 先等到兩分鐘以上。還是不動就看記錄,可能是 RPC 被限流 |
+| `admin reconcile` 回 404 或資料很舊 | 對帳還沒跑過第一輪 | 等 5 分鐘。還是沒有就看記錄找 `reconciliation pass failed` |
+| `DIFF` 不是 0 | 帳本和鏈上對不上 | **先不要動任何東西。** 把整段輸出貼給我,或看 `docs/runbooks/reconciliation-break.md` |
+| 提現卡在 `broadcast` 超過 10 分鐘 | 手續費不夠,或網路壅塞 | 看 `docs/runbooks/stuck-withdrawal.md`。系統會自己重送(每 3 分鐘一次,最多 3 次) |
+| 記錄裡有 `waiting for the fee market` | gas 價格超過我們設的上限(50 gwei) | **這是設計行為**,不是故障。等價格下來,或把 `compose.sepolia.yaml` 裡的 `ETH_MAX_FEE_PER_GAS` 調高 |
+| faucet 說「已經領過了」 | 冷卻時間 | 換一家 faucet。`pk910` 那種掛著跑就會累積 |
+| 領不到任何測試幣 | 幾家都掛了 | 停在這裡跟我說,4d 可以延後,不擋後面的工作 |
+
+### 6.3 什麼時候該停下來問我
+
+- 對帳的 `DIFF` 不是 0(**最重要的一個**)
+- 出現任何你在上面表格找不到的錯誤
+- 有一步的說明跟你看到的畫面對不上
+
+停下來比亂試好。把你打的指令和完整的輸出一起貼給我。
+
+---
+
+## 7. Sepolia 跟 anvil 差在哪(參考)
+
+| | anvil(之前) | Sepolia(現在) |
+|---|---|---|
+| 出塊 | 2 秒,準時 | 約 12 秒,會不準 |
+| 確認數 | 1 | 6(所以要等 72 秒以上) |
+| 手續費 | 幾乎是 0 | 真的要付,約 1 gwei |
+| reorg(帳本被改寫) | 只有測試故意造的 | 真的會發生,通常 1–2 塊 |
+| 歷史資料 | 全部都在 | 公開節點會刪舊資料 |
+| 錢 | 想要多少有多少 | faucet,有冷卻時間 |
+| 掃描起點 | 0(從頭) | 部署區塊(**一定要設**) |
+
+---
+
+## 附錄:給比較熟的人的快速版
+
+```sh
+# A
+make gen-dev-secrets && grep HOT_WALLET_ADDRESS .env
+docker run --rm --entrypoint cast ghcr.io/foundry-rs/foundry:v1.8.1 wallet new
+export SEPOLIA_RPC="https://eth-sepolia.g.alchemy.com/v2/<your key>" DEPLOY_BLOCK=<from cast receipt>
+# faucet -> deployer, hot wallet
+docker run --rm -v "$PWD/infra/contracts:/w" -w /w ghcr.io/foundry-rs/foundry:v1.8.1 \
+  forge create src/MockUSDC.sol:MockUSDC --rpc-url "$SEPOLIA_RPC" \
+  --private-key "$(cat secrets/sepolia-deployer.key)" --broadcast
+
+# B
+cp deploy/compose/sepolia/sepolia-addresses.json{.example,}
+cp deploy/compose/sepolia/seed-params.json{.example,}
+$EDITOR deploy/compose/sepolia/sepolia-addresses.json
+# ETH_RPC_URL and ETH_SCAN_START_BLOCK go in .env: compose interpolates from
+# --env-file, so every compose command works with no exports at all.
+printf 'ETH_RPC_URL=%s\nETH_SCAN_START_BLOCK=%d\n' "$SEPOLIA_RPC" $((DEPLOY_BLOCK - 10)) >> .env
+make up-sepolia
+export EXCHANGE_ADMIN_URL=http://localhost:8082 \
+       EXCHANGE_ADMIN_API_KEY=$(sed -n 's/^ADMIN_API_KEY=//p' .env)
+go run ./cmd/exchangectl admin house-adjust --code custody_hot --asset ETH \
+  --amount 0.05 --direction credit --reason "faucet, tx 0x..." --idempotency-key sepolia-hot-eth-1
+go run ./cmd/exchangectl user register --email a@b.c --password 'correct horse battery'
+go run ./cmd/exchangectl deposit-address --asset ETH     # faucet 打這裡
+go run ./cmd/exchangectl deposits list                   # 等 credited
+go run ./cmd/exchangectl admin sweeps list               # 等 confirmed
+go run ./cmd/exchangectl withdrawals create --asset ETH --amount 0.003 --to 0x...
+go run ./cmd/exchangectl withdrawals create --asset ETH --amount 0.008 --to 0x...
+go run ./cmd/exchangectl admin withdrawals review <id> approve --note ok
+go run ./cmd/exchangectl admin reconcile                 # 每列 DIFF = 0
+make down-sepolia
+```
+
+相關文件:[`reconciliation-break.md`](reconciliation-break.md)、[`stuck-withdrawal.md`](stuck-withdrawal.md)、[`reorg-alert.md`](reorg-alert.md)、[`../domain.md`](../domain.md) §21。
