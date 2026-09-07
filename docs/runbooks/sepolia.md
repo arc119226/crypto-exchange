@@ -10,12 +10,12 @@
 
 ## 這份文件分兩部分
 
-| | 內容 | 前置條件 |
-|---|---|---|
-| **Part A** | 領測試幣、部署 MockUSDC、記下三個數字 | **現在就能做**,不需要任何程式改動 |
-| **Part B** | 起 Sepolia stack、走完充值 → 提現 → 歸集 → 對帳 | 需要 4d-1 的程式改動(compose 覆蓋檔、Sepolia 設定、`seed --params`) |
+| | 內容 |
+|---|---|
+| **Part A** | 領測試幣、部署 MockUSDC、記下三個數字 |
+| **Part B** | 起 Sepolia stack、走完充值 → 提現 → 歸集 → 對帳,填結果表 |
 
-Part A 最慢的是 faucet(有冷卻時間、有 captcha),所以先做。做完把 §A5 的三個數字給我。
+Part A 最慢的是 faucet(有冷卻時間、有 captcha),而且它不依賴這個 repo 的任何東西,所以先做。
 
 ---
 
@@ -163,28 +163,146 @@ docker run --rm --entrypoint cast ghcr.io/foundry-rs/foundry:v1.8.1 \
 
 ---
 
-# Part B — 等 4d-1 落地之後
+# Part B — 起 Sepolia stack,走完一次
 
-> 這一段的指令依賴 4d-1 的改動(`deploy/compose/compose.sepolia.yaml`、`exchange seed --params`、可設定的錨點區塊、費用上限會真的等)。我交付 4d-1 時會把這一段補成可直接執行,並把你 A5 的數字填進設定檔。
+4d-1 已經落地,下面的指令可以直接打。
 
-大致的流程,先讓你有個底:
+## B1. 寫兩個設定檔
 
-1. **寫兩個設定檔**到 `deploy/compose/sepolia/`(gitignore,附 `.example`):`sepolia-addresses.json`(A5 的合約位址與部署區塊)與 `seed-params.json`(faucet 尺寸的門檻:歸集門檻 0.01 ETH、最小提現 0.002 ETH、level-0 自動核可 0.01 ETH)。
-2. **`make up-sepolia`**。它用獨立的 compose project name,所以會開一份乾淨的 Postgres,你的 anvil 那套原封不動留著。
-   > 為什麼要獨立:`registry.assets` 有 `UNIQUE (tenant_id, symbol)`,再 seed 一次 Sepolia 是**取代**而不是新增。
-3. **記帳熱錢包的 faucet 注資**。鏈上有、帳本不知道,對帳一定會報一筆完全正確的差異。用 `external` 科目記進去(§6.1.4 g):
-   ```sh
-   go run ./cmd/exchangectl admin house-adjust \
-     --code custody_hot --asset ETH --amount 0.05 --direction credit \
-     --reason "sepolia faucet 注資熱錢包,tx 0x..." \
-     --idempotency-key "sepolia-hot-funding-1"
-   ```
-   USDC 同理。細節見 [`reconciliation-break.md`](reconciliation-break.md) §3。
-4. **開使用者、要一個充值地址**,然後**用 faucet 直接打進那個充值地址**——faucet 本身就是外部匯款方,你不用另外準備一個有錢的錢包。USDC 那筆用 A0 的 key `mint` 進去就好。
-5. **看它跑完** 6 個確認 → 入帳 → 歸集。真實時間大約 6 × 12s ≈ 72 秒起跳。
-6. **走兩次提現**:一筆小額(低於 level-0 自動核可上限,會自動放行)、一筆大額(會排進 admin 審核,用 `exchangectl admin withdrawals review` 核可)。兩條路都要走過。
-7. **對帳歸零**:`exchangectl admin reconcile`,每一列 `DIFF` 都要是 0。這是 §2.3 第 5 條的判定條件。
-8. 把每一步的 tx hash / gas / 確認秒數填進下面的表,我寫進 4d-2。
+```sh
+cp deploy/compose/sepolia/sepolia-addresses.json.example deploy/compose/sepolia/sepolia-addresses.json
+cp deploy/compose/sepolia/seed-params.json.example       deploy/compose/sepolia/seed-params.json
+```
+
+編輯 `sepolia-addresses.json`,填 A5 的三個欄位(`chainId` 保持 `11155111`):
+
+```json
+{
+  "chainId": 11155111,
+  "deployer":  "<A0 的部署者位址>",
+  "hotWallet": "<.env 的 HOT_WALLET_ADDRESS>",
+  "usdc":      "<A3 的 MockUSDC 位址>",
+  "deployedAtBlock": <A3 的部署區塊>
+}
+```
+
+`seed-params.json` 已經是 faucet 尺寸的門檻(歸集 0.01 ETH、最小提現 0.002、level-0 自動核可 0.005 / 每日 0.02),為什麼是這些數字寫在 [`deploy/seed-params/README.md`](../../deploy/seed-params/README.md)。要改就改,它只是覆蓋層,沒寫的鍵保留內建值。
+
+兩個檔都 gitignore。
+
+## B2. 起 stack
+
+```sh
+export ETH_RPC_URL="$SEPOLIA_RPC"
+export ETH_SCAN_START_BLOCK=<A3 的部署區塊 − 10>
+make up-sepolia
+```
+
+`ETH_SCAN_START_BLOCK` **一定要設**,而且之後不能改:它同時是掃描起點與**錨點**——它那個區塊的雜湊被記進 `chain.chain_state`,每次啟動都會重驗一次,所以改了會被拒絕(訊息會告訴你原本記的是哪一塊)。減 10 是給 reorg 一點餘裕。
+
+這是**獨立的 compose project**(`crypto-exchange-sepolia`),有自己的 postgres volume,anvil 那套原封不動。
+
+看它起來:
+
+```sh
+docker compose -f deploy/compose/compose.yaml -f deploy/compose/compose.sepolia.yaml \
+  --env-file .env logs -f exchange-all
+```
+
+第一次啟動應該看到 `chain recorded`,帶著 `anchor_block` 與 `anchor_hash`。
+
+```sh
+export EXCHANGE_ADMIN_URL=http://localhost:8082
+export EXCHANGE_ADMIN_API_KEY=$(sed -n 's/^ADMIN_API_KEY=//p' .env)
+go run ./cmd/exchangectl markets list       # ETH-USDC,確認數 6
+```
+
+## B3. 把 faucet 給熱錢包的錢記進帳本
+
+鏈上有、帳本不知道,對帳一定會報一筆**完全正確**的差異。`external` 科目就是為這件事存在的(§6.1.4 g):
+
+```sh
+go run ./cmd/exchangectl admin house-adjust \
+  --code custody_hot --asset ETH --amount <A2 實際打進去的數量> --direction credit \
+  --reason "sepolia faucet 注資熱錢包,tx <A2 的 tx hash>" \
+  --idempotency-key "sepolia-hot-eth-1"
+
+go run ./cmd/exchangectl admin house-adjust \
+  --code custody_hot --asset USDC --amount 1000000 --direction credit \
+  --reason "A4 mint 給熱錢包,tx <A4 的 tx hash>" \
+  --idempotency-key "sepolia-hot-usdc-1"
+```
+
+`--reason` 要寫得讓半年後的人看得懂,理想上放 tx hash——這條會進 `audit.audit_events`。細節與判斷順序見 [`reconciliation-break.md`](reconciliation-break.md) §3。
+
+確認回到零(對帳每 5 分鐘一輪):
+
+```sh
+go run ./cmd/exchangectl admin reconcile
+```
+
+## B4. 開使用者、要一個充值地址
+
+```sh
+go run ./cmd/exchangectl user register --email alice@sepolia.test --password 'correct horse battery'
+export EXCHANGE_TOKEN=...          # 上一步的輸出
+go run ./cmd/exchangectl deposit-address --asset ETH
+```
+
+## B5. 充值:直接把 faucet 打進那個地址
+
+**這是刻意的:faucet 本身就是外部匯款方**,所以你不用另外準備一個有錢的錢包。要 0.05 ETH 左右(高於 0.01 的歸集門檻)。
+
+USDC 那筆用 A0 的 key 直接鑄進去:
+
+```sh
+docker run --rm --entrypoint cast ghcr.io/foundry-rs/foundry:v1.8.1 \
+  send <MockUSDC 位址> "mint(address,uint256)" <充值地址> 250500000 \
+  --rpc-url "$SEPOLIA_RPC" --private-key "$(cat secrets/sepolia-deployer.key)"
+```
+
+然後**看它跑**。6 個確認 × 12 秒 ≈ 72 秒起跳:
+
+```sh
+go run ./cmd/exchangectl deposits list       # detected → confirming → credited
+go run ./cmd/exchangectl balances
+```
+
+歸集會在下一輪(120 秒)自己啟動,ETH 一筆、USDC 兩筆(補 gas + 轉帳):
+
+```sh
+go run ./cmd/exchangectl admin sweeps list
+```
+
+## B6. 提現,兩條路都走
+
+```sh
+# 自動核可:低於 level-0 的 0.005
+go run ./cmd/exchangectl withdrawals create --asset ETH --amount 0.003 --to <你自己的位址>
+
+# 人工審核:高於它
+go run ./cmd/exchangectl withdrawals create --asset ETH --amount 0.008 --to <你自己的位址>
+go run ./cmd/exchangectl admin withdrawals list
+go run ./cmd/exchangectl admin withdrawals review <id> approve --note "sepolia 手動驗證"
+go run ./cmd/exchangectl withdrawals list
+```
+
+卡住的話見 [`stuck-withdrawal.md`](stuck-withdrawal.md);`ETH_REPLACE_AFTER` 在這裡是 3 分鐘。
+
+## B7. 對帳歸零
+
+```sh
+go run ./cmd/exchangectl admin reconcile
+go run ./cmd/exchangectl admin trial-balance
+```
+
+**每一列 `DIFF` 都是 0** 就是 `docs/plan-v1.0.md` §2.3 第 5 條的判定條件。不是 0 的話**先不要記帳**,照 [`reconciliation-break.md`](reconciliation-break.md) 走——那份文件的第一句就是「在知道錢在哪裡之前不要動任何東西」。
+
+## B8. 收工
+
+```sh
+make down-sepolia          # 保留 volume,之後還能回來看
+```
 
 ## B 的結果表(待填)
 
@@ -204,7 +322,12 @@ docker run --rm --entrypoint cast ghcr.io/foundry-rs/foundry:v1.8.1 \
 | 充值從上鏈到 `credited` 的實際時間 | |
 | 對帳一輪的耗時 | |
 | 整段期間 base fee 範圍 | |
-| RPC 有沒有被限流 | |
+| RPC 有沒有被限流 / 出現 `pruned history unavailable` | |
+| 有沒有遇到 reorg(`chain.deposits` 出現 `orphaned`) | |
+
+（`cast receipt <hash> --rpc-url "$SEPOLIA_RPC"` 一次給你 `gasUsed` 與 `effectiveGasPrice`。）
+
+把這兩張表填好給我,我寫成 4d-2 收尾。
 
 ---
 
