@@ -10,6 +10,8 @@ COMPOSE       := docker compose -f $(COMPOSE_FILE) --env-file $(ENV_FILE)
 SEPOLIA_FILE  := deploy/compose/compose.sepolia.yaml
 COMPOSE_SEP   := docker compose -f $(COMPOSE_FILE) -f $(SEPOLIA_FILE) --env-file $(ENV_FILE)
 OBS           ?= 1
+SERVICE       ?= exchange-all
+TAIL          ?= 100
 OBS_PROFILE   := $(if $(filter 1,$(OBS)),--profile observability,)
 VERSION       ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 COMMIT        ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
@@ -23,7 +25,7 @@ FOUNDRY_IMAGE := ghcr.io/foundry-rs/foundry:$(FOUNDRY_TAG)
 ALL_PROFILES  := --profile infra --profile observability --profile app --profile single
 
 .PHONY: help tools gen gen-check fmt tidy lint test test-fuzz test-integration e2e cover-money build image \
-	    up up-single up-sepolia down down-sepolia reset infra-up run migrate seed artifacts compose-config contracts-test \
+	    up up-single up-sepolia down down-sepolia logs-sepolia ps-sepolia reset infra-up run migrate seed artifacts compose-config contracts-test \
 	    gen-dev-secrets demo trace loadgen
 
 help: ## Show this help
@@ -96,6 +98,17 @@ up-sepolia: ## Start the all-in-one container against Sepolia (see docs/runbooks
 
 down-sepolia: ## Stop the Sepolia stack (keeps volumes; a separate project from the anvil one)
 	$(COMPOSE_SEP) $(ALL_PROFILES) down
+
+# Both of these exist because the profiles are not optional: naming a service
+# on the command line activates that service but not the ones it depends on,
+# so `logs exchange-all` without --profile infra fails with "no such service:
+# nats", and a bare `ps` resolves to an empty model and reports nothing running
+# while the stack is up. Neither failure points at the missing flag.
+logs-sepolia: ## Read the Sepolia stack's logs (SERVICE=exchange-all TAIL=100; FOLLOW=1 to keep watching)
+	$(COMPOSE_SEP) $(ALL_PROFILES) logs --tail $(TAIL) $(if $(FOLLOW),-f,) $(SERVICE)
+
+ps-sepolia: ## Show what is running in the Sepolia stack
+	$(COMPOSE_SEP) $(ALL_PROFILES) ps
 
 down: ## Stop everything (keeps volumes)
 	$(COMPOSE) $(ALL_PROFILES) down

@@ -908,8 +908,7 @@ make up-sepolia
 ### 看它有沒有正常起來
 
 ```
-docker compose -f deploy/compose/compose.yaml -f deploy/compose/compose.sepolia.yaml \
-  --env-file .env logs -f exchange-all
+make logs-sepolia FOLLOW=1
 ```
 
 畫面會一直滾。**這是正常的,它在持續印記錄。看夠了按 `Ctrl + C` 離開**(這只會關掉看記錄的畫面,不會關掉交易所)。
@@ -1190,16 +1189,24 @@ docker run --rm --entrypoint cast ghcr.io/foundry-rs/foundry:v1.8.1 \
 **看交易所在講什麼:**
 
 ```
-docker compose -f deploy/compose/compose.yaml -f deploy/compose/compose.sepolia.yaml \
-  --env-file .env logs --tail 100 exchange-all
+make logs-sepolia
+```
+
+預設印 `exchange-all` 最後 100 行。要看別的容器或看更多:
+
+```
+make logs-sepolia SERVICE=seed          # 換一個容器
+make logs-sepolia TAIL=300              # 印多一點
+make logs-sepolia FOLLOW=1              # 一直看下去,Ctrl + C 離開
 ```
 
 **看有哪些東西在跑:**
 
 ```
-docker compose -f deploy/compose/compose.yaml -f deploy/compose/compose.sepolia.yaml \
-  --env-file .env ps
+make ps-sepolia
 ```
+
+> 這兩個以前是很長的 `docker compose ...` 指令,現在收成 make 目標了。原因不是嫌長:那串指令**少了 `--profile`**,而少了它的兩種失敗都不會告訴你少了什麼 —— 看記錄會回 `no such service: nats`,`ps` 則是印一張空表,讓你以為什麼都沒在跑。
 
 **全部重來(會清掉這套 Sepolia 環境的資料,但不影響 anvil 那套):**
 
@@ -1230,7 +1237,9 @@ docker volume ls -q | grep '^crypto-exchange-sepolia' | xargs -r docker volume r
 | `no such file or directory` | 你不在專案資料夾 | `cd ~/crypto-exchange`,再 `ls` 確認 |
 | `cp: cannot stat '...json.example': No such file or directory` | 你在對的資料夾,但 checkout 比這份文件舊,那些檔案還沒進到你的機器 | 回 B0:`git checkout main && git pull`,再用 B0 那行 `ls` 確認三個路徑都在 |
 | `WARN[0000] The "CONTRACT_DEPLOYER_KEY" variable is not set` | 你的 `.env` 比程式舊,裡面還是舊名字 `ANVIL_DEPLOYER_KEY` | **Sepolia 這條路不受影響,可以繼續**(讀這個變數的服務在 Sepolia 上是關掉的)。但跑一次 `make gen-dev-secrets` 補上,不然之後回去跑 `make up-single` 會壞 |
-| `container crypto-exchange-sepolia-exchange-all-1 is unhealthy` + `make: *** [Makefile:95: up-sepolia] Error 1` | 交易所的容器起來了,但 80 秒內沒能就緒。`migrate` 和 `seed` 有 Exited 就代表那兩步是成功的 —— 問題在交易所自己,多半卡在連鏈 | 跑 6.1 第一個指令看記錄。找 `chain rpc` 開頭的重試訊息(RPC 連不上或太慢)或 `different chain`(設定不對)。**把輸出貼給我** |
+| `no such service: nats` | 你打的 `docker compose ... logs` 少了 `--profile`。指定服務名稱只會啟用那個服務,不會啟用它依賴的 `nats` | 改用 `make logs-sepolia`(見 6.1),它把 profile 都帶好了 |
+| `ps` 印出空的表,但交易所明明在跑 | 同上,少了 `--profile`,compose 解出來的是一個空的服務清單 | 改用 `make ps-sepolia` |
+| `container crypto-exchange-sepolia-exchange-all-1 is unhealthy` + `make: *** [up-sepolia] Error 1` | 交易所的容器起來了,但 80 秒內沒能就緒。`migrate` 和 `seed` 有 Exited 就代表那兩步是成功的 —— 問題在交易所自己,多半卡在連鏈 | 跑 `make logs-sepolia`。找 `chain rpc` 開頭的重試訊息(RPC 連不上或太慢)或 `different chain`(設定不對)。**把輸出貼給我** |
 | 記錄裡有 `pruned history unavailable` | 你的 RPC 背後某台機器刪掉了舊資料 | 換一個 RPC(A3),`make down-sepolia` 後重做 B2 |
 | `the node is on a different chain than the cursor` | 資料庫記的鏈跟你現在連的不是同一條,或 `ETH_SCAN_START_BLOCK` 被改過 | **這是保護不是故障。** 錯誤訊息會告訴你原本記的值,設回去。真的要換鏈就照 6.1 全部重來 |
 | 充值一直停在 `detected` 超過五分鐘 | 掃描器落後,或確認數還不夠 | 先等到兩分鐘以上。還是不動就看記錄,可能是 RPC 被限流 |
