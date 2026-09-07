@@ -373,7 +373,7 @@ make gen-dev-secrets
 **拿到熱錢包地址:**
 
 ```
-grep HOT_WALLET_ADDRESS .env
+grep '^HOT_WALLET_ADDRESS=' .env
 ```
 
 會印出類似:
@@ -406,7 +406,7 @@ Address:     0x1234...
 Private key: 0xabcd...
 ```
 
-**兩個都抄下來。**
+**兩個都抄下來**——不過真的漏抄也不要緊,A4 有一行指令可以從私鑰把地址重新算出來。
 
 現在把私鑰存進檔案(這樣後面的指令可以自動讀,不用一直貼):
 
@@ -479,7 +479,7 @@ ETH_RPC_URL=<貼上你的 Alchemy HTTPS 網址>
 **確認寫進去了:**
 
 ```
-grep ETH_RPC_URL .env
+grep '^ETH_RPC_URL=' .env
 ```
 
 要印出 `ETH_RPC_URL=https://eth-sepolia...`(你的網址)。
@@ -518,15 +518,36 @@ Alchemy 出問題時可以臨時換成 `https://1rpc.io/sepolia`(不用註冊)�
 
 ## A4. 領測試幣
 
+### 先把要收錢的兩個地址印出來
+
+faucet 是網頁,它只要一串 `0x...`。與其往回翻,直接印:
+
+```
+echo "─── 熱錢包(A1)───"
+sed -n 's/^HOT_WALLET_ADDRESS=//p' .env
+echo "─── 部署者(A2)───"
+docker run --rm --entrypoint cast ghcr.io/foundry-rs/foundry:v1.8.1 \
+  wallet address --private-key "$(cat secrets/sepolia-deployer.key)"
+```
+
+會印出兩串 `0x` 開頭的地址。**A2 的那串是從私鑰重新算出來的**,所以就算你 A2 沒抄下來也沒關係。
+
+> 如果它抱怨 `--private-key` 這個參數,改成把 key 直接接在後面:
+> `... wallet address "$(cat secrets/sepolia-deployer.key)"`
+
+### 誰要多少
+
 你總共需要大約 **0.12 SepoliaETH**,分給**三個不同的地址**:
 
 | 收款地址 | 大約要多少 | 用途 |
 |---|---|---|
-| A2 的 **Address**(部署者) | 0.02 | 付部署合約的手續費 |
-| A1 的 **HOT_WALLET_ADDRESS**(熱錢包) | 0.05 | 交易所付提現和手續費用 |
+| 上面印出來的 **熱錢包(A1)** | 0.05 | 交易所付提現和歸集補 gas |
+| 上面印出來的 **部署者(A2)** | 0.02 | A5 部署 MockUSDC 的手續費 |
 | 一個等一下才會知道的地址 | 0.05 | **這一筆本身就是「充值」** |
 
-**現在先領前兩個**,第三個要等 Part B 拿到充值地址。
+**現在先領前兩個。** 第三個是**充值地址**,要等 Part B 的 B4 開好使用者、跟交易所要一個才會拿到——第三次領錢是 B5 的事。
+
+> 兩個地址是分開領的:faucet 網頁上一次只填一個收款地址,所以要領兩次(或從兩家不同 faucet 各領一次,比較快,不用等冷卻)。
 
 ### 怎麼領
 
@@ -544,14 +565,56 @@ faucet 是網站,用**瀏覽器**打開。多數 faucet 一天只給一次,但**
 
 ### 確認收到了
 
+**終端機——一次查兩個:**
+
 ```
-docker run --rm --entrypoint cast ghcr.io/foundry-rs/foundry:v1.8.1 \
-  balance <要查的地址> --rpc-url "$SEPOLIA_RPC" --ether
+export SEPOLIA_RPC=$(sed -n 's/^ETH_RPC_URL=//p' .env)
+CAST="docker run --rm --entrypoint cast ghcr.io/foundry-rs/foundry:v1.8.1"
+
+HOT=$(sed -n 's/^HOT_WALLET_ADDRESS=//p' .env | tr -d '[:space:]')
+DEP=$($CAST wallet address --private-key "$(cat secrets/sepolia-deployer.key)" | tr -d '[:space:]')
+
+# 先驗格式再問餘額。壞掉的值送進 cast,回來的是「ENS 解析失敗」——一個
+# 完全指不到真正原因的錯誤訊息。方括號是刻意的,讓看不見的空白顯形。
+for v in "$HOT" "$DEP"; do
+  [[ "$v" =~ ^0x[0-9a-fA-F]{40}$ ]] || echo "⚠ 這不是合法地址,不要往下跑: [$v]"
+done
+
+echo "熱錢包  $HOT"
+echo "  餘額: $($CAST balance "$HOT" --rpc-url "$SEPOLIA_RPC" --ether) ETH"
+echo "部署者  $DEP"
+echo "  餘額: $($CAST balance "$DEP" --rpc-url "$SEPOLIA_RPC" --ether) ETH"
 ```
 
-印出來是數字,例如 `0.05`。是 `0` 就是還沒到,等一下再查。
+> **`--ether` 不能省。** 不加的話印出來的是 **wei**(以太坊的最小單位,1 ETH = 10^18 wei),`0.05 ETH` 會顯示成 `50000000000000000`。
 
-**兩個地址都拿到錢了再繼續。**
+**瀏覽器——看錢從哪來:**
+
+```
+https://sepolia.etherscan.io/address/<你的地址>
+```
+
+這是 Sepolia 的區塊瀏覽器。**Transactions** 分頁列出每一筆進帳:誰送的、多少、什麼時候,以及 **Transaction Hash**。
+
+**這一頁等一下還會用到**:第 5 節的結果表要填 tx hash,而 faucet 網站通常不會給你——只能從這裡抄。
+
+### 領到多少才夠
+
+| 地址 | 建議 | **實際最低** | 花在哪 |
+|---|---|---|---|
+| 部署者 | 0.02 | **0.005** | 部署合約約 0.0012(60 萬 gas × ~2 gwei),加兩筆 mint |
+| 熱錢包 | 0.05 | **0.015** | 兩筆提現的金額本身(0.003 + 0.008),加提現與補 gas 的手續費 |
+
+faucet 給得比建議少不用緊張,**到最低那一欄就能走完全程**。低於它再去多領一家。
+
+| 你看到 | 意思 |
+|---|---|
+| `0.000000000000000000` | 還沒到。通常幾十秒到幾分鐘,等一下再查 |
+| 比 faucet 標的少 | 正常,有些 faucet 標的是上限 |
+| Etherscan 上有好幾筆進帳 | 正常,你從不同 faucet 領的 |
+| 超過十分鐘還是 0 | 地址可能貼錯(對一下有沒有少字元),或那家 faucet 沒真的送出。換一家 |
+
+**兩個地址都到最低需求了再繼續。**
 
 ## A5. 部署 MockUSDC 合約
 
@@ -561,12 +624,15 @@ docker run --rm --entrypoint cast ghcr.io/foundry-rs/foundry:v1.8.1 \
 
 ```
 docker run --rm -v "$PWD/infra/contracts:/w" -w /w \
+  --entrypoint forge \
   ghcr.io/foundry-rs/foundry:v1.8.1 \
-  forge create src/MockUSDC.sol:MockUSDC \
+  create src/MockUSDC.sol:MockUSDC \
     --rpc-url "$SEPOLIA_RPC" \
     --private-key "$(cat secrets/sepolia-deployer.key)" \
     --broadcast
 ```
+
+> **`--entrypoint forge` 不能省,而且後面只寫 `create` 不寫 `forge create`。** 這個 image 的預設進入點是 `/bin/sh -c`,它只把第一個參數當指令執行、其餘丟給 `$0`、`$1`……所以不指定 entrypoint 的話,實際跑到的是沒有參數的 `forge`,結果是印一頁說明而不是部署。
 
 第一次會下載編譯器,等一兩分鐘。成功的話印出:
 
@@ -1005,13 +1071,15 @@ docker volume rm <上面列出來的每一個>
 
 | 你看到 | 意思 | 怎麼辦 |
 |---|---|---|
+| 指令印出 forge 或 cast 的**說明頁**,什麼都沒做 | `docker run` 少了 `--entrypoint`。這個 image 的進入點是 `/bin/sh -c`,只執行第一個參數 | 加 `--entrypoint forge`(或 `cast`),並把子指令後面那個重複的工具名拿掉 |
+| `Failed to resolve ENS name to an address` | 傳給 `cast` 的不是合法地址——多半是從 `.env` 取值時連註解行一起抓到了 | 用 `echo "[$HOT]"` 看它實際是什麼。取值要用 `sed -n 's/^KEY=//p'`(錨定行首);`grep KEY` 會連提到那個名字的註解一起抓 |
 | `command not found: docker` / `make` / `go` | 沒裝好,或終端機沒重開 | 回第 3 節;裝完要**關掉終端機重開** |
 | `go version` 印出 1.26 以下 | 你用 `apt install golang-go` 裝的,那個版本太舊 | `sudo apt remove -y golang-go`,再照 3.3 用官方 tarball 裝一次 |
 | Windows:Ubuntu 裡 `docker` 找不到,但 Docker Desktop 明明開著 | WSL Integration 沒打開 | Docker Desktop → Settings → Resources → WSL Integration → 打開 Ubuntu → Apply & Restart(見 2.2) |
 | Windows:`apt` 裝不了東西、家目錄怪怪的 | 你在 `docker-desktop` 那個發行版裡,不是 Ubuntu | `exit` 離開,在 PowerShell 打 `wsl --set-default Ubuntu`,重開(見 2.2) |
 | Windows:每個指令都慢得誇張 | 專案放在 `/mnt/c/` 底下 | 搬到 `~`:`cp -r /mnt/c/.../crypto-exchange ~/` 再從那裡跑(見 2.2) |
 | `Cannot connect to the Docker daemon` | Docker Desktop 沒開 | 開它,等鯨魚圖示穩定 |
-| `set ETH_RPC_URL to a Sepolia endpoint` | `.env` 裡沒有那一行 | 回 A3,確認 `grep ETH_RPC_URL .env` 印得出來 |
+| `set ETH_RPC_URL to a Sepolia endpoint` | `.env` 裡沒有那一行 | 回 A3,確認 `grep '^ETH_RPC_URL=' .env` 印得出來 |
 | `set ETH_SCAN_START_BLOCK...` | `.env` 裡沒有那一行 | 回 B2 加上去 |
 | `connection refused` / 空白的表格 | 忘了貼 Part B 開頭那四行,或交易所沒起來 | 先貼那四行;還是不行看 6.1 的記錄 |
 | `no such file or directory` | 你不在專案資料夾 | `cd ~/crypto-exchange`,再 `ls` 確認 |
@@ -1053,12 +1121,13 @@ docker volume rm <上面列出來的每一個>
 
 ```sh
 # A
-make gen-dev-secrets && grep HOT_WALLET_ADDRESS .env
+make gen-dev-secrets && grep '^HOT_WALLET_ADDRESS=' .env
 docker run --rm --entrypoint cast ghcr.io/foundry-rs/foundry:v1.8.1 wallet new
 export SEPOLIA_RPC="https://eth-sepolia.g.alchemy.com/v2/<your key>" DEPLOY_BLOCK=<from cast receipt>
 # faucet -> deployer, hot wallet
-docker run --rm -v "$PWD/infra/contracts:/w" -w /w ghcr.io/foundry-rs/foundry:v1.8.1 \
-  forge create src/MockUSDC.sol:MockUSDC --rpc-url "$SEPOLIA_RPC" \
+docker run --rm -v "$PWD/infra/contracts:/w" -w /w --entrypoint forge \
+  ghcr.io/foundry-rs/foundry:v1.8.1 \
+  create src/MockUSDC.sol:MockUSDC --rpc-url "$SEPOLIA_RPC" \
   --private-key "$(cat secrets/sepolia-deployer.key)" --broadcast
 
 # B
