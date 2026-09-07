@@ -565,14 +565,50 @@ faucet 是網站,用**瀏覽器**打開。多數 faucet 一天只給一次,但**
 
 ### 確認收到了
 
+**終端機——一次查兩個:**
+
 ```
-docker run --rm --entrypoint cast ghcr.io/foundry-rs/foundry:v1.8.1 \
-  balance <要查的地址> --rpc-url "$SEPOLIA_RPC" --ether
+export SEPOLIA_RPC=$(sed -n 's/^ETH_RPC_URL=//p' .env)
+CAST="docker run --rm --entrypoint cast ghcr.io/foundry-rs/foundry:v1.8.1"
+
+HOT=$(grep HOT_WALLET_ADDRESS .env | cut -d= -f2 | tr -d '[:space:]')
+DEP=$($CAST wallet address --private-key "$(cat secrets/sepolia-deployer.key)" | tr -d '[:space:]')
+
+echo "熱錢包  $HOT"
+echo "  餘額: $($CAST balance "$HOT" --rpc-url "$SEPOLIA_RPC" --ether) ETH"
+echo "部署者  $DEP"
+echo "  餘額: $($CAST balance "$DEP" --rpc-url "$SEPOLIA_RPC" --ether) ETH"
 ```
 
-印出來是數字,例如 `0.05`。是 `0` 就是還沒到,等一下再查。
+> **`--ether` 不能省。** 不加的話印出來的是 **wei**(以太坊的最小單位,1 ETH = 10^18 wei),`0.05 ETH` 會顯示成 `50000000000000000`。
 
-**兩個地址都拿到錢了再繼續。**
+**瀏覽器——看錢從哪來:**
+
+```
+https://sepolia.etherscan.io/address/<你的地址>
+```
+
+這是 Sepolia 的區塊瀏覽器。**Transactions** 分頁列出每一筆進帳:誰送的、多少、什麼時候,以及 **Transaction Hash**。
+
+**這一頁等一下還會用到**:第 5 節的結果表要填 tx hash,而 faucet 網站通常不會給你——只能從這裡抄。
+
+### 領到多少才夠
+
+| 地址 | 建議 | **實際最低** | 花在哪 |
+|---|---|---|---|
+| 部署者 | 0.02 | **0.005** | 部署合約約 0.0012(60 萬 gas × ~2 gwei),加兩筆 mint |
+| 熱錢包 | 0.05 | **0.015** | 兩筆提現的金額本身(0.003 + 0.008),加提現與補 gas 的手續費 |
+
+faucet 給得比建議少不用緊張,**到最低那一欄就能走完全程**。低於它再去多領一家。
+
+| 你看到 | 意思 |
+|---|---|
+| `0.000000000000000000` | 還沒到。通常幾十秒到幾分鐘,等一下再查 |
+| 比 faucet 標的少 | 正常,有些 faucet 標的是上限 |
+| Etherscan 上有好幾筆進帳 | 正常,你從不同 faucet 領的 |
+| 超過十分鐘還是 0 | 地址可能貼錯(對一下有沒有少字元),或那家 faucet 沒真的送出。換一家 |
+
+**兩個地址都到最低需求了再繼續。**
 
 ## A5. 部署 MockUSDC 合約
 
