@@ -4,12 +4,16 @@ package integration
 
 import (
 	"context"
+	"crypto/ecdsa"
 	"io"
 	"log/slog"
 	"math/big"
+	"strings"
 	"testing"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -279,4 +283,59 @@ func TestScriptedIgnoresOtherRecipients(t *testing.T) {
 
 	assert.Equal(t, 0, h.rows(t, ctx, account))
 	h.assertTrialBalanceZero(t, ctx)
+}
+
+// signedTransfer is a value transfer somebody actually signed, so the scanner
+// can recover who sent it. The unsigned `transfer` above is enough for tests
+// that only care about the recipient.
+func signedTransfer(t *testing.T, key *ecdsa.PrivateKey, nonce uint64, to common.Address, wei *big.Int) *types.Transaction {
+	t.Helper()
+	signer := types.LatestSignerForChainID(big.NewInt(anvilChainID))
+	tx, err := types.SignNewTx(key, signer, &types.LegacyTx{Nonce: nonce, To: &to, Value: wei, Gas: 21000})
+	require.NoError(t, err)
+	return tx
+}
+
+// TestScriptedIgnoresWhatTheExchangeSentItself.
+//
+// The sweeper funds a deposit address with ether from the hot wallet so the
+// address can pay for its own token transfer (§6.4.3). On chain that is a
+// plain value transfer into a watched address -- the exact shape this scanner
+// looks for -- so it credited it as a deposit: free ether for the account, and
+// custody_deposit_addresses booked twice for one movement, once by the sweeper
+// and once here.
+//
+// It shipped in 4c-1 and nothing noticed until reconciliation compared the
+// ledger with the chain and found the ledger higher by exactly the funding.
+func TestScriptedIgnoresWhatTheExchangeSentItself(t *testing.T) {
+	h := setupScripted(t, deposit.Config{DefaultConfirmations: 1})
+	ctx := context.Background()
+	account, address := h.account(t, ctx)
+
+	hotKey, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	hot := crypto.PubkeyToAddress(hotKey.PublicKey)
+	_, err = h.all.Exec(ctx,
+		`INSERT INTO chain.hot_wallets (tenant_id, chain_id, address, next_nonce)
+		 VALUES ('default', $1, $2, 0)`, anvilChainID, strings.ToLower(hot.Hex()))
+	require.NoError(t, err)
+
+	h.fake.mine("gas-funding", signedTransfer(t, hotKey, 0, address, oneETH()))
+	require.NoError(t, h.scanner.Tick(ctx))
+
+	assert.Equal(t, 0, h.rows(t, ctx, account), "the exchange funding its own address is not a deposit")
+	assert.Equal(t, "0", h.available(t, ctx, account, "ETH").String(), "and must not become the account's money")
+	h.assertTrialBalanceZero(t, ctx)
+
+	t.Run("a stranger sending to the same address still deposits", func(t *testing.T) {
+		// The rule is about where the money came from, not about the address:
+		// a guard that swallowed real deposits would be worse than the bug.
+		strangerKey, err := crypto.GenerateKey()
+		require.NoError(t, err)
+		h.fake.mine("real-deposit", signedTransfer(t, strangerKey, 0, address, oneETH()))
+		require.NoError(t, h.scanner.Tick(ctx))
+		assert.Equal(t, 1, h.rows(t, ctx, account))
+		assert.Equal(t, "1", h.available(t, ctx, account, "ETH").String())
+		h.assertTrialBalanceZero(t, ctx)
+	})
 }

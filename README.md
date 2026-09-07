@@ -22,7 +22,9 @@
 
 **第一次跑對帳一定會找到東西**,而且它是對的:dev 鏈直接給熱錢包 100 ETH,沒有任何一筆本系統的交易把它放進去。答案是 `exchangectl admin house-adjust`(§6.1.4 g 的 `external` 科目),不是在比較裡加一條例外。e2e 因此走三步:斷言第一次的差異是正的、記下正好那個數、跑完整流程之後**一個字都不記**地回到零。
 
-對帳也順手抓到兩個真的缺陷:nonce 補洞燒掉的 gas 從來沒進帳本(`hotwallet` 整個套件沒 import `ledger`),以及一次失敗的簽名會讓下一個 tick 記下一筆熱錢包從來沒送出去的 ETH。細節在 [`docs/domain.md`](docs/domain.md) §20 與 [`docs/runbooks/reconciliation-break.md`](docs/runbooks/reconciliation-break.md)。
+**對帳上線第一天就抓到一個 4c-1 留下的真漏洞**:歸集代幣時熱錢包補給充值地址的那筆 gas,在鏈上就是一筆流入受監控地址的普通轉帳,於是掃描器把它當成使用者的充值入帳了——使用者白得一筆交易所墊的 ETH,而 `custody_deposit_addresses` 為同一筆移動記了兩次。它撐過了完整的 integration 套件和兩輪 e2e,直到有東西真的拿帳本去和鏈上比。修法是把規則寫對:**充值是從交易所外面到達的錢**,發送方是自己的地址就不是充值。
+
+對帳另外還抓到兩個:nonce 補洞燒掉的 gas 從來沒進帳本(`hotwallet` 整個套件沒 import `ledger`),以及一次失敗的簽名會讓下一個 tick 記下一筆熱錢包從來沒送出去的 ETH。細節在 [`docs/domain.md`](docs/domain.md) §20 與 [`docs/runbooks/reconciliation-break.md`](docs/runbooks/reconciliation-break.md)。
 
 ## 產品邊界
 
