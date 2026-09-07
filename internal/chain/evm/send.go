@@ -119,9 +119,21 @@ func (c *Client) NonceAt(ctx context.Context, address common.Address) (uint64, e
 	return n, nil
 }
 
-// Balance is the address's native balance in wei.
+// Balance is the address's native balance in wei, at the head.
 func (c *Client) Balance(ctx context.Context, address common.Address) (*big.Int, error) {
-	b, err := c.rpc.BalanceAt(ctx, address, nil)
+	return c.BalanceAt(ctx, address, nil)
+}
+
+// BalanceAt is the address's native balance in wei at one block, or at the
+// head when block is nil.
+//
+// Reconciliation needs the block: asking for thirty balances takes long enough
+// that the chain moves underneath the answers, and a sweep mined halfway
+// through would be counted as having left one address without having arrived
+// at the other. Pinning them all to one height costs nothing and makes the set
+// a snapshot rather than a sequence of moments.
+func (c *Client) BalanceAt(ctx context.Context, address common.Address, block *big.Int) (*big.Int, error) {
+	b, err := c.rpc.BalanceAt(ctx, address, block)
 	if err != nil {
 		return nil, fmt.Errorf("evm: balance of %s: %w", address, err)
 	}
@@ -197,10 +209,16 @@ var balanceOfSelector = crypto.Keccak256([]byte("balanceOf(address)"))[:4]
 // Transfer logs, which say what moved, while sweeping has to know what is
 // actually sitting there — including anything the logs did not account for.
 func (c *Client) TokenBalance(ctx context.Context, token, holder common.Address) (*big.Int, error) {
+	return c.TokenBalanceAt(ctx, token, holder, nil)
+}
+
+// TokenBalanceAt reads an ERC-20 balance at one block, or at the head when
+// block is nil. Same reason as BalanceAt: one height for the whole set.
+func (c *Client) TokenBalanceAt(ctx context.Context, token, holder common.Address, block *big.Int) (*big.Int, error) {
 	data := make([]byte, 0, 4+32)
 	data = append(data, balanceOfSelector...)
 	data = append(data, common.LeftPadBytes(holder.Bytes(), 32)...)
-	out, err := c.rpc.CallContract(ctx, ethereum.CallMsg{To: &token, Data: data}, nil)
+	out, err := c.rpc.CallContract(ctx, ethereum.CallMsg{To: &token, Data: data}, block)
 	if err != nil {
 		return nil, fmt.Errorf("evm: balanceOf %s on %s: %w", lower(holder), lower(token), err)
 	}

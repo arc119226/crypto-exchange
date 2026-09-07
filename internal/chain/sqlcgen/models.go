@@ -10,6 +10,33 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+type AdminReconciliationBreak struct {
+	ID            string
+	TenantID      string
+	ReportID      string
+	ChainID       int64
+	Asset         string
+	BlockHeight   int64
+	LedgerTotal   pgtype.Numeric
+	ChainTotal    pgtype.Numeric
+	Uncredited    pgtype.Numeric
+	AboveFrontier pgtype.Numeric
+	InFlight      pgtype.Numeric
+	Diff          pgtype.Numeric
+	CreatedAt     time.Time
+}
+
+type AdminReconciliationReport struct {
+	ID         string
+	TenantID   string
+	ChainID    int64
+	StartedAt  time.Time
+	FinishedAt time.Time
+	Balanced   bool
+	Lines      []byte
+	CreatedAt  time.Time
+}
+
 type ChainBlock struct {
 	TenantID   string
 	ChainID    int64
@@ -60,23 +87,26 @@ type ChainDepositAddress struct {
 }
 
 type ChainHotWallet struct {
-	TenantID  string
-	ChainID   int64
-	Address   string
-	NextNonce int64
-	UpdatedAt time.Time
+	TenantID     string
+	ChainID      int64
+	Address      string
+	NextNonce    int64
+	UpdatedAt    time.Time
+	LowAlertedAt pgtype.Timestamptz
 }
 
 type ChainNonceFill struct {
-	ID        int64
-	TenantID  string
-	ChainID   int64
-	Nonce     int64
-	TxHash    string
-	Reason    string
-	Status    string
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	ID          int64
+	TenantID    string
+	ChainID     int64
+	Nonce       int64
+	TxHash      string
+	Reason      string
+	Status      string
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+	BlockNumber *int64
+	GasCost     pgtype.Numeric
 }
 
 type ChainScanCursor struct {
@@ -127,6 +157,7 @@ type ChainSweep struct {
 	Version          int32
 	CreatedAt        time.Time
 	UpdatedAt        time.Time
+	GasFundingBlock  *int64
 }
 
 type ChainWithdrawal struct {

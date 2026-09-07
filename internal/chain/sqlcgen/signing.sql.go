@@ -92,7 +92,7 @@ func (q *Queries) AllocateWithdrawalNonce(ctx context.Context, arg AllocateWithd
 }
 
 const getHotWallet = `-- name: GetHotWallet :one
-SELECT tenant_id, chain_id, address, next_nonce, updated_at FROM chain.hot_wallets WHERE tenant_id = $1 AND chain_id = $2
+SELECT tenant_id, chain_id, address, next_nonce, updated_at, low_alerted_at FROM chain.hot_wallets WHERE tenant_id = $1 AND chain_id = $2
 `
 
 type GetHotWalletParams struct {
@@ -109,6 +109,7 @@ func (q *Queries) GetHotWallet(ctx context.Context, arg GetHotWalletParams) (Cha
 		&i.Address,
 		&i.NextNonce,
 		&i.UpdatedAt,
+		&i.LowAlertedAt,
 	)
 	return i, err
 }
@@ -153,7 +154,7 @@ func (q *Queries) GetSignature(ctx context.Context, arg GetSignatureParams) (Cha
 const insertNonceFill = `-- name: InsertNonceFill :one
 INSERT INTO chain.nonce_fills (tenant_id, chain_id, nonce, tx_hash, reason)
 VALUES ($1, $2, $3, $4, $5)
-RETURNING id, tenant_id, chain_id, nonce, tx_hash, reason, status, created_at, updated_at
+RETURNING id, tenant_id, chain_id, nonce, tx_hash, reason, status, created_at, updated_at, block_number, gas_cost
 `
 
 type InsertNonceFillParams struct {
@@ -183,6 +184,8 @@ func (q *Queries) InsertNonceFill(ctx context.Context, arg InsertNonceFillParams
 		&i.Status,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.BlockNumber,
+		&i.GasCost,
 	)
 	return i, err
 }
@@ -354,7 +357,7 @@ func (q *Queries) ListCancellingWithdrawals(ctx context.Context, arg ListCancell
 }
 
 const listUnconfirmedNonceFills = `-- name: ListUnconfirmedNonceFills :many
-SELECT id, tenant_id, chain_id, nonce, tx_hash, reason, status, created_at, updated_at FROM chain.nonce_fills
+SELECT id, tenant_id, chain_id, nonce, tx_hash, reason, status, created_at, updated_at, block_number, gas_cost FROM chain.nonce_fills
 WHERE tenant_id = $1 AND chain_id = $2 AND status = 'broadcast'
 ORDER BY nonce
 `
@@ -383,6 +386,8 @@ func (q *Queries) ListUnconfirmedNonceFills(ctx context.Context, arg ListUnconfi
 			&i.Status,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.BlockNumber,
+			&i.GasCost,
 		); err != nil {
 			return nil, err
 		}
@@ -855,7 +860,7 @@ INSERT INTO chain.hot_wallets (tenant_id, chain_id, address, next_nonce)
 VALUES ($1, $2, $3, $4)
 ON CONFLICT (tenant_id, chain_id) DO UPDATE
 SET updated_at = now()
-RETURNING tenant_id, chain_id, address, next_nonce, updated_at
+RETURNING tenant_id, chain_id, address, next_nonce, updated_at, low_alerted_at
 `
 
 type UpsertHotWalletParams struct {
@@ -888,6 +893,7 @@ func (q *Queries) UpsertHotWallet(ctx context.Context, arg UpsertHotWalletParams
 		&i.Address,
 		&i.NextNonce,
 		&i.UpdatedAt,
+		&i.LowAlertedAt,
 	)
 	return i, err
 }

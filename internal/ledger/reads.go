@@ -175,7 +175,21 @@ func (s *Service) TrialBalance(ctx context.Context) ([]TrialBalanceLine, error) 
 // HouseBalances derives every house account balance, signed so that the
 // account type's normal balance is positive.
 func (s *Service) HouseBalances(ctx context.Context) ([]HouseBalance, error) {
-	rows, err := sqlcgen.New(s.pool).HouseBalances(ctx, s.tenant)
+	return s.houseBalances(ctx, sqlcgen.New(s.pool))
+}
+
+// HouseBalancesTx is the same read inside a caller's transaction, so it can be
+// taken in one snapshot with whatever the caller is comparing it against.
+//
+// On-chain reconciliation needs that: crediting a deposit moves the amount out
+// of the pending set and into custody in one commit, and reading the two sides
+// either side of it would show the amount in neither.
+func (s *Service) HouseBalancesTx(ctx context.Context, tx pgx.Tx) ([]HouseBalance, error) {
+	return s.houseBalances(ctx, sqlcgen.New(tx))
+}
+
+func (s *Service) houseBalances(ctx context.Context, q *sqlcgen.Queries) ([]HouseBalance, error) {
+	rows, err := q.HouseBalances(ctx, s.tenant)
 	if err != nil {
 		return nil, fmt.Errorf("ledger: house balances: %w", err)
 	}

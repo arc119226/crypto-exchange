@@ -35,9 +35,28 @@ RETURNING *;
 -- name: MarkSweepGasFunded :one
 -- The funding transaction is mined: the address can now pay for its own
 -- transfer, and the ETH that moved is booked.
+--
+-- gas_funding_block records where, so reconciliation can tell whether the
+-- ledger entry this produces is above or below the height it read balances at.
+-- Null when the address already held enough and no transaction was sent.
 UPDATE chain.sweeps
-SET status = 'gas_funded', gas_funding_cost = $3, version = version + 1, updated_at = now()
+SET status = 'gas_funded', gas_funding_cost = $3, gas_funding_block = $4,
+    version = version + 1, updated_at = now()
 WHERE tenant_id = $1 AND id = $2
+RETURNING *;
+
+-- name: ClearSweepGasFunding :one
+-- Forget a funding transaction that was pinned but never signed.
+--
+-- FundSweepGas writes gas_funding_amount when it pins the nonce, before the
+-- signer is asked. If signing then fails, the row keeps an amount with no
+-- transaction, and the next tick -- finding the address can now pay its own
+-- way and taking the shortcut past funding -- would book that amount as ether
+-- the hot wallet sent. It never sent it.
+UPDATE chain.sweeps
+SET gas_funding_amount = NULL, gas_funding_nonce = NULL,
+    version = version + 1, updated_at = now()
+WHERE tenant_id = $1 AND id = $2 AND gas_funding_tx_hash IS NULL
 RETURNING *;
 
 -- name: AllocateSweepNonce :one
@@ -69,9 +88,23 @@ WHERE tenant_id = $1 AND id = $2
 RETURNING *;
 
 -- name: FailSweep :one
+-- The sweep transaction itself failed. Its gas and the block it burned in are
+-- written together: reconciliation reads the two as a pair, and a cost with no
+-- block cannot be placed above or below the frontier.
 UPDATE chain.sweeps
-SET status = 'failed', failure_reason = $3, gas_cost = $4,
+SET status = 'failed', failure_reason = $3, gas_cost = $4, block_number = $5,
     version = version + 1, updated_at = now()
+WHERE tenant_id = $1 AND id = $2
+RETURNING *;
+
+-- name: FailSweepFunding :one
+-- The gas-funding transaction failed, so the cost belongs to the funding pair
+-- of columns rather than the sweep's. Writing it into gas_cost -- as this
+-- table did before reconciliation needed to read them -- would pair a funding
+-- cost with a sweep block that never happened.
+UPDATE chain.sweeps
+SET status = 'failed', failure_reason = $3, gas_funding_cost = $4,
+    gas_funding_block = $5, version = version + 1, updated_at = now()
 WHERE tenant_id = $1 AND id = $2
 RETURNING *;
 
