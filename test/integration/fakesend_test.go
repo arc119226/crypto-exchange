@@ -484,6 +484,14 @@ func (c *sendChain) failTokenBalance(token common.Address, err error) {
 	c.tokenErr[token] = err
 }
 
+// setBaseFee moves the fee market. Everything that reads a price goes through
+// SuggestFees, so this is enough to put a transaction over or under a ceiling.
+func (c *sendChain) setBaseFee(wei *big.Int) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.baseFee = new(big.Int).Set(wei)
+}
+
 // failNextSend makes the next broadcast fail, once.
 func (c *sendChain) failNextSend(err error) {
 	c.mu.Lock()

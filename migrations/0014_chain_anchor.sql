@@ -1,3 +1,4 @@
+-- +goose Up
 -- Phase 4d: the chain-identity guard stops being pinned to genesis.
 --
 -- 0009 recorded chain.chain_state.genesis_hash and Start compared it with
