@@ -2,9 +2,10 @@
 # go.mod / tools/go.mod / .env.example so CI and laptops run the same binaries.
 #
 #   lint ─┐
-#   unit ─┼─► integration ─► image
-#        └─► fuzz-smoke
-#   gen-check, compose-config, contracts run alongside.
+#   unit ─┼─► integration ─┬─► e2e
+#        │                 └─► image
+#        └─► fuzz-smoke (push only: main merges and v* tags)
+#   fast-checks runs alongside: generated code, compose rendering, contracts.
 name: ci
 
 on:
@@ -94,9 +95,19 @@ jobs:
           bin/exchange keys import-mnemonic --from /dev/null --keystore-dir "$RUNNER_TEMP/ks" && exit 1 || test $? -eq 1
           test ! -e "$RUNNER_TEMP/ks/hd-seed.json"
 
+  # Four billable minutes for one fuzz target -- FuzzApply in internal/matching
+  # is the only one in the repository. push covers both `branches: [main]` and
+  # `tags: ["v*"]`, so every merge and every release still fuzzes it; what a
+  # pull request gives up is 30 seconds of fuzzing on a single target, for the
+  # hours between opening the PR and merging it.
+  #
+  # docs/plan-v1.0.md §13.3 requires every Fuzz* for 30s with failing corpora
+  # committed to testdata/fuzz. That is about strength and what to do with a
+  # failure, not about which events run it.
   fuzz-smoke:
     name: fuzz-smoke
     needs: [unit]
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -109,8 +120,21 @@ jobs:
       - name: every Fuzz* target for 30s (docs/plan-v1.0.md §13.3)
         run: make test-fuzz FUZZ_TIME=30s
 
-  gen-check:
-    name: gen-check
+  # gen-check, compose-config and contracts used to be three jobs. Between
+  # them they did about five seconds of work and cost three billable minutes,
+  # because GitHub rounds every job up to a whole minute and two of the three
+  # spent most of their wall time installing a toolchain: gen-check took 54s,
+  # of which 32s was setup-go and 2s was the check.
+  #
+  # The cost of merging is one red check named fast-checks instead of a red
+  # check named contracts. GitHub still names the failing step, so what is
+  # actually lost is the name on the summary line, and it buys two thirds of
+  # this job's bill back.
+  #
+  # Nothing depends on these: only integration (lint, unit), fuzz-smoke (unit),
+  # e2e and image (integration) declare needs.
+  fast-checks:
+    name: fast-checks
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -120,16 +144,13 @@ jobs:
           cache-dependency-path: |
             go.sum
             tools/go.sum
-      - name: generated code is in sync (oapi-codegen, sqlc)
-        run: make gen-check
-      - name: sqlc vet
-        run: go tool -modfile=tools/go.mod sqlc vet -f sqlc.yaml
+      - name: read pinned foundry version
+        id: foundry
+        run: echo "tag=$(sed -n 's/^FOUNDRY_TAG=//p' .env.example)" >> "$GITHUB_OUTPUT"
+      - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: ${{ steps.foundry.outputs.tag }}
 
-  compose-config:
-    name: compose-config
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
       - name: compose file renders with every profile
         run: make compose-config
       - name: dev scripts parse
@@ -137,23 +158,18 @@ jobs:
         # finishes in seconds, and a syntax error found twelve minutes into a
         # container run is twelve minutes wasted.
         run: bash -n scripts/gen-dev-secrets.sh && bash -n scripts/e2e.sh
-
-  contracts:
-    name: contracts
-    runs-on: ubuntu-latest
-    defaults:
-      run:
+      - name: generated code is in sync (oapi-codegen, sqlc)
+        run: make gen-check
+      - name: sqlc vet
+        run: go tool -modfile=tools/go.mod sqlc vet -f sqlc.yaml
+      # working-directory is per-step, not a job default: a job-level default
+      # would send make gen-check and make compose-config into infra/contracts.
+      - name: forge build
         working-directory: infra/contracts
-    steps:
-      - uses: actions/checkout@v4
-      - name: read pinned foundry version
-        id: foundry
-        run: echo "tag=$(sed -n 's/^FOUNDRY_TAG=//p' ../../.env.example)" >> "$GITHUB_OUTPUT"
-      - uses: foundry-rs/foundry-toolchain@v1
-        with:
-          version: ${{ steps.foundry.outputs.tag }}
-      - run: forge build --sizes
-      - run: forge test -vv
+        run: forge build --sizes
+      - name: forge test
+        working-directory: infra/contracts
+        run: forge test -vv
 
   integration:
     name: integration
