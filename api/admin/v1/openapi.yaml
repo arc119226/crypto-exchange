@@ -24,6 +24,7 @@ tags:
   - name: registry
   - name: audit
   - name: withdrawals
+  - name: chain
 
 paths:
   /admin/v1/accounts:
@@ -309,6 +310,36 @@ paths:
         "500":
           $ref: "#/components/responses/InternalError"
 
+  /admin/v1/sweeps:
+    get:
+      tags: [chain]
+      operationId: listSweeps
+      summary: Recent collections into the hot wallet
+      description: >
+        Sweeps move deposits from the per-account addresses they landed on to
+        the hot wallet withdrawals are paid from (docs/plan-v1.0.md §6.4.3).
+        No user balance is involved: a sweep moves the exchange's own custody
+        between two of its own house accounts.
+
+
+        A native sweep is one transaction. A token sweep is two, because an
+        address that has only ever received tokens holds no ether and cannot
+        pay for its own transfer, so the hot wallet funds it first —
+        `gas_funding_tx_hash` is that leg.
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: Sweeps, newest first
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SweepList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
   /admin/v1/ledger/trial-balance:
     get:
       tags: [ledger]
@@ -582,6 +613,45 @@ components:
             Why. Required: every one of these actions is a person overriding
             the machine, and the audit trail is the only place that reason
             survives.
+
+    Sweep:
+      type: object
+      required: [id, chain_id, from_address, asset, amount, status, created_at]
+      properties:
+        id: { type: string }
+        chain_id: { type: integer, format: int64 }
+        from_address:
+          type: string
+          description: The deposit address that was emptied, lower-case.
+        asset: { type: string }
+        amount:
+          $ref: "#/components/schemas/Amount"
+        status:
+          type: string
+          description: requested, gas_funded, broadcast, confirmed or failed.
+        failure_reason: { type: string, nullable: true }
+        tx_hash: { type: string, nullable: true }
+        gas_funding_tx_hash:
+          type: string
+          nullable: true
+          description: The ether the hot wallet sent so the address could pay for its own transfer; null for a native sweep.
+        gas_cost:
+          allOf:
+            - $ref: "#/components/schemas/Amount"
+          nullable: true
+          description: What the sweep transaction burned, always in the chain's native coin — which is not necessarily `asset`.
+        block_number: { type: integer, format: int64, nullable: true }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    SweepList:
+      type: object
+      required: [sweeps]
+      properties:
+        sweeps:
+          type: array
+          items:
+            $ref: "#/components/schemas/Sweep"
 
     AccountKind:
       type: string

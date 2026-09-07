@@ -21,6 +21,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/arc119226/crypto-exchange/internal/chain/deposit"
+	"github.com/arc119226/crypto-exchange/internal/chain/sweep"
 	"github.com/arc119226/crypto-exchange/internal/chain/withdrawal"
 	"github.com/arc119226/crypto-exchange/internal/eventbus"
 	"github.com/arc119226/crypto-exchange/internal/matching"
@@ -61,6 +62,9 @@ var (
 		// the withdrawal story of docs/plan-v1.0.md §6.4.2
 		"withdrawal.requested":     "01J8Z2K3M4N5P6Q7R8S9T0V1X5",
 		"withdrawal.state_changed": "01J8Z2K3M4N5P6Q7R8S9T0V1X6",
+		// the sweep of docs/plan-v1.0.md §6.4.3
+		"sweep.completed": "01J8Z2K3M4N5P6Q7R8S9T0V1X7",
+		"sweep.failed":    "01J8Z2K3M4N5P6Q7R8S9T0V1X8",
 	}
 )
 
@@ -164,6 +168,21 @@ func sample(t *testing.T, eventType string) eventbus.Envelope {
 			p.TxHash = "0x2c9d8e7a6b5c4d3e2f1a0b9c8d7e6f5a4b3c2d1e0f9a8b7c6d5e4f3a2b1c1f4b"
 		}
 		payload = p
+	case sweep.EventCompleted, sweep.EventFailed:
+		// The deposit address from the deposit story above, emptied into the
+		// hot wallet. No account_id and no seq: a sweep belongs to no user,
+		// which is the one structural difference from every other event here.
+		p := sweep.Payload{
+			SweepID: "01J8Z2K3M4N5P6Q7R8S9T0V800", ChainID: 31337,
+			FromAddress: "0x9858effd232b4033e47d90003d41ec34ecaeda94",
+			Asset:       "ETH", Amount: amt("1.999"), Status: "confirmed",
+			TxHash:  "0x3d1e0f9a8b7c6d5e4f3a2b1c1f4b2c9d8e7a6b5c4d3e2f1a0b9c8d7e6f5a4b3c",
+			GasCost: amt("0.000021"), BlockNumber: 18240,
+		}
+		if eventType == sweep.EventFailed {
+			p.Status, p.Reason = "failed", "on_chain"
+		}
+		payload = p
 	case registry.EventMarketUpdated:
 		env.MarketID = str(market)
 		payload = registry.MarketUpdatedPayload{
@@ -187,7 +206,8 @@ func allEventTypes() []string {
 	out := append([]string{}, trading.EventTypes()...)
 	out = append(out, registry.EventTypes()...)
 	out = append(out, deposit.EventTypes()...)
-	return append(out, withdrawal.EventTypes()...)
+	out = append(out, withdrawal.EventTypes()...)
+	return append(out, sweep.EventTypes()...)
 }
 
 // TestSchemaFilesMatchEventTypes is the drift guard: a new event type with

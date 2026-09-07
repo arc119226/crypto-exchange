@@ -1070,7 +1070,12 @@ components:
           $ref: "#/components/schemas/Amount"
         address:
           type: string
-          description: The deposit address the funds arrived at.
+          description: >
+            The deposit address the funds arrived at, lower-case. Note that
+            this is *not* the form `GET /v1/deposit-address` returns: that one
+            is EIP-55 checksummed so a wallet can catch a mistyped paste, while
+            everything read back out of the chain tables is normalised. Compare
+            the two only after deciding which representation you want.
         tx_hash: { type: string }
         log_index:
           type: integer

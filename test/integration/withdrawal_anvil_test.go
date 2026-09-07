@@ -18,6 +18,7 @@ import (
 	"github.com/arc119226/crypto-exchange/internal/chain/hdwallet"
 	"github.com/arc119226/crypto-exchange/internal/chain/hotwallet"
 	"github.com/arc119226/crypto-exchange/internal/chain/signer"
+	"github.com/arc119226/crypto-exchange/internal/chain/sweep"
 	"github.com/arc119226/crypto-exchange/internal/chain/withdrawal"
 	"github.com/arc119226/crypto-exchange/internal/registry"
 )
@@ -158,4 +159,106 @@ func (h anvilSendHarness) locked(t *testing.T, ctx context.Context, account, ass
 	require.NoError(t, h.worker.Tick(ctx))
 	require.Equal(t, withdrawal.StatusFundsLocked, h.status(t, ctx, account, w.ID))
 	return w.ID
+}
+
+// TestSweepAgainstAnvil proves the one thing the scripted chain cannot: that a
+// transaction signed with a *deposit address's* key is one a real node
+// accepts.
+//
+// The withdrawal tests already prove the hot wallet's key works. This is a
+// different key — derived at m/44'/60'/0'/0/i rather than the hot wallet's
+// path — and the only check that can tell a valid signature from a plausible
+// one is the hot wallet's own balance afterwards.
+//
+// It also carries a second case for free, and deliberately does not paper over
+// it: the registry names a MockUSDC address that compose deploys and this
+// testcontainer never has, so the sweeper meets a token it cannot read on
+// every tick. Leaving USDC active here is what makes this test prove that an
+// unreadable asset does not stop the ether being collected — which is exactly
+// how the shape was found.
+func TestSweepAgainstAnvil(t *testing.T) {
+	h := setupAnvilSweep(t)
+	ctx := context.Background()
+
+	// A deposit lands on a real address, credited in the ledger the way the
+	// scanner would and funded on the chain the way the depositor would.
+	account := h.newSpot(t, ctx)
+	addr, err := h.addresses.Assign(ctx, account)
+	require.NoError(t, err)
+	address := common.HexToAddress(addr)
+	h.creditLedger(t, ctx, account, addr, "ETH", "1")
+	h.insertDeposit(t, ctx, account, addr, "ETH", "1", "credited")
+	h.anvil.SendETH(t, h.anvil.Accounts(t)[0], address, oneETH())
+	h.anvil.Mine(t, 1)
+
+	hotBefore := h.anvil.Balance(t, h.hot)
+	require.NoError(t, h.worker.Tick(ctx)) // plan
+	rows := h.sweeps(t, ctx)
+	require.Len(t, rows, 1)
+
+	require.NoError(t, h.worker.Tick(ctx)) // sign with the deposit key, broadcast
+	h.anvil.Mine(t, 1)
+	h.anvil.Mine(t, 1) // withdrawalConfirmations = 2
+	require.NoError(t, h.worker.Tick(ctx))
+
+	row := h.sweeps(t, ctx)[0]
+	require.Equal(t, sweep.StatusConfirmed, row.Status, "failure reason: %s", row.FailureReason)
+
+	gained := new(big.Int).Sub(h.anvil.Balance(t, h.hot), hotBefore)
+	want, err := evm.ToWei(row.Amount, 18)
+	require.NoError(t, err)
+	assert.Equal(t, want.String(), gained.String(),
+		"the hot wallet really received what a deposit address's own key sent")
+
+	// USDC is active in the registry and has no contract on this chain. It was
+	// skipped every tick, and the ether above was collected anyway.
+	for _, s := range h.sweeps(t, ctx) {
+		assert.NotEqual(t, "USDC", s.Asset, "a token this chain does not have is not swept")
+	}
+
+	// And the address kept only the dust the gas budget left it.
+	left := h.anvil.Balance(t, address)
+	assert.True(t, left.Cmp(oneETH()) < 0 && left.Sign() >= 0, "the address is emptied, got %s wei", left)
+	assert.Equal(t, "1", h.balance(t, ctx, account, "ETH").Available.String(), "the user saw nothing")
+	h.assertTrialBalanceZero(t, ctx)
+}
+
+// anvilSweepHarness is the sweeper against a real node.
+type anvilSweepHarness struct {
+	sweepHarness
+	anvil *anvil
+}
+
+func setupAnvilSweep(t *testing.T) anvilSweepHarness {
+	t.Helper()
+	ctx := context.Background()
+	a := startAnvil(t)
+	h := setupSweep(t)
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+
+	_, err := h.all.Exec(ctx,
+		`UPDATE registry.assets SET required_confirmations = $1`, withdrawalConfirmations)
+	require.NoError(t, err)
+
+	w, err := hdwallet.FromMnemonic(testMnemonic)
+	require.NoError(t, err)
+	t.Cleanup(w.Close)
+	store := registry.NewStore(h.all)
+	s, err := signer.NewKeystoreSigner(h.all, "default", anvilChainID, w, store, audit.NewRecorder("default"), log)
+	require.NoError(t, err)
+
+	// The hot wallet pays for gas funding, so it needs ether of its own even
+	// though this test only sweeps ether.
+	a.SendETH(t, a.Accounts(t)[0], h.hot, oneETH())
+	a.Mine(t, 1)
+
+	client := a.client(t)
+	nonces := hotwallet.New(h.all, "default", anvilChainID, h.hot, client, s, log)
+	require.NoError(t, nonces.Start(ctx))
+	h.worker = sweep.New(h.all, sweep.Config{
+		Tenant: "default", ChainID: anvilChainID, NativeAsset: "ETH",
+		DefaultConfirmations: withdrawalConfirmations,
+	}, store, h.svc, client, s, nonces, audit.NewRecorder("default"), log)
+
+	return anvilSweepHarness{sweepHarness: h, anvil: a}
 }

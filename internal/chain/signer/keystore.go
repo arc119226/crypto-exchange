@@ -10,6 +10,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -68,29 +69,34 @@ func (s *KeystoreSigner) Sign(ctx context.Context, req Request) (Result, error) 
 	}
 
 	var (
-		to    common.Address
-		value *big.Int
-		data  []byte
-		err   error
+		out outgoing
+		err error
 	)
 	switch req.Kind {
 	case KindWithdrawal:
-		to, value, data, err = s.withdrawalTx(ctx, req)
+		out, err = s.withdrawalTx(ctx, req)
 	case KindNonceFill:
-		to, value, data, err = s.nonceFillTx(req)
-	case KindSweep, KindGasFund:
-		return Result{}, fmt.Errorf("%w: %s arrives with sweeping in 4c", ErrUnsupported, req.Kind)
+		out, err = s.nonceFillTx(req)
+	case KindSweep:
+		out, err = s.sweepTx(ctx, req)
+	case KindGasFund:
+		out, err = s.gasFundTx(ctx, req)
 	default:
 		return Result{}, fmt.Errorf("%w: kind %q", ErrRefused, req.Kind)
 	}
 	if err != nil {
 		return Result{}, err
 	}
+	to, value, data := out.to, out.value, out.data
 
-	key, err := s.wallet.Derive(hdwallet.HotWalletPath())
+	// Which key signs is decided here, not by the caller. A sweep is sent by
+	// the deposit address itself, so it is the only kind that signs with
+	// anything other than the hot wallet.
+	key, err := s.wallet.Derive(out.path)
 	if err != nil {
 		return Result{}, fmt.Errorf("signer: derive: %w", err)
 	}
+	from := crypto.PubkeyToAddress(key.PublicKey)
 	tx, err := types.SignNewTx(key, types.LatestSignerForChainID(big.NewInt(s.chainID)), &types.DynamicFeeTx{
 		ChainID: big.NewInt(s.chainID), Nonce: req.Nonce, To: &to, Value: value,
 		Gas: req.Gas, GasTipCap: new(big.Int).Set(req.TipCap), GasFeeCap: new(big.Int).Set(req.FeeCap),
@@ -105,7 +111,7 @@ func (s *KeystoreSigner) Sign(ctx context.Context, req Request) (Result, error) 
 	}
 	hash := strings.ToLower(tx.Hash().Hex())
 
-	if existing, err := s.record(ctx, req, to, hash, raw); err != nil {
+	if existing, err := s.record(ctx, req, from, to, hash, raw); err != nil {
 		return Result{}, err
 	} else if existing != nil {
 		// This intent was already signed. Return the transaction that exists
@@ -123,7 +129,16 @@ func (s *KeystoreSigner) Sign(ctx context.Context, req Request) (Result, error) 
 		slog.String("kind", string(req.Kind)), slog.String("ref_id", req.RefID),
 		slog.Int("attempt", int(req.Attempt)), slog.Uint64("nonce", req.Nonce),
 		slog.String("tx_hash", hash))
-	return Result{RawTx: raw, TxHash: hash, From: strings.ToLower(s.hot.Hex()), Nonce: req.Nonce}, nil
+	return Result{RawTx: raw, TxHash: hash, From: strings.ToLower(from.Hex()), Nonce: req.Nonce}, nil
+}
+
+// outgoing is what a kind's check decided the transaction must be: its fields,
+// and the key that may sign it.
+type outgoing struct {
+	path  hdwallet.Path
+	to    common.Address
+	value *big.Int
+	data  []byte
 }
 
 // withdrawalTx checks the request against chain.withdrawals and returns what
@@ -133,13 +148,13 @@ func (s *KeystoreSigner) Sign(ctx context.Context, req Request) (Result, error) 
 // is the *contract* and a transfer call, which is why the check cannot be done
 // on a pre-built transaction without decoding calldata: the recipient the user
 // asked for never appears in the transaction's `to` field at all.
-func (s *KeystoreSigner) withdrawalTx(ctx context.Context, req Request) (common.Address, *big.Int, []byte, error) {
+func (s *KeystoreSigner) withdrawalTx(ctx context.Context, req Request) (outgoing, error) {
 	row, err := sqlcgen.New(s.db).GetWithdrawal(ctx, sqlcgen.GetWithdrawalParams{TenantID: s.tenant, ID: req.RefID})
 	if errors.Is(err, pgx.ErrNoRows) {
-		return common.Address{}, nil, nil, fmt.Errorf("%w: no withdrawal %s", ErrRefused, req.RefID)
+		return outgoing{}, fmt.Errorf("%w: no withdrawal %s", ErrRefused, req.RefID)
 	}
 	if err != nil {
-		return common.Address{}, nil, nil, fmt.Errorf("signer: read withdrawal %s: %w", req.RefID, err)
+		return outgoing{}, fmt.Errorf("signer: read withdrawal %s: %w", req.RefID, err)
 	}
 	// The attempt number is not free: it must be the one this withdrawal is
 	// actually on, so that "attempt > 0" is never an open licence to re-sign.
@@ -154,65 +169,68 @@ func (s *KeystoreSigner) withdrawalTx(ctx context.Context, req Request) (common.
 	// than a replacement for the first.
 	switch {
 	case row.Status == "funds_locked" && req.Attempt != row.Replacements:
-		return common.Address{}, nil, nil, fmt.Errorf("%w: withdrawal %s is on attempt %d, not %d", ErrRefused, req.RefID, row.Replacements, req.Attempt)
+		return outgoing{}, fmt.Errorf("%w: withdrawal %s is on attempt %d, not %d", ErrRefused, req.RefID, row.Replacements, req.Attempt)
 	case row.Status == "broadcast" && req.Attempt != row.Replacements+1:
-		return common.Address{}, nil, nil, fmt.Errorf("%w: withdrawal %s is on replacement %d, not %d", ErrRefused, req.RefID, row.Replacements, req.Attempt)
+		return outgoing{}, fmt.Errorf("%w: withdrawal %s is on replacement %d, not %d", ErrRefused, req.RefID, row.Replacements, req.Attempt)
 	case row.Status == "broadcast" && (row.Nonce == nil || uint64(*row.Nonce) != req.Nonce): //nolint:gosec // CHECKed >= 0
-		return common.Address{}, nil, nil, fmt.Errorf("%w: a replacement must reuse the original nonce", ErrRefused)
+		return outgoing{}, fmt.Errorf("%w: a replacement must reuse the original nonce", ErrRefused)
 	case row.Status != "funds_locked" && row.Status != "broadcast":
-		return common.Address{}, nil, nil, fmt.Errorf("%w: withdrawal %s is %s, which may not be signed", ErrRefused, req.RefID, row.Status)
+		return outgoing{}, fmt.Errorf("%w: withdrawal %s is %s, which may not be signed", ErrRefused, req.RefID, row.Status)
 	}
 	amount, err := pg.AmountFromNumeric(row.Amount)
 	if err != nil {
-		return common.Address{}, nil, nil, fmt.Errorf("signer: amount of %s: %w", req.RefID, err)
+		return outgoing{}, fmt.Errorf("signer: amount of %s: %w", req.RefID, err)
 	}
 	// Everything the request claims must match the row. A mismatch is not a
 	// disagreement to resolve — it means the caller is asking to send
 	// something other than what a person approved.
 	switch {
 	case row.ChainID != req.ChainID:
-		return common.Address{}, nil, nil, fmt.Errorf("%w: withdrawal %s is on chain %d", ErrRefused, req.RefID, row.ChainID)
+		return outgoing{}, fmt.Errorf("%w: withdrawal %s is on chain %d", ErrRefused, req.RefID, row.ChainID)
 	case !strings.EqualFold(row.ToAddress, req.To.Hex()):
-		return common.Address{}, nil, nil, fmt.Errorf("%w: withdrawal %s pays %s, not %s", ErrRefused, req.RefID, row.ToAddress, strings.ToLower(req.To.Hex()))
+		return outgoing{}, fmt.Errorf("%w: withdrawal %s pays %s, not %s", ErrRefused, req.RefID, row.ToAddress, strings.ToLower(req.To.Hex()))
 	case row.Asset != req.Asset:
-		return common.Address{}, nil, nil, fmt.Errorf("%w: withdrawal %s is %s, not %s", ErrRefused, req.RefID, row.Asset, req.Asset)
+		return outgoing{}, fmt.Errorf("%w: withdrawal %s is %s, not %s", ErrRefused, req.RefID, row.Asset, req.Asset)
 	case !amount.Equal(req.Value):
-		return common.Address{}, nil, nil, fmt.Errorf("%w: withdrawal %s is for %s, not %s", ErrRefused, req.RefID, amount, req.Value)
+		return outgoing{}, fmt.Errorf("%w: withdrawal %s is for %s, not %s", ErrRefused, req.RefID, amount, req.Value)
 	}
 
 	asset, err := s.reg.GetAsset(ctx, s.tenant, row.Asset)
 	if err != nil {
-		return common.Address{}, nil, nil, fmt.Errorf("signer: asset %s: %w", row.Asset, err)
+		return outgoing{}, fmt.Errorf("signer: asset %s: %w", row.Asset, err)
 	}
 	units, err := evm.ToWei(amount, asset.Scale)
 	if err != nil {
-		return common.Address{}, nil, nil, fmt.Errorf("%w: %s: %w", ErrRefused, req.RefID, err)
+		return outgoing{}, fmt.Errorf("%w: %s: %w", ErrRefused, req.RefID, err)
 	}
 	if asset.IsNative {
-		return req.To, units, nil, nil
+		return outgoing{path: hdwallet.HotWalletPath(), to: req.To, value: units}, nil
 	}
 	if asset.ContractAddress == nil || !common.IsHexAddress(*asset.ContractAddress) {
-		return common.Address{}, nil, nil, fmt.Errorf("%w: %s has no contract address", ErrRefused, asset.Symbol)
+		return outgoing{}, fmt.Errorf("%w: %s has no contract address", ErrRefused, asset.Symbol)
 	}
 	data, err := evm.TransferCalldata(req.To, units)
 	if err != nil {
-		return common.Address{}, nil, nil, fmt.Errorf("%w: %w", ErrRefused, err)
+		return outgoing{}, fmt.Errorf("%w: %w", ErrRefused, err)
 	}
 	// A token transfer moves no ether: the value is zero and the recipient is
 	// inside the calldata.
-	return common.HexToAddress(*asset.ContractAddress), new(big.Int), data, nil
+	return outgoing{
+		path: hdwallet.HotWalletPath(), to: common.HexToAddress(*asset.ContractAddress),
+		value: new(big.Int), data: data,
+	}, nil
 }
 
 // nonceFillTx is the 0-value self-transfer that closes a nonce gap (§6.4.2).
 // It can only ever pay the hot wallet, and can only ever pay it nothing.
-func (s *KeystoreSigner) nonceFillTx(req Request) (common.Address, *big.Int, []byte, error) {
+func (s *KeystoreSigner) nonceFillTx(req Request) (outgoing, error) {
 	if req.To != s.hot {
-		return common.Address{}, nil, nil, fmt.Errorf("%w: a nonce fill may only pay the hot wallet", ErrRefused)
+		return outgoing{}, fmt.Errorf("%w: a nonce fill may only pay the hot wallet", ErrRefused)
 	}
 	if !req.Value.IsZero() {
-		return common.Address{}, nil, nil, fmt.Errorf("%w: a nonce fill moves nothing, got %s", ErrRefused, req.Value)
+		return outgoing{}, fmt.Errorf("%w: a nonce fill moves nothing, got %s", ErrRefused, req.Value)
 	}
-	return s.hot, new(big.Int), nil, nil
+	return outgoing{path: hdwallet.HotWalletPath(), to: s.hot, value: new(big.Int)}, nil
 }
 
 // record appends to chain.signing_log and the audit trail, and reports whether
@@ -223,7 +241,7 @@ func (s *KeystoreSigner) nonceFillTx(req Request) (common.Address, *big.Int, []b
 // was signed before, and the recorded transaction is returned so the caller
 // converges on it. What the key prevents is two different transactions for one
 // intent, which is the thing that would actually cost money.
-func (s *KeystoreSigner) record(ctx context.Context, req Request, to common.Address, hash string, raw []byte) (*Result, error) {
+func (s *KeystoreSigner) record(ctx context.Context, req Request, from, to common.Address, hash string, raw []byte) (*Result, error) {
 	tx, err := s.db.Begin(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("signer: begin: %w", err)
@@ -232,7 +250,7 @@ func (s *KeystoreSigner) record(ctx context.Context, req Request, to common.Addr
 
 	if _, err := sqlcgen.New(tx).InsertSignature(ctx, sqlcgen.InsertSignatureParams{
 		TenantID: s.tenant, Kind: string(req.Kind), RefID: req.RefID, Attempt: req.Attempt,
-		ChainID: s.chainID, FromAddress: strings.ToLower(s.hot.Hex()),
+		ChainID: s.chainID, FromAddress: strings.ToLower(from.Hex()),
 		ToAddress: strings.ToLower(to.Hex()), Nonce: int64(req.Nonce), //nolint:gosec // node nonces are far below 2^63
 		TxHash: hash, RawTx: raw,
 	}); err != nil {
@@ -247,7 +265,8 @@ func (s *KeystoreSigner) record(ctx context.Context, req Request, to common.Addr
 		TargetType: string(req.Kind), TargetID: req.RefID,
 		After: map[string]any{
 			"attempt": req.Attempt, "nonce": req.Nonce, "tx_hash": hash,
-			"to": strings.ToLower(to.Hex()), "asset": req.Asset, "value": req.Value.String(),
+			"from": strings.ToLower(from.Hex()), "to": strings.ToLower(to.Hex()),
+			"asset": req.Asset, "value": req.Value.String(),
 		},
 	}); err != nil {
 		return nil, fmt.Errorf("signer: audit: %w", err)

@@ -202,6 +202,10 @@ services:
       DATABASE_URL: postgres://ex_chain:${POSTGRES_PASSWORD}@postgres:5432/exchange?sslmode=disable
       ETH_REQUIRED_CONFIRMATIONS_DEFAULT: "1"   # anvil: a deposit in the head block is already confirmed
       ETH_SCAN_INTERVAL: 2s
+      # §6.4.3 suggests a minute; anvil mines every two seconds and collection
+      # takes three ticks to cross plan -> send -> confirm, so a dev stack that
+      # waited a minute per tick would look broken.
+      ETH_SWEEP_INTERVAL: 3s
       # Signing goes over NATS request-reply to exchange-signer, on
       # WALLET_SIGNER_SUBJECT_PREFIX + "." + TENANT_ID. Both roles take the
       # same default, so neither states it.
@@ -281,6 +285,7 @@ services:
       ADMIN_BOOTSTRAP_PASSWORD: ${ADMIN_BOOTSTRAP_PASSWORD}
       ETH_REQUIRED_CONFIRMATIONS_DEFAULT: "1"   # anvil: a deposit in the head block is already confirmed
       ETH_SCAN_INTERVAL: 2s
+      ETH_SWEEP_INTERVAL: 3s                    # same reasoning as exchange-chain above
     volumes:
       - artifacts:/artifacts:ro
       - ../../secrets/jwt:/secrets/jwt:ro

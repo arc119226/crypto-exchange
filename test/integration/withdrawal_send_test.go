@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"math/big"
 	"testing"
 	"time"
 
@@ -56,6 +57,11 @@ func setupSendWith(t *testing.T, send withdrawal.SendConfig) sendHarness {
 	require.NoError(t, err)
 
 	chain := newSendChain(anvilChainID)
+	// The scripted chain enforces balances, so the hot wallet has to actually
+	// hold what it is asked to send. Generous amounts: these tests are about
+	// the state machine, not about running out.
+	chain.fund(hot, new(big.Int).Mul(big.NewInt(100), oneETH()))
+	chain.fundToken(common.HexToAddress(usdcContract), hot, big.NewInt(1_000_000_000_000))
 	nonces := hotwallet.New(h.all, "default", anvilChainID, hot, chain, s, log)
 	require.NoError(t, nonces.Start(ctx))
 

@@ -18,6 +18,7 @@ import (
 	"github.com/arc119226/crypto-exchange/internal/chain/evm"
 	"github.com/arc119226/crypto-exchange/internal/chain/hotwallet"
 	"github.com/arc119226/crypto-exchange/internal/chain/signer"
+	"github.com/arc119226/crypto-exchange/internal/chain/sweep"
 	"github.com/arc119226/crypto-exchange/internal/chain/withdrawal"
 	"github.com/arc119226/crypto-exchange/internal/ledger"
 	"github.com/arc119226/crypto-exchange/internal/policy"
@@ -40,6 +41,10 @@ type chainComponents struct {
 	// sending is nil when this deployment has no signer to reach, which
 	// leaves withdrawals stopping at funds_locked.
 	sending *withdrawal.Worker
+	// sweeper collects deposits into the hot wallet. Nil for the same reason
+	// sending is, and also when an operator has turned collection off.
+	sweeper       *sweep.Worker
+	sweepInterval time.Duration
 	// lastTick records whether the most recent tick succeeded, so readiness
 	// reflects the scanner rather than only the RPC connection.
 	lastErr error
@@ -83,6 +88,7 @@ func newChain(ctx context.Context, cfg Config, log *slog.Logger, db *pgxpool.Poo
 	store := registry.NewStore(db)
 	worker := withdrawal.NewWorker(db, withdrawal.Config{
 		Tenant: cfg.TenantID, Batch: cfg.Chain.WithdrawalBatchSize,
+		NativeAsset: cfg.Chain.NativeAsset,
 	}, store, store, l, withdrawal.NewPostgresKYC(db), policy.Basic{},
 		audit.NewRecorder(cfg.TenantID), log).WithMetrics(withdrawal.NewMetrics(reg))
 
@@ -90,19 +96,43 @@ func newChain(ctx context.Context, cfg Config, log *slog.Logger, db *pgxpool.Poo
 		client: client, scanner: scanner, interval: cfg.Chain.ScanInterval,
 		withdrawals: worker, withdrawalInterval: cfg.Chain.WithdrawalInterval,
 	}
-	if err := attachSigning(ctx, cfg, log, db, worker, client, nc, local); err != nil {
+	signing, err := attachSigning(ctx, cfg, log, db, worker, client, nc, local)
+	if err != nil {
 		client.Close()
 		return nil, err
 	}
-	if !worker.Sends() {
-		log.Warn("no signer reachable: withdrawals will stop at funds_locked")
+	if signing == nil {
+		log.Warn("no signer reachable: withdrawals will stop at funds_locked and nothing will be collected")
 	} else {
 		c.sending = worker
+		// The sweeper shares the signer, the node and the hot wallet's nonce
+		// allocator with the withdrawal worker, because it is the same key
+		// paying for the same kind of transaction.
+		if cfg.Chain.SweepEnabled {
+			maxFee, err := cfg.Chain.MaxFee()
+			if err != nil {
+				client.Close()
+				return nil, err
+			}
+			c.sweeper = sweep.New(db, sweep.Config{
+				Tenant: cfg.TenantID, ChainID: cfg.Chain.ChainID, Batch: cfg.Chain.SweepBatchSize,
+				NativeAsset: cfg.Chain.NativeAsset, DefaultConfirmations: cfg.Chain.RequiredConfirmations,
+				MaxFeePerGas: maxFee,
+			}, store, l, client, signing.signer, signing.nonces,
+				audit.NewRecorder(cfg.TenantID), log).WithMetrics(sweep.NewMetrics(reg))
+			c.sweepInterval = cfg.Chain.SweepInterval
+		} else {
+			log.Warn("sweeping is off: deposits stay on the addresses they landed on")
+		}
 	}
 
 	log.Info("scanning for deposits",
 		slog.String("rpc", client.LogValue()), slog.Int64("chain_id", cfg.Chain.ChainID),
 		slog.Duration("interval", cfg.Chain.ScanInterval))
+	if c.sweeper != nil {
+		log.Info("collecting deposits into the hot wallet",
+			slog.Duration("interval", cfg.Chain.SweepInterval))
+	}
 	log.Info("driving withdrawals to funds_locked",
 		slog.Duration("interval", cfg.Chain.WithdrawalInterval),
 		slog.Int("batch", int(cfg.Chain.WithdrawalBatchSize)))
@@ -115,7 +145,7 @@ func newChain(ctx context.Context, cfg Config, log *slog.Logger, db *pgxpool.Poo
 // runs here, otherwise one reached over NATS. With neither, withdrawals stop
 // at funds_locked — which is the correct behaviour for a deployment that was
 // never given a way to sign, not a failure to start.
-func attachSigning(ctx context.Context, cfg Config, log *slog.Logger, db *pgxpool.Pool, worker *withdrawal.Worker, client *evm.Client, nc *nats.Conn, local signer.Signer) error {
+func attachSigning(ctx context.Context, cfg Config, log *slog.Logger, db *pgxpool.Pool, worker *withdrawal.Worker, client *evm.Client, nc *nats.Conn, local signer.Signer) (*signing, error) {
 	s := local
 	switch {
 	case s != nil:
@@ -125,12 +155,12 @@ func attachSigning(ctx context.Context, cfg Config, log *slog.Logger, db *pgxpoo
 			Tenant: cfg.TenantID, SubjectPrefix: cfg.Wallet.SignerSubjectPrefix, Timeout: cfg.Wallet.SignerTimeout,
 		})
 		if err != nil {
-			return err
+			return nil, err
 		}
 		s = c
 		log.Info("signing requests go to the signer over NATS", slog.String("subject", c.Subject()))
 	default:
-		return nil
+		return nil, nil //nolint:nilnil // "this deployment cannot sign" is a value, not an error
 	}
 	// Ask the signer which address it signs from. Configuring it here instead
 	// would let a wrong value track nonces for one address while another sent
@@ -146,11 +176,11 @@ func attachSigning(ctx context.Context, cfg Config, log *slog.Logger, db *pgxpoo
 		hot, err = s.HotWallet(ctx)
 		return err
 	}); err != nil {
-		return fmt.Errorf("chain: the signer would not name its hot wallet: %w", err)
+		return nil, fmt.Errorf("chain: the signer would not name its hot wallet: %w", err)
 	}
 	maxFee, err := cfg.Chain.MaxFee()
 	if err != nil {
-		return err
+		return nil, err
 	}
 	nonces := hotwallet.New(db, cfg.TenantID, cfg.Chain.ChainID, hot, client, s, log)
 	// Fatal by design (§6.4.2): a nonce manager that cannot reconcile with the
@@ -158,7 +188,7 @@ func attachSigning(ctx context.Context, cfg Config, log *slog.Logger, db *pgxpoo
 	// flight, and ErrForeignTransaction means someone else holds the key. It
 	// is the one startup error that must not be retried into submission.
 	if err := nonces.Start(ctx); err != nil {
-		return err
+		return nil, err
 	}
 	worker.WithSending(client, s, nonces, withdrawal.SendConfig{
 		ChainID: cfg.Chain.ChainID, ReplaceAfter: cfg.Chain.ReplaceAfter,
@@ -169,7 +199,16 @@ func attachSigning(ctx context.Context, cfg Config, log *slog.Logger, db *pgxpoo
 		slog.String("hot_wallet", strings.ToLower(hot.Hex())),
 		slog.Duration("replace_after", cfg.Chain.ReplaceAfter),
 		slog.Int("max_replacements", int(cfg.Chain.MaxReplacements)))
-	return nil
+	return &signing{signer: s, nonces: nonces}, nil
+}
+
+// signing is what a deployment that can sign has: the signer itself, and the
+// hot wallet's nonce allocator. Both the withdrawal worker and the sweeper
+// need them, because it is the same key paying for the same kind of
+// transaction.
+type signing struct {
+	signer signer.Signer
+	nonces *hotwallet.Manager
 }
 
 // retryStop wraps an error that must end a retry loop rather than be retried.
@@ -232,6 +271,28 @@ func (c *chainComponents) runWithdrawals(ctx context.Context, log *slog.Logger) 
 // depend on the signer and the node, while deciding and locking depend on
 // neither. Sharing a loop would let an unreachable signer stop withdrawals
 // from being decided at all.
+// runSweeping collects deposits into the hot wallet until ctx ends.
+//
+// Its own clock, much slower than the other two: nobody is waiting for a
+// sweep, and every scan costs one balance call per address per asset.
+func (c *chainComponents) runSweeping(ctx context.Context, log *slog.Logger) error {
+	if c.sweeper == nil {
+		return nil
+	}
+	tick := time.NewTicker(c.sweepInterval)
+	defer tick.Stop()
+	for {
+		if err := c.sweeper.Tick(ctx); err != nil && ctx.Err() == nil {
+			log.Error("sweep tick failed", slog.String("err", err.Error()))
+		}
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-tick.C:
+		}
+	}
+}
+
 func (c *chainComponents) runSending(ctx context.Context, log *slog.Logger) error {
 	if c.sending == nil {
 		return nil

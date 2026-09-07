@@ -13,6 +13,7 @@ import (
 
 	"github.com/arc119226/crypto-exchange/internal/chain/evm"
 	"github.com/arc119226/crypto-exchange/internal/chain/hotwallet"
+	"github.com/arc119226/crypto-exchange/internal/chain/sweep"
 	"github.com/arc119226/crypto-exchange/internal/chain/withdrawal"
 )
 
@@ -39,10 +40,18 @@ type sendChain struct {
 	// can say "somebody else has been sending from this address" without
 	// having to forge their transactions.
 	foreignNonce map[common.Address]uint64
-	baseFee      *big.Int
-	tip          *big.Int
+	// ether and tokens are the balances this chain keeps. Mining a transaction
+	// moves them, so a sweep can be checked by what the hot wallet ends up
+	// holding rather than by what the code says it sent.
+	ether   map[common.Address]*big.Int
+	tokens  map[common.Address]map[common.Address]*big.Int
+	baseFee *big.Int
+	tip     *big.Int
 	// sendErr fails the next SendRawTransaction, once.
 	sendErr error
+	// tokenErr fails every TokenBalance for one contract, standing in for a
+	// registry row that names an address with no token behind it.
+	tokenErr map[common.Address]error
 	// sent records every raw transaction that reached the node, in order.
 	sent []*types.Transaction
 }
@@ -50,6 +59,7 @@ type sendChain struct {
 var (
 	_ withdrawal.Chain = (*sendChain)(nil)
 	_ hotwallet.Chain  = (*sendChain)(nil)
+	_ sweep.Chain      = (*sendChain)(nil)
 )
 
 func newSendChain(chainID int64) *sendChain {
@@ -58,7 +68,10 @@ func newSendChain(chainID int64) *sendChain {
 		pool:       map[common.Hash]*types.Transaction{},
 		mined:      map[common.Hash]*types.Receipt{},
 		minedNonce: map[common.Address]uint64{}, foreignNonce: map[common.Address]uint64{},
-		baseFee: big.NewInt(1_000_000_000), tip: big.NewInt(1_500_000_000),
+		ether:    map[common.Address]*big.Int{},
+		tokens:   map[common.Address]map[common.Address]*big.Int{},
+		tokenErr: map[common.Address]error{},
+		baseFee:  big.NewInt(1_000_000_000), tip: big.NewInt(1_500_000_000),
 	}
 }
 
@@ -128,6 +141,21 @@ func (c *sendChain) EstimateGas(context.Context, common.Address, common.Address,
 	return 60000, nil
 }
 
+func (c *sendChain) Balance(_ context.Context, a common.Address) (*big.Int, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return new(big.Int).Set(c.balanceOf(a)), nil
+}
+
+func (c *sendChain) TokenBalance(_ context.Context, token, holder common.Address) (*big.Int, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if err := c.tokenErr[token]; err != nil {
+		return nil, err
+	}
+	return new(big.Int).Set(c.tokenOf(token, holder)), nil
+}
+
 func (c *sendChain) Receipt(_ context.Context, txHash string) (*types.Receipt, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -186,30 +214,123 @@ func (c *sendChain) mineBlock(status uint64, only *common.Hash) uint64 {
 		if only != nil && *only != h {
 			continue
 		}
+		if status == types.ReceiptStatusSuccessful {
+			c.record(tx)
+			continue
+		}
+		// A reverted transaction still burned its gas and still spent its
+		// nonce; nothing else moved.
+		price := new(big.Int).Add(c.baseFee, tx.GasTipCap())
 		c.mined[h] = &types.Receipt{
 			Status: status, TxHash: h, BlockNumber: new(big.Int).SetUint64(c.head),
-			GasUsed: tx.Gas(), EffectiveGasPrice: new(big.Int).Add(c.baseFee, tx.GasTipCap()),
+			GasUsed: tx.Gas(), EffectiveGasPrice: price,
 		}
-		if sender := c.senderOf(tx); tx.Nonce()+1 > c.minedNonce[sender] {
+		sender := c.senderOf(tx)
+		if tx.Nonce()+1 > c.minedNonce[sender] {
 			c.minedNonce[sender] = tx.Nonce() + 1
 		}
+		c.debitEther(sender, new(big.Int).Mul(new(big.Int).SetUint64(tx.Gas()), price))
 		delete(c.pool, h)
 	}
 	return c.head
 }
 
-// record writes a successful receipt and advances the sender's nonce. Called
-// with c.mu held.
+// record writes a successful receipt, moves the balances and advances the
+// sender's nonce. Called with c.mu held.
 func (c *sendChain) record(tx *types.Transaction) {
+	price := new(big.Int).Add(c.baseFee, tx.GasTipCap())
 	c.mined[tx.Hash()] = &types.Receipt{
 		Status: types.ReceiptStatusSuccessful, TxHash: tx.Hash(),
 		BlockNumber: new(big.Int).SetUint64(c.head),
-		GasUsed:     tx.Gas(), EffectiveGasPrice: new(big.Int).Add(c.baseFee, tx.GasTipCap()),
+		GasUsed:     tx.Gas(), EffectiveGasPrice: price,
 	}
-	if sender := c.senderOf(tx); tx.Nonce()+1 > c.minedNonce[sender] {
+	sender := c.senderOf(tx)
+	if tx.Nonce()+1 > c.minedNonce[sender] {
 		c.minedNonce[sender] = tx.Nonce() + 1
 	}
+	c.settle(tx, sender, price)
 	delete(c.pool, tx.Hash())
+}
+
+// settle applies a mined transaction's effects. Called with c.mu held.
+//
+// Gas is charged at gas limit x price rather than at what was used, because
+// this chain has no execution to measure. That makes it strictly harsher than
+// a real node, which is the safe direction for a sweeper that has to leave
+// enough behind to pay.
+func (c *sendChain) settle(tx *types.Transaction, sender common.Address, price *big.Int) {
+	fee := new(big.Int).Mul(new(big.Int).SetUint64(tx.Gas()), price)
+	c.debitEther(sender, new(big.Int).Add(tx.Value(), fee))
+	if tx.To() != nil {
+		c.creditEther(*tx.To(), tx.Value())
+	}
+	// An ERC-20 transfer: selector, recipient, amount.
+	data := tx.Data()
+	if tx.To() == nil || len(data) != 4+32+32 || common.Bytes2Hex(data[:4]) != "a9059cbb" {
+		return
+	}
+	token := *tx.To()
+	to := common.BytesToAddress(data[4+12 : 4+32])
+	amount := new(big.Int).SetBytes(data[4+32:])
+	held := c.tokenOf(token, sender)
+	if held.Cmp(amount) < 0 {
+		// A real token would revert. Mark the receipt failed rather than
+		// invent balance, so the sweeper meets the failure it would really see.
+		c.mined[tx.Hash()].Status = types.ReceiptStatusFailed
+		return
+	}
+	c.setToken(token, sender, new(big.Int).Sub(held, amount))
+	c.setToken(token, to, new(big.Int).Add(c.tokenOf(token, to), amount))
+}
+
+// balanceOf, tokenOf, setToken and the credit/debit helpers all assume c.mu.
+func (c *sendChain) balanceOf(a common.Address) *big.Int {
+	if v, ok := c.ether[a]; ok {
+		return v
+	}
+	return new(big.Int)
+}
+
+func (c *sendChain) creditEther(a common.Address, v *big.Int) {
+	c.ether[a] = new(big.Int).Add(c.balanceOf(a), v)
+}
+
+func (c *sendChain) debitEther(a common.Address, v *big.Int) {
+	out := new(big.Int).Sub(c.balanceOf(a), v)
+	if out.Sign() < 0 {
+		out = new(big.Int)
+	}
+	c.ether[a] = out
+}
+
+func (c *sendChain) tokenOf(token, holder common.Address) *big.Int {
+	if m, ok := c.tokens[token]; ok {
+		if v, ok := m[holder]; ok {
+			return v
+		}
+	}
+	return new(big.Int)
+}
+
+func (c *sendChain) setToken(token, holder common.Address, v *big.Int) {
+	if c.tokens[token] == nil {
+		c.tokens[token] = map[common.Address]*big.Int{}
+	}
+	c.tokens[token][holder] = v
+}
+
+// fund gives an address ether out of thin air, the way a test faucet does.
+func (c *sendChain) fund(a common.Address, wei *big.Int) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.creditEther(a, wei)
+}
+
+// fundToken does the same for an ERC-20.
+func (c *sendChain) fundToken(token, holder common.Address, units *big.Int) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.setToken(token, holder, new(big.Int).Add(c.tokenOf(token, holder), units))
 }
 
 // advance moves the head on without mining anything, which is how a test buys
@@ -218,6 +339,16 @@ func (c *sendChain) advance(blocks uint64) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.head += blocks
+}
+
+// failTokenBalance makes every balanceOf on this contract fail, the way a
+// registry row pointing at an address with no code does: eth_call answers with
+// nothing, and reading that as zero would say "nothing to collect" when the
+// truth is that we asked the wrong thing.
+func (c *sendChain) failTokenBalance(token common.Address, err error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.tokenErr[token] = err
 }
 
 // failNextSend makes the next broadcast fail, once.

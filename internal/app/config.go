@@ -151,6 +151,22 @@ type ChainConfig struct {
 	// MaxFeePerGas is the operator's stop-loss on the fee market, in wei.
 	// Empty means no ceiling; a transaction that would exceed it waits.
 	MaxFeePerGas string `env:"MAX_FEE_PER_GAS"`
+	// NativeAsset is the registry symbol of the chain's own coin, which is
+	// what every gas entry is denominated in. Stated once here so the
+	// withdrawal worker and the sweeper cannot disagree about it and book two
+	// halves of one transaction against different assets.
+	NativeAsset string `env:"NATIVE_ASSET" envDefault:"ETH"`
+	// SweepInterval is how often deposit addresses are checked for balances
+	// worth collecting (§6.4.3: anvil 1 min). Much slower than the other two
+	// clocks on purpose: sweeping is housekeeping, nobody is waiting for it,
+	// and every scan costs one balance call per address per asset.
+	SweepInterval time.Duration `env:"SWEEP_INTERVAL" envDefault:"60s"`
+	// SweepBatchSize caps how many sweeps one tick advances.
+	SweepBatchSize int32 `env:"SWEEP_BATCH_SIZE" envDefault:"25"`
+	// SweepEnabled turns collection off. A deployment that has not decided
+	// where its hot wallet lives is better off leaving deposits where they
+	// landed than moving them somewhere it cannot spend from.
+	SweepEnabled bool `env:"SWEEP_ENABLED" envDefault:"true"`
 }
 
 // MaxFee parses MaxFeePerGas. An unset ceiling is nil, which every caller
@@ -307,6 +323,8 @@ func (c Config) LogValue() slog.Value {
 		slog.Int64("eth_chain_id", c.Chain.ChainID),
 		slog.Duration("eth_scan_interval", c.Chain.ScanInterval),
 		slog.Duration("eth_withdrawal_interval", c.Chain.WithdrawalInterval),
+		slog.Duration("eth_sweep_interval", c.Chain.SweepInterval),
+		slog.Bool("eth_sweep_enabled", c.Chain.SweepEnabled),
 		slog.Duration("eth_replace_after", c.Chain.ReplaceAfter),
 		slog.Int("eth_max_replacements", int(c.Chain.MaxReplacements)),
 		slog.String("eth_max_fee_per_gas", c.Chain.MaxFeePerGas),

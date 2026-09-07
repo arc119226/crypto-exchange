@@ -185,3 +185,33 @@ func TransferCalldata(to common.Address, amount *big.Int) ([]byte, error) {
 	data = append(data, common.LeftPadBytes(to.Bytes(), 32)...)
 	return append(data, common.LeftPadBytes(amount.Bytes(), 32)...), nil
 }
+
+// balanceOfSelector is keccak256("balanceOf(address)")[:4] — 0x70a08231.
+// Derived for the same reason transferSelector is, and pinned by the same
+// kind of test.
+var balanceOfSelector = crypto.Keccak256([]byte("balanceOf(address)"))[:4]
+
+// TokenBalance reads an ERC-20 balance with eth_call.
+//
+// The sweeper needs it and the deposit scanner does not: scanning follows
+// Transfer logs, which say what moved, while sweeping has to know what is
+// actually sitting there — including anything the logs did not account for.
+func (c *Client) TokenBalance(ctx context.Context, token, holder common.Address) (*big.Int, error) {
+	data := make([]byte, 0, 4+32)
+	data = append(data, balanceOfSelector...)
+	data = append(data, common.LeftPadBytes(holder.Bytes(), 32)...)
+	out, err := c.rpc.CallContract(ctx, ethereum.CallMsg{To: &token, Data: data}, nil)
+	if err != nil {
+		return nil, fmt.Errorf("evm: balanceOf %s on %s: %w", lower(holder), lower(token), err)
+	}
+	// A contract that is not a token, or an address with no code, answers with
+	// empty data rather than an error. Reading that as zero would tell the
+	// sweeper there is nothing to collect when the truth is that we asked the
+	// wrong thing.
+	if len(out) != 32 {
+		return nil, fmt.Errorf("evm: balanceOf %s on %s returned %d bytes, not 32", lower(holder), lower(token), len(out))
+	}
+	return new(big.Int).SetBytes(out), nil
+}
+
+func lower(a common.Address) string { return strings.ToLower(a.Hex()) }

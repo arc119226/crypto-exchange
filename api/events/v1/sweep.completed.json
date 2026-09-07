@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/arc119226/crypto-exchange/api/events/v1/sweep.completed.json",
+  "title": "sweep.completed",
+  "description": "A deposit address was emptied into the hot wallet. No user balance changed: a sweep moves the exchange's own custody between two of its own accounts, and the account whose address was swept sees nothing.",
+  "type": "object",
+  "required": [
+    "sweep_id",
+    "chain_id",
+    "from_address",
+    "asset",
+    "amount",
+    "status",
+    "tx_hash",
+    "gas_cost",
+    "block_number"
+  ],
+  "properties": {
+    "sweep_id": {
+      "type": "string",
+      "description": "Stable id of the sweep across every event about it."
+    },
+    "chain_id": {
+      "type": "integer",
+      "format": "int64"
+    },
+    "from_address": {
+      "type": "string",
+      "pattern": "^0x[0-9a-f]{40}$",
+      "description": "The deposit address that was emptied, lower-case."
+    },
+    "asset": {
+      "type": "string"
+    },
+    "amount": {
+      "type": "string",
+      "pattern": "^-?\\d{1,18}(\\.\\d{1,18})?$",
+      "description": "What the sweep moved, in the asset's own units."
+    },
+    "status": {
+      "type": "string",
+      "description": "The sweep's status after this event. An open string: a new state must not break a consumer."
+    },
+    "tx_hash": {
+      "type": "string",
+      "pattern": "^0x[0-9a-f]{64}$"
+    },
+    "gas_cost": {
+      "type": "string",
+      "pattern": "^-?\\d{1,18}(\\.\\d{1,18})?$",
+      "description": "What the sweep transaction burned, always in the chain's native coin -- which is not necessarily `asset`."
+    },
+    "block_number": {
+      "type": "integer",
+      "minimum": 0
+    }
+  }
+}

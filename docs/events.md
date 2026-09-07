@@ -112,7 +112,7 @@ schema; `planned` means the phase that adds it will add the schema with it.
 | `deposit.detected`, `deposit.credited`, `deposit.orphaned`, `deposit.dropped`, `deposit.reversed` | chain | stream, webhook, admin | shipped |
 | `withdrawal.requested` | api | stream, webhook, admin | shipped |
 | `withdrawal.state_changed` | api, chain, admin | stream, webhook, admin | shipped |
-| `sweep.completed`, `sweep.failed` | chain | admin | planned (Phase 4c) |
+| `sweep.completed`, `sweep.failed` | chain | admin | shipped |
 | `alert.hot_wallet_low` | chain | webhook, admin | planned (Phase 4c) |
 | `reconciliation.break_detected` | worker | webhook, admin | planned (Phase 4c) |
 | `user.kyc_level_updated`, `user.status_updated` | admin | webhook | planned (Phase 5) |
@@ -142,9 +142,22 @@ transfer, this is the displacing transaction, because that is the one whose
 fate decides the money. A consumer that wants to show a user "your withdrawal
 is on chain" should link this hash and no other.
 
+`sweep.*` is the one pair with **no `account_id` and no sequence**. A sweep
+belongs to no user: it moves the exchange's own custody from the address a
+deposit landed on to the hot wallet withdrawals are paid from, and the account
+that owns that address sees no change at all. Its subject therefore ends in the
+house scope `_`, like `market.updated` but for the opposite reason — that one
+is scoped to every account, this one to none. Only the two ends are published;
+the intermediate states are the exchange rearranging its own money and live in
+the audit trail.
+
+`gas_cost` on a sweep is in the chain's native coin, which is not necessarily
+`asset`: a USDC sweep burns ETH. A consumer that adds the two together is
+adding two currencies.
+
 The chain role writes these to the outbox; the **relay that publishes them
-runs in the engine role**, so a deployment without an engine leaves deposit
-and withdrawal events sitting in `eventbus.outbox`.
+runs in the engine role**, so a deployment without an engine leaves deposit,
+withdrawal and sweep events sitting in `eventbus.outbox`.
 
 `order.*` and `trade.executed` carry `seq`; `order.*` and `balance.updated`
 carry `account_seq`. `order.accepted` is emitted for **every** order that was

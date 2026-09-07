@@ -105,6 +105,15 @@ usdc=$("$CTL" deposit-address --asset USDC --output json | jq -r .address)
 # and it must not be the hot wallet, which is a different BIP-44 account
 [ "$addr" != "$HOT_WALLET_ADDRESS" ] || { echo "handed out the hot wallet as a deposit address"; exit 1; }
 
+# The same address in the two representations this system deliberately keeps.
+# GET /v1/deposit-address hands out the EIP-55 checksummed form, because a user
+# pastes it into a wallet and the mixed case is what catches a typo. The chain
+# tables store it normalised to lower case, so anything read back from the
+# admin API or a container log comes out that way. Comparing across the two is
+# the one place they meet, and it needs the conversion spelled out rather than
+# both sides flattened: flattening would hide a mismatch that is real.
+addr_lc=$(echo "$addr" | tr 'A-Z' 'a-z')
+
 # The chain half of the flow (docs/plan-v1.0.md §2.3 step 1): real ETH and
 # real MockUSDC move on anvil, the chain role sees them, and the balance
 # changes. `cast` runs in the same foundry image compose already pins, on the
@@ -194,18 +203,26 @@ payout=$(printf '0x%040x' "$STAMP")
 on_chain() { cast_run "$@" | awk 'NR==1 {print $1}'; }
 
 log "a withdrawal inside the limits is signed, sent and confirmed"
-hold_before=$("$CTL" balances --output json | jq -r '.balances[] | select(.asset=="ETH") | .hold')
+# Only terminal states are waited on. `funds_locked` and the hold that goes
+# with it last a tick or two before the machine moves on, so polling for them
+# from outside is a race the script loses whenever a round trip is slow.
+# available is the durable half: it drops when the funds are held and never
+# comes back. That the hold entry itself is made is asserted deterministically
+# in TestWithdrawalAutoApprovesAndLocksFunds, which drives the ticks by hand.
+available_before=$(balance_of ETH)
 [ "$(on_chain balance "$payout")" = "0" ] || { echo "$payout is not a fresh address"; exit 1; }
 auto=$("$CTL" withdrawals create --asset ETH --amount 0.05 --to "$payout" --output json | jq -r .id)
-wait_for_status "$auto" funds_locked
-hold_after=$("$CTL" balances --output json | jq -r '.balances[] | select(.asset=="ETH") | .hold')
-[ "$hold_before" != "$hold_after" ] || { echo "the withdrawal locked no funds"; "$CTL" balances; exit 1; }
 
 # Everything past here needs the signer, the nonce manager and a real
 # transaction. This is the only check in the suite that can tell a valid
 # signature from a plausible one: a wrong one produces a withdrawal that looks
 # sent and moves nothing.
 wait_for_status "$auto" confirmed
+available_after=$(balance_of ETH)
+[ "$available_before" != "$available_after" ] || {
+  echo "the withdrawal confirmed but the balance did not move: still $available_before"
+  "$CTL" balances; exit 1
+}
 received=$(on_chain balance "$payout")
 [ "$received" = "50000000000000000" ] || {
   echo "the withdrawal confirmed but $payout holds $received wei, not 0.05 ETH"
@@ -254,6 +271,61 @@ log "resolve refuses an action the withdrawal has outgrown"
 if "$CTL" admin withdrawals resolve "$auto" bump --note "e2e" >/dev/null 2>&1; then
   echo "bumping a confirmed withdrawal was accepted"; exit 1
 fi
+
+# Collection (§6.4.3): the money the user deposited landed on their own
+# address, and the hot wallet has been paying withdrawals out of its own
+# balance. Sweeping is what closes that gap.
+#
+# The sweeper runs on its own clock and starts as soon as a deposit is
+# credited, which is long before this line. So what is asserted here is the
+# *outcome* -- there are confirmed sweeps and the address is empty -- not the
+# act of sweeping, which the script has no way to be present for. Anything
+# that needs to observe the steps belongs in test/integration/sweep_test.go,
+# where the ticks are driven by hand.
+log "deposits are collected into the hot wallet"
+
+# wait_for_sweep ASSET — polls until a confirmed sweep of $addr in that asset
+# exists. It usually already does.
+wait_for_sweep() {
+  for _ in $(seq 1 60); do
+    if "$CTL" admin sweeps list --output json \
+       | jq -e --arg a "$addr_lc" --arg s "$1" \
+         '[.sweeps[] | select(.from_address==$a and .asset==$s and .status=="confirmed")] | length > 0' >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 2
+  done
+  echo "no confirmed $1 sweep of $addr_lc"
+  "$CTL" admin sweeps list || true
+  "${COMPOSE[@]}" logs --no-color --tail=80 exchange-chain || true
+  return 1
+}
+wait_for_sweep ETH
+wait_for_sweep USDC
+
+# Emptied: what is left is the gas the native sweep had to budget for itself,
+# far below the 0.05 ETH threshold that would make another sweep worthwhile.
+# The token has no such reserve, so it goes to exactly zero.
+addr_eth_left=$(on_chain balance "$addr")
+[ "$addr_eth_left" -lt 50000000000000000 ] || {
+  echo "the sweep confirmed but $addr still holds $addr_eth_left wei"; exit 1
+}
+addr_usdc_left=$(on_chain call "$usdc_contract" "balanceOf(address)(uint256)" "$addr")
+[ "$addr_usdc_left" = "0" ] || {
+  echo "the token sweep confirmed but $addr still holds $addr_usdc_left base units"; exit 1
+}
+log "the deposit addresses were emptied into the hot wallet"
+
+# The trial balance is the invariant the whole ledger rests on, and sweeping is
+# the first thing that writes to two house accounts in one entry.
+tb=$("$CTL" admin trial-balance --output json)
+echo "$tb" | jq -e '.balanced == true' >/dev/null \
+  || { echo "the trial balance is not zero after sweeping"; "$CTL" admin trial-balance; exit 1; }
+# And custody never claims a transfer it did not receive: sweeping is capped at
+# what the ledger was actually credited for, so this account cannot go negative
+# however much turns up on an address.
+echo "$tb" | jq -e '[.house[] | select(.code=="custody_deposit_addresses") | (.balance|tonumber) < 0] | any | not' >/dev/null \
+  || { echo "custody_deposit_addresses went negative"; "$CTL" admin trial-balance; exit 1; }
 
 log "a resting order survives kill -9 of the engine"
 session=$("$CTL" user register --email "restart-$STAMP@e2e.local" --password "restart-$STAMP-pw" --output json)

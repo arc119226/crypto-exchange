@@ -462,7 +462,7 @@ type CreatedAPIKey struct {
 
 // Deposit defines model for Deposit.
 type Deposit struct {
-	// Address The deposit address the funds arrived at.
+	// Address The deposit address the funds arrived at, lower-case. Note that this is *not* the form `GET /v1/deposit-address` returns: that one is EIP-55 checksummed so a wallet can catch a mistyped paste, while everything read back out of the chain tables is normalised. Compare the two only after deciding which representation you want.
 	Address string `json:"address"`
 
 	// Amount Arbitrary-precision decimal serialized as a string, at most 18 integer
