@@ -1411,6 +1411,9 @@ lint ──► unit ──► fuzz-smoke ──► integration ──► e2e ─
 - `compose-config`:`docker compose -f compose.yaml config` 與 `-f compose.yaml -f compose.prod.yaml config` 皆可解析(用假 `.env`)。
 - `image`:multi-arch 可選;`main` 推 `dev`,tag 推版本。
 - 版本釘住:Go 以 `go.mod`;容器 image 以 tag;foundry 以 `.env` / CI 變數 `FOUNDRY_TAG`,本機與 CI 一致。
+- **純文件的 PR 不跑**:`pull_request` 加 `paths-ignore: ['**/*.md', 'docs/**']`。一輪完整 CI 是九個 job、約 30 分鐘 runner 時間,而沒有任何 job 讀 `docs/**` 或 `.md`——測試載入的非 Go 檔案只有 `.env.example`、`deploy/seed-params/*.json`、`test/fixtures/*.json`,三者都不在濾除範圍內。`pull_request` 的 path filter 是對整個 PR diff 判定,所以同時碰程式與文件的分支照跑。
+  **刻意不套用在 `push` 上**:在純文件 commit 上打 `v*` tag 會讓 `image` 不跑而發出沒有 image 的 release;而 main 是所有分支的基準,每個 commit 都驗過是值得一輪的性質。
+  未來若在 main 開 branch protection 並把這些檢查設為 required,純文件 PR 會因為 required check 永不回報而合不起來——那時要補一個同名 job 的 workflow 在被濾路徑上直接成功。
 
 ## 14. 安全邊界與密鑰清單
 
