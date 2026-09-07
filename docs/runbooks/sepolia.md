@@ -192,6 +192,8 @@ yourname@yourlaptop:~$
 - 灰底框裡的東西是要你貼進終端機的。
 - `<像這樣的角括號>` 是**你要換掉的東西**,連角括號一起換掉。例如看到 `<你的地址>`,而你的地址是 `0xAbC...`,就整個換成 `0xAbC...`,不要留角括號。
 - 有些指令會分好幾行,行尾有一個反斜線 `\`。**整段一起複製貼上**,那是同一個指令。
+- **`<...>` 漏換掉不會好好報錯。** 在終端機裡 `<` 是「從檔案讀入」的意思,所以漏換的症狀是 `No such file or directory` 指著一個看起來莫名其妙的詞,而不是「你忘了換」。看到這種錯,先回去找有沒有沒換掉的角括號。
+- **從哪裡複製會影響對錯。** 有些顯示方式會幫 markdown 的特殊字元加跳脫:行尾 `\` 變成 `\\`、`_` 變成 `\_`。貼進終端機前掃一眼有沒有這種多餘的反斜線。最保險是直接從 repo 裡的 `docs/runbooks/sepolia.md` 複製。
 
 ---
 
@@ -656,20 +658,46 @@ Transaction hash: 0xabc...    ← 這個也抄下來
 
 ### 查出部署在第幾個區塊
 
+先把 tx hash 存成變數。**要換的只有這一行**,而且很短:
+
+```
+TX=0x貼上forge印的TransactionHash
+```
+
+（把 `0x...` 整串換掉,不要留角括號、不要留中文。)
+
 ```
 docker run --rm --entrypoint cast ghcr.io/foundry-rs/foundry:v1.8.1 \
-  receipt <剛剛的 Transaction hash> --rpc-url "$SEPOLIA_RPC" blockNumber
+  receipt "$TX" blockNumber --rpc-url "$SEPOLIA_RPC"
 ```
 
 印出一個數字,例如 `11651234`。**抄下來**,這是「部署區塊高度」。
+
+順便讓鏈自己告訴你合約地址,不用相信抄寫:
+
+```
+docker run --rm --entrypoint cast ghcr.io/foundry-rs/foundry:v1.8.1 \
+  receipt "$TX" contractAddress --rpc-url "$SEPOLIA_RPC"
+```
+
+應該跟 `forge` 印的 `Deployed to:` 一模一樣。存成變數,A6 要用:
+
+```
+USDC=0x上面印出來的合約地址
+```
 
 ## A6. 鑄一些 USDC 給熱錢包
 
 `MockUSDC` 誰都可以鑄(這是測試用合約,故意這樣設計的)。
 
+兩個值先就位。合約地址是 A5 印出來的那個(換過終端機視窗的話變數就沒了,所以這裡重貼一次);熱錢包直接從 `.env` 讀,不用抄:
+
 ```
+USDC=0x貼上A5的合約地址
+HOT=$(sed -n 's/^HOT_WALLET_ADDRESS=//p' .env | tr -d '[:space:]')
+
 docker run --rm --entrypoint cast ghcr.io/foundry-rs/foundry:v1.8.1 \
-  send <A5 的合約地址> "mint(address,uint256)" <A1 的熱錢包地址> 1000000000000 \
+  send "$USDC" "mint(address,uint256)" "$HOT" 1000000000000 \
   --rpc-url "$SEPOLIA_RPC" \
   --private-key "$(cat secrets/sepolia-deployer.key)"
 ```
@@ -680,7 +708,7 @@ docker run --rm --entrypoint cast ghcr.io/foundry-rs/foundry:v1.8.1 \
 
 ```
 docker run --rm --entrypoint cast ghcr.io/foundry-rs/foundry:v1.8.1 \
-  call <A5 的合約地址> "balanceOf(address)(uint256)" <A1 的熱錢包地址> \
+  call "$USDC" "balanceOf(address)(uint256)" "$HOT" \
   --rpc-url "$SEPOLIA_RPC"
 ```
 
@@ -834,19 +862,30 @@ go run ./cmd/exchangectl assets list
 
 真正的交易所遇到這種事(老闆從冷錢包轉錢進來、或收到補助),做法就是這個:記一筆「這筆錢從系統外面進來」。
 
+金額直接問鏈,不要憑印象打——記錯的話對帳不會歸零:
+
 ```
-go run ./cmd/exchangectl admin house-adjust \
-  --code custody_hot --asset ETH \
-  --amount <A4 實際打進熱錢包的數量,例如 0.05> \
-  --direction credit \
-  --reason "sepolia faucet 注資熱錢包,tx <faucet 那筆的 tx hash,不知道就寫日期>" \
-  --idempotency-key "sepolia-hot-eth-1"
+HOT=$(sed -n 's/^HOT_WALLET_ADDRESS=//p' .env | tr -d '[:space:]')
+AMOUNT=$(docker run --rm --entrypoint cast ghcr.io/foundry-rs/foundry:v1.8.1 \
+  balance "$HOT" --rpc-url "$SEPOLIA_RPC" --ether | tr -d '[:space:]')
+echo "熱錢包目前有 $AMOUNT ETH,要記這個數字"
 ```
 
 ```
 go run ./cmd/exchangectl admin house-adjust \
+  --code custody_hot --asset ETH \
+  --amount "$AMOUNT" \
+  --direction credit \
+  --reason "sepolia faucet 注資熱錢包 $(date +%F)" \
+  --idempotency-key "sepolia-hot-eth-1"
+```
+
+> 有 faucet 那筆的 tx hash 的話,把它加進 `--reason` 更好(從 Etherscan 抄)。這條會進稽核紀錄,是給半年後的人看的。
+
+```
+go run ./cmd/exchangectl admin house-adjust \
   --code custody_hot --asset USDC --amount 1000000 --direction credit \
-  --reason "A6 鑄給熱錢包,tx <A6 的 tx hash>" \
+  --reason "A6 鑄給熱錢包 $(date +%F)" \
   --idempotency-key "sepolia-hot-usdc-1"
 ```
 
@@ -899,8 +938,11 @@ go run ./cmd/exchangectl deposit-address --asset ETH
 順便也給它一些 USDC:
 
 ```
+USDC=$(sed -n 's/.*"usdc": *"\([^"]*\)".*/\1/p' deploy/compose/sepolia/sepolia-addresses.json)
+DEPOSIT=0x貼上上面拿到的充值地址
+
 docker run --rm --entrypoint cast ghcr.io/foundry-rs/foundry:v1.8.1 \
-  send <A5 的合約地址> "mint(address,uint256)" <B4 的充值地址> 250500000 \
+  send "$USDC" "mint(address,uint256)" "$DEPOSIT" 250500000 \
   --rpc-url "$SEPOLIA_RPC" \
   --private-key "$(cat secrets/sepolia-deployer.key)"
 ```
@@ -948,9 +990,16 @@ go run ./cmd/exchangectl admin sweeps list
 
 ### 小額(自動)
 
+提現要有個收款地址。用 A2 的部署者地址就行——那是你自己的:
+
 ```
-go run ./cmd/exchangectl withdrawals create \
-  --asset ETH --amount 0.003 --to <隨便一個你控制的地址,用 A2 的部署者地址就行>
+TO=$(docker run --rm --entrypoint cast ghcr.io/foundry-rs/foundry:v1.8.1 \
+  wallet address --private-key "$(cat secrets/sepolia-deployer.key)" | tr -d '[:space:]')
+echo "提現會送到 $TO"
+```
+
+```
+go run ./cmd/exchangectl withdrawals create --asset ETH --amount 0.003 --to "$TO"
 ```
 
 ```
@@ -962,8 +1011,7 @@ go run ./cmd/exchangectl withdrawals list
 ### 大額(人工審核)
 
 ```
-go run ./cmd/exchangectl withdrawals create \
-  --asset ETH --amount 0.008 --to <同一個地址>
+go run ./cmd/exchangectl withdrawals create --asset ETH --amount 0.008 --to "$TO"
 ```
 
 這筆會停在等待審核。用管理員身分看:
@@ -972,10 +1020,14 @@ go run ./cmd/exchangectl withdrawals create \
 go run ./cmd/exchangectl admin withdrawals list
 ```
 
-抄下它的 `id`,然後核准:
+把它的 `id` 存起來再核准:
 
 ```
-go run ./cmd/exchangectl admin withdrawals review <那個 id> approve --note "sepolia 手動驗證"
+WID=貼上上面那筆的id
+```
+
+```
+go run ./cmd/exchangectl admin withdrawals review "$WID" approve --note "sepolia 手動驗證"
 ```
 
 再看:
@@ -1061,8 +1113,7 @@ docker compose -f deploy/compose/compose.yaml -f deploy/compose/compose.sepolia.
 
 ```
 make down-sepolia
-docker volume ls | grep sepolia          # 看有哪些
-docker volume rm <上面列出來的每一個>
+docker volume ls -q | grep '^crypto-exchange-sepolia' | xargs -r docker volume rm
 ```
 
 然後從 B2 重做。
@@ -1071,6 +1122,8 @@ docker volume rm <上面列出來的每一個>
 
 | 你看到 | 意思 | 怎麼辦 |
 |---|---|---|
+| `error: unrecognized subcommand '\'` | 貼進來的行尾是 `\\` 而不是 `\`,多半是從轉義過的顯示版本複製的 | 刪掉多餘的反斜線,順便檢查有沒有 `\_` |
+| `-bash: <某個詞>: No such file or directory`,而那個詞來自指令裡的中文說明 | 角括號佔位符沒換掉,`<` 被當成輸入重新導向 | 找到那個 `<...>`,連角括號一起換成真正的值 |
 | 指令印出 forge 或 cast 的**說明頁**,什麼都沒做 | `docker run` 少了 `--entrypoint`。這個 image 的進入點是 `/bin/sh -c`,只執行第一個參數 | 加 `--entrypoint forge`(或 `cast`),並把子指令後面那個重複的工具名拿掉 |
 | `Failed to resolve ENS name to an address` | 傳給 `cast` 的不是合法地址——多半是從 `.env` 取值時連註解行一起抓到了 | 用 `echo "[$HOT]"` 看它實際是什麼。取值要用 `sed -n 's/^KEY=//p'`(錨定行首);`grep KEY` 會連提到那個名字的註解一起抓 |
 | `command not found: docker` / `make` / `go` | 沒裝好,或終端機沒重開 | 回第 3 節;裝完要**關掉終端機重開** |
