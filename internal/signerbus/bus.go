@@ -71,6 +71,27 @@ type wireResponse struct {
 	Error   *wireError `json:"error,omitempty"`
 }
 
+// LogValue keeps the signed transaction out of logs, the same way
+// signer.Result does. This struct is the second place those bytes live: they
+// cross the NATS boundary base64-encoded, so a split deployment would be the
+// one that leaks -- and a split deployment is exactly the one that has a
+// separate signer role because it is taking key handling seriously.
+func (r wireResponse) LogValue() slog.Value {
+	attrs := []slog.Attr{
+		slog.String("raw_tx", telemetry.Redacted),
+		slog.String("tx_hash", r.TxHash),
+		slog.String("from", r.From),
+		slog.Uint64("nonce", r.Nonce),
+	}
+	if r.Address != "" {
+		attrs = append(attrs, slog.String("address", r.Address))
+	}
+	if r.Error != nil {
+		attrs = append(attrs, slog.String("error_kind", r.Error.Kind), slog.String("error", r.Error.Message))
+	}
+	return slog.GroupValue(attrs...)
+}
+
 // wireError classifies a failure so the caller can rebuild the sentinel it
 // would have seen in-process. Without it a refusal and a transient RPC error
 // would be indistinguishable across the container boundary, and the caller
