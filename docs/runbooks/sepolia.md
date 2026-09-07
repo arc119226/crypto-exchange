@@ -624,12 +624,15 @@ faucet 給得比建議少不用緊張,**到最低那一欄就能走完全程**�
 
 ```
 docker run --rm -v "$PWD/infra/contracts:/w" -w /w \
+  --entrypoint forge \
   ghcr.io/foundry-rs/foundry:v1.8.1 \
-  forge create src/MockUSDC.sol:MockUSDC \
+  create src/MockUSDC.sol:MockUSDC \
     --rpc-url "$SEPOLIA_RPC" \
     --private-key "$(cat secrets/sepolia-deployer.key)" \
     --broadcast
 ```
+
+> **`--entrypoint forge` 不能省,而且後面只寫 `create` 不寫 `forge create`。** 這個 image 的預設進入點是 `/bin/sh -c`,它只把第一個參數當指令執行、其餘丟給 `$0`、`$1`……所以不指定 entrypoint 的話,實際跑到的是沒有參數的 `forge`,結果是印一頁說明而不是部署。
 
 第一次會下載編譯器,等一兩分鐘。成功的話印出:
 
@@ -1068,6 +1071,7 @@ docker volume rm <上面列出來的每一個>
 
 | 你看到 | 意思 | 怎麼辦 |
 |---|---|---|
+| 指令印出 forge 或 cast 的**說明頁**,什麼都沒做 | `docker run` 少了 `--entrypoint`。這個 image 的進入點是 `/bin/sh -c`,只執行第一個參數 | 加 `--entrypoint forge`(或 `cast`),並把子指令後面那個重複的工具名拿掉 |
 | `Failed to resolve ENS name to an address` | 傳給 `cast` 的不是合法地址——多半是從 `.env` 取值時連註解行一起抓到了 | 用 `echo "[$HOT]"` 看它實際是什麼。取值要用 `sed -n 's/^KEY=//p'`(錨定行首);`grep KEY` 會連提到那個名字的註解一起抓 |
 | `command not found: docker` / `make` / `go` | 沒裝好,或終端機沒重開 | 回第 3 節;裝完要**關掉終端機重開** |
 | `go version` 印出 1.26 以下 | 你用 `apt install golang-go` 裝的,那個版本太舊 | `sudo apt remove -y golang-go`,再照 3.3 用官方 tarball 裝一次 |
@@ -1121,8 +1125,9 @@ make gen-dev-secrets && grep '^HOT_WALLET_ADDRESS=' .env
 docker run --rm --entrypoint cast ghcr.io/foundry-rs/foundry:v1.8.1 wallet new
 export SEPOLIA_RPC="https://eth-sepolia.g.alchemy.com/v2/<your key>" DEPLOY_BLOCK=<from cast receipt>
 # faucet -> deployer, hot wallet
-docker run --rm -v "$PWD/infra/contracts:/w" -w /w ghcr.io/foundry-rs/foundry:v1.8.1 \
-  forge create src/MockUSDC.sol:MockUSDC --rpc-url "$SEPOLIA_RPC" \
+docker run --rm -v "$PWD/infra/contracts:/w" -w /w --entrypoint forge \
+  ghcr.io/foundry-rs/foundry:v1.8.1 \
+  create src/MockUSDC.sol:MockUSDC --rpc-url "$SEPOLIA_RPC" \
   --private-key "$(cat secrets/sepolia-deployer.key)" --broadcast
 
 # B
