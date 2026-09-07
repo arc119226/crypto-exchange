@@ -311,9 +311,12 @@ func (w *Worker) planOne(ctx context.Context, addr sqlcgen.ChainDepositAddress, 
 		FromAddress: addr.Address, Asset: asset.Symbol, Amount: pg.NumericFromAmount(amount),
 	})
 	if err != nil {
-		// The partial unique index refuses a second sweep of an address this
-		// one has not emptied yet. That is the index doing its job, not a
-		// failure: the sweep already in flight will move the money.
+		// The partial unique index refuses a second sweep of an address that
+		// already has one in flight, whatever its asset. That is the index
+		// doing its job, not a failure. Across assets it will not move *this*
+		// asset -- but it owns the address's ether until it settles, and both
+		// of them plan as though they owned all of it (0015), so this one
+		// waits for the next tick and reads the balance that is really left.
 		if isUniqueViolation(err) {
 			return nil
 		}
