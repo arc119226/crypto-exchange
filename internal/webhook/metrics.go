@@ -28,3 +28,26 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 	}
 	return m
 }
+
+// AdminMetrics is what the admin role exports. It is separate from Metrics
+// because the two never run in the same process: the worker cannot replay and
+// admin cannot deliver, so one struct would mean each role publishing a
+// counter it is structurally incapable of moving.
+type AdminMetrics struct {
+	replays prometheus.Counter
+}
+
+// NewAdminMetrics registers the collector. A nil registerer returns an
+// unregistered one, which keeps tests from needing a registry.
+func NewAdminMetrics(reg prometheus.Registerer) *AdminMetrics {
+	m := &AdminMetrics{
+		replays: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "webhook_replays_total",
+			Help: "Deliveries an operator asked to be sent again.",
+		}),
+	}
+	if reg != nil {
+		reg.MustRegister(m.replays)
+	}
+	return m
+}

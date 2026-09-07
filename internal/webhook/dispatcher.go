@@ -44,9 +44,14 @@ type Config struct {
 //
 // It is deliberately two halves that do not call each other. Enqueue runs
 // from the JetStream consumer and does nothing but write rows; Deliver runs
-// on its own clock and does nothing but send them. The split is what makes
-// at-least-once delivery safe: JetStream redelivering a message can only ever
-// re-run an idempotent insert, never a second POST.
+// on its own clock and does nothing but send them. The split is what keeps
+// JetStream's redelivery cheap: while an event is still queued, receiving it
+// again re-runs an idempotent insert and nothing else.
+//
+// It is not a duplicate-suppression mechanism, and docs/webhooks.md says so to
+// customers. Once a delivery finishes the queue row is gone, so a redelivery
+// after that enqueues a fresh run and the endpoint is POSTed again with the
+// same event_id. Delivery is at-least-once; the receiver deduplicates.
 type Dispatcher struct {
 	db      *pgxpool.Pool
 	cfg     Config
@@ -258,7 +263,7 @@ func (d *Dispatcher) settle(ctx context.Context, row sqlcgen.ClaimDueRow, a atte
 
 	p := sqlcgen.RecordAttemptParams{
 		TenantID: row.TenantID, EndpointID: row.EndpointID, EventID: row.EventID,
-		EventType: row.EventType, Attempt: row.Attempts, Status: status,
+		RunID: row.RunID, EventType: row.EventType, Attempt: row.Attempts, Status: status,
 		Error: a.err, DurationMs: int32(a.duration.Milliseconds()), //nolint:gosec // a duration in ms is far below 2^31
 	}
 	if a.code != 0 {
@@ -275,12 +280,13 @@ func (d *Dispatcher) settle(ctx context.Context, row sqlcgen.ClaimDueRow, a atte
 	if final {
 		if err := q.Dequeue(ctx, sqlcgen.DequeueParams{
 			TenantID: row.TenantID, EndpointID: row.EndpointID, EventID: row.EventID,
+			RunID: row.RunID,
 		}); err != nil {
 			return fmt.Errorf("webhook: dequeue: %w", err)
 		}
 	} else if err := q.RescheduleQueued(ctx, sqlcgen.RescheduleQueuedParams{
 		TenantID: row.TenantID, EndpointID: row.EndpointID, EventID: row.EventID,
-		NextAttemptAt: d.now().Add(d.cfg.Backoff[next]),
+		RunID: row.RunID, NextAttemptAt: d.now().Add(d.cfg.Backoff[next]),
 	}); err != nil {
 		return fmt.Errorf("webhook: reschedule: %w", err)
 	}

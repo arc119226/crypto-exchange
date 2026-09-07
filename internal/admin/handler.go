@@ -18,6 +18,7 @@ import (
 	"github.com/arc119226/crypto-exchange/internal/ledger"
 	"github.com/arc119226/crypto-exchange/internal/registry"
 	"github.com/arc119226/crypto-exchange/internal/telemetry"
+	"github.com/arc119226/crypto-exchange/internal/webhook"
 )
 
 // actorID is recorded on audit events for the static admin API key.
@@ -38,6 +39,10 @@ type Handler struct {
 	// tables, which turns the two withdrawal endpoints into 500s rather than
 	// pretending the queue is empty.
 	withdrawals *withdrawal.Reviewer
+	// webhooks is the outbound-webhook configuration; nil in a deployment
+	// without the webhook tables, which turns those endpoints into 500s
+	// rather than reporting that no customer has subscribed to anything.
+	webhooks *webhook.Store
 }
 
 var _ gen.StrictServerInterface = (*Handler)(nil)
@@ -58,6 +63,12 @@ func (h *Handler) WithChainID(id int64) *Handler { h.chainID = id; return h }
 // WithWithdrawals enables the withdrawal review queue.
 func (h *Handler) WithWithdrawals(r *withdrawal.Reviewer) *Handler {
 	h.withdrawals = r
+	return h
+}
+
+// WithWebhooks enables the outbound-webhook endpoints.
+func (h *Handler) WithWebhooks(s *webhook.Store) *Handler {
+	h.webhooks = s
 	return h
 }
 

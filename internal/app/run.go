@@ -134,7 +134,11 @@ func Run(ctx context.Context, cfg Config, roles []Role, bi BuildInfo) error {
 				return err
 			}
 			adminLedger = l
-			servers = append(servers, newAdminServer(cfg, log, httpMetrics, d.pool, l))
+			srv, err := newAdminServer(cfg, log, httpMetrics, reg, d.pool, l)
+			if err != nil {
+				return err
+			}
+			servers = append(servers, srv)
 		case RoleChain:
 			l, err := ledgerFor()
 			if err != nil {
