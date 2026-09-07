@@ -1152,9 +1152,31 @@ make down-sepolia
 
 ## 5. 把結果填回來
 
-這是我要的東西,填好給我,我寫進最終文件。
+**跑這個,把輸出整份貼給我:**
 
-欄位的意思、怎麼拿、以及**哪兩件不用你做**(成本不用自己算、時間不用精確),都在 [A7](#順便記下這兩筆的實際成本) 說明過,這裡不重複。拿法一樣:
+```
+ALICE_PASSWORD='correct horse battery' scripts/sepolia-results.sh
+```
+
+它會把交易所記錄的每一筆(充值、歸集、提現)的 tx hash 撈出來,對每一筆查 receipt,算好成本和時間,直接輸出兩張填好的表格 —— 同時印在畫面上,也存成 `sepolia-results.md`。
+
+> **為什麼要帶 `ALICE_PASSWORD`:** 充值和提現的紀錄要用 alice 的身分才讀得到,而登入權杖只活 15 分鐘 —— 你走到這裡一定早就過期了。腳本會自己重新登入。
+>
+> 不帶也能跑,只是充值和提現那幾列會是空的,而且腳本會告訴你為什麼。
+
+### 有兩件它撈不到
+
+**一、熱錢包的 faucet 注資。** 那筆交易發生在交易所外面,系統從來沒看過它。去 [Etherscan](https://sepolia.etherscan.io/) 查熱錢包地址的收款紀錄,拿到 hash 之後重跑一次:
+
+```
+FAUCET_TX=0x那筆的hash ALICE_PASSWORD='correct horse battery' scripts/sepolia-results.sh
+```
+
+**二、「有沒有哪一步的說明看不懂 / 跟實際不一樣」。** 只有走過的人知道 —— **這一列最重要**,這份文件寫得對不對,只有你能回答。腳本會把它留空並標記出來,請你自己補上。
+
+### 腳本壞掉的話
+
+手動查一筆的方法還在:
 
 ```
 TX=0x那筆交易的hash
@@ -1162,27 +1184,10 @@ docker run --rm --entrypoint cast ghcr.io/foundry-rs/foundry:v1.8.1 \
   receipt "$TX" --rpc-url "$SEPOLIA_RPC"
 ```
 
-| 步驟 | tx hash | block | gas used | effective gas price | 成本 (ETH) | 送出 → confirmed(秒) |
-|---|---|---|---|---|---|---|
-| 熱錢包 faucet 注資 | | | | | | |
-| ETH 充值(faucet → 充值地址) | | | | | | |
-| USDC 充值(mint → 充值地址) | | | | | | |
-| ETH 歸集 | | | | | | |
-| USDC 歸集:補 gas | | | | | | |
-| USDC 歸集:轉帳 | | | | | | |
-| 提現(自動核可) | | | | | | |
-| 提現(人工審核) | | | | | | |
+`gasUsed` × `effectiveGasPrice` ÷ 10^18 就是那筆的成本(ETH)。欄位的意思在 [A7](#順便記下這兩筆的實際成本) 說明過。
 
-| 觀察 | 值 |
-|---|---|
-| 充值從上鏈到 `credited` 實際花多久 | |
-| 對帳一輪要多久 | |
-| 整段期間 gas 價格大概多少 | |
-| RPC 有沒有被限流,或出現 `pruned history unavailable` | |
-| 有沒有遇到 reorg(`deposits list` 出現 `orphaned`) | |
-| **有沒有哪一步的說明看不懂 / 跟實際不一樣** | |
+要撈的東西是:充值 ×2、歸集 ×3(ETH、USDC 補 gas、USDC 轉帳)、提現 ×2,加上 faucet 注資那筆,總共八列;另外是對帳一輪的耗時、gas 價格區間、有沒有被限流、有沒有 reorg。
 
-最後一列最重要——這份文件寫得對不對,只有你知道。
 
 ---
 
