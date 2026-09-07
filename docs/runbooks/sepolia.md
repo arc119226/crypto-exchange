@@ -344,6 +344,8 @@ git checkout main
 git pull
 ```
 
+> 這一步在 **Part B 開頭還要再做一次**,不是多餘的。Part A 只用到很早就存在的東西;Part B 用的設定檔和指令是後來才加進 repo 的,中間如果有人推了新的 commit,你這裡拉到的就不夠新。
+
 **驗證你在對的地方**:
 
 ```
@@ -789,7 +791,41 @@ transactionHash     0x...
 > ```
 > 忘了貼會看到 `set ETH_RPC_URL...` 或 `connection refused` 之類的錯誤。
 
+## B0. 先確認你的 checkout 夠新
+
+**Part B 用到的檔案有一部分是後來才加進 repo 的。** 先拉最新的,再確認它們真的到你機器上了:
+
+```
+cd ~/crypto-exchange
+git checkout main && git pull
+ls deploy/compose/sepolia/ deploy/seed-params/ deploy/compose/compose.sepolia.yaml
+```
+
+要看到這些(順序可能不同,內容要一樣):
+
+```
+deploy/compose/compose.sepolia.yaml
+
+deploy/compose/sepolia/:
+README.md
+seed-params.json.example
+sepolia-addresses.json.example
+
+deploy/seed-params/:
+README.md
+anvil.json
+sepolia.json
+```
+
+**少任何一個,就先不要往下走**,再 `git pull` 一次。還是少的話停在這裡跟我說。
+
+> 「第 4.2 節不是拉過了嗎?」拉過,但那是 Part A 開始之前。Part A 只用到 `make gen-dev-secrets` 和 foundry 的 image,那些很早就在了;Part B 用的 `compose.sepolia.yaml`、`make up-sepolia`、`deploy/seed-params/`、資料庫的 migration 是後來才進來的。中間 repo 有更新的話,你 Part A 開始時拉的那份就不夠。
+>
+> 這也是為什麼這一節不寫死某個版本號:**能驗證的是「這幾個路徑存在」,不是「你在第幾個 commit」。**
+
 ## B1. 寫兩個設定檔
+
+這一節要用的兩個範本檔(`deploy/compose/sepolia/` 底下那兩個 `.example`)是 B0 確認過的東西。**B0 沒過就不要往下**——下面第一個指令就會失敗。
 
 先複製範本:
 
@@ -1184,6 +1220,7 @@ docker volume ls -q | grep '^crypto-exchange-sepolia' | xargs -r docker volume r
 | `set ETH_SCAN_START_BLOCK...` | `.env` 裡沒有那一行 | 回 B2 加上去 |
 | `connection refused` / 空白的表格 | 忘了貼 Part B 開頭那四行,或交易所沒起來 | 先貼那四行;還是不行看 6.1 的記錄 |
 | `no such file or directory` | 你不在專案資料夾 | `cd ~/crypto-exchange`,再 `ls` 確認 |
+| `cp: cannot stat '...json.example': No such file or directory` | 你在對的資料夾,但 checkout 比這份文件舊,那些檔案還沒進到你的機器 | 回 B0:`git checkout main && git pull`,再用 B0 那行 `ls` 確認三個路徑都在 |
 | 記錄裡有 `pruned history unavailable` | 你的 RPC 背後某台機器刪掉了舊資料 | 換一個 RPC(A3),`make down-sepolia` 後重做 B2 |
 | `the node is on a different chain than the cursor` | 資料庫記的鏈跟你現在連的不是同一條,或 `ETH_SCAN_START_BLOCK` 被改過 | **這是保護不是故障。** 錯誤訊息會告訴你原本記的值,設回去。真的要換鏈就照 6.1 全部重來 |
 | 充值一直停在 `detected` 超過五分鐘 | 掃描器落後,或確認數還不夠 | 先等到兩分鐘以上。還是不動就看記錄,可能是 RPC 被限流 |
