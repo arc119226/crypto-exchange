@@ -66,6 +66,15 @@ func newAdminServer(cfg Config, log *slog.Logger, m *telemetry.HTTPMetrics, reg 
 		admin.WriteProblem(w, req, http.StatusMethodNotAllowed, "Method Not Allowed", "")
 	})
 	rec := audit.NewRecorder(cfg.TenantID)
+	// A deployment with no signing key cannot have working endpoints at all --
+	// the worker could not open their secrets either -- so the endpoints say
+	// so instead of creating ones that could never be delivered to.
+	var webhooks *webhook.Store
+	if len(master) > 0 {
+		webhooks = webhook.NewStore(pool, cfg.TenantID, master).WithMetrics(webhook.NewAdminMetrics(reg))
+	} else {
+		log.Warn("WEBHOOK_SIGNING_KEY is not set: the webhook endpoints are disabled")
+	}
 	admin.Mount(r, admin.NewHandler(pool, l, registry.NewStore(pool), rec, cfg.TenantID).
 		// Which chain's reconciliation reports this role shows. It cannot
 		// produce one -- it has no node -- so this is only which rows to read.
@@ -76,8 +85,7 @@ func newAdminServer(cfg Config, log *slog.Logger, m *telemetry.HTTPMetrics, reg 
 		// Endpoint configuration and replay. This role never delivers -- it has
 		// no consumer and no delivery loop -- so the only thing it does to the
 		// queue is add a run to it (migration 0016/0017 grant exactly that).
-		WithWebhooks(webhook.NewStore(pool, cfg.TenantID, master).
-			WithMetrics(webhook.NewAdminMetrics(reg))))
+		WithWebhooks(webhooks))
 	return &http.Server{Addr: cfg.AdminAddr, Handler: r, ReadHeaderTimeout: 5 * time.Second}, nil
 }
 

@@ -891,3 +891,48 @@ afac2058  USDC  250.5  confirmed          ← 下一輪重新規劃的
 而 §22.6 原本寫錯的機制,也是同一件事的樣本:那是對現象的合理推測,不是對程式碼與區塊順序的驗證。事後把 `sepoliaresults.md` 的區塊編號排一次,一分鐘就定死了順序。
 
 **教訓不是「多派 agent」,是驗證的對象要選對。** 有用的驗證都指向同一種東西:**一個能反駁我的、獨立於我的紀錄**——區塊編號、`grep` 的命中數、紅燈測試、資料庫的欄位。指向「再想一遍」的驗證一次都沒有抓到東西。
+
+## 23. Phase 5a / 5b 程式碼與 §7.6 / §12 的對應(出站 webhook)
+
+事件本來就進了 JetStream,缺的只是最後一跳:哪些客戶 URL 要哪些事件,以及每一次送出去發生了什麼。5a 做投遞路徑,5b 做後台與 replay。
+
+| §7.6 / §12 的要求 | 程式碼 |
+|---|---|
+| 後台註冊 endpoint(`url`、`event_types[]`、`secret` 顯示一次、`status`) | `webhook.endpoints`(0016)、`internal/webhook/store.go`、`POST/GET /admin/v1/webhooks` |
+| `POST url`,body = envelope,四個 header | `internal/webhook/dispatcher.go` 的 `post`、`internal/webhook/sign.go` |
+| `X-Exchange-Signature: v1=hex(hmac_sha256(secret, timestamp + "." + body))` | `webhook.Sign` / `webhook.Verify`,§7.6 的字串一字不差 |
+| 2xx 成功;否則 1m → 5m → 30m → 2h → 12h → 24h | `WebhookConfig.Backoff`;退避清單的長度就是嘗試預算 |
+| `webhook.deliveries` 記錄每次嘗試(狀態碼、耗時、錯誤) | 0016 的 `deliveries`,一次嘗試一列 |
+| 後台可查、可手動 replay | `GET /admin/v1/webhooks/{id}/deliveries`、`POST .../replay` |
+| 至少一次投遞;客戶以 `event_id` 去重 | `docs/webhooks.md`「Delivery is at-least-once」 |
+| `exchangectl webhook-sink`(本機接收並驗簽) | `cmd/exchangectl/webhook_sink.go` |
+| §12 DoD:500 兩次後第三次成功,deliveries 有 3 筆 | `TestWebhookRetriesUntilTheEndpointAcceptsIt`(SQL 面)與 `TestWebhookDeliveriesEndpointShowsEveryAttempt`(後台面) |
+
+`internal/webhook` 的 depguard 允許清單只有 `$gostd`、自己的 `sqlcgen`、`eventbus`、`secretbox`、`telemetry`、pgx、prometheus。投遞是離開系統的最後一跳,它沒有必要知道什麼是一筆交易或一筆提現——事件以 envelope 的形式到它面前,其他領域一概搆不著。JetStream 的 consumer 因此也不在這個 package 裡,而在 `internal/app/webhook_consumer.go`:同樣的理由讓 `cmdbus` 不在 `internal/trading` 裡。
+
+### 23.1 兩個索引都是為一個沒有走完的情境寫的
+
+0016 的兩個唯一索引都聲稱在防「JetStream 的 at-least-once 重送造成重複投遞」。設計 admin 面、把 replay 從頭到尾走一遍之後,三件事一起浮出來:
+
+**`deliveries_delivered_uniq` 站在它宣稱要防止的副作用的下游。** POST 在 `post()` 就結束了,`settle()` 之後才開交易碰到索引。它擋不了一個 POST,只能藏住那個 POST 的紀錄——而它真的在藏:投遞成功後 queue 列被刪,晚到的重送重新入列、worker 再送一次,索引把第二列 delivered 默默丟掉。所以正確的說法不是「delivered 兩次從此合法」,而是**「delivered 兩次一直都可能發生,是索引在銷毀證據」**。
+
+**replay 的嘗試根本不會被記錄。** 重插的 queue 列 `attempts = 0`,於是它的 delivery 列和原本那輪的 attempt 0 撞上 `deliveries_attempt_uniq`,而 `RecordAttempt` 結尾是**沒有指定目標的** `ON CONFLICT DO NOTHING`——POST 送出去了、客戶收到了、表格一個字沒記,log 還照樣印 `webhook delivered`。replay 一筆 dead 的更徹底:它從 0 重跑整條排程,每一步都撞,產生**零列**。
+
+**`Dequeue` 會刪掉不屬於它的列。** `claim` 在任何 HTTP 之前就 commit,所以兩個 tick 可以各自 claim 到同一列而都 POST;後結算的那個帶著已經結束的一輪,而 `Dequeue` 只用 `(tenant, endpoint, event)` 定位——replay 之後,那個 key 上的列是 operator 剛排進去的新一輪。
+
+修法是給 queue 與 deliveries 各加一個 `run_id`:**一輪 = 一次走完 §7.6 的排程**,第一次投遞是一輪,每次 replay 是另一輪。`attempt` 於是繼續只有一個意思(排程的第幾步),退避索引、放棄判定、每一行 log 都不用動,而 `run_id` 順便就是 `Dequeue` 與 `RescheduleQueued` 需要的 fence。
+
+我第一版想的是 `attempt_base`——一個偏移欄,delivery 編號記成 `base + attempts`。它要一個 `SELECT max(attempt) + 1` 子查詢:一個在交易外算出來、讀到就過期的值,而它一旦算錯,退化回來的正好就是上面那個「安靜地不記錄」的缺陷。`run_id` 沒有這個輸入。
+
+### 23.2 停用 endpoint 會留下永遠撿不走的工作
+
+`ClaimDue` 濾 `e.status = 'active'`,所以一個 endpoint 被停用時,它已排隊的列**不是待處理而是搆不到**:沒有東西會投遞它們,也沒有東西會刪掉它們——每一條刪除路徑都在 `settle` 裡面。後果有四層:卡住同一個 `(endpoint, event)` 之後的任何 replay(主鍵衝突)、透過 `queue_event_fk` 把 `webhook.events` 的列釘住擋掉 0017 承諾的清理 job、幾個月後重新啟用會毫無預警地朝一個剛把整合打開的客戶噴一批陳年事件。
+
+停用之後那些投遞就是不欠了,所以 `SetStatus` 在同一筆交易裡把它們刪掉。丟掉幾筆記進**審計事件的 `After`**(`queued_dropped`),而不是往 `webhook.deliveries` 補 dead 列:後者要給 `ex_admin` 新的 INSERT 權限,而 0016 把 deliveries 的寫入權限收得緊是刻意的。審計是唯一會說出「客戶為什麼沒收到」的地方,而那正是審計該在的位置。
+
+### 23.3 這一輪學到的事
+
+- **一張表的正確性,要從它的使用者那一端驗。** 0016 的欄位、CHECK、權限都是對的;錯的是兩個索引所描述的情境從來沒有被從 POST 走到 settle。走一遍花了不到一小時,而它抓到的三個缺陷沒有一個是讀 schema 讀得出來的。
+- **`ON CONFLICT DO NOTHING` 不寫目標,就是在對每一個未來的約束簽空白支票。** 這裡它同時吞掉了兩個完全不同的衝突,其中一個是設計要的(併發重複結算),另一個是資料遺失。指定目標之後,新長出來的約束會大聲失敗而不是丟掉一列。
+- **一個測試如果自己寫了它要驗的那句 SQL,它什麼都沒驗。** `TestAStaleSettleCannotDequeueAnotherRun` 第一版是自己 `DELETE ... AND run_id = $2` 然後斷言刪了 0 列——把 `Dequeue` 的 fence 拿掉,它照樣綠。改成用一個會卡住的 receiver 讓兩個 tick 真的重疊、走真正的 `settle`,才變成紅得起來的測試。三個 schema 改動全部都這樣反向驗過。
+- **§22.8 那條又出現了一次,而且這次是索引的註解在說謊。** 一段解釋「這個索引防止 X」的註解,和一個真的防止 X 的索引,在 code review 裡看起來一模一樣。

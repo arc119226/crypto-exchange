@@ -1247,7 +1247,7 @@ exchangectl deposit simulate --user alice --asset ETH --amount 1.5        # cast
 exchangectl deposits list --user alice                                   # detected → credited
 exchangectl withdraw --user alice --asset ETH --amount 0.2 --to 0x...    # 限額內自動
 exchangectl withdraw --user alice --asset ETH --amount 50 --to 0x...     # 進 pending_review
-exchangectl admin withdrawals approve $ID
+exchangectl admin withdrawals review $ID approve --reason '手動核准'
 exchangectl admin reconcile                                              # diff = 0
 ```
 
@@ -1275,9 +1275,9 @@ exchangectl admin reconcile                                              # diff 
 - [ ] 用戶頁:列表、詳情、kyc_level、凍結;`PUT /users/{id}/kyc-level` API(admin API key scope)(1 d)
 - [ ] 帳本頁:試算平衡、帳戶餘額、journal 瀏覽(依 account / ref)、調帳表單(1 d)
 - [ ] 提現審核佇列(approve/reject/resolve)、充值、歸集、熱錢包頁(1.5 d)
-- [ ] 對帳 job(worker,每 5 min)+ `0007_admin.sql`(`reconciliation_reports`、`reconciliation_breaks`)+ 頁面 + `reconciliation.break_detected` 事件(1.5 d)
+- [ ] 對帳 job(每 5 min)+ `0013_reconciliation.sql`(`reconciliation_reports`、`reconciliation_breaks`)+ 頁面 + `reconciliation.break_detected` 事件(1.5 d)——**已於 Phase 4c-2 完成,而且跑在 chain role 而不是 worker**:對帳要讀鏈上餘額,而只有 chain role 有節點(理由見 `docs/domain.md` §20.1)
 - [ ] 審計查詢頁(過濾 actor / action / target)(0.5 d)
-- [ ] `webhook`:`0008_webhook.sql`、endpoint CRUD 頁、dispatcher(durable consumer、HMAC、退避、deliveries、dead)、replay(2 d)
+- [ ] `webhook`:`0016_webhook.sql` + `0017_webhook_replay.sql`、endpoint 管理頁、dispatcher(durable consumer、HMAC、退避、deliveries、dead)、replay(2 d)——5a 做了 dispatcher,5b 做了 admin API 與 replay,頁面留到後台那批
 - [ ] `docs/webhooks.md`、`exchangectl webhook-sink`(本機接收並驗簽的測試工具)(0.5 d)
 - [ ] 測試:對帳能抓出人為植入的錯帳(直接 SQL 插一筆 posting 破壞平衡 → break);提現審核狀態機每個轉移;webhook 重試與簽名驗證;TOTP 錯碼鎖定(1.5 d)
 
@@ -1287,9 +1287,12 @@ exchangectl admin reconcile                                              # diff 
 
 ```
 open http://localhost:8082/admin/login          # admin + TOTP
-exchangectl webhook-sink --port 9999 &          # 本機收 webhook
-exchangectl admin webhooks create --url http://host.docker.internal:9999 --events 'trade.executed,withdrawal.state_changed'
+# 先建 endpoint:secret 只顯示一次,而 sink 需要它才驗得了簽
+WH=$(exchangectl admin webhooks create --url http://host.docker.internal:9999 \
+      --events 'trade.executed,withdrawal.state_changed' --output json)
+exchangectl webhook-sink --port 9999 --secret $(echo $WH | jq -r .secret) &
 exchangectl e2e                                  # sink 印出已驗簽事件
+exchangectl admin webhooks deliveries $(echo $WH | jq -r .id)   # 每次嘗試的狀態碼、耗時、錯誤
 ```
 
 **預估工時**:3–5 週。
