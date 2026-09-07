@@ -77,3 +77,24 @@ func TestRetryUntilStopsOnCancel(t *testing.T) {
 	assert.ErrorIs(t, err, context.Canceled)
 	assert.Equal(t, 2, calls)
 }
+
+// A retryStop must end the loop on the first attempt. Without this, the
+// wrapper is decoration: retryUntil never returns fn's error, so the
+// errors.As unwrap at every call site is unreachable and an error the caller
+// declared fatal is retried forever instead.
+func TestRetryUntilStopsOnRetryStop(t *testing.T) {
+	waits := stubSleep(t)
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	fatal := errors.New("the node is on a different chain")
+	calls := 0
+
+	err := retryUntil(t.Context(), log, "chain rpc", func(context.Context) error {
+		calls++
+		return retryStop{fatal}
+	})
+
+	require.Error(t, err)
+	assert.ErrorIs(t, err, fatal, "the caller must be able to unwrap what it wrapped")
+	assert.Equal(t, 1, calls, "a fatal error must not be retried")
+	assert.Empty(t, *waits, "and must not sleep before giving up")
+}
