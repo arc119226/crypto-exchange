@@ -6,6 +6,8 @@
 #        │                 └─► image
 #        └─► fuzz-smoke (push only: main merges and v* tags)
 #   fast-checks runs alongside: generated code, compose rendering, contracts.
+#
+#   A merge to main runs only fuzz-smoke and image; see below for why.
 name: ci
 
 on:
@@ -20,9 +22,7 @@ on:
   # whole PR diff, so a branch that touches code *and* docs still runs.
   #
   # Deliberately not applied to push: a v* tag cut from a docs-only commit
-  # would skip the image job and ship a release with no image, and main is
-  # every branch's base -- it is worth one full run per merge to know that
-  # every commit on it has been verified.
+  # would skip the image job and ship a release with no image.
   #
   # If main ever gains branch protection with these checks marked required,
   # this filter makes docs-only PRs unmergeable: the required check never
@@ -32,6 +32,36 @@ on:
     paths-ignore:
       - '**/*.md'
       - 'docs/**'
+
+# What a merge to main runs, and why it is almost nothing.
+#
+# This repository is developed one pull request at a time, from a branch cut
+# off the current main and merged as soon as it is green. Under that rule main
+# does not move between the branch point and the merge, so the merge commit's
+# tree is the pull request head's tree -- not equivalent, identical. Measured
+# on the last three merges: 45d3dc4d, 430e8ac9 and f768d745 each appear as
+# both the merge commit's tree and its second parent's.
+#
+# So lint, unit, fast-checks, integration and e2e on main re-test a tree that
+# passed minutes earlier, for about 28 billable minutes a merge. They are
+# skipped there. Two jobs are not, because they are the only things a merge
+# does that the pull request did not:
+#
+#   fuzz-smoke  the only place fuzzing runs at all; pull requests skip it
+#   image       its ghcr login and push steps are push-only
+#
+# Both keep their `needs`, with an `if` that accepts a skipped dependency --
+# without it the skip would cascade and the merge would run nothing.
+#
+# THE CONDITION THIS RESTS ON: one pull request in flight at a time. Merge a
+# second one while the first is open and the merge commit's tree stops
+# matching what CI saw, and nothing on main would test the combination. If
+# this repository ever gains concurrent branches, delete the five `if` lines
+# rather than reasoning about which merges are still safe. `git rev-parse
+# <merge>^{tree} <merge>^2^{tree}` is how to check whether the premise still
+# holds.
+#
+# Tags are untouched: a release is verified on its own, in full.
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -44,6 +74,9 @@ jobs:
   lint:
     name: lint
     runs-on: ubuntu-latest
+    # Not run on a merge to main -- see "what a merge to main runs" at the
+    # top of this file. Tags still run everything.
+    if: ${{ github.event_name != 'push' || github.ref != 'refs/heads/main' }}
     permissions:
       contents: read
       pull-requests: read # gitleaks-action lists the PR's commits to pick its scan range
@@ -71,6 +104,9 @@ jobs:
   unit:
     name: unit
     runs-on: ubuntu-latest
+    # Not run on a merge to main -- see "what a merge to main runs" at the
+    # top of this file. Tags still run everything.
+    if: ${{ github.event_name != 'push' || github.ref != 'refs/heads/main' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -107,7 +143,9 @@ jobs:
   fuzz-smoke:
     name: fuzz-smoke
     needs: [unit]
-    if: github.event_name == 'push'
+    # unit is skipped on a merge to main, and a skipped dependency would
+    # otherwise skip this too -- which is the one job the merge exists for.
+    if: ${{ !cancelled() && github.event_name == 'push' && (needs.unit.result == 'success' || needs.unit.result == 'skipped') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -136,6 +174,9 @@ jobs:
   fast-checks:
     name: fast-checks
     runs-on: ubuntu-latest
+    # Not run on a merge to main -- see "what a merge to main runs" at the
+    # top of this file. Tags still run everything.
+    if: ${{ github.event_name != 'push' || github.ref != 'refs/heads/main' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -175,6 +216,9 @@ jobs:
     name: integration
     needs: [lint, unit]
     runs-on: ubuntu-latest
+    # Not run on a merge to main -- see "what a merge to main runs" at the
+    # top of this file. Tags still run everything.
+    if: ${{ github.event_name != 'push' || github.ref != 'refs/heads/main' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -192,6 +236,9 @@ jobs:
     name: e2e
     needs: [integration]
     runs-on: ubuntu-latest
+    # Not run on a merge to main -- see "what a merge to main runs" at the
+    # top of this file. Tags still run everything.
+    if: ${{ github.event_name != 'push' || github.ref != 'refs/heads/main' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -223,6 +270,10 @@ jobs:
   image:
     name: image
     needs: [integration]
+    # Runs when integration passed, and when it was skipped because this is
+    # a merge to main. A real integration failure still stops it, and
+    # !cancelled() rather than always() so a cancelled run cannot publish.
+    if: ${{ !cancelled() && (needs.integration.result == 'success' || needs.integration.result == 'skipped') }}
     runs-on: ubuntu-latest
     permissions:
       contents: read

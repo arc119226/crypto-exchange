@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -41,6 +42,20 @@ func newAdminReconcileCmd() *cobra.Command {
 			if format == "json" {
 				return printJSON(cmd.OutOrStdout(), resp.JSON200)
 			}
+			// When the pass ran, before the numbers it produced. The admin
+			// role has no node, so this table is always a recording -- and
+			// during the Sepolia walkthrough that was read as live twice: an
+			// adjustment was made, the table still showed the state before
+			// it, and the operator concluded the adjustment had not worked.
+			// The Long text and sepolia.md both warn about the lag in prose;
+			// prose cannot tell you how old the table on your screen is.
+			out := cmd.OutOrStdout()
+			if _, err := fmt.Fprintf(out, "pass ran: %s → %s (%s)\n",
+				resp.JSON200.StartedAt.UTC().Format(time.RFC3339),
+				resp.JSON200.FinishedAt.UTC().Format("15:04:05Z"),
+				age(resp.JSON200.FinishedAt)); err != nil {
+				return err
+			}
 			rows := make([][]string, 0, len(resp.JSON200.Lines))
 			for _, l := range resp.JSON200.Lines {
 				status := "break"
@@ -53,9 +68,27 @@ func newAdminReconcileCmd() *cobra.Command {
 					l.Diff.String(), status,
 				})
 			}
-			return printTable(cmd.OutOrStdout(),
+			return printTable(out,
 				[]string{"ASSET", "LEDGER", "CHAIN", "UNCREDITED", "ABOVE", "IN FLIGHT", "DIFF", ""}, rows)
 		},
+	}
+}
+
+// age renders how long ago something happened, because a timestamp alone
+// still asks the reader to do arithmetic against a clock they are not looking
+// at. Whole seconds under a minute, whole minutes above: the reconciliation
+// interval is minutes, so anything finer is noise.
+func age(t time.Time) string {
+	d := time.Since(t)
+	switch {
+	case d < 0:
+		// A clock difference between here and the chain role. Say so rather
+		// than print a negative age.
+		return "just now"
+	case d < time.Minute:
+		return fmt.Sprintf("%ds ago", int(d.Seconds()))
+	default:
+		return fmt.Sprintf("%dm ago", int(d.Minutes()))
 	}
 }
 

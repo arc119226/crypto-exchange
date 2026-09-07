@@ -66,7 +66,7 @@ func (w *Worker) Tick(ctx context.Context) error {
 	}
 	hot, err := w.hotWallet(ctx)
 	if err != nil {
-		return err
+		return w.skipIfNotReadyYet(err)
 	}
 	head, err := w.chain.Head(ctx)
 	if err != nil {
@@ -80,7 +80,7 @@ func (w *Worker) Tick(ctx context.Context) error {
 	}
 	frontiers, err := w.frontiers(ctx, head, assets)
 	if err != nil {
-		return err
+		return w.skipIfNotReadyYet(err)
 	}
 
 	addresses, err := w.addresses(ctx)
@@ -130,14 +130,51 @@ func (w *Worker) assets(ctx context.Context) ([]registry.Asset, error) {
 	return out, nil
 }
 
+// skipIfNotReadyYet turns the two "this deployment does not have that row
+// yet" errors into a skipped pass, and passes everything else through.
+//
+// The caller logs any error Tick returns at ERROR, once per interval, with no
+// dedup. On a fresh database that meant an ERROR for the missing cursor until
+// the scanner's first pass; in a deployment with no signer it meant one every
+// five minutes forever, for a row that is never going to appear. Neither is a
+// fault, and an ERROR that is always there is one an operator learns to scroll
+// past -- which costs the ERROR that matters.
+//
+// INFO rather than silence: a reconciler that is not reconciling should say
+// so, and say what would change it.
+func (w *Worker) skipIfNotReadyYet(err error) error {
+	switch {
+	case errors.Is(err, errNoCursor):
+		w.log.Info("skipped a reconciliation pass: the deposit scanner has not recorded a cursor yet",
+			slog.Int64("chain_id", w.cfg.ChainID))
+		return nil
+	case errors.Is(err, errNoHotWallet):
+		w.log.Info("skipped a reconciliation pass: no hot wallet is recorded for this chain, "+
+			"so its balance cannot be counted; it is written the first time a signer starts",
+			slog.Int64("chain_id", w.cfg.ChainID))
+		return nil
+	}
+	return err
+}
+
 // hotWallet reads the address from chain.hot_wallets rather than asking the
-// signer. Reconciliation must work in a deployment whose signer is down: the
-// money is still there, and a report is exactly what someone wants at that
-// moment.
+// signer. That is what lets reconciliation work while the signer is down: the
+// row outlives the process that wrote it, the money is still there, and a
+// report is exactly what someone wants at that moment.
+//
+// It does not make reconciliation work in a deployment that has never had a
+// signer, and the comment here used to imply that it did. Nothing writes that
+// row until a nonce manager starts, so there is no address to read, and the
+// hot wallet's balance is part of the chain total -- a report without it would
+// invent a break out of money sitting exactly where it belongs. The caller
+// skips the pass instead.
 func (w *Worker) hotWallet(ctx context.Context) (common.Address, error) {
 	row, err := sqlcgen.New(w.db).GetHotWallet(ctx, sqlcgen.GetHotWalletParams{
 		TenantID: w.cfg.Tenant, ChainID: w.cfg.ChainID,
 	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return common.Address{}, errNoHotWallet
+	}
 	if err != nil {
 		return common.Address{}, fmt.Errorf("reconcile: hot wallet: %w", err)
 	}
@@ -183,6 +220,12 @@ func (w *Worker) frontiers(ctx context.Context, head uint64, assets []registry.A
 	cursor, err := sqlcgen.New(w.db).GetScanCursor(ctx, sqlcgen.GetScanCursorParams{
 		TenantID: w.cfg.Tenant, ChainID: w.cfg.ChainID,
 	})
+	// No cursor is a state, not a failure -- the scanner writes it on its
+	// first pass, and reconciliation has its own clock. The deposit scanner
+	// makes the same distinction for the same row.
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, errNoCursor
+	}
 	if err != nil {
 		return nil, fmt.Errorf("reconcile: scan cursor: %w", err)
 	}

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -47,21 +48,38 @@ type chainComponents struct {
 	sweeper       *sweep.Worker
 	sweepInterval time.Duration
 	// reconciler compares ledger custody with on-chain balances (§6.4.4). It
-	// needs no signer -- it only reads -- so it runs in deployments where
-	// nothing can be signed, which is exactly when someone wants to know what
-	// is actually there.
+	// needs no signer -- it only reads -- so it keeps running while the signer
+	// is down, which is exactly when someone wants to know what is actually
+	// there. It does need chain.hot_wallets to have been written once, because
+	// the hot wallet's balance is part of the chain total; until then it says
+	// so and skips the pass rather than reporting a total it knows is short.
 	reconciler        *reconcile.Worker
 	reconcileInterval time.Duration
 	// lastTick records whether the most recent tick succeeded, so readiness
 	// reflects the scanner rather than only the RPC connection.
 	lastErr error
+
+	// bringUp is the half of starting that waits on other people's processes.
+	// newChain builds it as a closure so the config, pool and registry it
+	// needs stay where they were read instead of being copied onto this
+	// struct to be used once.
+	bringUp func(context.Context) error
+	// started is closed when bringUp has succeeded. The tick loops wait on
+	// it, which is both an ordering rule and the happens-before edge that
+	// makes bringUp's assignments to sending, sweeper and reconciler visible
+	// to them.
+	started chan struct{}
+	// startErr is why the role is not up yet, read by /readyz. A bool could
+	// only say "not ready"; the operator needs to know whether it is the node
+	// or the signer, and health.CheckResult.Err is a string field waiting for
+	// exactly that.
+	startMu  sync.Mutex
+	startErr error
 }
 
-// newChain dials the node and prepares the scanner.
-//
-// Start failures are fatal by design (§6.4.1 step 5): a scanner pointed at the
-// wrong chain, or one whose cursor is ahead of the head, would silently skip
-// every deposit in between. Refusing to start is the only honest answer.
+// newChain dials the node and builds the role's parts. It does not talk to
+// the chain or the signer beyond the dial: that is start's job, and it is
+// deliberately not done here.
 func newChain(ctx context.Context, cfg Config, log *slog.Logger, db *pgxpool.Pool, l *ledger.Service, reg prometheus.Registerer, nc *nats.Conn, local signer.Signer) (*chainComponents, error) {
 	if cfg.Chain.RPCURL == "" {
 		return nil, errors.New("config: ETH_RPC_URL is required for the chain role")
@@ -77,21 +95,6 @@ func newChain(ctx context.Context, cfg Config, log *slog.Logger, db *pgxpool.Poo
 		DefaultConfirmations: cfg.Chain.RequiredConfirmations,
 	}, log).WithMetrics(deposit.NewMetrics(reg))
 
-	if err := retryUntil(ctx, log, "chain rpc", func(ctx context.Context) error {
-		err := scanner.Start(ctx)
-		if errors.Is(err, deposit.ErrChainChanged) {
-			// Retrying will not fix a different chain; fail out of the loop.
-			return retryStop{err}
-		}
-		return err
-	}); err != nil {
-		client.Close()
-		var stop retryStop
-		if errors.As(err, &stop) {
-			return nil, stop.err
-		}
-		return nil, err
-	}
 	store := registry.NewStore(db)
 	worker := withdrawal.NewWorker(db, withdrawal.Config{
 		Tenant: cfg.TenantID, Batch: cfg.Chain.WithdrawalBatchSize,
@@ -102,11 +105,42 @@ func newChain(ctx context.Context, cfg Config, log *slog.Logger, db *pgxpool.Poo
 	c := &chainComponents{
 		client: client, scanner: scanner, interval: cfg.Chain.ScanInterval,
 		withdrawals: worker, withdrawalInterval: cfg.Chain.WithdrawalInterval,
+		started:  make(chan struct{}),
+		startErr: errors.New("the chain role has not finished starting"),
 	}
+	c.bringUp = func(ctx context.Context) error {
+		return c.up(ctx, cfg, log, db, store, l, reg, nc, local, worker)
+	}
+	return c, nil
+}
+
+// up is everything that waits on somebody else: verifying the chain against
+// the recorded anchor, and asking the signer which address it signs from.
+// Both can wait indefinitely, so both run after the ops server is listening.
+func (c *chainComponents) up(ctx context.Context, cfg Config, log *slog.Logger, db *pgxpool.Pool, store *registry.Store, l *ledger.Service, reg prometheus.Registerer, nc *nats.Conn, local signer.Signer, worker *withdrawal.Worker) error {
+	client := c.client
+	c.setStartErr(errors.New("connecting to the node and verifying the chain"))
+	if err := retryUntil(ctx, log, "chain rpc", func(ctx context.Context) error {
+		err := c.scanner.Start(ctx)
+		if errors.Is(err, deposit.ErrChainChanged) {
+			// Retrying will not fix a different chain; fail out of the loop.
+			return retryStop{err}
+		}
+		if err != nil {
+			c.setStartErr(err)
+		}
+		return err
+	}); err != nil {
+		var stop retryStop
+		if errors.As(err, &stop) {
+			return stop.err
+		}
+		return err
+	}
+	c.setStartErr(errors.New("waiting for the signer to name its hot wallet"))
 	signing, err := attachSigning(ctx, cfg, log, db, worker, client, nc, local)
 	if err != nil {
-		client.Close()
-		return nil, err
+		return err
 	}
 	if signing == nil {
 		log.Warn("no signer reachable: withdrawals will stop at funds_locked and nothing will be collected")
@@ -118,8 +152,7 @@ func newChain(ctx context.Context, cfg Config, log *slog.Logger, db *pgxpool.Poo
 		if cfg.Chain.SweepEnabled {
 			maxFee, err := cfg.Chain.MaxFee()
 			if err != nil {
-				client.Close()
-				return nil, err
+				return err
 			}
 			c.sweeper = sweep.New(db, sweep.Config{
 				Tenant: cfg.TenantID, ChainID: cfg.Chain.ChainID, Batch: cfg.Chain.SweepBatchSize,
@@ -136,8 +169,7 @@ func newChain(ctx context.Context, cfg Config, log *slog.Logger, db *pgxpool.Poo
 	if cfg.Chain.ReconcileEnabled {
 		minHot, err := cfg.Chain.MinHotWallet()
 		if err != nil {
-			client.Close()
-			return nil, err
+			return err
 		}
 		c.reconciler = reconcile.New(db, reconcile.Config{
 			Tenant: cfg.TenantID, ChainID: cfg.Chain.ChainID, NativeAsset: cfg.Chain.NativeAsset,
@@ -162,7 +194,67 @@ func newChain(ctx context.Context, cfg Config, log *slog.Logger, db *pgxpool.Poo
 	log.Info("driving withdrawals to funds_locked",
 		slog.Duration("interval", cfg.Chain.WithdrawalInterval),
 		slog.Int("batch", int(cfg.Chain.WithdrawalBatchSize)))
-	return c, nil
+	return nil
+}
+
+// start brings the role up and then lets the tick loops run.
+//
+// It is separate from newChain, and the caller runs it after the ops server
+// is listening, because up waits on other people's processes: retryUntil
+// backs off to 30s and ends only on success, a retryStop, or ctx. Done inside
+// newChain -- as it was until 4d-2b -- that wait happened before anything
+// bound a port, so an operator watching a slow RPC got a refused connection
+// from /readyz instead of a reason. The engine was moved out of the same spot
+// for the same reason (run.go).
+//
+// Failing is still fatal, as §6.4.1 step 5 requires: a scanner pointed at the
+// wrong chain, or one whose cursor is ahead of the head, would silently skip
+// every deposit in between. Refusing to start is the only honest answer, and
+// returning the error from the errgroup is how that happens now. That only
+// became true when retryStop started stopping (4d-2a); before it, this move
+// would have turned "hangs forever" into "503s forever", which is not an
+// improvement.
+func (c *chainComponents) start(ctx context.Context) error {
+	if err := c.bringUp(ctx); err != nil {
+		if ctx.Err() != nil {
+			return nil
+		}
+		c.setStartErr(err)
+		return err
+	}
+	c.setStartErr(nil)
+	close(c.started)
+	return nil
+}
+
+func (c *chainComponents) setStartErr(err error) {
+	c.startMu.Lock()
+	defer c.startMu.Unlock()
+	c.startErr = err
+}
+
+// starting reports why the role is not up yet, or nil once it is.
+func (c *chainComponents) starting() error {
+	c.startMu.Lock()
+	defer c.startMu.Unlock()
+	if c.startErr == nil {
+		return nil
+	}
+	return fmt.Errorf("still starting: %w", c.startErr)
+}
+
+// awaitStart blocks a tick loop until the role is up, reporting false when
+// ctx ended first. Ticking before then would run against a scanner that has
+// not verified the chain, and would read sending, sweeper and reconciler
+// while start is still assigning them -- so a deployment that does collect
+// could be read as one that does not, once, at the moment it mattered.
+func (c *chainComponents) awaitStart(ctx context.Context) bool {
+	select {
+	case <-c.started:
+		return true
+	case <-ctx.Done():
+		return false
+	}
 }
 
 // attachSigning gives the worker its signer, nonce manager and send settings.
@@ -243,6 +335,9 @@ type signing struct {
 // take the role down, and the next tick resumes from the same cursor because
 // every block is committed with it.
 func (c *chainComponents) run(ctx context.Context, log *slog.Logger) error {
+	if !c.awaitStart(ctx) {
+		return nil
+	}
 	tick := time.NewTicker(c.interval)
 	defer tick.Stop()
 	for {
@@ -269,6 +364,9 @@ func (c *chainComponents) run(ctx context.Context, log *slog.Logger) error {
 // locked: none of that touches the chain, and a user whose withdrawal is stuck
 // in `requested` because an RPC endpoint is down has been failed twice.
 func (c *chainComponents) runWithdrawals(ctx context.Context, log *slog.Logger) error {
+	if !c.awaitStart(ctx) {
+		return nil
+	}
 	tick := time.NewTicker(c.withdrawalInterval)
 	defer tick.Stop()
 	for {
@@ -296,7 +394,9 @@ func (c *chainComponents) runWithdrawals(ctx context.Context, log *slog.Logger) 
 // Its own clock, much slower than the other two: nobody is waiting for a
 // sweep, and every scan costs one balance call per address per asset.
 func (c *chainComponents) runSweeping(ctx context.Context, log *slog.Logger) error {
-	if c.sweeper == nil {
+	// After awaitStart, not before: start is what decides whether there is a
+	// sweeper at all.
+	if !c.awaitStart(ctx) || c.sweeper == nil {
 		return nil
 	}
 	tick := time.NewTicker(c.sweepInterval)
@@ -322,7 +422,7 @@ func (c *chainComponents) runSweeping(ctx context.Context, log *slog.Logger) err
 // stopped the role would turn "we could not check" into "we stopped running",
 // which is strictly worse.
 func (c *chainComponents) runReconciling(ctx context.Context, log *slog.Logger) error {
-	if c.reconciler == nil {
+	if !c.awaitStart(ctx) || c.reconciler == nil {
 		return nil
 	}
 	tick := time.NewTicker(c.reconcileInterval)
@@ -340,7 +440,7 @@ func (c *chainComponents) runReconciling(ctx context.Context, log *slog.Logger) 
 }
 
 func (c *chainComponents) runSending(ctx context.Context, log *slog.Logger) error {
-	if c.sending == nil {
+	if !c.awaitStart(ctx) || c.sending == nil {
 		return nil
 	}
 	tick := time.NewTicker(c.withdrawalInterval)
@@ -364,7 +464,16 @@ func (c *chainComponents) runSending(ctx context.Context, log *slog.Logger) erro
 }
 
 // ready reports the node is reachable and the last scan succeeded.
+//
+// The start check comes first, and not only for ordering: while the role is
+// starting there is nothing useful to say about the last scan, and the reason
+// it is still starting is the one thing an operator wants. It is also what
+// lets /readyz answer at all during startup, which is the whole point of
+// running start after the ops server.
 func (c *chainComponents) ready(ctx context.Context) error {
+	if err := c.starting(); err != nil {
+		return err
+	}
 	if _, err := c.client.Head(ctx); err != nil {
 		return err
 	}

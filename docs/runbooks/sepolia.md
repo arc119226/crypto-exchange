@@ -920,10 +920,16 @@ make logs-sepolia FOLLOW=1
 要找的是這一行:
 
 ```
-chain recorded  chain_id=11155111  anchor_block=...  anchor_hash=0x...
+chain verified  chain_id=11155111  anchor_block=...  anchor_hash=0x...
 ```
 
-看到它就表示交易所成功連上 Sepolia 並認明了這條鏈。
+看到它就表示交易所連上 Sepolia、而且**確認這條鏈跟資料庫裡記的是同一條**。
+
+> **第一次啟動印的是 `chain recorded`(不是 `verified`)**,欄位一樣。差別是:第一次是把這條鏈**記下來**,之後每一次是拿它**對一遍**。所以要一次抓到兩種,用:
+>
+> ```
+> make logs-sepolia TAIL=500 | grep -E 'chain (recorded|verified)'
+> ```
 
 **沒看到的話**,往上翻找紅色的 `error`,對照第 6 節的表。
 
@@ -951,19 +957,32 @@ go run ./cmd/exchangectl assets list
 
 真正的交易所遇到這種事(老闆從冷錢包轉錢進來、或收到補助),做法就是這個:記一筆「這筆錢從系統外面進來」。
 
-金額直接問鏈,不要憑印象打——記錯的話對帳不會歸零:
+**兩個資產都直接問鏈,不要憑印象打**——記錯的話對帳不會歸零。(上一次真的有人記錯:ETH 的金額被複製到 USDC 那一行,對帳立刻抓到,見 `docs/domain.md §22.5`。)
+
+先把兩個數字都撈出來:
 
 ```
+CAST="docker run --rm --entrypoint cast ghcr.io/foundry-rs/foundry:v1.8.1"
 HOT=$(sed -n 's/^HOT_WALLET_ADDRESS=//p' .env | tr -d '[:space:]')
-AMOUNT=$(docker run --rm --entrypoint cast ghcr.io/foundry-rs/foundry:v1.8.1 \
-  balance "$HOT" --rpc-url "$SEPOLIA_RPC" --ether | tr -d '[:space:]')
-echo "熱錢包目前有 $AMOUNT ETH,要記這個數字"
+USDC=$(sed -n 's/.*"usdc": *"\([^"]*\)".*/\1/p' deploy/compose/sepolia/sepolia-addresses.json)
+
+ETH_AMOUNT=$($CAST balance "$HOT" --rpc-url "$SEPOLIA_RPC" --ether | tr -d '[:space:]')
+
+# 代幣餘額問合約自己。cast 回的是「最小單位」(USDC 有 6 位小數),
+# 而 --amount 要的是人看的數字,所以要把小數點往左移 6 位。
+USDC_RAW=$($CAST call "$USDC" "balanceOf(address)(uint256)" "$HOT" --rpc-url "$SEPOLIA_RPC" | awk '{print $1}')
+USDC_AMOUNT=$(printf '%d.%06d' $((USDC_RAW / 1000000)) $((USDC_RAW % 1000000)) | sed 's/0*$//' | sed 's/\.$//')
+
+echo "ETH   $ETH_AMOUNT"
+echo "USDC  $USDC_AMOUNT   (鏈上最小單位:$USDC_RAW)"
 ```
+
+**兩行都印出數字才往下走。** 空白或 `0` 表示前面某一步沒成功,回 A4 / A6 看一次。
 
 ```
 go run ./cmd/exchangectl admin house-adjust \
   --code custody_hot --asset ETH \
-  --amount "$AMOUNT" \
+  --amount "$ETH_AMOUNT" \
   --direction credit \
   --reason "sepolia faucet 注資熱錢包 $(date +%F)" \
   --idempotency-key "sepolia-hot-eth-1"
@@ -973,12 +992,15 @@ go run ./cmd/exchangectl admin house-adjust \
 
 ```
 go run ./cmd/exchangectl admin house-adjust \
-  --code custody_hot --asset USDC --amount 1000000 --direction credit \
+  --code custody_hot --asset USDC \
+  --amount "$USDC_AMOUNT" \
+  --direction credit \
   --reason "A6 鑄給熱錢包 $(date +%F)" \
   --idempotency-key "sepolia-hot-usdc-1"
 ```
 
-> - `--amount` 要跟鏈上**實際的數量一致**。不確定的話用 A4 那個查餘額的指令看一次。
+> - **兩個變數不要互相貼錯。** 上一次的錯誤就是這樣來的:`$ETH_AMOUNT` 進了 USDC 那一行。名字取成這樣就是為了讓貼錯看得出來。
+> - `--amount` 要跟鏈上**實際的數量一致**。想自己再確認一次:ETH 用 A4 的餘額指令,USDC 用 A6 最後那個 `balanceOf`(**它印的是最小單位**,要除以 1000000)。
 > - `--reason` 是給半年後的人看的,寫清楚。這條會被寫進稽核紀錄。
 > - `--idempotency-key` 讓你重打同一個指令也不會記兩次。
 
@@ -1326,8 +1348,17 @@ printf 'ETH_RPC_URL=%s\nETH_SCAN_START_BLOCK=%d\n' "$SEPOLIA_RPC" $((DEPLOY_BLOC
 make up-sepolia
 export EXCHANGE_ADMIN_URL=http://localhost:8082 \
        EXCHANGE_ADMIN_API_KEY=$(sed -n 's/^ADMIN_API_KEY=//p' .env)
+# 兩個資產都要記,而且金額都問鏈 -- 寫死的數字就是 §22.5 那個被對帳抓到的錯誤
+CAST="docker run --rm --entrypoint cast ghcr.io/foundry-rs/foundry:v1.8.1"
+HOT=$(sed -n 's/^HOT_WALLET_ADDRESS=//p' .env | tr -d '[:space:]')
+USDC=$(sed -n 's/.*"usdc": *"\([^"]*\)".*/\1/p' deploy/compose/sepolia/sepolia-addresses.json)
+ETH_AMOUNT=$($CAST balance "$HOT" --rpc-url "$SEPOLIA_RPC" --ether | tr -d '[:space:]')
+USDC_RAW=$($CAST call "$USDC" "balanceOf(address)(uint256)" "$HOT" --rpc-url "$SEPOLIA_RPC" | awk '{print $1}')
+USDC_AMOUNT=$(printf '%d.%06d' $((USDC_RAW / 1000000)) $((USDC_RAW % 1000000)) | sed 's/0*$//' | sed 's/\.$//')
 go run ./cmd/exchangectl admin house-adjust --code custody_hot --asset ETH \
-  --amount 0.05 --direction credit --reason "faucet, tx 0x..." --idempotency-key sepolia-hot-eth-1
+  --amount "$ETH_AMOUNT" --direction credit --reason "faucet, tx 0x..." --idempotency-key sepolia-hot-eth-1
+go run ./cmd/exchangectl admin house-adjust --code custody_hot --asset USDC \
+  --amount "$USDC_AMOUNT" --direction credit --reason "A6 mint" --idempotency-key sepolia-hot-usdc-1
 go run ./cmd/exchangectl user register --email a@b.c --password 'correct horse battery'
 go run ./cmd/exchangectl deposit-address --asset ETH     # faucet 打這裡
 go run ./cmd/exchangectl deposits list                   # 等 credited

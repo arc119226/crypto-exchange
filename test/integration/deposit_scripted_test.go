@@ -408,6 +408,30 @@ func TestScriptedAnchorRefusesAMovedStartBlock(t *testing.T) {
 	assert.NotContains(t, err.Error(), "make reset")
 }
 
+// Every start says which chain it is on, not only the first. The anchor is
+// recorded once, so "chain recorded" appears once in the life of a database --
+// while docs/runbooks/sepolia.md tells an operator to look for that line every
+// time they bring the exchange up, and to go hunting for a red error if it is
+// missing. From the second start on there was no line and no error.
+func TestScannerSaysItVerifiedTheChainOnEveryStart(t *testing.T) {
+	ctx := context.Background()
+	h := setupScriptedAt(t, 4)
+
+	var logs strings.Builder
+	again := deposit.New(h.all, h.fake, h.svc, registry.NewStore(h.all), deposit.Config{
+		Tenant: "default", ChainID: anvilChainID, StartBlock: 4,
+		DefaultConfirmations: requiredConfirmations,
+	}, slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	require.NoError(t, again.Start(ctx))
+
+	out := logs.String()
+	assert.Contains(t, out, "chain verified", out)
+	assert.Contains(t, out, "anchor_block=4", "with the fields the first-start line carries")
+	assert.Contains(t, out, "anchor_hash=0x")
+	assert.NotContains(t, out, "chain recorded",
+		"the anchor was already there: this start verified it, it did not record it")
+}
+
 // setupScriptedAt mines a few blocks before the scanner starts, so StartBlock
 // can be something other than zero. With StartBlock 0 the anchor is genesis
 // and the change under test is invisible.

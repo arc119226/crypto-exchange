@@ -118,3 +118,24 @@ var ErrNoReport = errors.New("reconcile: no report yet")
 // silently mix two chains; the pass is dropped rather than reported, because a
 // report nobody can trust is worse than no report.
 var errChainMoved = errors.New("reconcile: the chain moved while balances were being read")
+
+// errNoCursor and errNoHotWallet are the two rows a pass needs that a
+// deployment can legitimately not have yet. Neither is a failure, and both
+// used to be reported as one: they were wrapped as ordinary errors, and the
+// caller logs any error from Tick at ERROR, every interval, forever.
+//
+// errNoCursor is the fresh database: the scanner records its cursor on the
+// first pass and reconciliation runs on its own clock, so on a new deployment
+// it can easily ask first. One tick later there is a cursor.
+//
+// errNoHotWallet does not go away on its own. chain.hot_wallets is written by
+// the nonce manager when the signer first starts, so a deployment that has
+// never had a signer never has that row. A pass cannot be completed without
+// it -- the hot wallet's balance is part of the chain total, and reporting a
+// total with it missing would invent a break out of money that is exactly
+// where it should be. So the pass is skipped, and skipping it is said once
+// per pass at INFO with what would fix it, not shouted as a failure.
+var (
+	errNoCursor    = errors.New("reconcile: the scanner has not recorded a cursor yet")
+	errNoHotWallet = errors.New("reconcile: no hot wallet is recorded for this chain")
+)
