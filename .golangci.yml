@@ -245,6 +245,10 @@ linters:
             - github.com/arc119226/crypto-exchange/internal/matching
             # exchangectl signs API-key requests with the same canonical string the server verifies
             - github.com/arc119226/crypto-exchange/internal/auth
+            # exchangectl webhook-sink verifies deliveries with the same code the
+            # dispatcher signs them with -- the same reason as internal/auth above,
+            # from the receiving side. It is the customer's half of docs/webhooks.md.
+            - github.com/arc119226/crypto-exchange/internal/webhook
             - github.com/arc119226/crypto-exchange/cmd/exchangectl/internal
             - github.com/spf13/cobra
             - github.com/oapi-codegen/runtime

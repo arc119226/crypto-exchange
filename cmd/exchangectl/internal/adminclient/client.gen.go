@@ -252,6 +252,48 @@ func (e PostingDirection) Valid() bool {
 	}
 }
 
+// Defines values for WebhookDeliveryStatus.
+const (
+	WebhookDeliveryStatusDead      WebhookDeliveryStatus = "dead"
+	WebhookDeliveryStatusDelivered WebhookDeliveryStatus = "delivered"
+	WebhookDeliveryStatusFailed    WebhookDeliveryStatus = "failed"
+	WebhookDeliveryStatusPending   WebhookDeliveryStatus = "pending"
+)
+
+// Valid indicates whether the value is a known member of the WebhookDeliveryStatus enum.
+func (e WebhookDeliveryStatus) Valid() bool {
+	switch e {
+	case WebhookDeliveryStatusDead:
+		return true
+	case WebhookDeliveryStatusDelivered:
+		return true
+	case WebhookDeliveryStatusFailed:
+		return true
+	case WebhookDeliveryStatusPending:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for WebhookEndpointStatus.
+const (
+	WebhookEndpointStatusActive   WebhookEndpointStatus = "active"
+	WebhookEndpointStatusDisabled WebhookEndpointStatus = "disabled"
+)
+
+// Valid indicates whether the value is a known member of the WebhookEndpointStatus enum.
+func (e WebhookEndpointStatus) Valid() bool {
+	switch e {
+	case WebhookEndpointStatusActive:
+		return true
+	case WebhookEndpointStatusDisabled:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for WithdrawalResolveRequestAction.
 const (
 	WithdrawalResolveRequestActionBump        WithdrawalResolveRequestAction = "bump"
@@ -436,6 +478,26 @@ type BalanceList struct {
 type CreateAccountRequest struct {
 	// OwnerUserID Optional until Phase 3 introduces users.
 	OwnerUserID *string `json:"owner_user_id,omitempty"`
+}
+
+// CreatedWebhookEndpoint defines model for CreatedWebhookEndpoint.
+type CreatedWebhookEndpoint struct {
+	CreatedAt time.Time `json:"created_at"`
+
+	// Events Event types this endpoint receives, matched against the envelope's event_type.
+	//
+	// Example: ["trade.executed","withdrawal.state_changed"]
+	Events []string `json:"events"`
+	ID     string   `json:"id"`
+	Label  string   `json:"label"`
+
+	// Secret HMAC signing secret, shown exactly once
+	Secret    string                `json:"secret"`
+	Status    WebhookEndpointStatus `json:"status"`
+	UpdatedAt time.Time             `json:"updated_at"`
+
+	// URL Example: https://example.com/hooks/exchange
+	URL string `json:"url"`
 }
 
 // HouseAdjustmentRequest defines model for HouseAdjustmentRequest.
@@ -680,6 +742,94 @@ type TrialBalanceLine struct {
 	Diff Amount `json:"diff"`
 }
 
+// WebhookDelivery defines model for WebhookDelivery.
+type WebhookDelivery struct {
+	// Attempt Step within the run, starting at 0.
+	Attempt     int32      `json:"attempt"`
+	CreatedAt   time.Time  `json:"created_at"`
+	DeliveredAt *time.Time `json:"delivered_at,omitempty"`
+	DurationMs  int32      `json:"duration_ms"`
+	Error       string     `json:"error,omitempty"`
+	EventID     string     `json:"event_id"`
+	EventType   string     `json:"event_type"`
+	ID          string     `json:"id"`
+
+	// ResponseStatus Null when the endpoint never answered (timeout, refused connection, bad name).
+	ResponseStatus *int `json:"response_status,omitempty"`
+
+	// RunID One pass through the retry schedule. A replay starts a new one.
+	RunID  string                `json:"run_id"`
+	Status WebhookDeliveryStatus `json:"status"`
+}
+
+// WebhookDeliveryStatus defines model for WebhookDelivery.Status.
+type WebhookDeliveryStatus string
+
+// WebhookDeliveryList defines model for WebhookDeliveryList.
+type WebhookDeliveryList struct {
+	Deliveries []WebhookDelivery `json:"deliveries"`
+}
+
+// WebhookEndpoint defines model for WebhookEndpoint.
+type WebhookEndpoint struct {
+	CreatedAt time.Time `json:"created_at"`
+
+	// Events Event types this endpoint receives, matched against the envelope's event_type.
+	//
+	// Example: ["trade.executed","withdrawal.state_changed"]
+	Events    []string              `json:"events"`
+	ID        string                `json:"id"`
+	Label     string                `json:"label"`
+	Status    WebhookEndpointStatus `json:"status"`
+	UpdatedAt time.Time             `json:"updated_at"`
+
+	// URL Example: https://example.com/hooks/exchange
+	URL string `json:"url"`
+}
+
+// WebhookEndpointList defines model for WebhookEndpointList.
+type WebhookEndpointList struct {
+	WebhookEndpoints []WebhookEndpoint `json:"webhook_endpoints"`
+}
+
+// WebhookEndpointRequest defines model for WebhookEndpointRequest.
+type WebhookEndpointRequest struct {
+	Events []string `json:"events"`
+	Label  string   `json:"label,omitempty"`
+
+	// URL Absolute http:// or https:// address. Redirects are never followed.
+	URL string `json:"url"`
+}
+
+// WebhookEndpointStatus defines model for WebhookEndpointStatus.
+type WebhookEndpointStatus string
+
+// WebhookEndpointStatusRequest defines model for WebhookEndpointStatusRequest.
+type WebhookEndpointStatusRequest struct {
+	Reason string                `json:"reason"`
+	Status WebhookEndpointStatus `json:"status"`
+}
+
+// WebhookEndpointUpdateRequest defines model for WebhookEndpointUpdateRequest.
+type WebhookEndpointUpdateRequest struct {
+	Events []string `json:"events"`
+	Label  string   `json:"label,omitempty"`
+
+	// Reason Why it changes (recorded in the audit trail)
+	Reason string `json:"reason"`
+
+	// URL Absolute http:// or https:// address. Redirects are never followed.
+	URL string `json:"url"`
+}
+
+// WebhookReplay defines model for WebhookReplay.
+type WebhookReplay struct {
+	EndpointID    string    `json:"endpoint_id"`
+	EventID       string    `json:"event_id"`
+	NextAttemptAt time.Time `json:"next_attempt_at"`
+	RunID         string    `json:"run_id"`
+}
+
 // WithdrawalResolveRequest defines model for WithdrawalResolveRequest.
 type WithdrawalResolveRequest struct {
 	Action WithdrawalResolveRequestAction `json:"action"`
@@ -713,6 +863,12 @@ type MarketSymbol = string
 
 // Offset defines model for Offset.
 type Offset = int32
+
+// WebhookDeliveryID defines model for WebhookDeliveryID.
+type WebhookDeliveryID = string
+
+// WebhookEndpointID defines model for WebhookEndpointID.
+type WebhookEndpointID = string
 
 // WithdrawalID defines model for WithdrawalID.
 type WithdrawalID = string
@@ -762,6 +918,12 @@ type ListSweepsParams struct {
 	Limit *Limit `form:"limit,omitempty" json:"limit,omitempty"`
 }
 
+// ListWebhookDeliveriesParams defines parameters for ListWebhookDeliveries.
+type ListWebhookDeliveriesParams struct {
+	Limit  *Limit  `form:"limit,omitempty" json:"limit,omitempty"`
+	Offset *Offset `form:"offset,omitempty" json:"offset,omitempty"`
+}
+
 // ListWithdrawalsForReviewParams defines parameters for ListWithdrawalsForReview.
 type ListWithdrawalsForReviewParams struct {
 	Limit *Limit `form:"limit,omitempty" json:"limit,omitempty"`
@@ -781,6 +943,15 @@ type CreateHouseAdjustmentJSONRequestBody = HouseAdjustmentRequest
 
 // SetMarketStatusJSONRequestBody defines body for SetMarketStatus for application/json ContentType.
 type SetMarketStatusJSONRequestBody = MarketStatusRequest
+
+// CreateWebhookEndpointJSONRequestBody defines body for CreateWebhookEndpoint for application/json ContentType.
+type CreateWebhookEndpointJSONRequestBody = WebhookEndpointRequest
+
+// UpdateWebhookEndpointJSONRequestBody defines body for UpdateWebhookEndpoint for application/json ContentType.
+type UpdateWebhookEndpointJSONRequestBody = WebhookEndpointUpdateRequest
+
+// SetWebhookEndpointStatusJSONRequestBody defines body for SetWebhookEndpointStatus for application/json ContentType.
+type SetWebhookEndpointStatusJSONRequestBody = WebhookEndpointStatusRequest
 
 // ResolveWithdrawalJSONRequestBody defines body for ResolveWithdrawal for application/json ContentType.
 type ResolveWithdrawalJSONRequestBody = WithdrawalResolveRequest
@@ -1058,6 +1229,108 @@ type ClientInterface interface {
 	//
 	// Corresponds with GET /admin/v1/sweeps (the `ListSweeps` operationId).
 	ListSweeps(ctx context.Context, params *ListSweepsParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ListWebhookEndpoints Webhook endpoints, disabled ones included
+	//
+	// Signing secrets are never returned; they are shown once, when the endpoint is created.
+	//
+	// Corresponds with GET /admin/v1/webhooks (the `ListWebhookEndpoints` operationId).
+	ListWebhookEndpoints(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// CreateWebhookEndpointWithBody Register an endpoint to receive events
+	//
+	// Returns the signing secret exactly once. It is stored encrypted and no
+	// later response can produce it, so an operator who loses it has to
+	// rotate rather than look it up.
+	//
+	// There is no way to delete an endpoint, deliberately: the delivery
+	// history has to outlive the integration, so an endpoint that is finished
+	// with is set to `disabled`.
+	//
+	// Takes any type of body and a specified content type.
+	//
+	// Corresponds with POST /admin/v1/webhooks (the `CreateWebhookEndpoint` operationId).
+	CreateWebhookEndpointWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// CreateWebhookEndpoint Register an endpoint to receive events
+	//
+	// Returns the signing secret exactly once. It is stored encrypted and no
+	// later response can produce it, so an operator who loses it has to
+	// rotate rather than look it up.
+	//
+	// There is no way to delete an endpoint, deliberately: the delivery
+	// history has to outlive the integration, so an endpoint that is finished
+	// with is set to `disabled`.
+	//
+	// Takes a body of the `application/json` content type.
+	//
+	// Corresponds with POST /admin/v1/webhooks (the `CreateWebhookEndpoint` operationId).
+	CreateWebhookEndpoint(ctx context.Context, body CreateWebhookEndpointJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// UpdateWebhookEndpointWithBody Replace an endpoint's URL, subscriptions and label
+	//
+	// A whole replacement of the mutable configuration, so `url` and `events` are required even when only one of them is changing. The signing secret is not part of it, and neither is the status, which has its own endpoint because turning an integration off is a different decision from editing it.
+	//
+	// Takes any type of body and a specified content type.
+	//
+	// Corresponds with PUT /admin/v1/webhooks/{id} (the `UpdateWebhookEndpoint` operationId).
+	UpdateWebhookEndpointWithBody(ctx context.Context, id WebhookEndpointID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// UpdateWebhookEndpoint Replace an endpoint's URL, subscriptions and label
+	//
+	// A whole replacement of the mutable configuration, so `url` and `events` are required even when only one of them is changing. The signing secret is not part of it, and neither is the status, which has its own endpoint because turning an integration off is a different decision from editing it.
+	//
+	// Takes a body of the `application/json` content type.
+	//
+	// Corresponds with PUT /admin/v1/webhooks/{id} (the `UpdateWebhookEndpoint` operationId).
+	UpdateWebhookEndpoint(ctx context.Context, id WebhookEndpointID, body UpdateWebhookEndpointJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ListWebhookDeliveries Delivery attempts for one endpoint, newest first
+	//
+	// One row per attempt, not per event. `run_id` groups the attempts that belong to one pass through the retry schedule, so a replay's attempts are distinguishable from the original's, and `attempt` is the step within that run. A null `response_status` means the endpoint never answered at all -- a timeout, a refused connection, a bad name -- which is a different problem from a rejection.
+	//
+	// Corresponds with GET /admin/v1/webhooks/{id}/deliveries (the `ListWebhookDeliveries` operationId).
+	ListWebhookDeliveries(ctx context.Context, id WebhookEndpointID, params *ListWebhookDeliveriesParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ReplayWebhookDelivery Send the event behind a delivery again
+	//
+	// Queues a new run of the event this delivery belongs to. The delivery
+	// itself does not change -- the table is append-only -- and the replay's
+	// attempts join it under a new `run_id`, restarting the retry schedule
+	// from its first step.
+	//
+	// 202, not 200: nothing has been sent yet. The worker picks the run up on
+	// its next tick, and the response says when that is due.
+	//
+	// The customer will receive the event a second time, with the same
+	// `event_id`. That is what a replay is; `docs/webhooks.md` tells them to
+	// deduplicate on it.
+	//
+	// 409 has two causes and the detail distinguishes them: the event is
+	// still queued for this endpoint, so the schedule is going to send it
+	// anyway; or the endpoint is disabled, and a replay would queue work
+	// nothing can pick up.
+	//
+	// Corresponds with POST /admin/v1/webhooks/{id}/deliveries/{delivery_id}/replay (the `ReplayWebhookDelivery` operationId).
+	ReplayWebhookDelivery(ctx context.Context, id WebhookEndpointID, deliveryID WebhookDeliveryID, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// SetWebhookEndpointStatusWithBody Enable or disable an endpoint
+	//
+	// Disabling also drops whatever is still queued for the endpoint. Queued deliveries to an inactive endpoint are not pending but unreachable, and leaving them would fire a batch of stale events at the customer whenever the integration was turned back on. The delivery history is untouched, and the number dropped is recorded in the audit trail.
+	//
+	// Takes any type of body and a specified content type.
+	//
+	// Corresponds with PUT /admin/v1/webhooks/{id}/status (the `SetWebhookEndpointStatus` operationId).
+	SetWebhookEndpointStatusWithBody(ctx context.Context, id WebhookEndpointID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// SetWebhookEndpointStatus Enable or disable an endpoint
+	//
+	// Disabling also drops whatever is still queued for the endpoint. Queued deliveries to an inactive endpoint are not pending but unreachable, and leaving them would fire a batch of stale events at the customer whenever the integration was turned back on. The delivery history is untouched, and the number dropped is recorded in the audit trail.
+	//
+	// Takes a body of the `application/json` content type.
+	//
+	// Corresponds with PUT /admin/v1/webhooks/{id}/status (the `SetWebhookEndpointStatus` operationId).
+	SetWebhookEndpointStatus(ctx context.Context, id WebhookEndpointID, body SetWebhookEndpointStatusJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// ListWithdrawalsForReview The withdrawal review queue
 	//
@@ -1492,6 +1765,198 @@ func (c *Client) GetReconciliation(ctx context.Context, reqEditors ...RequestEdi
 // Corresponds with GET /admin/v1/sweeps (the `ListSweeps` operationId).
 func (c *Client) ListSweeps(ctx context.Context, params *ListSweepsParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewListSweepsRequest(c.Server, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// ListWebhookEndpoints Webhook endpoints, disabled ones included
+//
+// Signing secrets are never returned; they are shown once, when the endpoint is created.
+//
+// Corresponds with GET /admin/v1/webhooks (the `ListWebhookEndpoints` operationId).
+func (c *Client) ListWebhookEndpoints(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListWebhookEndpointsRequest(c.Server)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// CreateWebhookEndpointWithBody Register an endpoint to receive events
+//
+// Returns the signing secret exactly once. It is stored encrypted and no
+// later response can produce it, so an operator who loses it has to
+// rotate rather than look it up.
+//
+// There is no way to delete an endpoint, deliberately: the delivery
+// history has to outlive the integration, so an endpoint that is finished
+// with is set to `disabled`.
+//
+// Takes any type of body and a specified content type.
+//
+// Corresponds with POST /admin/v1/webhooks (the `CreateWebhookEndpoint` operationId).
+func (c *Client) CreateWebhookEndpointWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCreateWebhookEndpointRequestWithBody(c.Server, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// CreateWebhookEndpoint Register an endpoint to receive events
+//
+// Returns the signing secret exactly once. It is stored encrypted and no
+// later response can produce it, so an operator who loses it has to
+// rotate rather than look it up.
+//
+// There is no way to delete an endpoint, deliberately: the delivery
+// history has to outlive the integration, so an endpoint that is finished
+// with is set to `disabled`.
+//
+// Takes a body of the `application/json` content type.
+//
+// Corresponds with POST /admin/v1/webhooks (the `CreateWebhookEndpoint` operationId).
+func (c *Client) CreateWebhookEndpoint(ctx context.Context, body CreateWebhookEndpointJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCreateWebhookEndpointRequest(c.Server, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// UpdateWebhookEndpointWithBody Replace an endpoint's URL, subscriptions and label
+//
+// A whole replacement of the mutable configuration, so `url` and `events` are required even when only one of them is changing. The signing secret is not part of it, and neither is the status, which has its own endpoint because turning an integration off is a different decision from editing it.
+//
+// Takes any type of body and a specified content type.
+//
+// Corresponds with PUT /admin/v1/webhooks/{id} (the `UpdateWebhookEndpoint` operationId).
+func (c *Client) UpdateWebhookEndpointWithBody(ctx context.Context, id WebhookEndpointID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewUpdateWebhookEndpointRequestWithBody(c.Server, id, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// UpdateWebhookEndpoint Replace an endpoint's URL, subscriptions and label
+//
+// A whole replacement of the mutable configuration, so `url` and `events` are required even when only one of them is changing. The signing secret is not part of it, and neither is the status, which has its own endpoint because turning an integration off is a different decision from editing it.
+//
+// Takes a body of the `application/json` content type.
+//
+// Corresponds with PUT /admin/v1/webhooks/{id} (the `UpdateWebhookEndpoint` operationId).
+func (c *Client) UpdateWebhookEndpoint(ctx context.Context, id WebhookEndpointID, body UpdateWebhookEndpointJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewUpdateWebhookEndpointRequest(c.Server, id, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// ListWebhookDeliveries Delivery attempts for one endpoint, newest first
+//
+// One row per attempt, not per event. `run_id` groups the attempts that belong to one pass through the retry schedule, so a replay's attempts are distinguishable from the original's, and `attempt` is the step within that run. A null `response_status` means the endpoint never answered at all -- a timeout, a refused connection, a bad name -- which is a different problem from a rejection.
+//
+// Corresponds with GET /admin/v1/webhooks/{id}/deliveries (the `ListWebhookDeliveries` operationId).
+func (c *Client) ListWebhookDeliveries(ctx context.Context, id WebhookEndpointID, params *ListWebhookDeliveriesParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListWebhookDeliveriesRequest(c.Server, id, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// ReplayWebhookDelivery Send the event behind a delivery again
+//
+// Queues a new run of the event this delivery belongs to. The delivery
+// itself does not change -- the table is append-only -- and the replay's
+// attempts join it under a new `run_id`, restarting the retry schedule
+// from its first step.
+//
+// 202, not 200: nothing has been sent yet. The worker picks the run up on
+// its next tick, and the response says when that is due.
+//
+// The customer will receive the event a second time, with the same
+// `event_id`. That is what a replay is; `docs/webhooks.md` tells them to
+// deduplicate on it.
+//
+// 409 has two causes and the detail distinguishes them: the event is
+// still queued for this endpoint, so the schedule is going to send it
+// anyway; or the endpoint is disabled, and a replay would queue work
+// nothing can pick up.
+//
+// Corresponds with POST /admin/v1/webhooks/{id}/deliveries/{delivery_id}/replay (the `ReplayWebhookDelivery` operationId).
+func (c *Client) ReplayWebhookDelivery(ctx context.Context, id WebhookEndpointID, deliveryID WebhookDeliveryID, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewReplayWebhookDeliveryRequest(c.Server, id, deliveryID)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// SetWebhookEndpointStatusWithBody Enable or disable an endpoint
+//
+// Disabling also drops whatever is still queued for the endpoint. Queued deliveries to an inactive endpoint are not pending but unreachable, and leaving them would fire a batch of stale events at the customer whenever the integration was turned back on. The delivery history is untouched, and the number dropped is recorded in the audit trail.
+//
+// Takes any type of body and a specified content type.
+//
+// Corresponds with PUT /admin/v1/webhooks/{id}/status (the `SetWebhookEndpointStatus` operationId).
+func (c *Client) SetWebhookEndpointStatusWithBody(ctx context.Context, id WebhookEndpointID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewSetWebhookEndpointStatusRequestWithBody(c.Server, id, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// SetWebhookEndpointStatus Enable or disable an endpoint
+//
+// Disabling also drops whatever is still queued for the endpoint. Queued deliveries to an inactive endpoint are not pending but unreachable, and leaving them would fire a batch of stale events at the customer whenever the integration was turned back on. The delivery history is untouched, and the number dropped is recorded in the audit trail.
+//
+// Takes a body of the `application/json` content type.
+//
+// Corresponds with PUT /admin/v1/webhooks/{id}/status (the `SetWebhookEndpointStatus` operationId).
+func (c *Client) SetWebhookEndpointStatus(ctx context.Context, id WebhookEndpointID, body SetWebhookEndpointStatusJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewSetWebhookEndpointStatusRequest(c.Server, id, body)
 	if err != nil {
 		return nil, err
 	}
@@ -2306,6 +2771,281 @@ func NewListSweepsRequest(server string, params *ListSweepsParams) (*http.Reques
 	return req, nil
 }
 
+// NewListWebhookEndpointsRequest constructs an http.Request for the ListWebhookEndpoints method
+func NewListWebhookEndpointsRequest(server string) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/admin/v1/webhooks")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewCreateWebhookEndpointRequest calls the generic CreateWebhookEndpoint builder with application/json body
+func NewCreateWebhookEndpointRequest(server string, body CreateWebhookEndpointJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewCreateWebhookEndpointRequestWithBody(server, "application/json", bodyReader)
+}
+
+// NewCreateWebhookEndpointRequestWithBody constructs an http.Request for the CreateWebhookEndpoint method, with any body, and a specified content type
+func NewCreateWebhookEndpointRequestWithBody(server string, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/admin/v1/webhooks")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewUpdateWebhookEndpointRequest calls the generic UpdateWebhookEndpoint builder with application/json body
+func NewUpdateWebhookEndpointRequest(server string, id WebhookEndpointID, body UpdateWebhookEndpointJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewUpdateWebhookEndpointRequestWithBody(server, id, "application/json", bodyReader)
+}
+
+// NewUpdateWebhookEndpointRequestWithBody constructs an http.Request for the UpdateWebhookEndpoint method, with any body, and a specified content type
+func NewUpdateWebhookEndpointRequestWithBody(server string, id WebhookEndpointID, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "id", id, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/admin/v1/webhooks/%s", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPut, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewListWebhookDeliveriesRequest constructs an http.Request for the ListWebhookDeliveries method
+func NewListWebhookDeliveriesRequest(server string, id WebhookEndpointID, params *ListWebhookDeliveriesParams) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "id", id, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/admin/v1/webhooks/%s/deliveries", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		// queryValues collects non-styled parameters (passthrough, JSON)
+		// that are safe to round-trip through url.Values.Encode().
+		queryValues := queryURL.Query()
+		// rawQueryFragments collects pre-encoded query fragments from
+		// styled parameters, preserving literal commas as delimiters
+		// per the OpenAPI spec (e.g. "color=blue,black,brown").
+		var rawQueryFragments []string
+
+		if params.Limit != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "limit", *params.Limit, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "integer", Format: "int32"}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.Offset != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "offset", *params.Offset, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "integer", Format: "int32"}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if encoded := queryValues.Encode(); encoded != "" {
+			rawQueryFragments = append(rawQueryFragments, encoded)
+		}
+		queryURL.RawQuery = strings.Join(rawQueryFragments, "&")
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewReplayWebhookDeliveryRequest constructs an http.Request for the ReplayWebhookDelivery method
+func NewReplayWebhookDeliveryRequest(server string, id WebhookEndpointID, deliveryID WebhookDeliveryID) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "id", id, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithOptions("simple", false, "delivery_id", deliveryID, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/admin/v1/webhooks/%s/deliveries/%s/replay", pathParam0, pathParam1)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewSetWebhookEndpointStatusRequest calls the generic SetWebhookEndpointStatus builder with application/json body
+func NewSetWebhookEndpointStatusRequest(server string, id WebhookEndpointID, body SetWebhookEndpointStatusJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewSetWebhookEndpointStatusRequestWithBody(server, id, "application/json", bodyReader)
+}
+
+// NewSetWebhookEndpointStatusRequestWithBody constructs an http.Request for the SetWebhookEndpointStatus method, with any body, and a specified content type
+func NewSetWebhookEndpointStatusRequestWithBody(server string, id WebhookEndpointID, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "id", id, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/admin/v1/webhooks/%s/status", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPut, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
 // NewListWithdrawalsForReviewRequest constructs an http.Request for the ListWithdrawalsForReview method
 func NewListWithdrawalsForReviewRequest(server string, params *ListWithdrawalsForReviewParams) (*http.Request, error) {
 	var err error
@@ -2712,6 +3452,114 @@ type ClientWithResponsesInterface interface {
 	//
 	// Corresponds with GET /admin/v1/sweeps (the `ListSweeps` operationId).
 	ListSweepsWithResponse(ctx context.Context, params *ListSweepsParams, reqEditors ...RequestEditorFn) (*ListSweepsResponse, error)
+
+	// ListWebhookEndpointsWithResponse Webhook endpoints, disabled ones included
+	//
+	// Signing secrets are never returned; they are shown once, when the endpoint is created.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /admin/v1/webhooks (the `ListWebhookEndpoints` operationId).
+	ListWebhookEndpointsWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*ListWebhookEndpointsResponse, error)
+
+	// CreateWebhookEndpointWithBodyWithResponse Register an endpoint to receive events
+	//
+	// Returns the signing secret exactly once. It is stored encrypted and no
+	// later response can produce it, so an operator who loses it has to
+	// rotate rather than look it up.
+	//
+	// There is no way to delete an endpoint, deliberately: the delivery
+	// history has to outlive the integration, so an endpoint that is finished
+	// with is set to `disabled`.
+	//
+	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /admin/v1/webhooks (the `CreateWebhookEndpoint` operationId).
+	CreateWebhookEndpointWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateWebhookEndpointResponse, error)
+
+	// CreateWebhookEndpointWithResponse Register an endpoint to receive events
+	//
+	// Returns the signing secret exactly once. It is stored encrypted and no
+	// later response can produce it, so an operator who loses it has to
+	// rotate rather than look it up.
+	//
+	// There is no way to delete an endpoint, deliberately: the delivery
+	// history has to outlive the integration, so an endpoint that is finished
+	// with is set to `disabled`.
+	//
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /admin/v1/webhooks (the `CreateWebhookEndpoint` operationId).
+	CreateWebhookEndpointWithResponse(ctx context.Context, body CreateWebhookEndpointJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateWebhookEndpointResponse, error)
+
+	// UpdateWebhookEndpointWithBodyWithResponse Replace an endpoint's URL, subscriptions and label
+	//
+	// A whole replacement of the mutable configuration, so `url` and `events` are required even when only one of them is changing. The signing secret is not part of it, and neither is the status, which has its own endpoint because turning an integration off is a different decision from editing it.
+	//
+	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with PUT /admin/v1/webhooks/{id} (the `UpdateWebhookEndpoint` operationId).
+	UpdateWebhookEndpointWithBodyWithResponse(ctx context.Context, id WebhookEndpointID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*UpdateWebhookEndpointResponse, error)
+
+	// UpdateWebhookEndpointWithResponse Replace an endpoint's URL, subscriptions and label
+	//
+	// A whole replacement of the mutable configuration, so `url` and `events` are required even when only one of them is changing. The signing secret is not part of it, and neither is the status, which has its own endpoint because turning an integration off is a different decision from editing it.
+	//
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with PUT /admin/v1/webhooks/{id} (the `UpdateWebhookEndpoint` operationId).
+	UpdateWebhookEndpointWithResponse(ctx context.Context, id WebhookEndpointID, body UpdateWebhookEndpointJSONRequestBody, reqEditors ...RequestEditorFn) (*UpdateWebhookEndpointResponse, error)
+
+	// ListWebhookDeliveriesWithResponse Delivery attempts for one endpoint, newest first
+	//
+	// One row per attempt, not per event. `run_id` groups the attempts that belong to one pass through the retry schedule, so a replay's attempts are distinguishable from the original's, and `attempt` is the step within that run. A null `response_status` means the endpoint never answered at all -- a timeout, a refused connection, a bad name -- which is a different problem from a rejection.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /admin/v1/webhooks/{id}/deliveries (the `ListWebhookDeliveries` operationId).
+	ListWebhookDeliveriesWithResponse(ctx context.Context, id WebhookEndpointID, params *ListWebhookDeliveriesParams, reqEditors ...RequestEditorFn) (*ListWebhookDeliveriesResponse, error)
+
+	// ReplayWebhookDeliveryWithResponse Send the event behind a delivery again
+	//
+	// Queues a new run of the event this delivery belongs to. The delivery
+	// itself does not change -- the table is append-only -- and the replay's
+	// attempts join it under a new `run_id`, restarting the retry schedule
+	// from its first step.
+	//
+	// 202, not 200: nothing has been sent yet. The worker picks the run up on
+	// its next tick, and the response says when that is due.
+	//
+	// The customer will receive the event a second time, with the same
+	// `event_id`. That is what a replay is; `docs/webhooks.md` tells them to
+	// deduplicate on it.
+	//
+	// 409 has two causes and the detail distinguishes them: the event is
+	// still queued for this endpoint, so the schedule is going to send it
+	// anyway; or the endpoint is disabled, and a replay would queue work
+	// nothing can pick up.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /admin/v1/webhooks/{id}/deliveries/{delivery_id}/replay (the `ReplayWebhookDelivery` operationId).
+	ReplayWebhookDeliveryWithResponse(ctx context.Context, id WebhookEndpointID, deliveryID WebhookDeliveryID, reqEditors ...RequestEditorFn) (*ReplayWebhookDeliveryResponse, error)
+
+	// SetWebhookEndpointStatusWithBodyWithResponse Enable or disable an endpoint
+	//
+	// Disabling also drops whatever is still queued for the endpoint. Queued deliveries to an inactive endpoint are not pending but unreachable, and leaving them would fire a batch of stale events at the customer whenever the integration was turned back on. The delivery history is untouched, and the number dropped is recorded in the audit trail.
+	//
+	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with PUT /admin/v1/webhooks/{id}/status (the `SetWebhookEndpointStatus` operationId).
+	SetWebhookEndpointStatusWithBodyWithResponse(ctx context.Context, id WebhookEndpointID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*SetWebhookEndpointStatusResponse, error)
+
+	// SetWebhookEndpointStatusWithResponse Enable or disable an endpoint
+	//
+	// Disabling also drops whatever is still queued for the endpoint. Queued deliveries to an inactive endpoint are not pending but unreachable, and leaving them would fire a batch of stale events at the customer whenever the integration was turned back on. The delivery history is untouched, and the number dropped is recorded in the audit trail.
+	//
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with PUT /admin/v1/webhooks/{id}/status (the `SetWebhookEndpointStatus` operationId).
+	SetWebhookEndpointStatusWithResponse(ctx context.Context, id WebhookEndpointID, body SetWebhookEndpointStatusJSONRequestBody, reqEditors ...RequestEditorFn) (*SetWebhookEndpointStatusResponse, error)
 
 	// ListWithdrawalsForReviewWithResponse The withdrawal review queue
 	//
@@ -3639,6 +4487,392 @@ func (r ListSweepsResponse) ContentType() string {
 	return ""
 }
 
+type ListWebhookEndpointsResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *WebhookEndpointList
+	// ApplicationProblemJSON401 the response for an HTTP 401 `application/problem+json` response
+	ApplicationProblemJSON401 *Unauthorized
+	// ApplicationProblemJSON500 the response for an HTTP 500 `application/problem+json` response
+	ApplicationProblemJSON500 *InternalError
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r ListWebhookEndpointsResponse) GetJSON200() *WebhookEndpointList {
+	return r.JSON200
+}
+
+// GetApplicationProblemJSON401 returns the response for an HTTP 401 `application/problem+json` response
+func (r ListWebhookEndpointsResponse) GetApplicationProblemJSON401() *Unauthorized {
+	return r.ApplicationProblemJSON401
+}
+
+// GetApplicationProblemJSON500 returns the response for an HTTP 500 `application/problem+json` response
+func (r ListWebhookEndpointsResponse) GetApplicationProblemJSON500() *InternalError {
+	return r.ApplicationProblemJSON500
+}
+
+// GetBody returns the raw response body bytes
+func (r ListWebhookEndpointsResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r ListWebhookEndpointsResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListWebhookEndpointsResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r ListWebhookEndpointsResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type CreateWebhookEndpointResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON201 the response for an HTTP 201 `application/json` response
+	JSON201 *CreatedWebhookEndpoint
+	// ApplicationProblemJSON400 the response for an HTTP 400 `application/problem+json` response
+	ApplicationProblemJSON400 *BadRequest
+	// ApplicationProblemJSON401 the response for an HTTP 401 `application/problem+json` response
+	ApplicationProblemJSON401 *Unauthorized
+	// ApplicationProblemJSON500 the response for an HTTP 500 `application/problem+json` response
+	ApplicationProblemJSON500 *InternalError
+}
+
+// GetJSON201 returns the response for an HTTP 201 `application/json` response
+func (r CreateWebhookEndpointResponse) GetJSON201() *CreatedWebhookEndpoint {
+	return r.JSON201
+}
+
+// GetApplicationProblemJSON400 returns the response for an HTTP 400 `application/problem+json` response
+func (r CreateWebhookEndpointResponse) GetApplicationProblemJSON400() *BadRequest {
+	return r.ApplicationProblemJSON400
+}
+
+// GetApplicationProblemJSON401 returns the response for an HTTP 401 `application/problem+json` response
+func (r CreateWebhookEndpointResponse) GetApplicationProblemJSON401() *Unauthorized {
+	return r.ApplicationProblemJSON401
+}
+
+// GetApplicationProblemJSON500 returns the response for an HTTP 500 `application/problem+json` response
+func (r CreateWebhookEndpointResponse) GetApplicationProblemJSON500() *InternalError {
+	return r.ApplicationProblemJSON500
+}
+
+// GetBody returns the raw response body bytes
+func (r CreateWebhookEndpointResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r CreateWebhookEndpointResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r CreateWebhookEndpointResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r CreateWebhookEndpointResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type UpdateWebhookEndpointResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *WebhookEndpoint
+	// ApplicationProblemJSON400 the response for an HTTP 400 `application/problem+json` response
+	ApplicationProblemJSON400 *BadRequest
+	// ApplicationProblemJSON401 the response for an HTTP 401 `application/problem+json` response
+	ApplicationProblemJSON401 *Unauthorized
+	// ApplicationProblemJSON404 the response for an HTTP 404 `application/problem+json` response
+	ApplicationProblemJSON404 *NotFound
+	// ApplicationProblemJSON500 the response for an HTTP 500 `application/problem+json` response
+	ApplicationProblemJSON500 *InternalError
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r UpdateWebhookEndpointResponse) GetJSON200() *WebhookEndpoint {
+	return r.JSON200
+}
+
+// GetApplicationProblemJSON400 returns the response for an HTTP 400 `application/problem+json` response
+func (r UpdateWebhookEndpointResponse) GetApplicationProblemJSON400() *BadRequest {
+	return r.ApplicationProblemJSON400
+}
+
+// GetApplicationProblemJSON401 returns the response for an HTTP 401 `application/problem+json` response
+func (r UpdateWebhookEndpointResponse) GetApplicationProblemJSON401() *Unauthorized {
+	return r.ApplicationProblemJSON401
+}
+
+// GetApplicationProblemJSON404 returns the response for an HTTP 404 `application/problem+json` response
+func (r UpdateWebhookEndpointResponse) GetApplicationProblemJSON404() *NotFound {
+	return r.ApplicationProblemJSON404
+}
+
+// GetApplicationProblemJSON500 returns the response for an HTTP 500 `application/problem+json` response
+func (r UpdateWebhookEndpointResponse) GetApplicationProblemJSON500() *InternalError {
+	return r.ApplicationProblemJSON500
+}
+
+// GetBody returns the raw response body bytes
+func (r UpdateWebhookEndpointResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r UpdateWebhookEndpointResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r UpdateWebhookEndpointResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r UpdateWebhookEndpointResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type ListWebhookDeliveriesResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *WebhookDeliveryList
+	// ApplicationProblemJSON401 the response for an HTTP 401 `application/problem+json` response
+	ApplicationProblemJSON401 *Unauthorized
+	// ApplicationProblemJSON404 the response for an HTTP 404 `application/problem+json` response
+	ApplicationProblemJSON404 *NotFound
+	// ApplicationProblemJSON500 the response for an HTTP 500 `application/problem+json` response
+	ApplicationProblemJSON500 *InternalError
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r ListWebhookDeliveriesResponse) GetJSON200() *WebhookDeliveryList {
+	return r.JSON200
+}
+
+// GetApplicationProblemJSON401 returns the response for an HTTP 401 `application/problem+json` response
+func (r ListWebhookDeliveriesResponse) GetApplicationProblemJSON401() *Unauthorized {
+	return r.ApplicationProblemJSON401
+}
+
+// GetApplicationProblemJSON404 returns the response for an HTTP 404 `application/problem+json` response
+func (r ListWebhookDeliveriesResponse) GetApplicationProblemJSON404() *NotFound {
+	return r.ApplicationProblemJSON404
+}
+
+// GetApplicationProblemJSON500 returns the response for an HTTP 500 `application/problem+json` response
+func (r ListWebhookDeliveriesResponse) GetApplicationProblemJSON500() *InternalError {
+	return r.ApplicationProblemJSON500
+}
+
+// GetBody returns the raw response body bytes
+func (r ListWebhookDeliveriesResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r ListWebhookDeliveriesResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListWebhookDeliveriesResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r ListWebhookDeliveriesResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type ReplayWebhookDeliveryResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON202 the response for an HTTP 202 `application/json` response
+	JSON202 *WebhookReplay
+	// ApplicationProblemJSON401 the response for an HTTP 401 `application/problem+json` response
+	ApplicationProblemJSON401 *Unauthorized
+	// ApplicationProblemJSON404 the response for an HTTP 404 `application/problem+json` response
+	ApplicationProblemJSON404 *NotFound
+	// ApplicationProblemJSON409 the response for an HTTP 409 `application/problem+json` response
+	ApplicationProblemJSON409 *Conflict
+	// ApplicationProblemJSON500 the response for an HTTP 500 `application/problem+json` response
+	ApplicationProblemJSON500 *InternalError
+}
+
+// GetJSON202 returns the response for an HTTP 202 `application/json` response
+func (r ReplayWebhookDeliveryResponse) GetJSON202() *WebhookReplay {
+	return r.JSON202
+}
+
+// GetApplicationProblemJSON401 returns the response for an HTTP 401 `application/problem+json` response
+func (r ReplayWebhookDeliveryResponse) GetApplicationProblemJSON401() *Unauthorized {
+	return r.ApplicationProblemJSON401
+}
+
+// GetApplicationProblemJSON404 returns the response for an HTTP 404 `application/problem+json` response
+func (r ReplayWebhookDeliveryResponse) GetApplicationProblemJSON404() *NotFound {
+	return r.ApplicationProblemJSON404
+}
+
+// GetApplicationProblemJSON409 returns the response for an HTTP 409 `application/problem+json` response
+func (r ReplayWebhookDeliveryResponse) GetApplicationProblemJSON409() *Conflict {
+	return r.ApplicationProblemJSON409
+}
+
+// GetApplicationProblemJSON500 returns the response for an HTTP 500 `application/problem+json` response
+func (r ReplayWebhookDeliveryResponse) GetApplicationProblemJSON500() *InternalError {
+	return r.ApplicationProblemJSON500
+}
+
+// GetBody returns the raw response body bytes
+func (r ReplayWebhookDeliveryResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r ReplayWebhookDeliveryResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ReplayWebhookDeliveryResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r ReplayWebhookDeliveryResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type SetWebhookEndpointStatusResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *WebhookEndpoint
+	// ApplicationProblemJSON400 the response for an HTTP 400 `application/problem+json` response
+	ApplicationProblemJSON400 *BadRequest
+	// ApplicationProblemJSON401 the response for an HTTP 401 `application/problem+json` response
+	ApplicationProblemJSON401 *Unauthorized
+	// ApplicationProblemJSON404 the response for an HTTP 404 `application/problem+json` response
+	ApplicationProblemJSON404 *NotFound
+	// ApplicationProblemJSON500 the response for an HTTP 500 `application/problem+json` response
+	ApplicationProblemJSON500 *InternalError
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r SetWebhookEndpointStatusResponse) GetJSON200() *WebhookEndpoint {
+	return r.JSON200
+}
+
+// GetApplicationProblemJSON400 returns the response for an HTTP 400 `application/problem+json` response
+func (r SetWebhookEndpointStatusResponse) GetApplicationProblemJSON400() *BadRequest {
+	return r.ApplicationProblemJSON400
+}
+
+// GetApplicationProblemJSON401 returns the response for an HTTP 401 `application/problem+json` response
+func (r SetWebhookEndpointStatusResponse) GetApplicationProblemJSON401() *Unauthorized {
+	return r.ApplicationProblemJSON401
+}
+
+// GetApplicationProblemJSON404 returns the response for an HTTP 404 `application/problem+json` response
+func (r SetWebhookEndpointStatusResponse) GetApplicationProblemJSON404() *NotFound {
+	return r.ApplicationProblemJSON404
+}
+
+// GetApplicationProblemJSON500 returns the response for an HTTP 500 `application/problem+json` response
+func (r SetWebhookEndpointStatusResponse) GetApplicationProblemJSON500() *InternalError {
+	return r.ApplicationProblemJSON500
+}
+
+// GetBody returns the raw response body bytes
+func (r SetWebhookEndpointStatusResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r SetWebhookEndpointStatusResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r SetWebhookEndpointStatusResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r SetWebhookEndpointStatusResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
 type ListWithdrawalsForReviewResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -4173,6 +5407,168 @@ func (c *ClientWithResponses) ListSweepsWithResponse(ctx context.Context, params
 		return nil, err
 	}
 	return ParseListSweepsResponse(rsp)
+}
+
+// ListWebhookEndpointsWithResponse Webhook endpoints, disabled ones included
+//
+// Signing secrets are never returned; they are shown once, when the endpoint is created.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /admin/v1/webhooks (the `ListWebhookEndpoints` operationId).
+func (c *ClientWithResponses) ListWebhookEndpointsWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*ListWebhookEndpointsResponse, error) {
+	rsp, err := c.ListWebhookEndpoints(ctx, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListWebhookEndpointsResponse(rsp)
+}
+
+// CreateWebhookEndpointWithBodyWithResponse Register an endpoint to receive events
+//
+// Returns the signing secret exactly once. It is stored encrypted and no
+// later response can produce it, so an operator who loses it has to
+// rotate rather than look it up.
+//
+// There is no way to delete an endpoint, deliberately: the delivery
+// history has to outlive the integration, so an endpoint that is finished
+// with is set to `disabled`.
+//
+// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /admin/v1/webhooks (the `CreateWebhookEndpoint` operationId).
+func (c *ClientWithResponses) CreateWebhookEndpointWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateWebhookEndpointResponse, error) {
+	rsp, err := c.CreateWebhookEndpointWithBody(ctx, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCreateWebhookEndpointResponse(rsp)
+}
+
+// CreateWebhookEndpointWithResponse Register an endpoint to receive events
+//
+// Returns the signing secret exactly once. It is stored encrypted and no
+// later response can produce it, so an operator who loses it has to
+// rotate rather than look it up.
+//
+// There is no way to delete an endpoint, deliberately: the delivery
+// history has to outlive the integration, so an endpoint that is finished
+// with is set to `disabled`.
+//
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /admin/v1/webhooks (the `CreateWebhookEndpoint` operationId).
+func (c *ClientWithResponses) CreateWebhookEndpointWithResponse(ctx context.Context, body CreateWebhookEndpointJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateWebhookEndpointResponse, error) {
+	rsp, err := c.CreateWebhookEndpoint(ctx, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCreateWebhookEndpointResponse(rsp)
+}
+
+// UpdateWebhookEndpointWithBodyWithResponse Replace an endpoint's URL, subscriptions and label
+//
+// A whole replacement of the mutable configuration, so `url` and `events` are required even when only one of them is changing. The signing secret is not part of it, and neither is the status, which has its own endpoint because turning an integration off is a different decision from editing it.
+//
+// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with PUT /admin/v1/webhooks/{id} (the `UpdateWebhookEndpoint` operationId).
+func (c *ClientWithResponses) UpdateWebhookEndpointWithBodyWithResponse(ctx context.Context, id WebhookEndpointID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*UpdateWebhookEndpointResponse, error) {
+	rsp, err := c.UpdateWebhookEndpointWithBody(ctx, id, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseUpdateWebhookEndpointResponse(rsp)
+}
+
+// UpdateWebhookEndpointWithResponse Replace an endpoint's URL, subscriptions and label
+//
+// A whole replacement of the mutable configuration, so `url` and `events` are required even when only one of them is changing. The signing secret is not part of it, and neither is the status, which has its own endpoint because turning an integration off is a different decision from editing it.
+//
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with PUT /admin/v1/webhooks/{id} (the `UpdateWebhookEndpoint` operationId).
+func (c *ClientWithResponses) UpdateWebhookEndpointWithResponse(ctx context.Context, id WebhookEndpointID, body UpdateWebhookEndpointJSONRequestBody, reqEditors ...RequestEditorFn) (*UpdateWebhookEndpointResponse, error) {
+	rsp, err := c.UpdateWebhookEndpoint(ctx, id, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseUpdateWebhookEndpointResponse(rsp)
+}
+
+// ListWebhookDeliveriesWithResponse Delivery attempts for one endpoint, newest first
+//
+// One row per attempt, not per event. `run_id` groups the attempts that belong to one pass through the retry schedule, so a replay's attempts are distinguishable from the original's, and `attempt` is the step within that run. A null `response_status` means the endpoint never answered at all -- a timeout, a refused connection, a bad name -- which is a different problem from a rejection.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /admin/v1/webhooks/{id}/deliveries (the `ListWebhookDeliveries` operationId).
+func (c *ClientWithResponses) ListWebhookDeliveriesWithResponse(ctx context.Context, id WebhookEndpointID, params *ListWebhookDeliveriesParams, reqEditors ...RequestEditorFn) (*ListWebhookDeliveriesResponse, error) {
+	rsp, err := c.ListWebhookDeliveries(ctx, id, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListWebhookDeliveriesResponse(rsp)
+}
+
+// ReplayWebhookDeliveryWithResponse Send the event behind a delivery again
+//
+// Queues a new run of the event this delivery belongs to. The delivery
+// itself does not change -- the table is append-only -- and the replay's
+// attempts join it under a new `run_id`, restarting the retry schedule
+// from its first step.
+//
+// 202, not 200: nothing has been sent yet. The worker picks the run up on
+// its next tick, and the response says when that is due.
+//
+// The customer will receive the event a second time, with the same
+// `event_id`. That is what a replay is; `docs/webhooks.md` tells them to
+// deduplicate on it.
+//
+// 409 has two causes and the detail distinguishes them: the event is
+// still queued for this endpoint, so the schedule is going to send it
+// anyway; or the endpoint is disabled, and a replay would queue work
+// nothing can pick up.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /admin/v1/webhooks/{id}/deliveries/{delivery_id}/replay (the `ReplayWebhookDelivery` operationId).
+func (c *ClientWithResponses) ReplayWebhookDeliveryWithResponse(ctx context.Context, id WebhookEndpointID, deliveryID WebhookDeliveryID, reqEditors ...RequestEditorFn) (*ReplayWebhookDeliveryResponse, error) {
+	rsp, err := c.ReplayWebhookDelivery(ctx, id, deliveryID, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseReplayWebhookDeliveryResponse(rsp)
+}
+
+// SetWebhookEndpointStatusWithBodyWithResponse Enable or disable an endpoint
+//
+// Disabling also drops whatever is still queued for the endpoint. Queued deliveries to an inactive endpoint are not pending but unreachable, and leaving them would fire a batch of stale events at the customer whenever the integration was turned back on. The delivery history is untouched, and the number dropped is recorded in the audit trail.
+//
+// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with PUT /admin/v1/webhooks/{id}/status (the `SetWebhookEndpointStatus` operationId).
+func (c *ClientWithResponses) SetWebhookEndpointStatusWithBodyWithResponse(ctx context.Context, id WebhookEndpointID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*SetWebhookEndpointStatusResponse, error) {
+	rsp, err := c.SetWebhookEndpointStatusWithBody(ctx, id, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseSetWebhookEndpointStatusResponse(rsp)
+}
+
+// SetWebhookEndpointStatusWithResponse Enable or disable an endpoint
+//
+// Disabling also drops whatever is still queued for the endpoint. Queued deliveries to an inactive endpoint are not pending but unreachable, and leaving them would fire a batch of stale events at the customer whenever the integration was turned back on. The delivery history is untouched, and the number dropped is recorded in the audit trail.
+//
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with PUT /admin/v1/webhooks/{id}/status (the `SetWebhookEndpointStatus` operationId).
+func (c *ClientWithResponses) SetWebhookEndpointStatusWithResponse(ctx context.Context, id WebhookEndpointID, body SetWebhookEndpointStatusJSONRequestBody, reqEditors ...RequestEditorFn) (*SetWebhookEndpointStatusResponse, error) {
+	rsp, err := c.SetWebhookEndpointStatus(ctx, id, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseSetWebhookEndpointStatusResponse(rsp)
 }
 
 // ListWithdrawalsForReviewWithResponse The withdrawal review queue
@@ -4907,6 +6303,302 @@ func ParseListSweepsResponse(rsp *http.Response) (*ListSweepsResponse, error) {
 			return nil, err
 		}
 		response.ApplicationProblemJSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON500 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseListWebhookEndpointsResponse parses an HTTP response from a ListWebhookEndpointsWithResponse call
+func ParseListWebhookEndpointsResponse(rsp *http.Response) (*ListWebhookEndpointsResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListWebhookEndpointsResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest WebhookEndpointList
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON500 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseCreateWebhookEndpointResponse parses an HTTP response from a CreateWebhookEndpointWithResponse call
+func ParseCreateWebhookEndpointResponse(rsp *http.Response) (*CreateWebhookEndpointResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &CreateWebhookEndpointResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 201:
+		var dest CreatedWebhookEndpoint
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON201 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest BadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON500 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseUpdateWebhookEndpointResponse parses an HTTP response from a UpdateWebhookEndpointWithResponse call
+func ParseUpdateWebhookEndpointResponse(rsp *http.Response) (*UpdateWebhookEndpointResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &UpdateWebhookEndpointResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest WebhookEndpoint
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest BadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON500 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseListWebhookDeliveriesResponse parses an HTTP response from a ListWebhookDeliveriesWithResponse call
+func ParseListWebhookDeliveriesResponse(rsp *http.Response) (*ListWebhookDeliveriesResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListWebhookDeliveriesResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest WebhookDeliveryList
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON500 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseReplayWebhookDeliveryResponse parses an HTTP response from a ReplayWebhookDeliveryWithResponse call
+func ParseReplayWebhookDeliveryResponse(rsp *http.Response) (*ReplayWebhookDeliveryResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ReplayWebhookDeliveryResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 202:
+		var dest WebhookReplay
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON202 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest Conflict
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON409 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON500 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseSetWebhookEndpointStatusResponse parses an HTTP response from a SetWebhookEndpointStatusWithResponse call
+func ParseSetWebhookEndpointStatusResponse(rsp *http.Response) (*SetWebhookEndpointStatusResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &SetWebhookEndpointStatusResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest WebhookEndpoint
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest BadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON404 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
 		var dest InternalError
