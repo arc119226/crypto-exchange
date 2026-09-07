@@ -270,6 +270,12 @@ services:
       <<: *exchange-env
       DATABASE_URL: postgres://ex_worker:${POSTGRES_PASSWORD}@postgres:5432/exchange?sslmode=disable
       WEBHOOK_SIGNING_KEY: ${WEBHOOK_SIGNING_KEY}
+      # The production schedule's first retry is a minute away, which makes a
+      # failing endpoint untestable by hand. Same reasoning as the shortened
+      # ETH_* clocks on exchange-chain: development wants to see the behaviour,
+      # not wait for it. §7.6's real sequence is the default in config.go.
+      WEBHOOK_BACKOFF: 2s,5s,15s
+      WEBHOOK_INTERVAL: 1s
     depends_on: *app-deps
 
   exchange-all:                                          # every role in one process; the signer is an in-process call
@@ -296,6 +302,8 @@ services:
       ETH_SWEEP_INTERVAL: 3s                    # same reasoning as exchange-chain above
       ETH_RECONCILE_INTERVAL: 5s                # same
       ETH_HOT_WALLET_MIN: "1"                   # same
+      WEBHOOK_BACKOFF: 2s,5s,15s                # same: see exchange-worker
+      WEBHOOK_INTERVAL: 1s
     volumes:
       - artifacts:/artifacts:ro
       - ../../secrets/jwt:/secrets/jwt:ro
