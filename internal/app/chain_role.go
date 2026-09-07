@@ -17,6 +17,7 @@ import (
 	"github.com/arc119226/crypto-exchange/internal/chain/deposit"
 	"github.com/arc119226/crypto-exchange/internal/chain/evm"
 	"github.com/arc119226/crypto-exchange/internal/chain/hotwallet"
+	"github.com/arc119226/crypto-exchange/internal/chain/reconcile"
 	"github.com/arc119226/crypto-exchange/internal/chain/signer"
 	"github.com/arc119226/crypto-exchange/internal/chain/sweep"
 	"github.com/arc119226/crypto-exchange/internal/chain/withdrawal"
@@ -45,6 +46,12 @@ type chainComponents struct {
 	// sending is, and also when an operator has turned collection off.
 	sweeper       *sweep.Worker
 	sweepInterval time.Duration
+	// reconciler compares ledger custody with on-chain balances (§6.4.4). It
+	// needs no signer -- it only reads -- so it runs in deployments where
+	// nothing can be signed, which is exactly when someone wants to know what
+	// is actually there.
+	reconciler        *reconcile.Worker
+	reconcileInterval time.Duration
 	// lastTick records whether the most recent tick succeeded, so readiness
 	// reflects the scanner rather than only the RPC connection.
 	lastErr error
@@ -126,12 +133,31 @@ func newChain(ctx context.Context, cfg Config, log *slog.Logger, db *pgxpool.Poo
 		}
 	}
 
+	if cfg.Chain.ReconcileEnabled {
+		minHot, err := cfg.Chain.MinHotWallet()
+		if err != nil {
+			client.Close()
+			return nil, err
+		}
+		c.reconciler = reconcile.New(db, reconcile.Config{
+			Tenant: cfg.TenantID, ChainID: cfg.Chain.ChainID, NativeAsset: cfg.Chain.NativeAsset,
+			DefaultConfirmations: cfg.Chain.RequiredConfirmations, HotWalletMin: minHot,
+		}, store, l, client, log).WithMetrics(reconcile.NewMetrics(reg))
+		c.reconcileInterval = cfg.Chain.ReconcileInterval
+	} else {
+		log.Warn("reconciliation is off: nothing will compare the ledger with the chain")
+	}
+
 	log.Info("scanning for deposits",
 		slog.String("rpc", client.LogValue()), slog.Int64("chain_id", cfg.Chain.ChainID),
 		slog.Duration("interval", cfg.Chain.ScanInterval))
 	if c.sweeper != nil {
 		log.Info("collecting deposits into the hot wallet",
 			slog.Duration("interval", cfg.Chain.SweepInterval))
+	}
+	if c.reconciler != nil {
+		log.Info("reconciling ledger custody against on-chain balances",
+			slog.Duration("interval", cfg.Chain.ReconcileInterval))
 	}
 	log.Info("driving withdrawals to funds_locked",
 		slog.Duration("interval", cfg.Chain.WithdrawalInterval),
@@ -284,6 +310,32 @@ func (c *chainComponents) runSweeping(ctx context.Context, log *slog.Logger) err
 	for {
 		if err := c.sweeper.Tick(ctx); err != nil && ctx.Err() == nil {
 			log.Error("sweep tick failed", slog.String("err", err.Error()))
+		}
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-tick.C:
+		}
+	}
+}
+
+// runReconciling compares the ledger with the chain until ctx ends.
+//
+// The slowest clock in the role, and the only one nobody is waiting on: a pass
+// costs a balance call per address per asset, and a difference that appears
+// between two of them is not one anybody can act on faster than minutes. A
+// failed pass is logged and the next one tries again -- a reconciler that
+// stopped the role would turn "we could not check" into "we stopped running",
+// which is strictly worse.
+func (c *chainComponents) runReconciling(ctx context.Context, log *slog.Logger) error {
+	if c.reconciler == nil {
+		return nil
+	}
+	tick := time.NewTicker(c.reconcileInterval)
+	defer tick.Stop()
+	for {
+		if err := c.reconciler.Tick(ctx); err != nil && ctx.Err() == nil {
+			log.Error("reconciliation pass failed", slog.String("err", err.Error()))
 		}
 		select {
 		case <-ctx.Done():

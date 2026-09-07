@@ -13,6 +13,7 @@ import (
 
 	"github.com/caarlos0/env/v11"
 
+	"github.com/arc119226/crypto-exchange/internal/money"
 	"github.com/arc119226/crypto-exchange/internal/telemetry"
 )
 
@@ -167,6 +168,38 @@ type ChainConfig struct {
 	// where its hot wallet lives is better off leaving deposits where they
 	// landed than moving them somewhere it cannot spend from.
 	SweepEnabled bool `env:"SWEEP_ENABLED" envDefault:"true"`
+	// ReconcileInterval is how often ledger custody is compared with on-chain
+	// balances (§6.4.4). The slowest clock in the role: a pass costs one
+	// balance call per address per asset, and nothing downstream reacts within
+	// minutes anyway.
+	ReconcileInterval time.Duration `env:"RECONCILE_INTERVAL" envDefault:"5m"`
+	// ReconcileEnabled turns the comparison off. Also turns off the booking of
+	// nonce-fill gas, which rides the same pass.
+	ReconcileEnabled bool `env:"RECONCILE_ENABLED" envDefault:"true"`
+	// HotWalletMin is the balance below which alert.hot_wallet_low fires, in
+	// NativeAsset. Empty or zero disables the alert.
+	//
+	// §6.4.3 spells it HOT_WALLET_MIN_ETH. The leaf name here has no "ETH" in
+	// it because the denomination is whatever ETH_NATIVE_ASSET says, and a
+	// setting that names one coin while meaning another is a trap on the first
+	// chain that is not Ethereum.
+	HotWalletMin string `env:"HOT_WALLET_MIN" envDefault:"0"`
+}
+
+// MinHotWallet parses HotWalletMin. Zero means the low-balance alert is off.
+func (c ChainConfig) MinHotWallet() (money.Amount, error) {
+	s := strings.TrimSpace(c.HotWalletMin)
+	if s == "" {
+		return money.Zero, nil
+	}
+	v, err := money.ParseAmount(s)
+	if err != nil {
+		return money.Zero, fmt.Errorf("config: ETH_HOT_WALLET_MIN %q is not a decimal amount", c.HotWalletMin)
+	}
+	if v.IsNegative() {
+		return money.Zero, fmt.Errorf("config: ETH_HOT_WALLET_MIN %q must not be negative", c.HotWalletMin)
+	}
+	return v, nil
 }
 
 // MaxFee parses MaxFeePerGas. An unset ceiling is nil, which every caller
@@ -302,6 +335,15 @@ func (c Config) Validate() error {
 	if c.Chain.ScanBatchSize == 0 || c.Chain.BlockRingDepth == 0 {
 		return fmt.Errorf("config: ETH_SCAN_BATCH_SIZE and ETH_BLOCK_RING_DEPTH must be positive")
 	}
+	if c.Chain.SweepInterval <= 0 {
+		return fmt.Errorf("config: ETH_SWEEP_INTERVAL must be positive")
+	}
+	if c.Chain.ReconcileInterval <= 0 {
+		return fmt.Errorf("config: ETH_RECONCILE_INTERVAL must be positive")
+	}
+	if _, err := c.Chain.MinHotWallet(); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -324,6 +366,9 @@ func (c Config) LogValue() slog.Value {
 		slog.Duration("eth_scan_interval", c.Chain.ScanInterval),
 		slog.Duration("eth_withdrawal_interval", c.Chain.WithdrawalInterval),
 		slog.Duration("eth_sweep_interval", c.Chain.SweepInterval),
+		slog.Duration("eth_reconcile_interval", c.Chain.ReconcileInterval),
+		slog.Bool("eth_reconcile_enabled", c.Chain.ReconcileEnabled),
+		slog.String("eth_hot_wallet_min", c.Chain.HotWalletMin),
 		slog.Bool("eth_sweep_enabled", c.Chain.SweepEnabled),
 		slog.Duration("eth_replace_after", c.Chain.ReplaceAfter),
 		slog.Int("eth_max_replacements", int(c.Chain.MaxReplacements)),

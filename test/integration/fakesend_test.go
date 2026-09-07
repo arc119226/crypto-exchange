@@ -13,6 +13,7 @@ import (
 
 	"github.com/arc119226/crypto-exchange/internal/chain/evm"
 	"github.com/arc119226/crypto-exchange/internal/chain/hotwallet"
+	"github.com/arc119226/crypto-exchange/internal/chain/reconcile"
 	"github.com/arc119226/crypto-exchange/internal/chain/sweep"
 	"github.com/arc119226/crypto-exchange/internal/chain/withdrawal"
 )
@@ -54,12 +55,31 @@ type sendChain struct {
 	tokenErr map[common.Address]error
 	// sent records every raw transaction that reached the node, in order.
 	sent []*types.Transaction
+	// history is the balances as of the end of each block, so a read pinned to
+	// a height answers what was true then rather than what is true now.
+	//
+	// Without it a scripted chain would let reconciliation read "at block B"
+	// and quietly get the head -- which is precisely the mistake the frontier
+	// arithmetic exists to prevent, so the fake has to be able to make it.
+	history map[uint64]snapshot
+	// hashSalt changes a block's hash without changing anything else, which is
+	// how a test says "a reorg happened between those two reads".
+	hashSalt map[uint64]string
+	// reorgOnRead flips that salt the first time a block is asked for.
+	reorgOnRead map[uint64]bool
+}
+
+// snapshot is the balance state at the end of one block.
+type snapshot struct {
+	ether  map[common.Address]*big.Int
+	tokens map[common.Address]map[common.Address]*big.Int
 }
 
 var (
 	_ withdrawal.Chain = (*sendChain)(nil)
 	_ hotwallet.Chain  = (*sendChain)(nil)
 	_ sweep.Chain      = (*sendChain)(nil)
+	_ reconcile.Chain  = (*sendChain)(nil)
 )
 
 func newSendChain(chainID int64) *sendChain {
@@ -68,11 +88,109 @@ func newSendChain(chainID int64) *sendChain {
 		pool:       map[common.Hash]*types.Transaction{},
 		mined:      map[common.Hash]*types.Receipt{},
 		minedNonce: map[common.Address]uint64{}, foreignNonce: map[common.Address]uint64{},
-		ether:    map[common.Address]*big.Int{},
-		tokens:   map[common.Address]map[common.Address]*big.Int{},
-		tokenErr: map[common.Address]error{},
-		baseFee:  big.NewInt(1_000_000_000), tip: big.NewInt(1_500_000_000),
+		ether:       map[common.Address]*big.Int{},
+		tokens:      map[common.Address]map[common.Address]*big.Int{},
+		tokenErr:    map[common.Address]error{},
+		history:     map[uint64]snapshot{},
+		hashSalt:    map[uint64]string{},
+		reorgOnRead: map[uint64]bool{},
+		baseFee:     big.NewInt(1_000_000_000), tip: big.NewInt(1_500_000_000),
 	}
+}
+
+// snap remembers the balances as of the current head. Called with c.mu held.
+func (c *sendChain) snap() {
+	ether := make(map[common.Address]*big.Int, len(c.ether))
+	for a, v := range c.ether {
+		ether[a] = new(big.Int).Set(v)
+	}
+	tokens := make(map[common.Address]map[common.Address]*big.Int, len(c.tokens))
+	for token, holders := range c.tokens {
+		out := make(map[common.Address]*big.Int, len(holders))
+		for h, v := range holders {
+			out[h] = new(big.Int).Set(v)
+		}
+		tokens[token] = out
+	}
+	c.history[c.head] = snapshot{ether: ether, tokens: tokens}
+}
+
+// at is the snapshot governing a height: the most recent one at or below it.
+// Called with c.mu held.
+func (c *sendChain) at(block *big.Int) (snapshot, bool) {
+	if block == nil {
+		return snapshot{}, false
+	}
+	want := block.Uint64()
+	best, found := uint64(0), false
+	for n := range c.history {
+		if n <= want && (!found || n > best) {
+			best, found = n, true
+		}
+	}
+	if !found {
+		return snapshot{}, false
+	}
+	return c.history[best], true
+}
+
+// BalanceAt answers as of a block, or the head when block is nil.
+func (c *sendChain) BalanceAt(_ context.Context, a common.Address, block *big.Int) (*big.Int, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if snap, ok := c.at(block); ok {
+		if v, held := snap.ether[a]; held {
+			return new(big.Int).Set(v), nil
+		}
+		return big.NewInt(0), nil
+	}
+	return new(big.Int).Set(c.balanceOf(a)), nil
+}
+
+// TokenBalanceAt answers as of a block, or the head when block is nil.
+func (c *sendChain) TokenBalanceAt(_ context.Context, token, holder common.Address, block *big.Int) (*big.Int, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if err := c.tokenErr[token]; err != nil {
+		return nil, err
+	}
+	if snap, ok := c.at(block); ok {
+		if v, held := snap.tokens[token][holder]; held {
+			return new(big.Int).Set(v), nil
+		}
+		return big.NewInt(0), nil
+	}
+	return new(big.Int).Set(c.tokenOf(token, holder)), nil
+}
+
+// BlockByNumber is enough of a block for a hash comparison.
+func (c *sendChain) BlockByNumber(_ context.Context, number uint64) (evm.Block, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if number > c.head {
+		return evm.Block{}, fmt.Errorf("%w: block %d", evm.ErrNotFound, number)
+	}
+	block := evm.Block{
+		Number: number,
+		Hash:   labelHash(fmt.Sprintf("block-%d-%s", number, c.hashSalt[number])),
+	}
+	if c.reorgOnRead[number] {
+		delete(c.reorgOnRead, number)
+		c.hashSalt[number] = "reorged"
+	}
+	return block, nil
+}
+
+// reorgAfterRead changes a block's hash the first time it is read, so a reader
+// that brackets a set of balances with that hash sees it move underneath.
+//
+// The real shape of this: BalanceAt takes a number, not a hash, so a reorg
+// part-way through a set of reads blends two chains and nothing in the answers
+// says so. The only defence is to ask twice.
+func (c *sendChain) reorgAfterRead(block uint64) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.reorgOnRead[block] = true
 }
 
 func (c *sendChain) Head(context.Context) (uint64, error) {
@@ -232,6 +350,7 @@ func (c *sendChain) mineBlock(status uint64, only *common.Hash) uint64 {
 		c.debitEther(sender, new(big.Int).Mul(new(big.Int).SetUint64(tx.Gas()), price))
 		delete(c.pool, h)
 	}
+	c.snap()
 	return c.head
 }
 
@@ -324,6 +443,18 @@ func (c *sendChain) fund(a common.Address, wei *big.Int) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.creditEther(a, wei)
+	// Funding is not a transaction here, so nothing else would record it into
+	// the current block's snapshot -- and a balance a pinned read cannot see
+	// is a balance the test did not really set.
+	c.snap()
+}
+
+// drain removes ether, standing in for spending nobody modelled.
+func (c *sendChain) drain(a common.Address, wei *big.Int) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.debitEther(a, wei)
+	c.snap()
 }
 
 // fundToken does the same for an ERC-20.
@@ -331,6 +462,7 @@ func (c *sendChain) fundToken(token, holder common.Address, units *big.Int) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.setToken(token, holder, new(big.Int).Add(c.tokenOf(token, holder), units))
+	c.snap()
 }
 
 // advance moves the head on without mining anything, which is how a test buys
@@ -339,6 +471,7 @@ func (c *sendChain) advance(blocks uint64) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.head += blocks
+	c.snap()
 }
 
 // failTokenBalance makes every balanceOf on this contract fail, the way a

@@ -100,6 +100,10 @@ type Scanner struct {
 	// tick; addresses are only ever added, never removed.
 	watched   map[common.Address]watchedAddress
 	watermark string // highest deposit_addresses.id already loaded
+	// hot is the wallet the exchange pays out of, nil until the signer has
+	// registered one. Transfers from it are the exchange's own money moving,
+	// not deposits.
+	hot *common.Address
 }
 
 type watchedAddress struct {

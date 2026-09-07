@@ -51,9 +51,20 @@ func (w *Worker) fundGas(ctx context.Context, row sqlcgen.ChainSweep, asset regi
 	if have.Cmp(funding) >= 0 {
 		// Already funded. Skip the leg entirely rather than send a zero
 		// transfer: it moves nothing and costs 21000 gas to say so.
+		//
+		// Anything a previous attempt pinned has to go first. FundSweepGas
+		// writes the amount and the nonce when it reserves the nonce, before
+		// the signer is asked; if signing failed, this row still carries them
+		// with no transaction behind them. Marking it funded with those left
+		// in place would book ether the hot wallet never sent, and would
+		// abandon a nonce nothing will ever spend.
+		row, err = w.releasePinnedFunding(ctx, row)
+		if err != nil {
+			return err
+		}
 		w.log.Info("deposit address can already pay its own gas",
 			slog.String("sweep_id", row.ID), slog.String("held", have.String()))
-		return w.markGasFunded(ctx, row, money.Zero)
+		return w.markGasFunded(ctx, row, money.Zero, nil)
 	}
 	funding = funding.Sub(have)
 
@@ -72,12 +83,35 @@ func (w *Worker) fundGas(ctx context.Context, row sqlcgen.ChainSweep, asset regi
 		}
 		w.log.Error("gas funding was refused",
 			slog.String("sweep_id", row.ID), slog.String("err", err.Error()))
-		return w.fail(ctx, row, FailureGasFunding, money.Zero)
+		return w.failFunding(ctx, row, money.Zero, nil)
 	}
 	w.log.Info("funding a deposit address so it can pay for its own sweep",
 		slog.String("sweep_id", row.ID), slog.String("address", row.FromAddress),
 		slog.String("amount", funding.String()), slog.String("tx_hash", hash))
 	return nil
+}
+
+// releasePinnedFunding gives back a funding nonce and amount that were
+// reserved but never turned into a transaction, and returns the cleaned row.
+//
+// A no-op on a row that has a funding hash: those columns describe a
+// transaction that exists, and the ether it moved still has to be booked.
+func (w *Worker) releasePinnedFunding(ctx context.Context, row sqlcgen.ChainSweep) (sqlcgen.ChainSweep, error) {
+	if row.GasFundingTxHash != nil || (row.GasFundingNonce == nil && !row.GasFundingAmount.Valid) {
+		return row, nil
+	}
+	if row.GasFundingNonce != nil {
+		if err := w.nonces.Recycle(ctx, uint64(*row.GasFundingNonce), "broadcast_failed"); err != nil { //nolint:gosec // CHECKed >= 0
+			return row, fmt.Errorf("sweep: recycle unsigned funding nonce on %s: %w", row.ID, err)
+		}
+	}
+	cleaned, err := sqlcgen.New(w.db).ClearSweepGasFunding(ctx, sqlcgen.ClearSweepGasFundingParams{
+		TenantID: w.cfg.Tenant, ID: row.ID,
+	})
+	if err != nil {
+		return row, fmt.Errorf("sweep: clear pinned funding on %s: %w", row.ID, err)
+	}
+	return cleaned, nil
 }
 
 // signFunding pins the funding nonce, signs, and records both before the
@@ -169,9 +203,9 @@ func (w *Worker) trackGasFunding(ctx context.Context, row sqlcgen.ChainSweep) er
 		// the sweep itself has happened.
 		w.log.Error("gas funding reverted on chain",
 			slog.String("sweep_id", row.ID), slog.String("tx_hash", *row.GasFundingTxHash))
-		return w.fail(ctx, row, FailureGasFunding, gasCost(receipt))
+		return w.failFunding(ctx, row, gasCost(receipt), int64Ptr(receipt.BlockNumber.Uint64()))
 	}
-	return w.markGasFunded(ctx, row, gasCost(receipt))
+	return w.markGasFunded(ctx, row, gasCost(receipt), int64Ptr(receipt.BlockNumber.Uint64()))
 }
 
 // markGasFunded books the funded ether and the funding's own gas, and moves
@@ -180,7 +214,11 @@ func (w *Worker) trackGasFunding(ctx context.Context, row sqlcgen.ChainSweep) er
 // Two things moved and both are house-to-house: the funding itself went from
 // custody:hot to custody:deposit_addresses (it is sitting on one of our
 // addresses now), and the gas it burned left custody:hot for gas_expense.
-func (w *Worker) markGasFunded(ctx context.Context, row sqlcgen.ChainSweep, gas money.Amount) error {
+// block is where the funding transaction was mined, or nil when the address
+// already held enough and none was sent. Reconciliation reads it with
+// gas_funding_cost to place the entry above or below the height it read
+// balances at.
+func (w *Worker) markGasFunded(ctx context.Context, row sqlcgen.ChainSweep, gas money.Amount, block *int64) error {
 	hot, err := w.ledger.HouseAccount(ledger.HouseCustodyHot)
 	if err != nil {
 		return err
@@ -218,6 +256,7 @@ func (w *Worker) markGasFunded(ctx context.Context, row sqlcgen.ChainSweep, gas 
 		}
 		if _, err := sqlcgen.New(tx).MarkSweepGasFunded(ctx, sqlcgen.MarkSweepGasFundedParams{
 			TenantID: w.cfg.Tenant, ID: row.ID, GasFundingCost: pg.NumericFromAmount(gas),
+			GasFundingBlock: block,
 		}); err != nil {
 			return fmt.Errorf("sweep: mark gas funded %s: %w", row.ID, err)
 		}
@@ -254,7 +293,7 @@ func (w *Worker) send(ctx context.Context, row sqlcgen.ChainSweep, asset registr
 	} else if !ok {
 		w.log.Warn("abandoning a sweep whose balance no longer covers it",
 			slog.String("sweep_id", row.ID), slog.String("address", row.FromAddress))
-		return w.fail(ctx, row, FailureBalanceChanged, money.Zero)
+		return w.fail(ctx, row, FailureBalanceChanged, money.Zero, nil)
 	}
 
 	nonce, raw, hash, err := w.signSweep(ctx, row, amount, gas, from)
@@ -264,7 +303,7 @@ func (w *Worker) send(ctx context.Context, row sqlcgen.ChainSweep, asset registr
 	if err := w.chain.SendRawTransaction(ctx, raw); err != nil && !errors.Is(err, evm.ErrKnownTransaction) {
 		w.log.Error("sweep broadcast was refused",
 			slog.String("sweep_id", row.ID), slog.String("err", err.Error()))
-		return w.fail(ctx, row, FailureBroadcast, money.Zero)
+		return w.fail(ctx, row, FailureBroadcast, money.Zero, nil)
 	}
 	return inTx(ctx, w.db, func(tx pgx.Tx) error {
 		if _, err := sqlcgen.New(tx).MarkSweepBroadcast(ctx, sqlcgen.MarkSweepBroadcastParams{
@@ -385,7 +424,7 @@ func (w *Worker) track(ctx context.Context, row sqlcgen.ChainSweep, asset regist
 		w.log.Error("sweep reverted on chain",
 			slog.String("sweep_id", row.ID), slog.String("tx_hash", *row.TxHash),
 			slog.Uint64("block", block))
-		return w.fail(ctx, row, FailureOnChain, gas)
+		return w.fail(ctx, row, FailureOnChain, gas, int64Ptr(block))
 	}
 	return w.confirm(ctx, row, block, gas)
 }
@@ -445,26 +484,48 @@ func (w *Worker) confirm(ctx context.Context, row sqlcgen.ChainSweep, block uint
 	})
 }
 
-// fail records a terminal failure, booking any gas that was really spent.
-func (w *Worker) fail(ctx context.Context, row sqlcgen.ChainSweep, reason string, gas money.Amount) error {
-	hot, err := w.ledger.HouseAccount(ledger.HouseCustodyHot)
-	if err != nil {
-		return err
-	}
+// fail records a terminal failure of the sweep transaction, booking any gas
+// the deposit address really spent and the block it spent it in.
+func (w *Worker) fail(ctx context.Context, row sqlcgen.ChainSweep, reason string, gas money.Amount, block *int64) error {
 	addresses, err := w.ledger.HouseAccount(ledger.HouseCustodyDepositAddresses)
 	if err != nil {
 		return err
 	}
-	gasAccount, err := w.ledger.HouseAccount(ledger.HouseGasExpense)
+	return w.failWith(ctx, row, reason, gas, addresses, "sweep:gas:"+row.ID, func(tx pgx.Tx) error {
+		_, err := sqlcgen.New(tx).FailSweep(ctx, sqlcgen.FailSweepParams{
+			TenantID: w.cfg.Tenant, ID: row.ID, FailureReason: optString(reason),
+			GasCost: pg.NumericFromAmount(gas), BlockNumber: block,
+		})
+		return err
+	})
+}
+
+// failFunding is the same for the gas-funding leg, where the hot wallet paid
+// and the cost belongs to the funding columns.
+//
+// The two are separate because the cost and the block have to stay paired:
+// writing a funding cost next to a sweep block would tell reconciliation the
+// gas was burned by a transaction that never ran.
+func (w *Worker) failFunding(ctx context.Context, row sqlcgen.ChainSweep, gas money.Amount, block *int64) error {
+	hot, err := w.ledger.HouseAccount(ledger.HouseCustodyHot)
 	if err != nil {
 		return err
 	}
-	// Whoever sent the failed transaction paid for it: the hot wallet for a
-	// funding, the deposit address for a sweep.
-	payer := addresses
-	key := "sweep:gas:" + row.ID
-	if reason == FailureGasFunding {
-		payer, key = hot, "sweep:gas_funding_cost:"+row.ID
+	return w.failWith(ctx, row, FailureGasFunding, gas, hot, "sweep:gas_funding_cost:"+row.ID, func(tx pgx.Tx) error {
+		_, err := sqlcgen.New(tx).FailSweepFunding(ctx, sqlcgen.FailSweepFundingParams{
+			TenantID: w.cfg.Tenant, ID: row.ID, FailureReason: optString(FailureGasFunding),
+			GasFundingCost: pg.NumericFromAmount(gas), GasFundingBlock: block,
+		})
+		return err
+	})
+}
+
+func (w *Worker) failWith(ctx context.Context, row sqlcgen.ChainSweep, reason string, gas money.Amount,
+	payer, key string, mark func(pgx.Tx) error,
+) error {
+	gasAccount, err := w.ledger.HouseAccount(ledger.HouseGasExpense)
+	if err != nil {
+		return err
 	}
 	amount, err := pg.AmountFromNumeric(row.Amount)
 	if err != nil {
@@ -474,10 +535,7 @@ func (w *Worker) fail(ctx context.Context, row sqlcgen.ChainSweep, reason string
 		if err := w.postGas(ctx, tx, row, key, gasAccount, payer, gas); err != nil {
 			return err
 		}
-		if _, err := sqlcgen.New(tx).FailSweep(ctx, sqlcgen.FailSweepParams{
-			TenantID: w.cfg.Tenant, ID: row.ID, FailureReason: optString(reason),
-			GasCost: pg.NumericFromAmount(gas),
-		}); err != nil {
+		if err := mark(tx); err != nil {
 			return fmt.Errorf("sweep: fail %s: %w", row.ID, err)
 		}
 		w.log.Warn("sweep failed",

@@ -15,7 +15,7 @@ const allocateSweepNonce = `-- name: AllocateSweepNonce :one
 UPDATE chain.sweeps
 SET nonce = $3, version = version + 1, updated_at = now()
 WHERE tenant_id = $1 AND id = $2
-RETURNING id, tenant_id, chain_id, address_id, from_address, asset, amount, status, failure_reason, gas_funding_tx_hash, gas_funding_nonce, gas_funding_amount, gas_funding_raw_tx, gas_funding_cost, nonce, raw_tx, tx_hash, broadcast_at, block_number, gas_cost, correlation_id, version, created_at, updated_at
+RETURNING id, tenant_id, chain_id, address_id, from_address, asset, amount, status, failure_reason, gas_funding_tx_hash, gas_funding_nonce, gas_funding_amount, gas_funding_raw_tx, gas_funding_cost, nonce, raw_tx, tx_hash, broadcast_at, block_number, gas_cost, correlation_id, version, created_at, updated_at, gas_funding_block
 `
 
 type AllocateSweepNonceParams struct {
@@ -55,12 +55,13 @@ func (q *Queries) AllocateSweepNonce(ctx context.Context, arg AllocateSweepNonce
 		&i.Version,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.GasFundingBlock,
 	)
 	return i, err
 }
 
 const claimSweeps = `-- name: ClaimSweeps :many
-SELECT id, tenant_id, chain_id, address_id, from_address, asset, amount, status, failure_reason, gas_funding_tx_hash, gas_funding_nonce, gas_funding_amount, gas_funding_raw_tx, gas_funding_cost, nonce, raw_tx, tx_hash, broadcast_at, block_number, gas_cost, correlation_id, version, created_at, updated_at FROM chain.sweeps
+SELECT id, tenant_id, chain_id, address_id, from_address, asset, amount, status, failure_reason, gas_funding_tx_hash, gas_funding_nonce, gas_funding_amount, gas_funding_raw_tx, gas_funding_cost, nonce, raw_tx, tx_hash, broadcast_at, block_number, gas_cost, correlation_id, version, created_at, updated_at, gas_funding_block FROM chain.sweeps
 WHERE tenant_id = $1 AND status = ANY($3::text[])
 ORDER BY created_at
 LIMIT $2
@@ -110,6 +111,7 @@ func (q *Queries) ClaimSweeps(ctx context.Context, arg ClaimSweepsParams) ([]Cha
 			&i.Version,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.GasFundingBlock,
 		); err != nil {
 			return nil, err
 		}
@@ -119,6 +121,59 @@ func (q *Queries) ClaimSweeps(ctx context.Context, arg ClaimSweepsParams) ([]Cha
 		return nil, err
 	}
 	return items, nil
+}
+
+const clearSweepGasFunding = `-- name: ClearSweepGasFunding :one
+UPDATE chain.sweeps
+SET gas_funding_amount = NULL, gas_funding_nonce = NULL,
+    version = version + 1, updated_at = now()
+WHERE tenant_id = $1 AND id = $2 AND gas_funding_tx_hash IS NULL
+RETURNING id, tenant_id, chain_id, address_id, from_address, asset, amount, status, failure_reason, gas_funding_tx_hash, gas_funding_nonce, gas_funding_amount, gas_funding_raw_tx, gas_funding_cost, nonce, raw_tx, tx_hash, broadcast_at, block_number, gas_cost, correlation_id, version, created_at, updated_at, gas_funding_block
+`
+
+type ClearSweepGasFundingParams struct {
+	TenantID string
+	ID       string
+}
+
+// Forget a funding transaction that was pinned but never signed.
+//
+// FundSweepGas writes gas_funding_amount when it pins the nonce, before the
+// signer is asked. If signing then fails, the row keeps an amount with no
+// transaction, and the next tick -- finding the address can now pay its own
+// way and taking the shortcut past funding -- would book that amount as ether
+// the hot wallet sent. It never sent it.
+func (q *Queries) ClearSweepGasFunding(ctx context.Context, arg ClearSweepGasFundingParams) (ChainSweep, error) {
+	row := q.db.QueryRow(ctx, clearSweepGasFunding, arg.TenantID, arg.ID)
+	var i ChainSweep
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.ChainID,
+		&i.AddressID,
+		&i.FromAddress,
+		&i.Asset,
+		&i.Amount,
+		&i.Status,
+		&i.FailureReason,
+		&i.GasFundingTxHash,
+		&i.GasFundingNonce,
+		&i.GasFundingAmount,
+		&i.GasFundingRawTx,
+		&i.GasFundingCost,
+		&i.Nonce,
+		&i.RawTx,
+		&i.TxHash,
+		&i.BroadcastAt,
+		&i.BlockNumber,
+		&i.GasCost,
+		&i.CorrelationID,
+		&i.Version,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.GasFundingBlock,
+	)
+	return i, err
 }
 
 const countUnsettledDeposits = `-- name: CountUnsettledDeposits :one
@@ -174,10 +229,10 @@ func (q *Queries) CreditedToAddress(ctx context.Context, arg CreditedToAddressPa
 
 const failSweep = `-- name: FailSweep :one
 UPDATE chain.sweeps
-SET status = 'failed', failure_reason = $3, gas_cost = $4,
+SET status = 'failed', failure_reason = $3, gas_cost = $4, block_number = $5,
     version = version + 1, updated_at = now()
 WHERE tenant_id = $1 AND id = $2
-RETURNING id, tenant_id, chain_id, address_id, from_address, asset, amount, status, failure_reason, gas_funding_tx_hash, gas_funding_nonce, gas_funding_amount, gas_funding_raw_tx, gas_funding_cost, nonce, raw_tx, tx_hash, broadcast_at, block_number, gas_cost, correlation_id, version, created_at, updated_at
+RETURNING id, tenant_id, chain_id, address_id, from_address, asset, amount, status, failure_reason, gas_funding_tx_hash, gas_funding_nonce, gas_funding_amount, gas_funding_raw_tx, gas_funding_cost, nonce, raw_tx, tx_hash, broadcast_at, block_number, gas_cost, correlation_id, version, created_at, updated_at, gas_funding_block
 `
 
 type FailSweepParams struct {
@@ -185,14 +240,19 @@ type FailSweepParams struct {
 	ID            string
 	FailureReason *string
 	GasCost       pgtype.Numeric
+	BlockNumber   *int64
 }
 
+// The sweep transaction itself failed. Its gas and the block it burned in are
+// written together: reconciliation reads the two as a pair, and a cost with no
+// block cannot be placed above or below the frontier.
 func (q *Queries) FailSweep(ctx context.Context, arg FailSweepParams) (ChainSweep, error) {
 	row := q.db.QueryRow(ctx, failSweep,
 		arg.TenantID,
 		arg.ID,
 		arg.FailureReason,
 		arg.GasCost,
+		arg.BlockNumber,
 	)
 	var i ChainSweep
 	err := row.Scan(
@@ -220,6 +280,66 @@ func (q *Queries) FailSweep(ctx context.Context, arg FailSweepParams) (ChainSwee
 		&i.Version,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.GasFundingBlock,
+	)
+	return i, err
+}
+
+const failSweepFunding = `-- name: FailSweepFunding :one
+UPDATE chain.sweeps
+SET status = 'failed', failure_reason = $3, gas_funding_cost = $4,
+    gas_funding_block = $5, version = version + 1, updated_at = now()
+WHERE tenant_id = $1 AND id = $2
+RETURNING id, tenant_id, chain_id, address_id, from_address, asset, amount, status, failure_reason, gas_funding_tx_hash, gas_funding_nonce, gas_funding_amount, gas_funding_raw_tx, gas_funding_cost, nonce, raw_tx, tx_hash, broadcast_at, block_number, gas_cost, correlation_id, version, created_at, updated_at, gas_funding_block
+`
+
+type FailSweepFundingParams struct {
+	TenantID        string
+	ID              string
+	FailureReason   *string
+	GasFundingCost  pgtype.Numeric
+	GasFundingBlock *int64
+}
+
+// The gas-funding transaction failed, so the cost belongs to the funding pair
+// of columns rather than the sweep's. Writing it into gas_cost -- as this
+// table did before reconciliation needed to read them -- would pair a funding
+// cost with a sweep block that never happened.
+func (q *Queries) FailSweepFunding(ctx context.Context, arg FailSweepFundingParams) (ChainSweep, error) {
+	row := q.db.QueryRow(ctx, failSweepFunding,
+		arg.TenantID,
+		arg.ID,
+		arg.FailureReason,
+		arg.GasFundingCost,
+		arg.GasFundingBlock,
+	)
+	var i ChainSweep
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.ChainID,
+		&i.AddressID,
+		&i.FromAddress,
+		&i.Asset,
+		&i.Amount,
+		&i.Status,
+		&i.FailureReason,
+		&i.GasFundingTxHash,
+		&i.GasFundingNonce,
+		&i.GasFundingAmount,
+		&i.GasFundingRawTx,
+		&i.GasFundingCost,
+		&i.Nonce,
+		&i.RawTx,
+		&i.TxHash,
+		&i.BroadcastAt,
+		&i.BlockNumber,
+		&i.GasCost,
+		&i.CorrelationID,
+		&i.Version,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.GasFundingBlock,
 	)
 	return i, err
 }
@@ -229,7 +349,7 @@ UPDATE chain.sweeps
 SET gas_funding_nonce = $3, gas_funding_raw_tx = $4, gas_funding_tx_hash = $5,
     gas_funding_amount = $6, version = version + 1, updated_at = now()
 WHERE tenant_id = $1 AND id = $2
-RETURNING id, tenant_id, chain_id, address_id, from_address, asset, amount, status, failure_reason, gas_funding_tx_hash, gas_funding_nonce, gas_funding_amount, gas_funding_raw_tx, gas_funding_cost, nonce, raw_tx, tx_hash, broadcast_at, block_number, gas_cost, correlation_id, version, created_at, updated_at
+RETURNING id, tenant_id, chain_id, address_id, from_address, asset, amount, status, failure_reason, gas_funding_tx_hash, gas_funding_nonce, gas_funding_amount, gas_funding_raw_tx, gas_funding_cost, nonce, raw_tx, tx_hash, broadcast_at, block_number, gas_cost, correlation_id, version, created_at, updated_at, gas_funding_block
 `
 
 type FundSweepGasParams struct {
@@ -278,6 +398,7 @@ func (q *Queries) FundSweepGas(ctx context.Context, arg FundSweepGasParams) (Cha
 		&i.Version,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.GasFundingBlock,
 	)
 	return i, err
 }
@@ -335,7 +456,7 @@ func (q *Queries) GetDepositAddressByID(ctx context.Context, arg GetDepositAddre
 }
 
 const getSweep = `-- name: GetSweep :one
-SELECT id, tenant_id, chain_id, address_id, from_address, asset, amount, status, failure_reason, gas_funding_tx_hash, gas_funding_nonce, gas_funding_amount, gas_funding_raw_tx, gas_funding_cost, nonce, raw_tx, tx_hash, broadcast_at, block_number, gas_cost, correlation_id, version, created_at, updated_at FROM chain.sweeps WHERE tenant_id = $1 AND id = $2
+SELECT id, tenant_id, chain_id, address_id, from_address, asset, amount, status, failure_reason, gas_funding_tx_hash, gas_funding_nonce, gas_funding_amount, gas_funding_raw_tx, gas_funding_cost, nonce, raw_tx, tx_hash, broadcast_at, block_number, gas_cost, correlation_id, version, created_at, updated_at, gas_funding_block FROM chain.sweeps WHERE tenant_id = $1 AND id = $2
 `
 
 type GetSweepParams struct {
@@ -371,6 +492,7 @@ func (q *Queries) GetSweep(ctx context.Context, arg GetSweepParams) (ChainSweep,
 		&i.Version,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.GasFundingBlock,
 	)
 	return i, err
 }
@@ -379,7 +501,7 @@ const insertSweep = `-- name: InsertSweep :one
 INSERT INTO chain.sweeps (
     tenant_id, chain_id, address_id, from_address, asset, amount, correlation_id
 ) VALUES ($1, $2, $3, $4, $5, $6, $7)
-RETURNING id, tenant_id, chain_id, address_id, from_address, asset, amount, status, failure_reason, gas_funding_tx_hash, gas_funding_nonce, gas_funding_amount, gas_funding_raw_tx, gas_funding_cost, nonce, raw_tx, tx_hash, broadcast_at, block_number, gas_cost, correlation_id, version, created_at, updated_at
+RETURNING id, tenant_id, chain_id, address_id, from_address, asset, amount, status, failure_reason, gas_funding_tx_hash, gas_funding_nonce, gas_funding_amount, gas_funding_raw_tx, gas_funding_cost, nonce, raw_tx, tx_hash, broadcast_at, block_number, gas_cost, correlation_id, version, created_at, updated_at, gas_funding_block
 `
 
 type InsertSweepParams struct {
@@ -428,12 +550,13 @@ func (q *Queries) InsertSweep(ctx context.Context, arg InsertSweepParams) (Chain
 		&i.Version,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.GasFundingBlock,
 	)
 	return i, err
 }
 
 const listSweeps = `-- name: ListSweeps :many
-SELECT id, tenant_id, chain_id, address_id, from_address, asset, amount, status, failure_reason, gas_funding_tx_hash, gas_funding_nonce, gas_funding_amount, gas_funding_raw_tx, gas_funding_cost, nonce, raw_tx, tx_hash, broadcast_at, block_number, gas_cost, correlation_id, version, created_at, updated_at FROM chain.sweeps
+SELECT id, tenant_id, chain_id, address_id, from_address, asset, amount, status, failure_reason, gas_funding_tx_hash, gas_funding_nonce, gas_funding_amount, gas_funding_raw_tx, gas_funding_cost, nonce, raw_tx, tx_hash, broadcast_at, block_number, gas_cost, correlation_id, version, created_at, updated_at, gas_funding_block FROM chain.sweeps
 WHERE tenant_id = $1
 ORDER BY created_at DESC
 LIMIT $2
@@ -478,6 +601,7 @@ func (q *Queries) ListSweeps(ctx context.Context, arg ListSweepsParams) ([]Chain
 			&i.Version,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.GasFundingBlock,
 		); err != nil {
 			return nil, err
 		}
@@ -493,7 +617,7 @@ const markSweepBroadcast = `-- name: MarkSweepBroadcast :one
 UPDATE chain.sweeps
 SET status = 'broadcast', broadcast_at = now(), version = version + 1, updated_at = now()
 WHERE tenant_id = $1 AND id = $2
-RETURNING id, tenant_id, chain_id, address_id, from_address, asset, amount, status, failure_reason, gas_funding_tx_hash, gas_funding_nonce, gas_funding_amount, gas_funding_raw_tx, gas_funding_cost, nonce, raw_tx, tx_hash, broadcast_at, block_number, gas_cost, correlation_id, version, created_at, updated_at
+RETURNING id, tenant_id, chain_id, address_id, from_address, asset, amount, status, failure_reason, gas_funding_tx_hash, gas_funding_nonce, gas_funding_amount, gas_funding_raw_tx, gas_funding_cost, nonce, raw_tx, tx_hash, broadcast_at, block_number, gas_cost, correlation_id, version, created_at, updated_at, gas_funding_block
 `
 
 type MarkSweepBroadcastParams struct {
@@ -529,6 +653,7 @@ func (q *Queries) MarkSweepBroadcast(ctx context.Context, arg MarkSweepBroadcast
 		&i.Version,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.GasFundingBlock,
 	)
 	return i, err
 }
@@ -538,7 +663,7 @@ UPDATE chain.sweeps
 SET status = 'confirmed', block_number = $3, gas_cost = $4,
     version = version + 1, updated_at = now()
 WHERE tenant_id = $1 AND id = $2
-RETURNING id, tenant_id, chain_id, address_id, from_address, asset, amount, status, failure_reason, gas_funding_tx_hash, gas_funding_nonce, gas_funding_amount, gas_funding_raw_tx, gas_funding_cost, nonce, raw_tx, tx_hash, broadcast_at, block_number, gas_cost, correlation_id, version, created_at, updated_at
+RETURNING id, tenant_id, chain_id, address_id, from_address, asset, amount, status, failure_reason, gas_funding_tx_hash, gas_funding_nonce, gas_funding_amount, gas_funding_raw_tx, gas_funding_cost, nonce, raw_tx, tx_hash, broadcast_at, block_number, gas_cost, correlation_id, version, created_at, updated_at, gas_funding_block
 `
 
 type MarkSweepConfirmedParams struct {
@@ -581,27 +706,39 @@ func (q *Queries) MarkSweepConfirmed(ctx context.Context, arg MarkSweepConfirmed
 		&i.Version,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.GasFundingBlock,
 	)
 	return i, err
 }
 
 const markSweepGasFunded = `-- name: MarkSweepGasFunded :one
 UPDATE chain.sweeps
-SET status = 'gas_funded', gas_funding_cost = $3, version = version + 1, updated_at = now()
+SET status = 'gas_funded', gas_funding_cost = $3, gas_funding_block = $4,
+    version = version + 1, updated_at = now()
 WHERE tenant_id = $1 AND id = $2
-RETURNING id, tenant_id, chain_id, address_id, from_address, asset, amount, status, failure_reason, gas_funding_tx_hash, gas_funding_nonce, gas_funding_amount, gas_funding_raw_tx, gas_funding_cost, nonce, raw_tx, tx_hash, broadcast_at, block_number, gas_cost, correlation_id, version, created_at, updated_at
+RETURNING id, tenant_id, chain_id, address_id, from_address, asset, amount, status, failure_reason, gas_funding_tx_hash, gas_funding_nonce, gas_funding_amount, gas_funding_raw_tx, gas_funding_cost, nonce, raw_tx, tx_hash, broadcast_at, block_number, gas_cost, correlation_id, version, created_at, updated_at, gas_funding_block
 `
 
 type MarkSweepGasFundedParams struct {
-	TenantID       string
-	ID             string
-	GasFundingCost pgtype.Numeric
+	TenantID        string
+	ID              string
+	GasFundingCost  pgtype.Numeric
+	GasFundingBlock *int64
 }
 
 // The funding transaction is mined: the address can now pay for its own
 // transfer, and the ETH that moved is booked.
+//
+// gas_funding_block records where, so reconciliation can tell whether the
+// ledger entry this produces is above or below the height it read balances at.
+// Null when the address already held enough and no transaction was sent.
 func (q *Queries) MarkSweepGasFunded(ctx context.Context, arg MarkSweepGasFundedParams) (ChainSweep, error) {
-	row := q.db.QueryRow(ctx, markSweepGasFunded, arg.TenantID, arg.ID, arg.GasFundingCost)
+	row := q.db.QueryRow(ctx, markSweepGasFunded,
+		arg.TenantID,
+		arg.ID,
+		arg.GasFundingCost,
+		arg.GasFundingBlock,
+	)
 	var i ChainSweep
 	err := row.Scan(
 		&i.ID,
@@ -628,6 +765,7 @@ func (q *Queries) MarkSweepGasFunded(ctx context.Context, arg MarkSweepGasFunded
 		&i.Version,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.GasFundingBlock,
 	)
 	return i, err
 }
@@ -636,7 +774,7 @@ const signSweep = `-- name: SignSweep :one
 UPDATE chain.sweeps
 SET raw_tx = $3, tx_hash = $4, version = version + 1, updated_at = now()
 WHERE tenant_id = $1 AND id = $2
-RETURNING id, tenant_id, chain_id, address_id, from_address, asset, amount, status, failure_reason, gas_funding_tx_hash, gas_funding_nonce, gas_funding_amount, gas_funding_raw_tx, gas_funding_cost, nonce, raw_tx, tx_hash, broadcast_at, block_number, gas_cost, correlation_id, version, created_at, updated_at
+RETURNING id, tenant_id, chain_id, address_id, from_address, asset, amount, status, failure_reason, gas_funding_tx_hash, gas_funding_nonce, gas_funding_amount, gas_funding_raw_tx, gas_funding_cost, nonce, raw_tx, tx_hash, broadcast_at, block_number, gas_cost, correlation_id, version, created_at, updated_at, gas_funding_block
 `
 
 type SignSweepParams struct {
@@ -679,6 +817,7 @@ func (q *Queries) SignSweep(ctx context.Context, arg SignSweepParams) (ChainSwee
 		&i.Version,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.GasFundingBlock,
 	)
 	return i, err
 }

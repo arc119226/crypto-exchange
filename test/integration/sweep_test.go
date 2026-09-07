@@ -40,6 +40,9 @@ type sweepHarness struct {
 	addresses *chain.Addresses
 	hot       common.Address
 	usdc      common.Address
+	// nonces is the hot wallet's allocator, kept so a test can create the gap
+	// a fill exists to close.
+	nonces *hotwallet.Manager
 }
 
 func setupSweep(t *testing.T) sweepHarness {
@@ -76,7 +79,7 @@ func setupSweep(t *testing.T) sweepHarness {
 	}, store, lh.svc, node, s, nonces, audit.NewRecorder("default"), log)
 
 	return sweepHarness{
-		ledgerHarness: lh, chain: node, worker: worker, hot: hot,
+		ledgerHarness: lh, chain: node, worker: worker, hot: hot, nonces: nonces,
 		addresses: chain.NewAddresses(lh.all, "default", anvilChainID),
 		usdc:      common.HexToAddress(usdcContract),
 	}
@@ -307,6 +310,68 @@ func TestSweepFundsGasThenCollectsAToken(t *testing.T) {
 
 	assert.Equal(t, "500", h.balance(t, ctx, account, "USDC").Available.String(), "the user saw nothing")
 	h.assertTrialBalanceZero(t, ctx)
+}
+
+// TestSweepDoesNotBookFundingItNeverSent.
+//
+// FundSweepGas writes gas_funding_amount when it pins the nonce -- before the
+// signer is asked, because a crash between signing and recording must come
+// back to the same intent. If signing then fails, the row keeps an amount with
+// no transaction behind it.
+//
+// The next tick can find the address able to pay its own way (an earlier sweep
+// left ether behind, or a deposit arrived) and take the shortcut past funding.
+// Before this fix that shortcut booked the pinned amount as ether the hot
+// wallet had sent. It never sent it, and the pinned nonce was abandoned as
+// well -- a permanent ledger error and a permanent nonce hole from one failed
+// call. Reconciliation would have reported both, correctly and forever.
+func TestSweepDoesNotBookFundingItNeverSent(t *testing.T) {
+	h := setupSweep(t)
+	ctx := context.Background()
+	_, address := h.deposited(t, ctx, "USDC", "500")
+
+	require.NoError(t, h.worker.Tick(ctx)) // plan
+	id := h.sweeps(t, ctx)[0].ID
+
+	// Exactly what a refused signature leaves behind: a nonce and an amount,
+	// and nothing that was ever sent.
+	var nonce uint64
+	require.NoError(t, inTx(ctx, h.all, func(tx pgx.Tx) error {
+		n, err := h.nonces.Allocate(ctx, tx)
+		if err != nil {
+			return err
+		}
+		nonce = n
+		_, err = tx.Exec(ctx,
+			`UPDATE chain.sweeps SET gas_funding_nonce = $2, gas_funding_amount = 0.02 WHERE id = $1`,
+			id, int64(nonce))
+		return err
+	}))
+
+	// And now the address can pay for itself anyway.
+	h.chain.fund(address, toUnits(amt("1"), 18))
+
+	before := h.houseBalance(t, ctx, "custody_deposit_addresses", "ETH")
+	require.NoError(t, h.worker.Tick(ctx))
+	assert.Equal(t, sweep.StatusGasFunded, h.sweeps(t, ctx)[0].Status)
+	assert.Equal(t, before.String(), h.houseBalance(t, ctx, "custody_deposit_addresses", "ETH").String(),
+		"no ether moved, so nothing may be booked as having moved")
+
+	var pinned *string
+	require.NoError(t, h.all.QueryRow(ctx,
+		`SELECT gas_funding_amount::text FROM chain.sweeps WHERE id = $1`, id).Scan(&pinned))
+	assert.Nil(t, pinned, "the amount that was never sent must not stay on the row")
+
+	// The nonce came back rather than becoming a hole every later hot-wallet
+	// transaction would queue behind.
+	var fills int
+	require.NoError(t, h.all.QueryRow(ctx,
+		`SELECT count(*) FROM chain.nonce_fills WHERE nonce = $1`, nonce).Scan(&fills))
+	var next int64
+	require.NoError(t, h.all.QueryRow(ctx,
+		`SELECT next_nonce FROM chain.hot_wallets WHERE chain_id = $1`, anvilChainID).Scan(&next))
+	assert.True(t, fills == 1 || uint64(next) == nonce,
+		"nonce %d was neither stepped back to nor filled (next=%d, fills=%d)", nonce, next, fills)
 }
 
 // An address holding less than the threshold is left alone: the gas would cost

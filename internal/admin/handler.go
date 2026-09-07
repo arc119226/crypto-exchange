@@ -30,6 +30,10 @@ type Handler struct {
 	audit    *audit.Recorder
 	registry *registry.Store
 	tenant   string
+	// chainID is the chain reconciliation reports are read for. Zero until a
+	// deployment says otherwise, which matches the single-chain assumption
+	// everything else in Phase 4 makes.
+	chainID int64
 	// withdrawals is the review queue; nil in a deployment without the chain
 	// tables, which turns the two withdrawal endpoints into 500s rather than
 	// pretending the queue is empty.
@@ -47,6 +51,9 @@ func NewHandler(pool *pgxpool.Pool, l *ledger.Service, r *registry.Store, a *aud
 	}
 	return &Handler{pool: pool, ledger: l, registry: r, audit: a, tenant: tenant}
 }
+
+// WithChainID names the chain whose reconciliation reports this handler reads.
+func (h *Handler) WithChainID(id int64) *Handler { h.chainID = id; return h }
 
 // WithWithdrawals enables the withdrawal review queue.
 func (h *Handler) WithWithdrawals(r *withdrawal.Reviewer) *Handler {

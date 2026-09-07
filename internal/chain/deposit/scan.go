@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math/big"
 	"strings"
 	"time"
 
@@ -98,6 +99,21 @@ func (s *Scanner) nativeSightings(ctx context.Context, block evm.Block, assets a
 		if !ok {
 			continue
 		}
+		// A deposit is money arriving from outside the exchange. This one may
+		// have come from inside it: the sweeper funds a deposit address with
+		// ether from the hot wallet so the address can pay for its own token
+		// transfer (§6.4.3), and that is a plain value transfer into a watched
+		// address -- exactly the shape looked for here.
+		//
+		// Crediting it would hand the account free ether the exchange fronted,
+		// and would book custody_deposit_addresses twice for one movement:
+		// once by the sweeper moving it out of custody_hot, once by this
+		// scanner treating it as an arrival. Reconciliation is what found it.
+		if from, ok := s.senderOf(tx); ok && s.isOurs(from) {
+			s.log.Info("ignoring a transfer the exchange sent itself",
+				slog.String("tx", tx.Hash().Hex()), slog.String("to", watched.address))
+			continue
+		}
 		// Unlike a log, a transaction appears in its block whether or not it
 		// succeeded: an out-of-gas transfer moves nothing. Credit only what
 		// actually landed.
@@ -135,6 +151,13 @@ func (s *Scanner) erc20Sighting(l types.Log, assets assetIndex) (sighting, bool,
 	}
 	watched, ok := s.watched[transfer.To]
 	if !ok {
+		return sighting{}, false, nil
+	}
+	// Same rule as the native path: what the exchange sends itself is not a
+	// deposit. No token moves this way today -- gas funding is native and a
+	// sweep goes to the hot wallet, which is not watched -- but the rule is
+	// about where money came from, not about which paths happen to exist.
+	if s.isOurs(transfer.From) {
 		return sighting{}, false, nil
 	}
 	asset, ok := assets.byContract[transfer.Contract]
@@ -404,7 +427,48 @@ func (s *Scanner) refreshAddresses(ctx context.Context) error {
 		}
 	}
 	s.metrics.observeWatched(len(s.watched))
+	return s.refreshHotWallet(ctx)
+}
+
+// refreshHotWallet notes the address the exchange pays out of, so a transfer
+// from it is not mistaken for a deposit.
+//
+// Absent until the signer has started once, which is fine: with no hot wallet
+// there is nothing that could have sent such a transfer.
+func (s *Scanner) refreshHotWallet(ctx context.Context) error {
+	row, err := sqlcgen.New(s.db).GetHotWallet(ctx, sqlcgen.GetHotWalletParams{
+		TenantID: s.cfg.Tenant, ChainID: s.cfg.ChainID,
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("deposit: load hot wallet: %w", err)
+	}
+	hot := common.HexToAddress(row.Address)
+	s.hot = &hot
 	return nil
+}
+
+// isOurs reports whether an address is one the exchange sends from: the hot
+// wallet, or a deposit address it controls.
+func (s *Scanner) isOurs(a common.Address) bool {
+	if s.hot != nil && *s.hot == a {
+		return true
+	}
+	_, ok := s.watched[a]
+	return ok
+}
+
+// senderOf recovers who signed a transaction. A signature that will not
+// recover is not something to guess about, so the caller treats it as
+// "not ours" and the transfer is judged on its recipient alone.
+func (s *Scanner) senderOf(tx *types.Transaction) (common.Address, bool) {
+	from, err := types.Sender(types.LatestSignerForChainID(big.NewInt(s.cfg.ChainID)), tx)
+	if err != nil {
+		return common.Address{}, false
+	}
+	return from, true
 }
 
 // assetIndex resolves a chain address or symbol to a registry asset.

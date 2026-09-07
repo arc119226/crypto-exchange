@@ -1,0 +1,23 @@
+{
+  "event_id": "01J8Z2K3M4N5P6Q7R8S9T0V1X9",
+  "event_type": "reconciliation.break_detected",
+  "schema_version": 1,
+  "tenant_id": "default",
+  "market_id": null,
+  "account_id": null,
+  "seq": null,
+  "occurred_at": "2026-09-05T08:15:23.412Z",
+  "correlation_id": "req_01J8Z2K2000000000000000000",
+  "payload": {
+    "report_id": "01J8Z2K3M4N5P6Q7R8S9T0V900",
+    "chain_id": 31337,
+    "asset": "ETH",
+    "block_height": 18240,
+    "ledger_total": "12.5",
+    "chain_total": "12.75",
+    "uncredited": "0",
+    "above_frontier": "0",
+    "in_flight": "0",
+    "diff": "0.25"
+  }
+}

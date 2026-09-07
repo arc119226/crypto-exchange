@@ -113,8 +113,8 @@ schema; `planned` means the phase that adds it will add the schema with it.
 | `withdrawal.requested` | api | stream, webhook, admin | shipped |
 | `withdrawal.state_changed` | api, chain, admin | stream, webhook, admin | shipped |
 | `sweep.completed`, `sweep.failed` | chain | admin | shipped |
-| `alert.hot_wallet_low` | chain | webhook, admin | planned (Phase 4c) |
-| `reconciliation.break_detected` | worker | webhook, admin | planned (Phase 4c) |
+| `alert.hot_wallet_low` | chain | webhook, admin | shipped |
+| `reconciliation.break_detected` | **chain** | webhook, admin | shipped |
 | `user.kyc_level_updated`, `user.status_updated` | admin | webhook | planned (Phase 5) |
 
 `deposit.*` events all share one payload: what a consumer needs about a
@@ -155,9 +155,32 @@ the audit trail.
 `asset`: a USDC sweep burns ETH. A consumer that adds the two together is
 adding two currencies.
 
+`reconciliation.break_detected` is listed against **chain**, not the worker
+role §6.4.4 names. Reconciliation reads on-chain balances, and the chain role
+is the only one that dials a node; giving the worker its own connection to
+match a word would buy nothing. The role that displays a report still cannot
+produce one, which is the split withdrawal review already has.
+
+Both `reconciliation.break_detected` and `alert.hot_wallet_low` are
+**edge-triggered**, and for the same reason: each describes a condition rather
+than an occurrence. A break that stays open is real and stays visible in the
+report and in `reconciliation_diff`, so re-announcing it every few minutes
+would only teach the people who receive it to filter it out. A break is
+therefore published when it appears or when its size changes, and a low hot
+wallet when the balance crosses the line — remembered in
+`chain.hot_wallets.low_alerted_at`, so a restart does not re-announce it
+either. A consumer that wants the current state should read
+`GET /admin/v1/reconciliation`, not count events.
+
+`reconciliation.break_detected` carries every term of the comparison and not
+just `diff`, because the terms are what say where to look: a difference the
+same size as an uncredited deposit and a difference nothing explains want very
+different people woken up.
+
 The chain role writes these to the outbox; the **relay that publishes them
 runs in the engine role**, so a deployment without an engine leaves deposit,
-withdrawal and sweep events sitting in `eventbus.outbox`.
+withdrawal, sweep, reconciliation and alert events sitting in
+`eventbus.outbox`.
 
 `order.*` and `trade.executed` carry `seq`; `order.*` and `balance.updated`
 carry `account_seq`. `order.accepted` is emitted for **every** order that was

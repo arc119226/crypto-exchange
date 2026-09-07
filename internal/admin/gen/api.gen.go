@@ -95,6 +95,42 @@ func (e AuditEventActorType) Valid() bool {
 	}
 }
 
+// Defines values for HouseAdjustmentRequestCode.
+const (
+	HouseAdjustmentRequestCodeCustodyDepositAddresses HouseAdjustmentRequestCode = "custody_deposit_addresses"
+	HouseAdjustmentRequestCodeCustodyHot              HouseAdjustmentRequestCode = "custody_hot"
+)
+
+// Valid indicates whether the value is a known member of the HouseAdjustmentRequestCode enum.
+func (e HouseAdjustmentRequestCode) Valid() bool {
+	switch e {
+	case HouseAdjustmentRequestCodeCustodyDepositAddresses:
+		return true
+	case HouseAdjustmentRequestCodeCustodyHot:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for HouseAdjustmentRequestDirection.
+const (
+	HouseAdjustmentRequestDirectionCredit HouseAdjustmentRequestDirection = "credit"
+	HouseAdjustmentRequestDirectionDebit  HouseAdjustmentRequestDirection = "debit"
+)
+
+// Valid indicates whether the value is a known member of the HouseAdjustmentRequestDirection enum.
+func (e HouseAdjustmentRequestDirection) Valid() bool {
+	switch e {
+	case HouseAdjustmentRequestDirectionCredit:
+		return true
+	case HouseAdjustmentRequestDirectionDebit:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for HouseBalanceType.
 const (
 	HouseBalanceTypeAsset     HouseBalanceType = "asset"
@@ -401,6 +437,35 @@ type CreateAccountRequest struct {
 	OwnerUserID *string `json:"owner_user_id,omitempty"`
 }
 
+// HouseAdjustmentRequest defines model for HouseAdjustmentRequest.
+type HouseAdjustmentRequest struct {
+	// Amount Decimal serialized as a string (NUMERIC(36,18)); never a JSON number.
+	//
+	// Example: 1990.00
+	Amount Amount `json:"amount"`
+
+	// Asset Example: ETH
+	Asset string `json:"asset"`
+
+	// Code The custody account to adjust. Only these two can gain or lose value outside this ledger.
+	Code HouseAdjustmentRequestCode `json:"code"`
+
+	// Direction credit means custody gains, debit means it loses.
+	Direction HouseAdjustmentRequestDirection `json:"direction"`
+
+	// IdempotencyKey Defaults to a fresh key; pass one to make retries safe.
+	IdempotencyKey string `json:"idempotency_key,omitempty"`
+
+	// Reason Example: anvil pre-funded the hot wallet before the exchange took it over
+	Reason string `json:"reason"`
+}
+
+// HouseAdjustmentRequestCode The custody account to adjust. Only these two can gain or lose value outside this ledger.
+type HouseAdjustmentRequestCode string
+
+// HouseAdjustmentRequestDirection credit means custody gains, debit means it loses.
+type HouseAdjustmentRequestDirection string
+
 // HouseBalance defines model for HouseBalance.
 type HouseBalance struct {
 	Asset string `json:"asset"`
@@ -512,6 +577,45 @@ type Problem struct {
 	Status        int    `json:"status"`
 	Title         string `json:"title"`
 	Type          string `json:"type"`
+}
+
+// ReconciliationLine defines model for ReconciliationLine.
+type ReconciliationLine struct {
+	// AboveFrontier The net effect the ledger booked for transactions mined above block_height.
+	AboveFrontier Amount `json:"above_frontier"`
+	Asset         string `json:"asset"`
+
+	// Balanced true when diff is exactly zero.
+	Balanced bool `json:"balanced"`
+
+	// BlockHeight The block every balance in this line was read at.
+	BlockHeight int64 `json:"block_height"`
+
+	// ChainTotal Every controlled deposit address plus the hot wallet, at block_height.
+	ChainTotal Amount `json:"chain_total"`
+
+	// Diff chain_total - ledger_total + above_frontier - uncredited + in_flight. Positive means the chain holds more than the ledger claims; negative means it holds less, which is the one that cannot wait.
+	Diff Amount `json:"diff"`
+
+	// InFlight What has been spent at or below block_height without the ledger having booked it.
+	InFlight Amount `json:"in_flight"`
+
+	// LedgerTotal custody_deposit_addresses + custody_hot. Can be negative: custody_hot goes negative between a withdrawal and the sweep that refills it.
+	LedgerTotal Amount `json:"ledger_total"`
+
+	// Uncredited Deposits the chain shows at or below block_height that the ledger has not credited yet.
+	Uncredited Amount `json:"uncredited"`
+}
+
+// ReconciliationReport defines model for ReconciliationReport.
+type ReconciliationReport struct {
+	// Balanced true when every asset's diff is zero.
+	Balanced   bool                 `json:"balanced"`
+	ChainID    int64                `json:"chain_id"`
+	FinishedAt time.Time            `json:"finished_at"`
+	ID         string               `json:"id"`
+	Lines      []ReconciliationLine `json:"lines"`
+	StartedAt  time.Time            `json:"started_at"`
 }
 
 // Sweep defines model for Sweep.
@@ -671,6 +775,9 @@ type SetAccountStatusJSONRequestBody = AccountStatusRequest
 // CreateAdjustmentJSONRequestBody defines body for CreateAdjustment for application/json ContentType.
 type CreateAdjustmentJSONRequestBody = AdjustmentRequest
 
+// CreateHouseAdjustmentJSONRequestBody defines body for CreateHouseAdjustment for application/json ContentType.
+type CreateHouseAdjustmentJSONRequestBody = HouseAdjustmentRequest
+
 // SetMarketStatusJSONRequestBody defines body for SetMarketStatus for application/json ContentType.
 type SetMarketStatusJSONRequestBody = MarketStatusRequest
 
@@ -706,6 +813,9 @@ type ServerInterface interface {
 	// ListEntries Journal entries with postings, newest first
 	// (GET /admin/v1/ledger/entries)
 	ListEntries(w http.ResponseWriter, r *http.Request, params ListEntriesParams)
+	// CreateHouseAdjustment Record value that entered or left custody outside this ledger
+	// (POST /admin/v1/ledger/house-adjustments)
+	CreateHouseAdjustment(w http.ResponseWriter, r *http.Request)
 	// GetTrialBalance Trial balance per asset (must be zero) and house account balances
 	// (GET /admin/v1/ledger/trial-balance)
 	GetTrialBalance(w http.ResponseWriter, r *http.Request)
@@ -715,6 +825,9 @@ type ServerInterface interface {
 	// SetMarketStatus Halt, resume or delist a market
 	// (PUT /admin/v1/markets/{symbol}/status)
 	SetMarketStatus(w http.ResponseWriter, r *http.Request, symbol MarketSymbol)
+	// GetReconciliation The latest comparison of ledger custody against on-chain balances
+	// (GET /admin/v1/reconciliation)
+	GetReconciliation(w http.ResponseWriter, r *http.Request)
 	// ListSweeps Recent collections into the hot wallet
 	// (GET /admin/v1/sweeps)
 	ListSweeps(w http.ResponseWriter, r *http.Request, params ListSweepsParams)
@@ -781,6 +894,12 @@ func (_ Unimplemented) ListEntries(w http.ResponseWriter, r *http.Request, param
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// CreateHouseAdjustment Record value that entered or left custody outside this ledger
+// (POST /admin/v1/ledger/house-adjustments)
+func (_ Unimplemented) CreateHouseAdjustment(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // GetTrialBalance Trial balance per asset (must be zero) and house account balances
 // (GET /admin/v1/ledger/trial-balance)
 func (_ Unimplemented) GetTrialBalance(w http.ResponseWriter, r *http.Request) {
@@ -796,6 +915,12 @@ func (_ Unimplemented) ListMarkets(w http.ResponseWriter, r *http.Request) {
 // SetMarketStatus Halt, resume or delist a market
 // (PUT /admin/v1/markets/{symbol}/status)
 func (_ Unimplemented) SetMarketStatus(w http.ResponseWriter, r *http.Request, symbol MarketSymbol) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetReconciliation The latest comparison of ledger custody against on-chain balances
+// (GET /admin/v1/reconciliation)
+func (_ Unimplemented) GetReconciliation(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -1167,6 +1292,20 @@ func (siw *ServerInterfaceWrapper) ListEntries(w http.ResponseWriter, r *http.Re
 	handler.ServeHTTP(w, r)
 }
 
+// CreateHouseAdjustment operation middleware
+func (siw *ServerInterfaceWrapper) CreateHouseAdjustment(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateHouseAdjustment(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // GetTrialBalance operation middleware
 func (siw *ServerInterfaceWrapper) GetTrialBalance(w http.ResponseWriter, r *http.Request) {
 
@@ -1212,6 +1351,20 @@ func (siw *ServerInterfaceWrapper) SetMarketStatus(w http.ResponseWriter, r *htt
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.SetMarketStatus(w, r, symbol)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetReconciliation operation middleware
+func (siw *ServerInterfaceWrapper) GetReconciliation(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetReconciliation(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -1493,6 +1646,12 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/admin/v1/ledger/adjustments", wrapper.CreateAdjustment)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/admin/v1/ledger/house-adjustments", wrapper.CreateHouseAdjustment)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/admin/v1/reconciliation", wrapper.GetReconciliation)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/admin/v1/audit-events", wrapper.ListAuditEvents)
@@ -2084,6 +2243,90 @@ func (response ListEntries500ApplicationProblemPlusJSONResponse) VisitListEntrie
 	return err
 }
 
+type CreateHouseAdjustmentRequestObject struct {
+	Body *CreateHouseAdjustmentJSONRequestBody
+}
+
+type CreateHouseAdjustmentResponseObject interface {
+	VisitCreateHouseAdjustmentResponse(w http.ResponseWriter) error
+}
+
+type CreateHouseAdjustment200JSONResponse JournalEntry
+
+func (response CreateHouseAdjustment200JSONResponse) VisitCreateHouseAdjustmentResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateHouseAdjustment201JSONResponse JournalEntry
+
+func (response CreateHouseAdjustment201JSONResponse) VisitCreateHouseAdjustmentResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateHouseAdjustment400ApplicationProblemPlusJSONResponse struct {
+	BadRequestApplicationProblemPlusJSONResponse
+}
+
+func (response CreateHouseAdjustment400ApplicationProblemPlusJSONResponse) VisitCreateHouseAdjustmentResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateHouseAdjustment401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response CreateHouseAdjustment401ApplicationProblemPlusJSONResponse) VisitCreateHouseAdjustmentResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateHouseAdjustment500ApplicationProblemPlusJSONResponse struct {
+	InternalErrorApplicationProblemPlusJSONResponse
+}
+
+func (response CreateHouseAdjustment500ApplicationProblemPlusJSONResponse) VisitCreateHouseAdjustmentResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type GetTrialBalanceRequestObject struct {
 }
 
@@ -2266,6 +2509,75 @@ type SetMarketStatus500ApplicationProblemPlusJSONResponse struct {
 }
 
 func (response SetMarketStatus500ApplicationProblemPlusJSONResponse) VisitSetMarketStatusResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetReconciliationRequestObject struct {
+}
+
+type GetReconciliationResponseObject interface {
+	VisitGetReconciliationResponse(w http.ResponseWriter) error
+}
+
+type GetReconciliation200JSONResponse ReconciliationReport
+
+func (response GetReconciliation200JSONResponse) VisitGetReconciliationResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetReconciliation401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response GetReconciliation401ApplicationProblemPlusJSONResponse) VisitGetReconciliationResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetReconciliation404ApplicationProblemPlusJSONResponse struct {
+	NotFoundApplicationProblemPlusJSONResponse
+}
+
+func (response GetReconciliation404ApplicationProblemPlusJSONResponse) VisitGetReconciliationResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetReconciliation500ApplicationProblemPlusJSONResponse struct {
+	InternalErrorApplicationProblemPlusJSONResponse
+}
+
+func (response GetReconciliation500ApplicationProblemPlusJSONResponse) VisitGetReconciliationResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
@@ -2617,6 +2929,9 @@ type StrictServerInterface interface {
 	// ListEntries Journal entries with postings, newest first
 	// (GET /admin/v1/ledger/entries)
 	ListEntries(ctx context.Context, request ListEntriesRequestObject) (ListEntriesResponseObject, error)
+	// CreateHouseAdjustment Record value that entered or left custody outside this ledger
+	// (POST /admin/v1/ledger/house-adjustments)
+	CreateHouseAdjustment(ctx context.Context, request CreateHouseAdjustmentRequestObject) (CreateHouseAdjustmentResponseObject, error)
 	// GetTrialBalance Trial balance per asset (must be zero) and house account balances
 	// (GET /admin/v1/ledger/trial-balance)
 	GetTrialBalance(ctx context.Context, request GetTrialBalanceRequestObject) (GetTrialBalanceResponseObject, error)
@@ -2626,6 +2941,9 @@ type StrictServerInterface interface {
 	// SetMarketStatus Halt, resume or delist a market
 	// (PUT /admin/v1/markets/{symbol}/status)
 	SetMarketStatus(ctx context.Context, request SetMarketStatusRequestObject) (SetMarketStatusResponseObject, error)
+	// GetReconciliation The latest comparison of ledger custody against on-chain balances
+	// (GET /admin/v1/reconciliation)
+	GetReconciliation(ctx context.Context, request GetReconciliationRequestObject) (GetReconciliationResponseObject, error)
 	// ListSweeps Recent collections into the hot wallet
 	// (GET /admin/v1/sweeps)
 	ListSweeps(ctx context.Context, request ListSweepsRequestObject) (ListSweepsResponseObject, error)
@@ -2904,6 +3222,37 @@ func (sh *strictHandler) ListEntries(w http.ResponseWriter, r *http.Request, par
 	}
 }
 
+// CreateHouseAdjustment operation middleware
+func (sh *strictHandler) CreateHouseAdjustment(w http.ResponseWriter, r *http.Request) {
+	var request CreateHouseAdjustmentRequestObject
+
+	var body CreateHouseAdjustmentJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CreateHouseAdjustment(ctx, request.(CreateHouseAdjustmentRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CreateHouseAdjustment")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CreateHouseAdjustmentResponseObject); ok {
+		if err := validResponse.VisitCreateHouseAdjustmentResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // GetTrialBalance operation middleware
 func (sh *strictHandler) GetTrialBalance(w http.ResponseWriter, r *http.Request) {
 	var request GetTrialBalanceRequestObject
@@ -2978,6 +3327,30 @@ func (sh *strictHandler) SetMarketStatus(w http.ResponseWriter, r *http.Request,
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(SetMarketStatusResponseObject); ok {
 		if err := validResponse.VisitSetMarketStatusResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetReconciliation operation middleware
+func (sh *strictHandler) GetReconciliation(w http.ResponseWriter, r *http.Request) {
+	var request GetReconciliationRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetReconciliation(ctx, request.(GetReconciliationRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetReconciliation")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetReconciliationResponseObject); ok {
+		if err := validResponse.VisitGetReconciliationResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

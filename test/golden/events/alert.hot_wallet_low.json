@@ -1,0 +1,18 @@
+{
+  "event_id": "01J8Z2K3M4N5P6Q7R8S9T0V1Y0",
+  "event_type": "alert.hot_wallet_low",
+  "schema_version": 1,
+  "tenant_id": "default",
+  "market_id": null,
+  "account_id": null,
+  "seq": null,
+  "occurred_at": "2026-09-05T08:15:23.412Z",
+  "correlation_id": "req_01J8Z2K2000000000000000000",
+  "payload": {
+    "chain_id": 31337,
+    "address": "0x14dc79964da2c08b23698b3d3cc7ca32193d9955",
+    "asset": "ETH",
+    "balance": "0.42",
+    "threshold": "1"
+  }
+}

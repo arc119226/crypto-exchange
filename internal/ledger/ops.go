@@ -138,6 +138,72 @@ func (s *Service) Adjust(ctx context.Context, tx pgx.Tx, p AdjustParams) (Journa
 	})
 }
 
+// HouseAdjustParams books value into or out of a custody account against
+// external (docs/plan-v1.0.md §6.1.4 g).
+//
+// This is how money that entered or left the exchange's control without a
+// transaction the ledger produced gets recorded: a faucet funding the hot
+// wallet, an operator moving coins in from cold storage, or the resolution of
+// a reconciliation break whose cause has been established. Direction credit
+// means custody gains; debit means it loses.
+type HouseAdjustParams struct {
+	Code           HouseCode
+	Asset          string
+	Amount         money.Amount
+	Direction      Direction
+	Reason         string
+	IdempotencyKey string
+	CorrelationID  string
+}
+
+// AdjustHouse posts a custody adjustment. Reason is mandatory; the caller
+// records the audit event in the same transaction.
+//
+// Only the two custody accounts are allowed. They are the ones that can
+// legitimately gain or lose value outside this ledger, because they are the
+// ones backed by an address somebody else can send to. fee_revenue,
+// gas_expense and pending_withdrawal are derived from entries this system
+// makes, so an adjustment to one of them would not be recording a fact -- it
+// would be hiding a bug.
+func (s *Service) AdjustHouse(ctx context.Context, tx pgx.Tx, p HouseAdjustParams) (JournalEntry, bool, error) {
+	if p.Code != HouseCustodyHot && p.Code != HouseCustodyDepositAddresses {
+		return JournalEntry{}, false, fmt.Errorf("%w: %s is not a custody account", ErrInvalidEntry, p.Code)
+	}
+	if p.Reason == "" {
+		return JournalEntry{}, false, ErrReasonRequired
+	}
+	if !p.Amount.IsPositive() {
+		return JournalEntry{}, false, fmt.Errorf("%w: adjustment amount must be positive", ErrInvalidEntry)
+	}
+	custody, err := s.HouseAccount(p.Code)
+	if err != nil {
+		return JournalEntry{}, false, err
+	}
+	ext, err := s.HouseAccount(HouseExternal)
+	if err != nil {
+		return JournalEntry{}, false, err
+	}
+	var postings []Posting
+	switch p.Direction {
+	case Credit:
+		postings = []Posting{
+			{AccountID: custody, Asset: p.Asset, Bucket: BucketHouse, Direction: Debit, Amount: p.Amount},
+			{AccountID: ext, Asset: p.Asset, Bucket: BucketHouse, Direction: Credit, Amount: p.Amount},
+		}
+	case Debit:
+		postings = []Posting{
+			{AccountID: ext, Asset: p.Asset, Bucket: BucketHouse, Direction: Debit, Amount: p.Amount},
+			{AccountID: custody, Asset: p.Asset, Bucket: BucketHouse, Direction: Credit, Amount: p.Amount},
+		}
+	default:
+		return JournalEntry{}, false, fmt.Errorf("%w: direction %q", ErrInvalidEntry, p.Direction)
+	}
+	return s.Post(ctx, tx, Entry{
+		IdempotencyKey: p.IdempotencyKey, Kind: KindAdjustment, RefType: "house_adjustment", RefID: p.IdempotencyKey,
+		Reason: p.Reason, CorrelationID: p.CorrelationID, Postings: postings,
+	})
+}
+
 // Settle books one trade: both holds pay the counterparties net of fees,
 // fees go to fee_revenue, and the buyer's price improvement is released.
 func (s *Service) Settle(ctx context.Context, tx pgx.Tx, p SettleParams) (SettleResult, bool, error) {

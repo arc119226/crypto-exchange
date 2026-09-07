@@ -58,6 +58,9 @@ func newAdminServer(cfg Config, log *slog.Logger, m *telemetry.HTTPMetrics, pool
 	})
 	rec := audit.NewRecorder(cfg.TenantID)
 	admin.Mount(r, admin.NewHandler(pool, l, registry.NewStore(pool), rec, cfg.TenantID).
+		// Which chain's reconciliation reports this role shows. It cannot
+		// produce one -- it has no node -- so this is only which rows to read.
+		WithChainID(cfg.Chain.ChainID).
 		// The review queue. Approving marks a withdrawal for the chain worker;
 		// this role can neither lock funds nor sign (docs/plan-v1.0.md §6.4.2).
 		WithWithdrawals(withdrawal.NewReviewer(pool, cfg.TenantID, l, rec)))

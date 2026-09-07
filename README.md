@@ -2,7 +2,7 @@
 
 白牌交易引擎(white-label exchange engine)的商業化原型:現貨撮合、複式記帳帳本、EVM 充提與歸集、行情推播、管理後台,以單一 Go binary 多角色的模組化單體交付,客戶透過 REST / WebSocket / Webhook 與事件契約整合。
 
-**目前狀態:Phase 4c-1 進行中(歸集;本 PR)。Phase 3、4a 與 4b 已完成。** 已合併:Phase 0 walking skeleton、Phase 1 `internal/matching`(無 I/O、確定性訂單簿)、Phase 2 `internal/ledger`(複式記帳、凍結即分錄、冪等鍵)與 admin API、Phase 3a `internal/trading` + `internal/eventbus`(每市場 runner、一筆交易內 Hold → Apply → 成交 / 分錄 / outbox、重啟重建、JetStream relay)、Phase 3b `internal/auth` + `internal/ratelimit` + public API(JWT / refresh / API key HMAC、限流、`client_order_id` 冪等)。3c 讓拆分部署真的能交易:`internal/cmdbus`(NATS request-reply 命令匯流排,跨容器仍保持 404 / 422 / 503 的錯誤語意,命令帶 `aud=internal` JWT)、`eventbus` 消費端與引擎的`market.updated` 熱載入、`PUT /admin/v1/markets/{symbol}/status`、`api/events/v1/*.json` + `docs/events.md` 事件契約(golden + JSON Schema 測試),以及每個 PR 都跑的多容器 `make e2e`。
+**目前狀態:Phase 4c-2 進行中(鏈上對帳;本 PR)。Phase 3、4a、4b 與 4c-1 歸集已完成。** 已合併:Phase 0 walking skeleton、Phase 1 `internal/matching`(無 I/O、確定性訂單簿)、Phase 2 `internal/ledger`(複式記帳、凍結即分錄、冪等鍵)與 admin API、Phase 3a `internal/trading` + `internal/eventbus`(每市場 runner、一筆交易內 Hold → Apply → 成交 / 分錄 / outbox、重啟重建、JetStream relay)、Phase 3b `internal/auth` + `internal/ratelimit` + public API(JWT / refresh / API key HMAC、限流、`client_order_id` 冪等)。3c 讓拆分部署真的能交易:`internal/cmdbus`(NATS request-reply 命令匯流排,跨容器仍保持 404 / 422 / 503 的錯誤語意,命令帶 `aud=internal` JWT)、`eventbus` 消費端與引擎的`market.updated` 熱載入、`PUT /admin/v1/markets/{symbol}/status`、`api/events/v1/*.json` + `docs/events.md` 事件契約(golden + JSON Schema 測試),以及每個 PR 都跑的多容器 `make e2e`。
 
 4a-1 已合併:`internal/chain/hdwallet`(BIP-44 派生、scrypt + AES-256-GCM 的 `hd-seed.json`)、`exchange keys import-mnemonic`、signer role 維護的**預生成充值地址池**、`GET /v1/deposit-address`——api role 只認領地址,永遠拿不到金鑰。
 
@@ -14,11 +14,17 @@
 
 `resolve` 是**請求**而不是動作:admin role 沒有節點也沒有金鑰,它只寫四個請求欄,chain role 在自己的 tick 上執行——能寫 `tx_hash` 的角色可以讓一筆提現看起來已經送出卻什麼都沒簽過。處置的操作步驟在 [`docs/runbooks/stuck-withdrawal.md`](docs/runbooks/stuck-withdrawal.md)。
 
-本 PR(4c-1)是歸集,把充值和提現接起來:`internal/chain/sweep`(ETH 一筆、ERC-20 兩筆——只收過代幣的地址一滴 ETH 都沒有,付不起自己的轉帳,所以熱錢包要先補 gas)、§6.1.4(f) 的 custody 分錄、`sweep.*` 事件、`GET /admin/v1/sweeps`。signer 也第一次用熱錢包以外的金鑰簽東西:歸集是充值地址自己送出的,而**用哪把金鑰由地址列上的 derivation index 決定,不由請求決定**。
+4c-1 是歸集,把充值和提現接起來:`internal/chain/sweep`(ETH 一筆、ERC-20 兩筆——只收過代幣的地址一滴 ETH 都沒有,付不起自己的轉帳,所以熱錢包要先補 gas)、§6.1.4(f) 的 custody 分錄、`sweep.*` 事件、`GET /admin/v1/sweeps`。歸集永遠不動使用者餘額,而且刻意只收「帳本真的入過帳的數」:鏈上餘額可以合法地更高(掃描器看不到的合約內部轉帳),把那部分掃走等於讓 custody 為一筆從來沒收到的轉帳背書。多的錢留在鏈上。
 
-**歸集永遠不動使用者餘額**:它在兩個 house 帳戶之間搬錢並記 gas,被清空地址的那個帳戶餘額一分不變。這也是 `custody:hot` 之前為什麼會是負的——熱錢包一直在付一筆不是從它這裡收進來的錢,而這個 PR 把缺口接上了。
+**本 PR(4c-2)是對帳,去看那筆多出來的錢。** 每個資產比對「帳本的 `custody_deposit_addresses + custody_hot`」與「全部充值地址 + 熱錢包的鏈上餘額」,`GET /admin/v1/reconciliation` 與 `exchangectl admin reconcile` 顯示結果(§6.4.4)。兩側從來不會看著同一個瞬間,所以有兩個修正項——鏈上看得到但還沒入帳的充值,以及帳本在邊界之上已經記了的 movement——**兩個都是精確算出來的,所以容差是零**。餘額全部釘在同一個區塊讀,而那個區塊就是掃描器、提現 worker 和歸集三者記帳用的同一條邊界,再往回夾到掃描器的游標:帳本對鏈的認識是那個游標,不是節點的 head。
 
-兩條規則決定什麼可以歸集,都是為了讓 `custody:deposit_addresses` 誠實:**有還沒入帳的充值的地址整個跳過**,而且**歸集金額上限是帳本真的入過帳的數**——鏈上餘額可以合法地更高(掃描器看不到的合約內部轉帳),把那部分掃走等於讓 custody 為一筆從來沒收到的轉帳背書。多的錢留在鏈上,4c-2 的對帳會看到它。
+差異不為零就寫 `admin.reconciliation_breaks` 並發 `reconciliation.break_detected`;熱錢包低於 `ETH_HOT_WALLET_MIN` 發 `alert.hot_wallet_low`。兩者都是邊緣觸發的——一直存在的狀況留在報告和指標裡,每五分鐘重喊一次只會教人設過濾器。
+
+**第一次跑對帳一定會找到東西**,而且它是對的:dev 鏈直接給熱錢包 100 ETH,沒有任何一筆本系統的交易把它放進去。答案是 `exchangectl admin house-adjust`(§6.1.4 g 的 `external` 科目),不是在比較裡加一條例外。e2e 因此走三步:斷言第一次的差異是正的、記下正好那個數、跑完整流程之後**一個字都不記**地回到零。
+
+**對帳上線第一天就抓到一個 4c-1 留下的真漏洞**:歸集代幣時熱錢包補給充值地址的那筆 gas,在鏈上就是一筆流入受監控地址的普通轉帳,於是掃描器把它當成使用者的充值入帳了——使用者白得一筆交易所墊的 ETH,而 `custody_deposit_addresses` 為同一筆移動記了兩次。它撐過了完整的 integration 套件和兩輪 e2e,直到有東西真的拿帳本去和鏈上比。修法是把規則寫對:**充值是從交易所外面到達的錢**,發送方是自己的地址就不是充值。
+
+對帳另外還抓到兩個:nonce 補洞燒掉的 gas 從來沒進帳本(`hotwallet` 整個套件沒 import `ledger`),以及一次失敗的簽名會讓下一個 tick 記下一筆熱錢包從來沒送出去的 ETH。細節在 [`docs/domain.md`](docs/domain.md) §20 與 [`docs/runbooks/reconciliation-break.md`](docs/runbooks/reconciliation-break.md)。
 
 ## 產品邊界
 

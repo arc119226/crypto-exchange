@@ -20,7 +20,7 @@ func newAdminCmd() *cobra.Command {
 	c := &cobra.Command{Use: "admin", Short: "Operator commands (admin API on :8082)"}
 	c.PersistentFlags().String("admin-url", envOr("EXCHANGE_ADMIN_URL", "http://localhost:8082"), "admin API base URL")
 	c.PersistentFlags().String("admin-key", envOr("EXCHANGE_ADMIN_API_KEY", ""), "admin API key (X-Admin-Api-Key); env EXCHANGE_ADMIN_API_KEY")
-	c.AddCommand(newAdminAccountsCmd(), newAdminBalancesCmd(), newAdminFundCmd(), newAdminAdjustCmd(), newAdminTrialBalanceCmd(), newAdminEntriesCmd(), newAdminAuditCmd(), newAdminMarketsCmd(), newAdminWithdrawalsCmd(), newAdminSweepsCmd())
+	c.AddCommand(newAdminAccountsCmd(), newAdminBalancesCmd(), newAdminFundCmd(), newAdminAdjustCmd(), newAdminTrialBalanceCmd(), newAdminEntriesCmd(), newAdminAuditCmd(), newAdminMarketsCmd(), newAdminWithdrawalsCmd(), newAdminSweepsCmd(), newAdminReconcileCmd(), newAdminHouseAdjustCmd())
 	return c
 }
 
