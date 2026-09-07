@@ -73,8 +73,19 @@ test-fuzz: ## Run every Fuzz* target for FUZZ_TIME each
 	    echo "fuzz $$pkg $$f"; go test -run '^$$' -fuzz "^$$f$$" -fuzztime $(FUZZ_TIME) $$pkg || exit 1; \
 	  done; done
 
+# ./internal/... used to be listed here too. It ran nothing the unit job had
+# not already run: no package outside ./test/integration carries the integration
+# build tag, so the tag added no files to it (152 tests listed either way), and
+# the only place -short changes anything is internal/matching, where rapid
+# divides its check count by five -- which the unit job already re-runs at full
+# strength with `-run TestProperty`. What it did cost was -p 1: twelve packages
+# forced through one at a time, measured at 3.3x the two-way-parallel time on
+# the two cores a runner has.
+#
+# -p 1 stays. With one package it is a no-op today; it is here so that a second
+# integration package added later does not race this one for Docker.
 test-integration: ## Integration tests (testcontainers; needs Docker)
-	go test -race -count=1 -p 1 -tags integration ./test/integration/... ./internal/...
+	go test -race -count=1 -p 1 -tags integration ./test/integration/...
 
 cover-money: ## Enforce >= 95% coverage on internal/money
 	scripts/covercheck.sh 95 ./internal/money
