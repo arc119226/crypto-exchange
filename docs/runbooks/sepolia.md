@@ -920,10 +920,16 @@ make logs-sepolia FOLLOW=1
 要找的是這一行:
 
 ```
-chain recorded  chain_id=11155111  anchor_block=...  anchor_hash=0x...
+chain verified  chain_id=11155111  anchor_block=...  anchor_hash=0x...
 ```
 
-看到它就表示交易所成功連上 Sepolia 並認明了這條鏈。
+看到它就表示交易所連上 Sepolia、而且**確認這條鏈跟資料庫裡記的是同一條**。
+
+> **第一次啟動印的是 `chain recorded`(不是 `verified`)**,欄位一樣。差別是:第一次是把這條鏈**記下來**,之後每一次是拿它**對一遍**。所以要一次抓到兩種,用:
+>
+> ```
+> make logs-sepolia TAIL=500 | grep -E 'chain (recorded|verified)'
+> ```
 
 **沒看到的話**,往上翻找紅色的 `error`,對照第 6 節的表。
 

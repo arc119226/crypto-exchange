@@ -214,6 +214,15 @@ func (s *Scanner) verifyAnchor(ctx context.Context) error {
 		return fmt.Errorf("%w: block %d hashes to %s, expected %s (run `make reset` to start both over)",
 			ErrChainChanged, recorded, hash, state.AnchorHash)
 	}
+	// Say so. The check above is the one that runs on every start after the
+	// first, and it used to succeed in silence -- so "chain recorded" appeared
+	// once in the life of a database, while the runbook tells an operator to
+	// look for it every time they bring the exchange up. On the second start
+	// they find nothing, and the instruction after that is to go hunting for a
+	// red error that is not there either. The same fields as the first-start
+	// line, so one grep finds whichever of the two this start produced.
+	s.log.Info("chain verified", slog.Int64("chain_id", s.cfg.ChainID),
+		slog.Uint64("anchor_block", recorded), slog.String("anchor_hash", hash))
 	return nil
 }
 

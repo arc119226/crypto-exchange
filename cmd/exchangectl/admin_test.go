@@ -2,10 +2,13 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -53,9 +56,43 @@ func fakeAdmin(t *testing.T) *httptest.Server {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"account_id":"acc","balances":[{"asset":"USDC","available":"9204","hold":"0","total":"9204"}]}`))
 	}))
+	mux.HandleFunc("GET /admin/v1/reconciliation", auth(func(w http.ResponseWriter, _ *http.Request) {
+		// Deliberately a while ago: this endpoint serves the most recent
+		// stored pass, so anything it returns is history.
+		finished := time.Now().UTC().Add(-4 * time.Minute)
+		started := finished.Add(-3 * time.Second)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprintf(w, `{"id":"r-1","chain_id":31337,"started_at":%q,"finished_at":%q,"balanced":true,`+
+			`"lines":[{"asset":"ETH","ledger_total":"2","chain_total":"2","uncredited":"0",`+
+			`"above_frontier":"0","in_flight":"0","diff":"0","balanced":true}]}`,
+			started.Format(time.RFC3339Nano), finished.Format(time.RFC3339Nano))
+	}))
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
 	return srv
+}
+
+// The reconciliation table is a recording, never a live read: the admin role
+// has no node, so it serves the most recent stored pass. During the Sepolia
+// walkthrough that was read as live twice -- an adjustment was made, the table
+// still showed the state before it, and the operator concluded the adjustment
+// had failed. The table has to say when it was taken.
+func TestAdminReconcileSaysWhenThePassRan(t *testing.T) {
+	srv := fakeAdmin(t)
+	out, err := run(t, "admin", "--admin-url", srv.URL, "--admin-key", "secret", "reconcile")
+	require.NoError(t, err)
+
+	first := strings.SplitN(out, "\n", 2)[0]
+	assert.Contains(t, first, "pass ran:", "before the numbers, not after them")
+	assert.Contains(t, first, "4m ago", "an absolute time still asks the reader to do arithmetic")
+	assert.Regexp(t, `\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z`, first, "and the absolute time as well, for the record")
+	assert.Contains(t, out, "ASSET", "the table still follows")
+
+	// --output json is what a script reads; it must not gain a header line.
+	out, err = run(t, "--output", "json", "admin", "--admin-url", srv.URL, "--admin-key", "secret", "reconcile")
+	require.NoError(t, err)
+	assert.NotContains(t, out, "pass ran:")
+	assert.True(t, strings.HasPrefix(strings.TrimSpace(out), "{"), out)
 }
 
 func TestAdminFundAndReplay(t *testing.T) {
