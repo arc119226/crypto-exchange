@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"math/big"
+	"strings"
 	"testing"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -457,4 +458,63 @@ func TestReconcileAfterATokenSweepFundsItsOwnGas(t *testing.T) {
 		t.Logf("chain hot=%s address=%s", h.chain.mustBalance(t, ctx, h.hot), h.chain.mustBalance(t, ctx, address))
 	}
 	assert.True(t, report.Balanced, "diff %s", eth.Diff)
+}
+
+// A row a deployment does not have yet is a state, not a failure. The chain
+// role logs anything Tick returns at ERROR, once per interval, with no dedup:
+// a fresh database used to produce one for the missing scan cursor, and a
+// deployment with no signer one every five minutes forever, for a row that is
+// never going to appear on its own. An ERROR that is always there is one an
+// operator learns to scroll past, which costs the ERROR that matters.
+func TestReconcileSkipsQuietlyUntilTheRowsItNeedsExist(t *testing.T) {
+	h := setupReconcile(t, money.Zero)
+	ctx := context.Background()
+
+	// ex_all cannot DELETE from these tables (§14 grants are per operation),
+	// so removing a row the way a deployment that never had one is shaped
+	// takes the migration role.
+	admin, err := pg.Open(ctx, pg.PoolConfig{DSN: h.DSN("ex_migrate"), MaxConns: 2})
+	require.NoError(t, err)
+	t.Cleanup(admin.Close)
+
+	quiet := func(t *testing.T) (*reconcile.Worker, *strings.Builder) {
+		t.Helper()
+		var logs strings.Builder
+		w := reconcile.New(h.all, reconcile.Config{
+			Tenant: "default", ChainID: anvilChainID, NativeAsset: "ETH", DefaultConfirmations: 1,
+		}, registry.NewStore(h.all), h.svc, h.chain,
+			slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug})))
+		return w, &logs
+	}
+
+	t.Run("no scan cursor yet", func(t *testing.T) {
+		w, logs := quiet(t)
+		_, err := admin.Exec(ctx, `DELETE FROM chain.scan_cursors WHERE chain_id = $1`, anvilChainID)
+		require.NoError(t, err)
+		t.Cleanup(func() { h.setCursor(t, ctx, 1_000_000) })
+
+		require.NoError(t, w.Tick(ctx), "the scanner writes the cursor on its first pass; asking first is not a fault")
+		assert.NotContains(t, logs.String(), "level=ERROR", logs.String())
+		assert.Contains(t, logs.String(), "has not recorded a cursor yet")
+	})
+
+	t.Run("no signer has ever started", func(t *testing.T) {
+		w, logs := quiet(t)
+		_, err := admin.Exec(ctx, `DELETE FROM chain.hot_wallets WHERE chain_id = $1`, anvilChainID)
+		require.NoError(t, err)
+
+		// Twice: this row is not one that appears by itself, so the second
+		// pass is what a signer-less deployment does for the rest of its life.
+		for i := 1; i <= 2; i++ {
+			require.NoError(t, w.Tick(ctx), "pass %d", i)
+		}
+		assert.NotContains(t, logs.String(), "level=ERROR", logs.String())
+		assert.Contains(t, logs.String(), "no hot wallet is recorded")
+
+		// And it skips rather than reporting: the hot wallet's balance is part
+		// of the chain total, so a report without it would invent a break out
+		// of money sitting exactly where it belongs.
+		_, latestErr := reconcile.Latest(ctx, h.all, "default", anvilChainID)
+		assert.ErrorIs(t, latestErr, reconcile.ErrNoReport)
+	})
 }

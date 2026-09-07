@@ -48,9 +48,11 @@ type chainComponents struct {
 	sweeper       *sweep.Worker
 	sweepInterval time.Duration
 	// reconciler compares ledger custody with on-chain balances (§6.4.4). It
-	// needs no signer -- it only reads -- so it runs in deployments where
-	// nothing can be signed, which is exactly when someone wants to know what
-	// is actually there.
+	// needs no signer -- it only reads -- so it keeps running while the signer
+	// is down, which is exactly when someone wants to know what is actually
+	// there. It does need chain.hot_wallets to have been written once, because
+	// the hot wallet's balance is part of the chain total; until then it says
+	// so and skips the pass rather than reporting a total it knows is short.
 	reconciler        *reconcile.Worker
 	reconcileInterval time.Duration
 	// lastTick records whether the most recent tick succeeded, so readiness
