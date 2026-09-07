@@ -17,11 +17,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"math/big"
+	"strings"
 
 	"github.com/ethereum/go-ethereum/common"
 
 	"github.com/arc119226/crypto-exchange/internal/money"
+	"github.com/arc119226/crypto-exchange/internal/telemetry"
 )
 
 // Kind is what a signature is for. The signer applies a different check to
@@ -83,6 +86,44 @@ type Result struct {
 	// signed without re-deriving the hot wallet address.
 	From  string
 	Nonce uint64
+}
+
+// LogValue keeps the signed transaction out of logs (§12 Phase 4 DoD).
+//
+// It redacts the bytes rather than the whole Result, because everything else
+// here is what an operator needs: the hash is how you find the transaction on
+// a block explorer, and from/nonce are how you tell two attempts apart. A
+// blanket [redacted] would have protected the same thing and made the log
+// useless, which is how a redaction ends up being removed by the next person.
+//
+// The e2e leak scan cannot cover this. It compares container logs against the
+// known development secrets, and a signed transaction is different every run,
+// so nothing but a LogValuer can catch it.
+func (r Result) LogValue() slog.Value {
+	return slog.GroupValue(
+		slog.String("raw_tx", telemetry.Redacted),
+		slog.String("tx_hash", r.TxHash),
+		slog.String("from", r.From),
+		slog.Uint64("nonce", r.Nonce),
+	)
+}
+
+// LogValue names the fields worth logging. Every one of them is already on
+// chain or in the ledger, so nothing here is secret today -- it exists so that
+// adding a field which is secret becomes a deliberate edit in this function,
+// rather than a silent appearance in every line that logs a Request.
+func (r Request) LogValue() slog.Value {
+	return slog.GroupValue(
+		slog.String("kind", string(r.Kind)),
+		slog.String("ref_id", r.RefID),
+		slog.Int("attempt", int(r.Attempt)),
+		slog.Int64("chain_id", r.ChainID),
+		slog.String("to", strings.ToLower(r.To.Hex())),
+		slog.String("asset", r.Asset),
+		slog.String("value", r.Value.String()),
+		slog.Uint64("nonce", r.Nonce),
+		slog.Uint64("gas", r.Gas),
+	)
 }
 
 // Signer signs one intent at a time.

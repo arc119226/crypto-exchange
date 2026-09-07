@@ -114,6 +114,15 @@ func FromMnemonic(mnemonic string) (*Wallet, error) {
 
 // Derive returns the private key at path. The caller owns the key and should
 // not keep it longer than the signature it is producing.
+//
+// The §12 Phase 4 DoD asks for a slog.LogValuer on *ecdsa.PrivateKey. That is
+// not expressible: the type belongs to crypto/ecdsa, and Go does not allow a
+// method on a type from another package. Wallet redacts itself and so do
+// signer.Result and signerbus.wireResponse, but this value cannot defend
+// itself -- so the rule is structural instead. Its one caller
+// (signer.KeystoreSigner.sign) keeps it in a local and hands it straight to
+// the signing call; putting it in a struct, or in anything a logger might be
+// given, would defeat every other redaction in the signing path.
 func (w *Wallet) Derive(path Path) (*ecdsa.PrivateKey, error) {
 	key := w.master
 	for i, child := range path {
