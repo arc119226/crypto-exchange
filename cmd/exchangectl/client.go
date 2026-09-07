@@ -82,15 +82,37 @@ func (c credentials) editor() apiclient.RequestEditorFn {
 // server logs; the id is printed on failures. Credentials, when given, are
 // attached to every request.
 func newClient(cmd *cobra.Command) (*apiclient.ClientWithResponses, string, error) {
-	base, err := cmd.Flags().GetString("base-url")
-	if err != nil {
-		return nil, "", err
-	}
 	creds, err := credentialsFrom(cmd)
 	if err != nil {
 		return nil, "", err
 	}
-	c, err := apiclient.NewClientWithResponses(base,
+	return buildClient(cmd, creds.editor())
+}
+
+// newAnonymousClient builds the same client with no credential attached, for
+// the /v1/auth/* routes that hand credentials out. Those routes need none --
+// the OpenAPI spec gives register, login, refresh and logout no `security` --
+// but internal/auth/middleware.go rejects a credential that is present and
+// invalid before any handler runs, and that is the right strictness. So an
+// EXCHANGE_TOKEN left over from yesterday would 401 the one command that
+// would replace it, and the operator has to know to unset a variable nothing
+// told them about. Not sending it is the fix; the middleware is not.
+func newAnonymousClient(cmd *cobra.Command) (*apiclient.ClientWithResponses, string, error) {
+	// The flags are still parsed, so --api-key without --api-secret is
+	// rejected here too: the check belongs to the flag pair, not to whether
+	// this particular command happens to use it.
+	if _, err := credentialsFrom(cmd); err != nil {
+		return nil, "", err
+	}
+	return buildClient(cmd)
+}
+
+func buildClient(cmd *cobra.Command, editors ...apiclient.RequestEditorFn) (*apiclient.ClientWithResponses, string, error) {
+	base, err := cmd.Flags().GetString("base-url")
+	if err != nil {
+		return nil, "", err
+	}
+	opts := []apiclient.ClientOption{
 		apiclient.WithHTTPClient(&http.Client{Timeout: requestTimeout}),
 		apiclient.WithRequestEditorFn(func(_ context.Context, req *http.Request) error {
 			if req.Header.Get(telemetry.RequestIDHeader) == "" {
@@ -98,8 +120,11 @@ func newClient(cmd *cobra.Command) (*apiclient.ClientWithResponses, string, erro
 			}
 			return nil
 		}),
-		apiclient.WithRequestEditorFn(creds.editor()),
-	)
+	}
+	for _, e := range editors {
+		opts = append(opts, apiclient.WithRequestEditorFn(e))
+	}
+	c, err := apiclient.NewClientWithResponses(base, opts...)
 	if err != nil {
 		return nil, "", fmt.Errorf("invalid --base-url %q: %w", base, err)
 	}

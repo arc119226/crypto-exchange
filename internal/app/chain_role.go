@@ -237,12 +237,6 @@ type signing struct {
 	nonces *hotwallet.Manager
 }
 
-// retryStop wraps an error that must end a retry loop rather than be retried.
-type retryStop struct{ err error }
-
-func (r retryStop) Error() string { return r.err.Error() }
-func (r retryStop) Unwrap() error { return r.err }
-
 // run ticks the scanner until ctx ends.
 //
 // A tick failure is logged and retried rather than fatal: an RPC blip must not

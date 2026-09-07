@@ -492,6 +492,39 @@ func TestSweepDoesNotStartASecondOneWhileTheFirstIsInFlight(t *testing.T) {
 	h.assertTrialBalanceZero(t, ctx)
 }
 
+// Two assets on one address are still one sweep at a time, because what they
+// share is the address's ether. A native sweep plans to take everything above
+// its own 21000 gas; a token sweep needs that same ether to pay for its
+// transfer, and both read the raw balance. Left unserialised the native one
+// empties the address the token one was just declared able to pay from -- and
+// if the native transaction is still in the mempool at that moment, the token
+// transfer is signed and broadcast against a balance that is about to leave,
+// then dropped with nothing to re-send it (§6.4.3, migration 0015).
+//
+// This is the Sepolia incident: sweeps 64317a52 (USDC, failed
+// balance_changed) and cce4400a (ETH, confirmed) were planned in one tick
+// from one address.
+func TestSweepDoesNotStartASecondOneForAnotherAssetOnTheSameAddress(t *testing.T) {
+	h := setupSweep(t)
+	ctx := context.Background()
+	// One account gets one deposit address for every asset -- scripts/e2e.sh
+	// asserts the ETH and USDC addresses are equal before it funds both -- so
+	// the two deposits have to be put on the same address here. deposited()
+	// opens a fresh account each time, which would give them one address each
+	// and test nothing the index governs.
+	account := h.newSpot(t, ctx)
+	addr, err := h.addresses.Assign(ctx, account)
+	require.NoError(t, err)
+	h.creditDeposit(t, ctx, account, addr, "ETH", "2")
+	h.creditDeposit(t, ctx, account, addr, "USDC", "250.5")
+
+	require.NoError(t, h.worker.Tick(ctx))
+	got := h.sweeps(t, ctx)
+	require.Len(t, got, 1,
+		"one address, one sweep in flight -- got %d, so both are promising the same ether", len(got))
+	h.assertTrialBalanceZero(t, ctx)
+}
+
 // A sweep that reverts on chain books the gas that was really spent and leaves
 // the money where it is, so the next scan tries again.
 func TestSweepThatRevertsBooksGasAndRetriesLater(t *testing.T) {

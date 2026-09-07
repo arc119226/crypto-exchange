@@ -1270,6 +1270,7 @@ docker volume ls -q | grep '^crypto-exchange-sepolia' | xargs -r docker volume r
 | `container crypto-exchange-sepolia-exchange-all-1 is unhealthy` + `make: *** [up-sepolia] Error 1` | 交易所的容器起來了,但 80 秒內沒能就緒。`migrate` 和 `seed` 有 Exited 就代表那兩步是成功的 —— 問題在交易所自己,多半卡在連鏈 | 跑 `make logs-sepolia`。找 `chain rpc` 開頭的重試訊息(RPC 連不上或太慢)或 `different chain`(設定不對)。**把輸出貼給我** |
 | 記錄裡有 `pruned history unavailable` | 你的 RPC 背後某台機器刪掉了舊資料 | 換一個 RPC(A3),`make down-sepolia` 後重做 B2 |
 | `the node is on a different chain than the cursor` | 資料庫記的鏈跟你現在連的不是同一條,或 `ETH_SCAN_START_BLOCK` 被改過 | **這是保護不是故障。** 錯誤訊息會告訴你原本記的值,設回去。真的要換鏈就照 6.1 全部重來 |
+| 任何指令回 `401` / `invalid or expired access token`,但你明明登入過 | 存取權杖只活 15 分鐘(`AUTH_ACCESS_TTL`),過期了就無效 | 重跑一次 B4 的 `user login`(同一組 email / 密碼),把它印的那行 `export EXCHANGE_TOKEN=...` 貼回終端機。**不用先 `unset`** —— 4d-2 起 `user register` / `login` / `logout` 不再把舊憑證附上去 |
 | 充值一直停在 `detected` 超過五分鐘 | 掃描器落後,或確認數還不夠 | 先等到兩分鐘以上。還是不動就看記錄,可能是 RPC 被限流 |
 | `admin reconcile` 回 404 或資料很舊 | 對帳還沒跑過第一輪 | 等 5 分鐘。還是沒有就看記錄找 `reconciliation pass failed` |
 | `DIFF` 不是 0 | 帳本和鏈上對不上 | **先不要動任何東西。** 把整段輸出貼給我,或看 `docs/runbooks/reconciliation-break.md` |
