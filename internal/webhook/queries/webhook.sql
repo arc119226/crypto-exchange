@@ -8,26 +8,45 @@ FROM webhook.endpoints
 WHERE tenant_id = $1 AND status = 'active'
 ORDER BY created_at;
 
--- name: RecordAttempt :one
--- One row per try. The unique index on (tenant, endpoint, event, attempt)
--- makes a re-run of the same attempt a conflict rather than a second row, so
--- a crash between sending and recording cannot double-count.
+-- name: Enqueue :execrows
+-- Idempotent under JetStream's at-least-once redelivery: the primary key is
+-- (tenant, endpoint, event), so the same event arriving twice is a no-op
+-- rather than a second POST. Returns 0 when it was already queued.
+INSERT INTO webhook.queue (tenant_id, endpoint_id, event_id, event_type, body)
+VALUES ($1, $2, $3, $4, $5)
+ON CONFLICT DO NOTHING;
+
+-- name: ClaimDue :many
+-- What is owed now. FOR UPDATE SKIP LOCKED so two workers can drain the same
+-- queue without either waiting on the other or sending the same event twice.
+SELECT q.tenant_id, q.endpoint_id, q.event_id, q.event_type, q.body, q.attempts,
+       e.url, e.secret_enc
+FROM webhook.queue q
+JOIN webhook.endpoints e ON e.id = q.endpoint_id
+WHERE q.tenant_id = $1 AND q.next_attempt_at <= now() AND e.status = 'active'
+ORDER BY q.next_attempt_at
+LIMIT $2
+FOR UPDATE OF q SKIP LOCKED;
+
+-- name: RecordAttempt :exec
+-- One row per try, append-only. The unique index on
+-- (tenant, endpoint, event, attempt) makes a re-run of the same attempt a
+-- conflict rather than a second row, so a crash between sending and recording
+-- cannot double-count.
 INSERT INTO webhook.deliveries (
     tenant_id, endpoint_id, event_id, event_type, attempt, status,
-    response_status, error, delivered_at
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-RETURNING id;
+    response_status, error, duration_ms, delivered_at
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+ON CONFLICT DO NOTHING;
 
--- name: CountAttempts :one
--- How many times this event has been tried against this endpoint, which is
--- both the next attempt number and the retry budget check.
-SELECT count(*) FROM webhook.deliveries
+-- name: RescheduleQueued :exec
+-- The attempt failed and the schedule has more steps left.
+UPDATE webhook.queue
+SET attempts = attempts + 1, next_attempt_at = $4
 WHERE tenant_id = $1 AND endpoint_id = $2 AND event_id = $3;
 
--- name: AlreadyDelivered :one
--- JetStream is at-least-once, so the same event arrives again after a
--- restart or a nak. This is what stops the customer getting it twice.
-SELECT EXISTS (
-    SELECT 1 FROM webhook.deliveries
-    WHERE tenant_id = $1 AND endpoint_id = $2 AND event_id = $3 AND status = 'delivered'
-);
+-- name: Dequeue :exec
+-- Delivered, or out of schedule. Either way nothing more is owed, and what
+-- survives is the delivery rows -- the queue entry held no history.
+DELETE FROM webhook.queue
+WHERE tenant_id = $1 AND endpoint_id = $2 AND event_id = $3;

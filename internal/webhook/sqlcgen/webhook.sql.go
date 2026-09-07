@@ -7,50 +7,116 @@ package sqlcgen
 
 import (
 	"context"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-const alreadyDelivered = `-- name: AlreadyDelivered :one
-SELECT EXISTS (
-    SELECT 1 FROM webhook.deliveries
-    WHERE tenant_id = $1 AND endpoint_id = $2 AND event_id = $3 AND status = 'delivered'
-)
+const claimDue = `-- name: ClaimDue :many
+SELECT q.tenant_id, q.endpoint_id, q.event_id, q.event_type, q.body, q.attempts,
+       e.url, e.secret_enc
+FROM webhook.queue q
+JOIN webhook.endpoints e ON e.id = q.endpoint_id
+WHERE q.tenant_id = $1 AND q.next_attempt_at <= now() AND e.status = 'active'
+ORDER BY q.next_attempt_at
+LIMIT $2
+FOR UPDATE OF q SKIP LOCKED
 `
 
-type AlreadyDeliveredParams struct {
+type ClaimDueParams struct {
+	TenantID string
+	Limit    int32
+}
+
+type ClaimDueRow struct {
 	TenantID   string
 	EndpointID string
 	EventID    string
+	EventType  string
+	Body       []byte
+	Attempts   int32
+	Url        string
+	SecretEnc  []byte
 }
 
-// JetStream is at-least-once, so the same event arrives again after a
-// restart or a nak. This is what stops the customer getting it twice.
-func (q *Queries) AlreadyDelivered(ctx context.Context, arg AlreadyDeliveredParams) (bool, error) {
-	row := q.db.QueryRow(ctx, alreadyDelivered, arg.TenantID, arg.EndpointID, arg.EventID)
-	var exists bool
-	err := row.Scan(&exists)
-	return exists, err
+// What is owed now. FOR UPDATE SKIP LOCKED so two workers can drain the same
+// queue without either waiting on the other or sending the same event twice.
+func (q *Queries) ClaimDue(ctx context.Context, arg ClaimDueParams) ([]ClaimDueRow, error) {
+	rows, err := q.db.Query(ctx, claimDue, arg.TenantID, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ClaimDueRow{}
+	for rows.Next() {
+		var i ClaimDueRow
+		if err := rows.Scan(
+			&i.TenantID,
+			&i.EndpointID,
+			&i.EventID,
+			&i.EventType,
+			&i.Body,
+			&i.Attempts,
+			&i.Url,
+			&i.SecretEnc,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
-const countAttempts = `-- name: CountAttempts :one
-SELECT count(*) FROM webhook.deliveries
+const dequeue = `-- name: Dequeue :exec
+DELETE FROM webhook.queue
 WHERE tenant_id = $1 AND endpoint_id = $2 AND event_id = $3
 `
 
-type CountAttemptsParams struct {
+type DequeueParams struct {
 	TenantID   string
 	EndpointID string
 	EventID    string
 }
 
-// How many times this event has been tried against this endpoint, which is
-// both the next attempt number and the retry budget check.
-func (q *Queries) CountAttempts(ctx context.Context, arg CountAttemptsParams) (int64, error) {
-	row := q.db.QueryRow(ctx, countAttempts, arg.TenantID, arg.EndpointID, arg.EventID)
-	var count int64
-	err := row.Scan(&count)
-	return count, err
+// Delivered, or out of schedule. Either way nothing more is owed, and what
+// survives is the delivery rows -- the queue entry held no history.
+func (q *Queries) Dequeue(ctx context.Context, arg DequeueParams) error {
+	_, err := q.db.Exec(ctx, dequeue, arg.TenantID, arg.EndpointID, arg.EventID)
+	return err
+}
+
+const enqueue = `-- name: Enqueue :execrows
+INSERT INTO webhook.queue (tenant_id, endpoint_id, event_id, event_type, body)
+VALUES ($1, $2, $3, $4, $5)
+ON CONFLICT DO NOTHING
+`
+
+type EnqueueParams struct {
+	TenantID   string
+	EndpointID string
+	EventID    string
+	EventType  string
+	Body       []byte
+}
+
+// Idempotent under JetStream's at-least-once redelivery: the primary key is
+// (tenant, endpoint, event), so the same event arriving twice is a no-op
+// rather than a second POST. Returns 0 when it was already queued.
+func (q *Queries) Enqueue(ctx context.Context, arg EnqueueParams) (int64, error) {
+	result, err := q.db.Exec(ctx, enqueue,
+		arg.TenantID,
+		arg.EndpointID,
+		arg.EventID,
+		arg.EventType,
+		arg.Body,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const listActiveEndpoints = `-- name: ListActiveEndpoints :many
@@ -98,12 +164,12 @@ func (q *Queries) ListActiveEndpoints(ctx context.Context, tenantID string) ([]L
 	return items, nil
 }
 
-const recordAttempt = `-- name: RecordAttempt :one
+const recordAttempt = `-- name: RecordAttempt :exec
 INSERT INTO webhook.deliveries (
     tenant_id, endpoint_id, event_id, event_type, attempt, status,
-    response_status, error, delivered_at
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-RETURNING id
+    response_status, error, duration_ms, delivered_at
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+ON CONFLICT DO NOTHING
 `
 
 type RecordAttemptParams struct {
@@ -115,14 +181,16 @@ type RecordAttemptParams struct {
 	Status         string
 	ResponseStatus *int32
 	Error          string
+	DurationMs     int32
 	DeliveredAt    pgtype.Timestamptz
 }
 
-// One row per try. The unique index on (tenant, endpoint, event, attempt)
-// makes a re-run of the same attempt a conflict rather than a second row, so
-// a crash between sending and recording cannot double-count.
-func (q *Queries) RecordAttempt(ctx context.Context, arg RecordAttemptParams) (string, error) {
-	row := q.db.QueryRow(ctx, recordAttempt,
+// One row per try, append-only. The unique index on
+// (tenant, endpoint, event, attempt) makes a re-run of the same attempt a
+// conflict rather than a second row, so a crash between sending and recording
+// cannot double-count.
+func (q *Queries) RecordAttempt(ctx context.Context, arg RecordAttemptParams) error {
+	_, err := q.db.Exec(ctx, recordAttempt,
 		arg.TenantID,
 		arg.EndpointID,
 		arg.EventID,
@@ -131,9 +199,32 @@ func (q *Queries) RecordAttempt(ctx context.Context, arg RecordAttemptParams) (s
 		arg.Status,
 		arg.ResponseStatus,
 		arg.Error,
+		arg.DurationMs,
 		arg.DeliveredAt,
 	)
-	var id string
-	err := row.Scan(&id)
-	return id, err
+	return err
+}
+
+const rescheduleQueued = `-- name: RescheduleQueued :exec
+UPDATE webhook.queue
+SET attempts = attempts + 1, next_attempt_at = $4
+WHERE tenant_id = $1 AND endpoint_id = $2 AND event_id = $3
+`
+
+type RescheduleQueuedParams struct {
+	TenantID      string
+	EndpointID    string
+	EventID       string
+	NextAttemptAt time.Time
+}
+
+// The attempt failed and the schedule has more steps left.
+func (q *Queries) RescheduleQueued(ctx context.Context, arg RescheduleQueuedParams) error {
+	_, err := q.db.Exec(ctx, rescheduleQueued,
+		arg.TenantID,
+		arg.EndpointID,
+		arg.EventID,
+		arg.NextAttemptAt,
+	)
+	return err
 }

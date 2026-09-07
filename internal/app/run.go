@@ -66,6 +66,7 @@ func Run(ctx context.Context, cfg Config, roles []Role, bi BuildInfo) error {
 		apiRefresh   *registryRefresher
 		signer       *signerComponents
 		chainRole    *chainComponents
+		workerRole   *workerComponents
 	)
 	// the ledger service is shared by every role in the process that needs it
 	ledgerFor := func() (*ledger.Service, error) {
@@ -146,6 +147,14 @@ func Run(ctx context.Context, cfg Config, roles []Role, bi BuildInfo) error {
 			chainRole = c
 			defer chainRole.close()
 			checker.Register("chain", true, chainRole.ready)
+		case RoleWorker:
+			w, err := newWorker(cfg, log, d.pool, reg, d.nc)
+			if err != nil {
+				return err
+			}
+			workerRole = w
+			defer workerRole.close()
+			checker.Register("worker", true, workerRole.ready)
 		case RoleSigner:
 			// built above
 		default:
@@ -163,6 +172,12 @@ func Run(ctx context.Context, cfg Config, roles []Role, bi BuildInfo) error {
 	}
 	if signer != nil {
 		g.Go(func() error { return signer.run(gctx, log) })
+	}
+	if workerRole != nil {
+		// Same shape as the chain role below: start waits on JetStream, and
+		// the ops server is already listening so /readyz reports why.
+		g.Go(func() error { return workerRole.start(gctx) })
+		g.Go(func() error { return workerRole.runDelivering(gctx, log) })
 	}
 	if chainRole != nil {
 		// start blocks while the node is verified and the signer answers; the
