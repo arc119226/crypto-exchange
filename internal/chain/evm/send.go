@@ -30,6 +30,12 @@ var ErrKnownTransaction = errors.New("evm: transaction already known")
 // fee enough. The caller must bump further, not give up.
 var ErrUnderpriced = errors.New("evm: replacement transaction underpriced")
 
+// ErrFeeCeiling reports that the fees a transaction would need are above
+// ETH_MAX_FEE_PER_GAS. It is a decision, not a failure: the work is still
+// there, it is simply not worth this price yet. Callers wrap it with the
+// numbers and leave whatever they were about to send exactly as it was.
+var ErrFeeCeiling = errors.New("evm: fees are above the configured ceiling")
+
 // Fees are the EIP-1559 parameters of one transaction.
 type Fees struct {
 	// TipCap is the priority fee paid to the proposer.
@@ -81,21 +87,26 @@ func (f Fees) Bump(percent int64) Fees {
 	return Fees{TipCap: mul(f.TipCap), FeeCap: mul(f.FeeCap)}
 }
 
-// CapAt lowers the fee cap to limit when it exceeds it, keeping the tip below
-// the cap. MAX_FEE_PER_GAS is an operator's stop-loss on a fee market gone
-// mad; a transaction that would exceed it waits instead.
-func (f Fees) CapAt(limit *big.Int) Fees {
-	if limit == nil || limit.Sign() <= 0 {
-		return f
+// Over reports whether these fees breach the operator's ceiling. A nil or
+// non-positive limit means there is no ceiling.
+//
+// This used to be CapAt, which lowered FeeCap to the limit and let the caller
+// send anyway. Both its own comment and ETH_MAX_FEE_PER_GAS's said a
+// transaction over the ceiling "waits instead", and neither was true: what it
+// actually did was send at a price the market had already left behind, which
+// on a real fee market means the transaction sits in the mempool and the
+// replacement ladder spends itself trying to fix it. Nothing noticed on anvil,
+// where the base fee is zero and the ceiling is never reached.
+//
+// A stop-loss that quietly turns into a worse price is not a stop-loss. So the
+// decision moves to the caller, who is the only one that knows what waiting
+// means for the work in hand -- a withdrawal stays where it is, a sweep waits
+// for the next tick, a nonce fill is simply not sent yet.
+func (f Fees) Over(limit *big.Int) bool {
+	if limit == nil || limit.Sign() <= 0 || f.FeeCap == nil {
+		return false
 	}
-	out := Fees{TipCap: new(big.Int).Set(f.TipCap), FeeCap: new(big.Int).Set(f.FeeCap)}
-	if out.FeeCap.Cmp(limit) > 0 {
-		out.FeeCap.Set(limit)
-	}
-	if out.TipCap.Cmp(out.FeeCap) > 0 {
-		out.TipCap.Set(out.FeeCap)
-	}
-	return out
+	return f.FeeCap.Cmp(limit) > 0
 }
 
 // PendingNonceAt is the nonce the node would give the next transaction from

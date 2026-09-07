@@ -240,13 +240,34 @@ func TestScannerRefusesADifferentChain(t *testing.T) {
 	ctx := context.Background()
 
 	_, err := h.all.Exec(ctx,
-		`UPDATE chain.chain_state SET genesis_hash = $1 WHERE chain_id = $2`,
+		`UPDATE chain.chain_state SET anchor_hash = $1 WHERE chain_id = $2`,
 		fakeHash("11"), anvilChainID)
 	require.NoError(t, err)
 
 	err = h.scanner.Start(ctx)
 	require.ErrorIs(t, err, deposit.ErrChainChanged)
 	assert.Contains(t, err.Error(), "make reset")
+}
+
+// TestScannerRefusesAMovedAnchor covers the half of the guard that did not
+// exist before the anchor stopped being genesis: ETH_SCAN_START_BLOCK decides
+// what "already scanned" means on a fresh database, and until now it could be
+// edited under a live one with nothing noticing.
+func TestScannerRefusesAMovedAnchor(t *testing.T) {
+	h := setupDeposit(t)
+	ctx := context.Background()
+
+	_, err := h.all.Exec(ctx,
+		`UPDATE chain.chain_state SET anchor_block = $1 WHERE chain_id = $2`,
+		int64(7), anvilChainID)
+	require.NoError(t, err)
+
+	err = h.scanner.Start(ctx)
+	require.ErrorIs(t, err, deposit.ErrChainChanged)
+	assert.Contains(t, err.Error(), "anchored at block 7")
+	// The message must name the recorded value: the fix is a setting, and an
+	// operator who is told to reset instead loses a database for a typo.
+	assert.NotContains(t, err.Error(), "make reset")
 }
 
 func TestScannerRefusesAChainBehindTheCursor(t *testing.T) {

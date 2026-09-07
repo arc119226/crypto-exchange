@@ -12,6 +12,7 @@ type Metrics struct {
 	confirmed  *prometheus.CounterVec
 	failed     *prometheus.CounterVec
 	unreadable *prometheus.CounterVec
+	feeCeiling *prometheus.CounterVec
 }
 
 // NewMetrics registers the collectors. A nil registerer returns unregistered
@@ -36,9 +37,16 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 				"Alert on this rising steadily: it means a registry row names a contract that answers nothing, " +
 				"and deposits in that asset are accumulating where the hot wallet cannot spend them.",
 		}, []string{"asset"}),
+		// Distinct from failed: nothing went wrong, an operator's ceiling said
+		// the gas was not worth it. Sustained non-zero here with a falling
+		// hot-wallet balance means the ceiling is set below the market.
+		feeCeiling: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "sweeps_fee_ceiling_waits_total",
+			Help: "Times collection was deferred because fees exceeded ETH_MAX_FEE_PER_GAS.",
+		}, []string{"asset"}),
 	}
 	if reg != nil {
-		reg.MustRegister(m.planned, m.confirmed, m.failed, m.unreadable)
+		reg.MustRegister(m.planned, m.confirmed, m.failed, m.unreadable, m.feeCeiling)
 	}
 	return m
 }

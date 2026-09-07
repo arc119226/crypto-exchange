@@ -69,15 +69,23 @@ func TestFeesBumpAlwaysClearsTheReplacementThreshold(t *testing.T) {
 	assert.Equal(t, up.FeeCap.String(), f.Bump(0).FeeCap.String())
 }
 
-func TestFeesCapAtKeepsTheTipUnderTheCeiling(t *testing.T) {
+func TestFeesOverReportsTheCeilingWithoutChangingAnything(t *testing.T) {
 	f := Fees{TipCap: big.NewInt(30), FeeCap: big.NewInt(100)}
-	capped := f.CapAt(big.NewInt(20))
-	assert.Equal(t, "20", capped.FeeCap.String())
-	assert.Equal(t, "20", capped.TipCap.String(), "a tip above the fee cap is not a valid transaction")
 
-	// The original is untouched: callers keep their own copy.
+	assert.True(t, f.Over(big.NewInt(99)))
+	assert.False(t, f.Over(big.NewInt(100)), "exactly at the ceiling is allowed; it is a maximum, not a bound")
+	assert.False(t, f.Over(big.NewInt(101)))
+
+	// An absent ceiling is not a ceiling of zero.
+	assert.False(t, f.Over(nil))
+	assert.False(t, f.Over(big.NewInt(0)))
+	assert.False(t, f.Over(big.NewInt(-1)))
+
+	// Nothing is mutated: this replaced CapAt precisely because the old
+	// behaviour was to quietly rewrite the fees and send them anyway.
 	assert.Equal(t, "100", f.FeeCap.String())
-	// No ceiling means no change.
-	assert.Equal(t, "100", f.CapAt(nil).FeeCap.String())
-	assert.Equal(t, "100", f.CapAt(big.NewInt(0)).FeeCap.String())
+	assert.Equal(t, "30", f.TipCap.String())
+
+	// Zero-valued fees have no cap to compare, and must not panic.
+	assert.False(t, Fees{}.Over(big.NewInt(1)))
 }

@@ -71,13 +71,19 @@ func (c *Client) Head(ctx context.Context) (uint64, error) {
 	return n, nil
 }
 
-// GenesisHash identifies the chain across restarts. A node whose genesis
-// changed is a different chain, however familiar its chain id looks — which is
-// exactly what happens when an anvil state volume is wiped.
-func (c *Client) GenesisHash(ctx context.Context) (string, error) {
-	h, err := c.rpc.HeaderByNumber(ctx, big.NewInt(0))
+// AnchorHash identifies the chain across restarts: a node serving a different
+// hash at the same height is a different chain, however familiar its chain id
+// looks — which is exactly what happens when an anvil state volume is wiped.
+//
+// The caller picks the height. Genesis would be the obvious anchor and is what
+// this used to read, but it is also the block a pruned node is least likely to
+// serve, and public testnet endpoints load-balance across backends that have
+// pruned different depths. Anchoring at the block the scanner starts from asks
+// the same question at a depth the node still has.
+func (c *Client) AnchorHash(ctx context.Context, block uint64) (string, error) {
+	h, err := c.rpc.HeaderByNumber(ctx, new(big.Int).SetUint64(block))
 	if err != nil {
-		return "", fmt.Errorf("evm: genesis: %w", err)
+		return "", fmt.Errorf("evm: anchor block %d: %w", block, err)
 	}
 	return strings.ToLower(h.Hash().Hex()), nil
 }

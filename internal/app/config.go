@@ -122,8 +122,14 @@ type ChainConfig struct {
 	// ScanInterval is how often the chain role polls for new blocks.
 	ScanInterval time.Duration `env:"SCAN_INTERVAL" envDefault:"2s"`
 	// ScanStartBlock is the last block treated as already scanned on a fresh
-	// database, so scanning begins just after it. Useful when pointing at a
-	// chain whose early history cannot contain a deposit of ours.
+	// database, so scanning begins just after it. Leaving it at 0 means "from
+	// genesis", which is right for anvil and ruinous anywhere else: Sepolia's
+	// head is past 11,000,000, and at ScanBatchSize 200 that is tens of
+	// thousands of ticks before the first deposit could be seen.
+	//
+	// It is also the chain's anchor: the hash of this block is recorded once
+	// and compared on every start, so changing it on a live database is
+	// refused rather than silently redefining what "already scanned" means.
 	ScanStartBlock uint64 `env:"SCAN_START_BLOCK"`
 	// ScanBatchSize caps the blocks one tick covers while catching up.
 	ScanBatchSize uint64 `env:"SCAN_BATCH_SIZE" envDefault:"200"`
@@ -150,7 +156,9 @@ type ChainConfig struct {
 	// asked. Past it the withdrawal waits rather than bidding forever.
 	MaxReplacements int32 `env:"MAX_REPLACEMENTS" envDefault:"3"`
 	// MaxFeePerGas is the operator's stop-loss on the fee market, in wei.
-	// Empty means no ceiling; a transaction that would exceed it waits.
+	// Empty means no ceiling; a transaction that would exceed it waits, and
+	// keeps waiting until the market comes back down or an operator raises
+	// the ceiling. Nothing is sent at a clamped price (evm.Fees.Over).
 	MaxFeePerGas string `env:"MAX_FEE_PER_GAS"`
 	// NativeAsset is the registry symbol of the chain's own coin, which is
 	// what every gas entry is denominated in. Stated once here so the
