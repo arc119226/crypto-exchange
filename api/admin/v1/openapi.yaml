@@ -26,6 +26,7 @@ tags:
   - name: withdrawals
   - name: chain
   - name: reconciliation
+  - name: webhooks
 
 paths:
   /admin/v1/accounts:
@@ -555,6 +556,196 @@ paths:
         "500":
           $ref: "#/components/responses/InternalError"
 
+  /admin/v1/webhooks:
+    get:
+      tags: [webhooks]
+      operationId: listWebhookEndpoints
+      summary: Webhook endpoints, disabled ones included
+      description: Signing secrets are never returned; they are shown once, when the endpoint is created.
+      responses:
+        "200":
+          description: Endpoints
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WebhookEndpointList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    post:
+      tags: [webhooks]
+      operationId: createWebhookEndpoint
+      summary: Register an endpoint to receive events
+      description: |
+        Returns the signing secret exactly once. It is stored encrypted and no
+        later response can produce it, so an operator who loses it has to
+        rotate rather than look it up.
+
+        There is no way to delete an endpoint, deliberately: the delivery
+        history has to outlive the integration, so an endpoint that is finished
+        with is set to `disabled`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WebhookEndpointRequest"
+      responses:
+        "201":
+          description: Created; store the secret now
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreatedWebhookEndpoint"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /admin/v1/webhooks/{id}:
+    put:
+      tags: [webhooks]
+      operationId: updateWebhookEndpoint
+      summary: Replace an endpoint's URL, subscriptions and label
+      description: >
+        A whole replacement of the mutable configuration, so `url` and `events`
+        are required even when only one of them is changing. The signing secret
+        is not part of it, and neither is the status, which has its own
+        endpoint because turning an integration off is a different decision
+        from editing it.
+      parameters:
+        - $ref: "#/components/parameters/WebhookEndpointID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WebhookEndpointUpdateRequest"
+      responses:
+        "200":
+          description: The endpoint after the change
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WebhookEndpoint"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /admin/v1/webhooks/{id}/status:
+    put:
+      tags: [webhooks]
+      operationId: setWebhookEndpointStatus
+      summary: Enable or disable an endpoint
+      description: >
+        Disabling also drops whatever is still queued for the endpoint. Queued
+        deliveries to an inactive endpoint are not pending but unreachable, and
+        leaving them would fire a batch of stale events at the customer
+        whenever the integration was turned back on. The delivery history is
+        untouched, and the number dropped is recorded in the audit trail.
+      parameters:
+        - $ref: "#/components/parameters/WebhookEndpointID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WebhookEndpointStatusRequest"
+      responses:
+        "200":
+          description: The endpoint after the change
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WebhookEndpoint"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /admin/v1/webhooks/{id}/deliveries:
+    get:
+      tags: [webhooks]
+      operationId: listWebhookDeliveries
+      summary: Delivery attempts for one endpoint, newest first
+      description: >
+        One row per attempt, not per event. `run_id` groups the attempts that
+        belong to one pass through the retry schedule, so a replay's attempts
+        are distinguishable from the original's, and `attempt` is the step
+        within that run. A null `response_status` means the endpoint never
+        answered at all -- a timeout, a refused connection, a bad name -- which
+        is a different problem from a rejection.
+      parameters:
+        - $ref: "#/components/parameters/WebhookEndpointID"
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+      responses:
+        "200":
+          description: Delivery attempts
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WebhookDeliveryList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /admin/v1/webhooks/{id}/deliveries/{delivery_id}/replay:
+    post:
+      tags: [webhooks]
+      operationId: replayWebhookDelivery
+      summary: Send the event behind a delivery again
+      description: |
+        Queues a new run of the event this delivery belongs to. The delivery
+        itself does not change -- the table is append-only -- and the replay's
+        attempts join it under a new `run_id`, restarting the retry schedule
+        from its first step.
+
+        202, not 200: nothing has been sent yet. The worker picks the run up on
+        its next tick, and the response says when that is due.
+
+        The customer will receive the event a second time, with the same
+        `event_id`. That is what a replay is; `docs/webhooks.md` tells them to
+        deduplicate on it.
+
+        409 has two causes and the detail distinguishes them: the event is
+        still queued for this endpoint, so the schedule is going to send it
+        anyway; or the endpoint is disabled, and a replay would queue work
+        nothing can pick up.
+      parameters:
+        - $ref: "#/components/parameters/WebhookEndpointID"
+        - $ref: "#/components/parameters/WebhookDeliveryID"
+      responses:
+        "202":
+          description: Queued for delivery
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WebhookReplay"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
 components:
   securitySchemes:
     AdminApiKey:
@@ -595,6 +786,19 @@ components:
         default: 0
     WithdrawalID:
       name: id
+      in: path
+      required: true
+      schema:
+        type: string
+
+    WebhookEndpointID:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+    WebhookDeliveryID:
+      name: delivery_id
       in: path
       required: true
       schema:
@@ -1145,6 +1349,154 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/AuditEvent"
+
+    WebhookEndpoint:
+      type: object
+      required: [id, url, events, label, status, created_at, updated_at]
+      properties:
+        id:
+          type: string
+        url:
+          type: string
+          example: https://example.com/hooks/exchange
+        events:
+          type: array
+          description: Event types this endpoint receives, matched against the envelope's event_type.
+          items:
+            type: string
+          example: [trade.executed, withdrawal.state_changed]
+        label:
+          type: string
+          x-go-type-skip-optional-pointer: true
+        status:
+          $ref: "#/components/schemas/WebhookEndpointStatus"
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    WebhookEndpointStatus:
+      type: string
+      enum: [active, disabled]
+
+    CreatedWebhookEndpoint:
+      allOf:
+        - $ref: "#/components/schemas/WebhookEndpoint"
+        - type: object
+          required: [secret]
+          properties:
+            secret:
+              type: string
+              description: HMAC signing secret, shown exactly once
+
+    WebhookEndpointList:
+      type: object
+      required: [webhook_endpoints]
+      properties:
+        webhook_endpoints:
+          type: array
+          items:
+            $ref: "#/components/schemas/WebhookEndpoint"
+
+    WebhookEndpointRequest:
+      type: object
+      required: [url, events]
+      properties:
+        url:
+          type: string
+          description: Absolute http:// or https:// address. Redirects are never followed.
+        events:
+          type: array
+          minItems: 1
+          items:
+            type: string
+        label:
+          type: string
+          x-go-type-skip-optional-pointer: true
+
+    WebhookEndpointUpdateRequest:
+      allOf:
+        - $ref: "#/components/schemas/WebhookEndpointRequest"
+        - type: object
+          required: [reason]
+          properties:
+            reason:
+              type: string
+              minLength: 1
+              description: Why it changes (recorded in the audit trail)
+
+    WebhookEndpointStatusRequest:
+      type: object
+      required: [status, reason]
+      properties:
+        status:
+          $ref: "#/components/schemas/WebhookEndpointStatus"
+        reason:
+          type: string
+          minLength: 1
+
+    WebhookDelivery:
+      type: object
+      required: [id, event_id, event_type, run_id, attempt, status, duration_ms, created_at]
+      properties:
+        id:
+          type: string
+        event_id:
+          type: string
+        event_type:
+          type: string
+        run_id:
+          type: string
+          description: One pass through the retry schedule. A replay starts a new one.
+        attempt:
+          type: integer
+          format: int32
+          description: Step within the run, starting at 0.
+        status:
+          type: string
+          enum: [pending, delivered, failed, dead]
+        response_status:
+          type: integer
+          nullable: true
+          description: Null when the endpoint never answered (timeout, refused connection, bad name).
+        error:
+          type: string
+          x-go-type-skip-optional-pointer: true
+        duration_ms:
+          type: integer
+          format: int32
+        created_at:
+          type: string
+          format: date-time
+        delivered_at:
+          type: string
+          format: date-time
+          nullable: true
+
+    WebhookDeliveryList:
+      type: object
+      required: [deliveries]
+      properties:
+        deliveries:
+          type: array
+          items:
+            $ref: "#/components/schemas/WebhookDelivery"
+
+    WebhookReplay:
+      type: object
+      required: [endpoint_id, event_id, run_id, next_attempt_at]
+      properties:
+        endpoint_id:
+          type: string
+        event_id:
+          type: string
+        run_id:
+          type: string
+        next_attempt_at:
+          type: string
+          format: date-time
 
     Problem:
       type: object

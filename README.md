@@ -2,7 +2,7 @@
 
 白牌交易引擎(white-label exchange engine)的商業化原型:現貨撮合、複式記帳帳本、EVM 充提與歸集、行情推播、管理後台,以單一 Go binary 多角色的模組化單體交付,客戶透過 REST / WebSocket / Webhook 與事件契約整合。
 
-**目前狀態:Phase 4d-1 進行中(Sepolia 的設定與程式準備;本 PR)。Phase 3、4a、4b、4c-1 歸集與 4c-2 對帳已完成;4d 的實跑見 [`docs/runbooks/sepolia.md`](docs/runbooks/sepolia.md)。** 已合併:Phase 0 walking skeleton、Phase 1 `internal/matching`(無 I/O、確定性訂單簿)、Phase 2 `internal/ledger`(複式記帳、凍結即分錄、冪等鍵)與 admin API、Phase 3a `internal/trading` + `internal/eventbus`(每市場 runner、一筆交易內 Hold → Apply → 成交 / 分錄 / outbox、重啟重建、JetStream relay)、Phase 3b `internal/auth` + `internal/ratelimit` + public API(JWT / refresh / API key HMAC、限流、`client_order_id` 冪等)。3c 讓拆分部署真的能交易:`internal/cmdbus`(NATS request-reply 命令匯流排,跨容器仍保持 404 / 422 / 503 的錯誤語意,命令帶 `aud=internal` JWT)、`eventbus` 消費端與引擎的`market.updated` 熱載入、`PUT /admin/v1/markets/{symbol}/status`、`api/events/v1/*.json` + `docs/events.md` 事件契約(golden + JSON Schema 測試),以及每個 PR 都跑的多容器 `make e2e`。
+**目前狀態:Phase 5b 進行中(webhook 的後台:endpoint 管理、投遞紀錄、手動 replay、本機驗簽的 sink;本 PR)。Phase 4 全數完成,包含 4d 在 Sepolia 上的實跑([`docs/runbooks/sepolia.md`](docs/runbooks/sepolia.md) 有逐筆的交易、gas 與區塊);Phase 5a 已合併,worker role 第一次做真的工作。** 已合併:Phase 0 walking skeleton、Phase 1 `internal/matching`(無 I/O、確定性訂單簿)、Phase 2 `internal/ledger`(複式記帳、凍結即分錄、冪等鍵)與 admin API、Phase 3a `internal/trading` + `internal/eventbus`(每市場 runner、一筆交易內 Hold → Apply → 成交 / 分錄 / outbox、重啟重建、JetStream relay)、Phase 3b `internal/auth` + `internal/ratelimit` + public API(JWT / refresh / API key HMAC、限流、`client_order_id` 冪等)。3c 讓拆分部署真的能交易:`internal/cmdbus`(NATS request-reply 命令匯流排,跨容器仍保持 404 / 422 / 503 的錯誤語意,命令帶 `aud=internal` JWT)、`eventbus` 消費端與引擎的`market.updated` 熱載入、`PUT /admin/v1/markets/{symbol}/status`、`api/events/v1/*.json` + `docs/events.md` 事件契約(golden + JSON Schema 測試),以及每個 PR 都跑的多容器 `make e2e`。
 
 4a-1 已合併:`internal/chain/hdwallet`(BIP-44 派生、scrypt + AES-256-GCM 的 `hd-seed.json`)、`exchange keys import-mnemonic`、signer role 維護的**預生成充值地址池**、`GET /v1/deposit-address`——api role 只認領地址,永遠拿不到金鑰。
 
@@ -16,7 +16,7 @@
 
 4c-1 是歸集,把充值和提現接起來:`internal/chain/sweep`(ETH 一筆、ERC-20 兩筆——只收過代幣的地址一滴 ETH 都沒有,付不起自己的轉帳,所以熱錢包要先補 gas)、§6.1.4(f) 的 custody 分錄、`sweep.*` 事件、`GET /admin/v1/sweeps`。歸集永遠不動使用者餘額,而且刻意只收「帳本真的入過帳的數」:鏈上餘額可以合法地更高(掃描器看不到的合約內部轉帳),把那部分掃走等於讓 custody 為一筆從來沒收到的轉帳背書。多的錢留在鏈上。
 
-**本 PR(4c-2)是對帳,去看那筆多出來的錢。** 每個資產比對「帳本的 `custody_deposit_addresses + custody_hot`」與「全部充值地址 + 熱錢包的鏈上餘額」,`GET /admin/v1/reconciliation` 與 `exchangectl admin reconcile` 顯示結果(§6.4.4)。兩側從來不會看著同一個瞬間,所以有兩個修正項——鏈上看得到但還沒入帳的充值,以及帳本在邊界之上已經記了的 movement——**兩個都是精確算出來的,所以容差是零**。餘額全部釘在同一個區塊讀,而那個區塊就是掃描器、提現 worker 和歸集三者記帳用的同一條邊界,再往回夾到掃描器的游標:帳本對鏈的認識是那個游標,不是節點的 head。
+**4c-2 是對帳,去看那筆多出來的錢。** 每個資產比對「帳本的 `custody_deposit_addresses + custody_hot`」與「全部充值地址 + 熱錢包的鏈上餘額」,`GET /admin/v1/reconciliation` 與 `exchangectl admin reconcile` 顯示結果(§6.4.4)。兩側從來不會看著同一個瞬間,所以有兩個修正項——鏈上看得到但還沒入帳的充值,以及帳本在邊界之上已經記了的 movement——**兩個都是精確算出來的,所以容差是零**。餘額全部釘在同一個區塊讀,而那個區塊就是掃描器、提現 worker 和歸集三者記帳用的同一條邊界,再往回夾到掃描器的游標:帳本對鏈的認識是那個游標,不是節點的 head。
 
 差異不為零就寫 `admin.reconciliation_breaks` 並發 `reconciliation.break_detected`;熱錢包低於 `ETH_HOT_WALLET_MIN` 發 `alert.hot_wallet_low`。兩者都是邊緣觸發的——一直存在的狀況留在報告和指標裡,每五分鐘重喊一次只會教人設過濾器。
 
@@ -25,6 +25,14 @@
 **對帳上線第一天就抓到一個 4c-1 留下的真漏洞**:歸集代幣時熱錢包補給充值地址的那筆 gas,在鏈上就是一筆流入受監控地址的普通轉帳,於是掃描器把它當成使用者的充值入帳了——使用者白得一筆交易所墊的 ETH,而 `custody_deposit_addresses` 為同一筆移動記了兩次。它撐過了完整的 integration 套件和兩輪 e2e,直到有東西真的拿帳本去和鏈上比。修法是把規則寫對:**充值是從交易所外面到達的錢**,發送方是自己的地址就不是充值。
 
 對帳另外還抓到兩個:nonce 補洞燒掉的 gas 從來沒進帳本(`hotwallet` 整個套件沒 import `ledger`),以及一次失敗的簽名會讓下一個 tick 記下一筆熱錢包從來沒送出去的 ETH。細節在 [`docs/domain.md`](docs/domain.md) §20 與 [`docs/runbooks/reconciliation-break.md`](docs/runbooks/reconciliation-break.md)。
+
+4d 是拿這一整套去對真的鏈:Sepolia 上手動走完充值 → 提現 → 歸集 → 對帳,七筆交易的 hash、gas 與區塊都記在 [`docs/runbooks/sepolia.md`](docs/runbooks/sepolia.md)。準備階段對真節點做讀取實測就抓到四個只在真鏈上才會踩到的缺陷,實跑之後又找到八個,細節在 [`docs/domain.md`](docs/domain.md) §21–§22。
+
+**Phase 5a 已合併,worker role 第一次做真的工作:出站 webhook 的投遞路徑。** `internal/webhook` 從 JetStream 收事件、寫進自己的佇列、按 §7.6 的排程(1m → 5m → 30m → 2h → 12h → 24h)投遞,每一次嘗試連狀態碼、耗時、錯誤一起記進 `webhook.deliveries`。簽章是 `HMAC-SHA256(secret, timestamp + "." + body)`,刻意不是 API key 那一套。退避排程住在資料庫而不是 JetStream,因為 nak 的延遲是單一固定值配 30s AckWait,撐不過第一分鐘。
+
+**本 PR(5b)是把它接上人**:`POST/GET /admin/v1/webhooks`、`PUT {id}` 與 `{id}/status`、投遞紀錄查詢、手動 replay,加上 `exchangectl admin webhooks` 與 `exchangectl webhook-sink`——一個本機接收並**驗簽**的工具,用的是伺服器簽章時的同一份程式碼。**沒有 DELETE**:投遞歷史必須活得比整合關係久,所以結束的 endpoint 是停用而不是刪除。
+
+設計後台這一步本身抓到三個 5a 留下的缺陷,而且沒有一個讀 schema 讀得出來:0016 的「防重複投遞」索引其實站在 POST 的**下游**,擋不了重送、只能藏住重送的紀錄;replay 的嘗試會撞上舊一輪的編號被 `ON CONFLICT DO NOTHING` 默默吞掉(replay 一筆 dead 的投遞會產生**零列**紀錄);而一個過期的結算會刪掉別人剛排進去的佇列列。修法是給「一輪投遞」一個 `run_id`,細節與教訓在 [`docs/domain.md`](docs/domain.md) §23。客戶要讀的那一面在 [`docs/webhooks.md`](docs/webhooks.md),包括**投遞成功之後晚到的重送會讓客戶再收到一次**這件事——至少一次投遞是契約,不是免責聲明。
 
 ## 產品邊界
 
@@ -70,6 +78,15 @@ make e2e                   # 上面那條路徑的完整驗證:exchangectl e2e�
 go run ./cmd/exchangectl admin markets set-status ETH-USDC halted --reason "maintenance"   # 引擎熱載入,無需重啟
 make artifacts                                  # 把 addresses.json 從 volume 複製到 deploy/compose/artifacts/
 cast call $(jq -r .usdc deploy/compose/artifacts/addresses.json) "decimals()(uint8)" --rpc-url localhost:8545   # 6
+
+# Webhook(§7.6;客戶那一面的說明在 docs/webhooks.md)
+WH=$(go run ./cmd/exchangectl admin webhooks create --url http://host.docker.internal:9999 \
+    --events 'trade.executed,withdrawal.state_changed' --output json)   # secret 只顯示一次
+go run ./cmd/exchangectl webhook-sink --port 9999 --secret $(echo $WH | jq -r .secret) &
+go run ./cmd/exchangectl e2e --verbose                                  # sink 印出已驗簽的事件
+EP=$(echo $WH | jq -r .id)
+go run ./cmd/exchangectl admin webhooks deliveries $EP                  # 每次嘗試的狀態碼、耗時、錯誤
+go run ./cmd/exchangectl admin webhooks replay $EP $DELIVERY_ID         # 重送(客戶會再收到一次,event_id 相同)
 
 make down               # 停止(保留資料)
 make reset              # 停止並清空 postgres / nats / anvil 狀態與合約產物
@@ -117,10 +134,11 @@ internal/policy       同步下單規則(市場狀態、帳戶凍結)
 internal/ledger       複式帳本:Post / Hold / Release / Settle / Credit / Adjust、balances 快取、試算平衡(sqlc)
 internal/audit        append-only 稽核紀錄
 internal/admin        admin REST(oapi-codegen strict server)+ X-Admin-Api-Key
+internal/webhook      出站投遞:HMAC 簽章、退避排程、deliveries、endpoint 管理與 replay
 internal/registry     assets / markets / fee schedules(sqlc)+ seed
 internal/money        Decimal 金額型別(禁 float;JSON 字串)
 internal/telemetry    slog、correlation id、Prometheus
-internal/platform     pgx / NATS / Redis 連線與健康檢查
+internal/platform     pgx / NATS / Redis 連線與健康檢查;secretbox 是 auth 與 webhook 共用的 AES-256-GCM 信封
 api/public/v1         公開 OpenAPI 契約
 api/admin/v1          admin OpenAPI 契約
 migrations            goose SQL(embed)
@@ -142,9 +160,13 @@ docs                  計畫、審查、ADR、領域文件
 | [`docs/domain.md`](docs/domain.md) | 領域文件:科目表、分錄、狀態機、撮合語意的逐項驗算與疑問清單;各 Phase 程式碼與計畫的對應表 |
 | [`docs/api-conventions.md`](docs/api-conventions.md) | Public API 慣例:金額字串、problem+json、JWT / API key HMAC 簽章、限流、`client_order_id` 狀態碼(English) |
 | [`docs/events.md`](docs/events.md) | 事件契約:envelope、subject 與 stream、排序與去重、consumer 型別、catalog、相容規則(English);schema 在 [`api/events/v1/`](api/events/v1) |
+| [`docs/webhooks.md`](docs/webhooks.md) | 出站 Webhook:簽章與驗證、重試排程、**至少一次投遞的實際後果**、endpoint 管理與 replay(English) |
+| [`docs/runbooks/`](docs/runbooks/) | 營運手冊:Sepolia 實跑、卡住的提現、對帳差異、reorg 告警 |
 | [`docs/adr/`](docs/adr/) | ADR-0000 需求訪談決策(8 輪 32 題);ADR-0001~0008 架構決策(單體、真相來源、租戶、數值、帳本、認證、簽名、工具鏈) |
 | [`docs/archive/plan-v0.1.md`](docs/archive/plan-v0.1.md) | 原始 v0.1 規劃書(已取代,僅供對照) |
 
 ## 下一步
 
-Phase 3(`docs/plan-v1.0.md` §12)分三個 PR 全數合併,DoD 全滿足。Phase 4 鏈上分 4a 充值、4b 提現、4c 歸集與對帳、4d Sepolia 驗證,每一項再拆兩個 PR。4d-1(本 PR)是把設定與程式準備好——並且在準備的過程中,對真的 Sepolia 節點做讀取實測,抓到四個只在真鏈上才會踩到的缺陷(見 [`docs/domain.md`](docs/domain.md) §21);4d-2 是手動實跑與結果記錄。DoD 不過不進下一階段。
+Phase 3 與 Phase 4 全數合併,DoD 全滿足;4d 在 Sepolia 上實跑過一次,結果與抓到的缺陷記在 [`docs/runbooks/sepolia.md`](docs/runbooks/sepolia.md) 與 [`docs/domain.md`](docs/domain.md) §21–§22。
+
+Phase 5(`docs/plan-v1.0.md` §12)分批進行:5a 出站投遞路徑(已合併)、5b webhook 後台(本 PR)。接下來是 htmx 後台本身(登入 + TOTP、registry / 用戶 / 帳本 / 審核 / 對帳頁)、`PUT /admin/v1/users/{id}/kyc-level`,以及 webhook secret 的輪替(`rotate-secret`,留到 5c)。DoD 不過不進下一階段。

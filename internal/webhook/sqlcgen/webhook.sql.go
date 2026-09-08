@@ -13,10 +13,11 @@ import (
 )
 
 const claimDue = `-- name: ClaimDue :many
-SELECT q.tenant_id, q.endpoint_id, q.event_id, q.event_type, q.body, q.attempts,
+SELECT q.tenant_id, q.endpoint_id, q.event_id, q.run_id, ev.event_type, ev.body, q.attempts,
        e.url, e.secret_enc
 FROM webhook.queue q
 JOIN webhook.endpoints e ON e.id = q.endpoint_id
+JOIN webhook.events ev ON ev.tenant_id = q.tenant_id AND ev.event_id = q.event_id
 WHERE q.tenant_id = $1 AND q.next_attempt_at <= now() AND e.status = 'active'
 ORDER BY q.next_attempt_at
 LIMIT $2
@@ -32,6 +33,7 @@ type ClaimDueRow struct {
 	TenantID   string
 	EndpointID string
 	EventID    string
+	RunID      string
 	EventType  string
 	Body       []byte
 	Attempts   int32
@@ -39,8 +41,11 @@ type ClaimDueRow struct {
 	SecretEnc  []byte
 }
 
-// What is owed now. FOR UPDATE SKIP LOCKED so two workers can drain the same
-// queue without either waiting on the other or sending the same event twice.
+// What is owed now. FOR UPDATE SKIP LOCKED keeps two workers off each other's
+// rows for the length of this transaction -- which ends before any HTTP
+// happens, so it does not stop both from claiming the same row on successive
+// ticks and both POSTing. deliveries_attempt_uniq is what makes the second
+// one's bookkeeping a no-op, and run_id is what fences its queue mutation.
 func (q *Queries) ClaimDue(ctx context.Context, arg ClaimDueParams) ([]ClaimDueRow, error) {
 	rows, err := q.db.Query(ctx, claimDue, arg.TenantID, arg.Limit)
 	if err != nil {
@@ -54,6 +59,7 @@ func (q *Queries) ClaimDue(ctx context.Context, arg ClaimDueParams) ([]ClaimDueR
 			&i.TenantID,
 			&i.EndpointID,
 			&i.EventID,
+			&i.RunID,
 			&i.EventType,
 			&i.Body,
 			&i.Attempts,
@@ -70,27 +76,105 @@ func (q *Queries) ClaimDue(ctx context.Context, arg ClaimDueParams) ([]ClaimDueR
 	return items, nil
 }
 
+const createEndpoint = `-- name: CreateEndpoint :one
+
+INSERT INTO webhook.endpoints (tenant_id, url, secret_enc, events, label)
+VALUES ($1, $2, $3, $4, $5)
+RETURNING id, url, events, label, status, created_at, updated_at
+`
+
+type CreateEndpointParams struct {
+	TenantID  string
+	Url       string
+	SecretEnc []byte
+	Events    []string
+	Label     string
+}
+
+type CreateEndpointRow struct {
+	ID        string
+	Url       string
+	Events    []string
+	Label     string
+	Status    string
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
+
+// Admin side (docs/plan-v1.0.md §7.6 "後台可查、可手動 replay").
+func (q *Queries) CreateEndpoint(ctx context.Context, arg CreateEndpointParams) (CreateEndpointRow, error) {
+	row := q.db.QueryRow(ctx, createEndpoint,
+		arg.TenantID,
+		arg.Url,
+		arg.SecretEnc,
+		arg.Events,
+		arg.Label,
+	)
+	var i CreateEndpointRow
+	err := row.Scan(
+		&i.ID,
+		&i.Url,
+		&i.Events,
+		&i.Label,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const deleteQueuedForEndpoint = `-- name: DeleteQueuedForEndpoint :execrows
+DELETE FROM webhook.queue
+WHERE tenant_id = $1 AND endpoint_id = $2
+`
+
+type DeleteQueuedForEndpointParams struct {
+	TenantID   string
+	EndpointID string
+}
+
+// Disabling an endpoint stops what is owed to it. Leaving the rows would make
+// them unreachable rather than pending: ClaimDue skips inactive endpoints, and
+// every other delete path is inside settle.
+func (q *Queries) DeleteQueuedForEndpoint(ctx context.Context, arg DeleteQueuedForEndpointParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteQueuedForEndpoint, arg.TenantID, arg.EndpointID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const dequeue = `-- name: Dequeue :exec
 DELETE FROM webhook.queue
-WHERE tenant_id = $1 AND endpoint_id = $2 AND event_id = $3
+WHERE tenant_id = $1 AND endpoint_id = $2 AND event_id = $3 AND run_id = $4
 `
 
 type DequeueParams struct {
 	TenantID   string
 	EndpointID string
 	EventID    string
+	RunID      string
 }
 
 // Delivered, or out of schedule. Either way nothing more is owed, and what
 // survives is the delivery rows -- the queue entry held no history.
+//
+// Fenced on run_id, and this one is not a nicety: without it a straggler
+// settling a finished run deletes whatever row now holds that key, which
+// after a replay is the operator's freshly enqueued run.
 func (q *Queries) Dequeue(ctx context.Context, arg DequeueParams) error {
-	_, err := q.db.Exec(ctx, dequeue, arg.TenantID, arg.EndpointID, arg.EventID)
+	_, err := q.db.Exec(ctx, dequeue,
+		arg.TenantID,
+		arg.EndpointID,
+		arg.EventID,
+		arg.RunID,
+	)
 	return err
 }
 
 const enqueue = `-- name: Enqueue :execrows
-INSERT INTO webhook.queue (tenant_id, endpoint_id, event_id, event_type, body)
-VALUES ($1, $2, $3, $4, $5)
+INSERT INTO webhook.queue (tenant_id, endpoint_id, event_id)
+VALUES ($1, $2, $3)
 ON CONFLICT DO NOTHING
 `
 
@@ -98,25 +182,147 @@ type EnqueueParams struct {
 	TenantID   string
 	EndpointID string
 	EventID    string
-	EventType  string
-	Body       []byte
 }
 
 // Idempotent under JetStream's at-least-once redelivery: the primary key is
 // (tenant, endpoint, event), so the same event arriving twice is a no-op
 // rather than a second POST. Returns 0 when it was already queued.
+//
+// run_id is not named here. A queue row is a run, and the default mints one.
 func (q *Queries) Enqueue(ctx context.Context, arg EnqueueParams) (int64, error) {
-	result, err := q.db.Exec(ctx, enqueue,
-		arg.TenantID,
-		arg.EndpointID,
-		arg.EventID,
-		arg.EventType,
-		arg.Body,
-	)
+	result, err := q.db.Exec(ctx, enqueue, arg.TenantID, arg.EndpointID, arg.EventID)
 	if err != nil {
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const enqueueReplay = `-- name: EnqueueReplay :one
+INSERT INTO webhook.queue (tenant_id, endpoint_id, event_id)
+VALUES ($1, $2, $3)
+ON CONFLICT DO NOTHING
+RETURNING run_id, next_attempt_at
+`
+
+type EnqueueReplayParams struct {
+	TenantID   string
+	EndpointID string
+	EventID    string
+}
+
+type EnqueueReplayRow struct {
+	RunID         string
+	NextAttemptAt time.Time
+}
+
+// A replay is a new run of an event that already happened. No body is written
+// and none is read: webhook.events already holds the exact bytes, and ex_admin
+// has no INSERT on it precisely so a replay cannot become a rewrite.
+//
+// No rows back means the primary key is taken -- this event is still queued
+// for this endpoint, so it is going to be sent anyway.
+func (q *Queries) EnqueueReplay(ctx context.Context, arg EnqueueReplayParams) (EnqueueReplayRow, error) {
+	row := q.db.QueryRow(ctx, enqueueReplay, arg.TenantID, arg.EndpointID, arg.EventID)
+	var i EnqueueReplayRow
+	err := row.Scan(&i.RunID, &i.NextAttemptAt)
+	return i, err
+}
+
+const getDelivery = `-- name: GetDelivery :one
+SELECT id, event_id, run_id, attempt, status
+FROM webhook.deliveries
+WHERE tenant_id = $1 AND endpoint_id = $2 AND id = $3
+`
+
+type GetDeliveryParams struct {
+	TenantID   string
+	EndpointID string
+	ID         string
+}
+
+type GetDeliveryRow struct {
+	ID      string
+	EventID string
+	RunID   string
+	Attempt int32
+	Status  string
+}
+
+// Which event an operator is pointing at. They pick a delivery row because
+// that is what the list shows them; what gets replayed is the event behind it.
+func (q *Queries) GetDelivery(ctx context.Context, arg GetDeliveryParams) (GetDeliveryRow, error) {
+	row := q.db.QueryRow(ctx, getDelivery, arg.TenantID, arg.EndpointID, arg.ID)
+	var i GetDeliveryRow
+	err := row.Scan(
+		&i.ID,
+		&i.EventID,
+		&i.RunID,
+		&i.Attempt,
+		&i.Status,
+	)
+	return i, err
+}
+
+const getEndpoint = `-- name: GetEndpoint :one
+SELECT id, url, events, label, status, created_at, updated_at
+FROM webhook.endpoints
+WHERE tenant_id = $1 AND id = $2
+`
+
+type GetEndpointParams struct {
+	TenantID string
+	ID       string
+}
+
+type GetEndpointRow struct {
+	ID        string
+	Url       string
+	Events    []string
+	Label     string
+	Status    string
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
+
+func (q *Queries) GetEndpoint(ctx context.Context, arg GetEndpointParams) (GetEndpointRow, error) {
+	row := q.db.QueryRow(ctx, getEndpoint, arg.TenantID, arg.ID)
+	var i GetEndpointRow
+	err := row.Scan(
+		&i.ID,
+		&i.Url,
+		&i.Events,
+		&i.Label,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getQueued = `-- name: GetQueued :one
+SELECT run_id, attempts, next_attempt_at
+FROM webhook.queue
+WHERE tenant_id = $1 AND endpoint_id = $2 AND event_id = $3
+`
+
+type GetQueuedParams struct {
+	TenantID   string
+	EndpointID string
+	EventID    string
+}
+
+type GetQueuedRow struct {
+	RunID         string
+	Attempts      int32
+	NextAttemptAt time.Time
+}
+
+// Only used to say when the retry that blocked a replay is due.
+func (q *Queries) GetQueued(ctx context.Context, arg GetQueuedParams) (GetQueuedRow, error) {
+	row := q.db.QueryRow(ctx, getQueued, arg.TenantID, arg.EndpointID, arg.EventID)
+	var i GetQueuedRow
+	err := row.Scan(&i.RunID, &i.Attempts, &i.NextAttemptAt)
+	return i, err
 }
 
 const listActiveEndpoints = `-- name: ListActiveEndpoints :many
@@ -164,18 +370,135 @@ func (q *Queries) ListActiveEndpoints(ctx context.Context, tenantID string) ([]L
 	return items, nil
 }
 
+const listDeliveries = `-- name: ListDeliveries :many
+SELECT id, event_id, event_type, run_id, attempt, status, response_status,
+       error, duration_ms, created_at, delivered_at
+FROM webhook.deliveries
+WHERE tenant_id = $1 AND endpoint_id = $2
+ORDER BY created_at DESC, attempt DESC
+LIMIT $3 OFFSET $4
+`
+
+type ListDeliveriesParams struct {
+	TenantID   string
+	EndpointID string
+	Limit      int32
+	Offset     int32
+}
+
+type ListDeliveriesRow struct {
+	ID             string
+	EventID        string
+	EventType      string
+	RunID          string
+	Attempt        int32
+	Status         string
+	ResponseStatus *int32
+	Error          string
+	DurationMs     int32
+	CreatedAt      time.Time
+	DeliveredAt    pgtype.Timestamptz
+}
+
+// What happened, newest first (deliveries_recent_idx is in this order).
+func (q *Queries) ListDeliveries(ctx context.Context, arg ListDeliveriesParams) ([]ListDeliveriesRow, error) {
+	rows, err := q.db.Query(ctx, listDeliveries,
+		arg.TenantID,
+		arg.EndpointID,
+		arg.Limit,
+		arg.Offset,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListDeliveriesRow{}
+	for rows.Next() {
+		var i ListDeliveriesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.EventID,
+			&i.EventType,
+			&i.RunID,
+			&i.Attempt,
+			&i.Status,
+			&i.ResponseStatus,
+			&i.Error,
+			&i.DurationMs,
+			&i.CreatedAt,
+			&i.DeliveredAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listEndpoints = `-- name: ListEndpoints :many
+SELECT id, url, events, label, status, created_at, updated_at
+FROM webhook.endpoints
+WHERE tenant_id = $1
+ORDER BY created_at
+`
+
+type ListEndpointsRow struct {
+	ID        string
+	Url       string
+	Events    []string
+	Label     string
+	Status    string
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
+
+// Disabled ones included: an operator managing endpoints has to see the one
+// they turned off, which is the difference between this and the dispatcher's
+// ListActiveEndpoints.
+func (q *Queries) ListEndpoints(ctx context.Context, tenantID string) ([]ListEndpointsRow, error) {
+	rows, err := q.db.Query(ctx, listEndpoints, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListEndpointsRow{}
+	for rows.Next() {
+		var i ListEndpointsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Url,
+			&i.Events,
+			&i.Label,
+			&i.Status,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const recordAttempt = `-- name: RecordAttempt :exec
 INSERT INTO webhook.deliveries (
-    tenant_id, endpoint_id, event_id, event_type, attempt, status,
+    tenant_id, endpoint_id, event_id, run_id, event_type, attempt, status,
     response_status, error, duration_ms, delivered_at
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-ON CONFLICT DO NOTHING
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+ON CONFLICT (tenant_id, endpoint_id, event_id, run_id, attempt) DO NOTHING
 `
 
 type RecordAttemptParams struct {
 	TenantID       string
 	EndpointID     string
 	EventID        string
+	RunID          string
 	EventType      string
 	Attempt        int32
 	Status         string
@@ -185,15 +508,16 @@ type RecordAttemptParams struct {
 	DeliveredAt    pgtype.Timestamptz
 }
 
-// One row per try, append-only. The unique index on
-// (tenant, endpoint, event, attempt) makes a re-run of the same attempt a
-// conflict rather than a second row, so a crash between sending and recording
-// cannot double-count.
+// One row per try, append-only. The conflict target is spelled out rather than
+// left bare: the only collision that may pass silently is two workers settling
+// the same claimed attempt, and naming it means any other constraint this
+// table grows will fail loudly instead of losing a row.
 func (q *Queries) RecordAttempt(ctx context.Context, arg RecordAttemptParams) error {
 	_, err := q.db.Exec(ctx, recordAttempt,
 		arg.TenantID,
 		arg.EndpointID,
 		arg.EventID,
+		arg.RunID,
 		arg.EventType,
 		arg.Attempt,
 		arg.Status,
@@ -205,26 +529,142 @@ func (q *Queries) RecordAttempt(ctx context.Context, arg RecordAttemptParams) er
 	return err
 }
 
+const recordEvent = `-- name: RecordEvent :exec
+INSERT INTO webhook.events (tenant_id, event_id, event_type, body)
+VALUES ($1, $2, $3, $4)
+ON CONFLICT DO NOTHING
+`
+
+type RecordEventParams struct {
+	TenantID  string
+	EventID   string
+	EventType string
+	Body      []byte
+}
+
+// The event body, stored once however many endpoints want it. Must run before
+// Enqueue: the queue's foreign key points here.
+func (q *Queries) RecordEvent(ctx context.Context, arg RecordEventParams) error {
+	_, err := q.db.Exec(ctx, recordEvent,
+		arg.TenantID,
+		arg.EventID,
+		arg.EventType,
+		arg.Body,
+	)
+	return err
+}
+
 const rescheduleQueued = `-- name: RescheduleQueued :exec
 UPDATE webhook.queue
-SET attempts = attempts + 1, next_attempt_at = $4
-WHERE tenant_id = $1 AND endpoint_id = $2 AND event_id = $3
+SET attempts = attempts + 1, next_attempt_at = $5
+WHERE tenant_id = $1 AND endpoint_id = $2 AND event_id = $3 AND run_id = $4
 `
 
 type RescheduleQueuedParams struct {
 	TenantID      string
 	EndpointID    string
 	EventID       string
+	RunID         string
 	NextAttemptAt time.Time
 }
 
-// The attempt failed and the schedule has more steps left.
+// The attempt failed and the schedule has more steps left. Fenced on run_id:
+// a settle arriving late from a claim that has already been superseded must
+// not push a schedule it is no longer part of.
 func (q *Queries) RescheduleQueued(ctx context.Context, arg RescheduleQueuedParams) error {
 	_, err := q.db.Exec(ctx, rescheduleQueued,
 		arg.TenantID,
 		arg.EndpointID,
 		arg.EventID,
+		arg.RunID,
 		arg.NextAttemptAt,
 	)
 	return err
+}
+
+const setEndpointStatus = `-- name: SetEndpointStatus :one
+UPDATE webhook.endpoints
+SET status = $3, updated_at = now()
+WHERE tenant_id = $1 AND id = $2
+RETURNING id, url, events, label, status, created_at, updated_at
+`
+
+type SetEndpointStatusParams struct {
+	TenantID string
+	ID       string
+	Status   string
+}
+
+type SetEndpointStatusRow struct {
+	ID        string
+	Url       string
+	Events    []string
+	Label     string
+	Status    string
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
+
+func (q *Queries) SetEndpointStatus(ctx context.Context, arg SetEndpointStatusParams) (SetEndpointStatusRow, error) {
+	row := q.db.QueryRow(ctx, setEndpointStatus, arg.TenantID, arg.ID, arg.Status)
+	var i SetEndpointStatusRow
+	err := row.Scan(
+		&i.ID,
+		&i.Url,
+		&i.Events,
+		&i.Label,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const updateEndpoint = `-- name: UpdateEndpoint :one
+UPDATE webhook.endpoints
+SET url = $3, events = $4, label = $5, updated_at = now()
+WHERE tenant_id = $1 AND id = $2
+RETURNING id, url, events, label, status, created_at, updated_at
+`
+
+type UpdateEndpointParams struct {
+	TenantID string
+	ID       string
+	Url      string
+	Events   []string
+	Label    string
+}
+
+type UpdateEndpointRow struct {
+	ID        string
+	Url       string
+	Events    []string
+	Label     string
+	Status    string
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
+
+// A whole replacement of the mutable configuration, which is what PUT means.
+// The secret is not among the fields: rotating it is a separate operation with
+// its own once-only response.
+func (q *Queries) UpdateEndpoint(ctx context.Context, arg UpdateEndpointParams) (UpdateEndpointRow, error) {
+	row := q.db.QueryRow(ctx, updateEndpoint,
+		arg.TenantID,
+		arg.ID,
+		arg.Url,
+		arg.Events,
+		arg.Label,
+	)
+	var i UpdateEndpointRow
+	err := row.Scan(
+		&i.ID,
+		&i.Url,
+		&i.Events,
+		&i.Label,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
 }

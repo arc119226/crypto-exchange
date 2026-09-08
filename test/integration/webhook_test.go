@@ -74,11 +74,9 @@ func (r *receiver) nextCode() int {
 	return c
 }
 
-func setupWebhook(t *testing.T, backoff []time.Duration, codes ...int) webhookHarness {
+// newReceiver starts the customer's server.
+func newReceiver(t *testing.T, codes ...int) *receiver {
 	t.Helper()
-	ctx := context.Background()
-	lh := setupLedger(t)
-
 	rec := &receiver{codes: codes}
 	rec.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		body, _ := io.ReadAll(req.Body)
@@ -94,6 +92,15 @@ func setupWebhook(t *testing.T, backoff []time.Duration, codes ...int) webhookHa
 		w.WriteHeader(code)
 	}))
 	t.Cleanup(rec.srv.Close)
+	return rec
+}
+
+func setupWebhook(t *testing.T, backoff []time.Duration, codes ...int) webhookHarness {
+	t.Helper()
+	ctx := context.Background()
+	lh := setupLedger(t)
+
+	rec := newReceiver(t, codes...)
 
 	master := make([]byte, secretbox.KeySize)
 	_, err := rand.Read(master)
@@ -291,23 +298,72 @@ func TestWebhookEnqueueIsIdempotent(t *testing.T) {
 	// immediately after enqueuing, long before delivery -- but it is real,
 	// and pretending otherwise is how somebody later builds on an
 	// exactly-once guarantee that was never there.
-	//
-	// What the database does guarantee is that the record stays honest: the
-	// partial unique index means one success per endpoint per event no matter
-	// how many times it is sent.
 	require.NoError(t, h.dispatcher.Enqueue(ctx, event("ev-dup")))
 	_, err = h.dispatcher.Deliver(ctx)
 	require.NoError(t, err)
 	assert.Len(t, h.received.got(), 2, "at-least-once: a late redelivery does reach the customer again")
 
-	got := h.deliveries(t, ctx, "ev-dup")
-	delivered := 0
-	for _, d := range got {
-		if d.Status == "delivered" {
-			delivered++
-		}
-	}
-	assert.Equal(t, 1, delivered, "but only one row records a success, whatever JetStream does")
+	// And the table says so. 0016 had a partial unique index here that let
+	// only one delivered row exist per endpoint per event, which read as a
+	// guarantee about deliveries and was really a guarantee about rows: the
+	// second POST happened either way, and the index only threw away the
+	// evidence. Two sends, two records, two runs.
+	var delivered, runs int
+	require.NoError(t, h.all.QueryRow(ctx,
+		`SELECT count(*), count(DISTINCT run_id) FROM webhook.deliveries
+		 WHERE event_id = 'ev-dup' AND status = 'delivered'`).Scan(&delivered, &runs))
+	assert.Equal(t, 2, delivered, "both successes are on the record")
+	assert.Equal(t, 2, runs, "each redelivery is its own run")
+}
+
+// Replay can only re-send what still exists. The queue row is deleted the
+// moment a delivery reaches a terminal state, so before 0017 the body went
+// with it and there was nothing left to replay -- deliveries records what
+// happened, not what was sent.
+func TestWebhookKeepsTheBodyAfterDeliverySoItCanBeReplayed(t *testing.T) {
+	ctx := context.Background()
+	h := setupWebhook(t, []time.Duration{time.Second})
+
+	require.NoError(t, h.dispatcher.Enqueue(ctx, event("ev-keep")))
+	_, err := h.dispatcher.Deliver(ctx)
+	require.NoError(t, err)
+	require.Zero(t, h.queued(t, ctx), "delivered, so the queue row is gone")
+
+	var body []byte
+	var eventType string
+	require.NoError(t, h.all.QueryRow(ctx,
+		`SELECT body, event_type FROM webhook.events WHERE event_id = $1`, "ev-keep").
+		Scan(&body, &eventType))
+	assert.Equal(t, "trade.executed", eventType)
+
+	// And it is the same bytes, not an equivalent re-encoding: a replay signs
+	// what it sends, so anything that round-trips through a normaliser would
+	// produce a signature the customer's first delivery did not have.
+	assert.Equal(t, h.received.got()[0].body, body)
+}
+
+// One row per event, however many endpoints want it. Storing the body per
+// subscriber would mean three copies of one JSON document and a replay having
+// to choose between them.
+func TestWebhookStoresTheBodyOncePerEvent(t *testing.T) {
+	ctx := context.Background()
+	h := setupWebhook(t, []time.Duration{time.Second})
+
+	// A second endpoint on the same event.
+	sealed, err := secretbox.Seal(make([]byte, secretbox.KeySize), "other")
+	require.NoError(t, err)
+	_, err = h.all.Exec(ctx,
+		`INSERT INTO webhook.endpoints (url, secret_enc, events) VALUES ($1, $2, $3)`,
+		h.received.srv.URL, sealed, []string{"trade.executed"})
+	require.NoError(t, err)
+
+	require.NoError(t, h.dispatcher.Enqueue(ctx, event("ev-two")))
+	assert.Equal(t, 2, h.queued(t, ctx), "one queue row per endpoint")
+
+	var events int
+	require.NoError(t, h.all.QueryRow(ctx,
+		`SELECT count(*) FROM webhook.events WHERE event_id = $1`, "ev-two").Scan(&events))
+	assert.Equal(t, 1, events, "but one body")
 }
 
 // An event nobody subscribes to is acked rather than queued: delivered, in

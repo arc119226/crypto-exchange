@@ -20,4 +20,11 @@ regexes = [
   # high-entropy value. Allowlist regexes match the captured secret, so only
   # this exact English phrase is exempt; the rest of the line is still scanned.
   '''^Ed25519-signed$''',
+  # The webhook-sink test's fixture secret. generic-api-key reads
+  # `const secret = "whsec_..."` as keyword + separator + high-entropy value,
+  # and 16 distinct hex characters score high. It is a literal in
+  # cmd/exchangectl/webhook_sink_test.go, never a credential: a real signing
+  # secret is 32 bytes (64 hex characters) and is generated per endpoint. As
+  # above, this matches only the exact captured string.
+  '''^whsec_0123456789abcdef$''',
 ]
