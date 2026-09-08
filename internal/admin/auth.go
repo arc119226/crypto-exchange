@@ -5,8 +5,10 @@ import (
 	"net/http"
 )
 
-// APIKeyHeader carries the static admin API key (Phase 2–4). Phase 5
-// replaces it with admin sessions (password + TOTP) and scoped admin keys.
+// APIKeyHeader carries the static admin API key that machine integrations
+// present on /admin/v1. People use the back office instead, with a session
+// (see session.go); scoped, HMAC-signed admin keys (docs/plan-v1.0.md §7.4)
+// are not built yet, so this key is still the only machine credential.
 const APIKeyHeader = "X-Admin-Api-Key" //nolint:gosec // a header name, not a credential
 
 // RequireAPIKey rejects requests whose X-Admin-Api-Key does not match key

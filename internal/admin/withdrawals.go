@@ -7,7 +7,6 @@ import (
 	"net/http"
 
 	"github.com/arc119226/crypto-exchange/internal/admin/gen"
-	"github.com/arc119226/crypto-exchange/internal/audit"
 	"github.com/arc119226/crypto-exchange/internal/chain/withdrawal"
 )
 
@@ -60,13 +59,7 @@ func (h *Handler) ReviewWithdrawal(ctx context.Context, req gen.ReviewWithdrawal
 			BadRequestApplicationProblemPlusJSONResponse: badRequest(ctx, instance, "a rejection must carry a note saying why"),
 		}, nil
 	}
-	rec, err := h.withdrawals.Review(ctx, withdrawal.ReviewParams{
-		ID: req.ID, Approve: approve, Note: note,
-		// AdminID stays empty: the admin API authenticates with a static key,
-		// so there is no user id to write into reviewed_by. The audit trail
-		// records the actor, exactly as the other admin endpoints do.
-		ActorType: audit.ActorAPIKey, ActorID: actorID,
-	})
+	rec, err := h.reviewWithdrawal(ctx, req.ID, approve, note)
 	switch {
 	case errors.Is(err, withdrawal.ErrNotFound):
 		return gen.ReviewWithdrawal404ApplicationProblemPlusJSONResponse{
@@ -110,10 +103,7 @@ func (h *Handler) ResolveWithdrawal(ctx context.Context, req gen.ResolveWithdraw
 			BadRequestApplicationProblemPlusJSONResponse: badRequest(ctx, instance, "a resolution must carry a note saying why"),
 		}, nil
 	}
-	rec, err := h.withdrawals.RequestResolve(ctx, withdrawal.ResolveParams{
-		ID: req.ID, Action: withdrawal.Action(req.Body.Action), Note: note,
-		ActorType: audit.ActorAPIKey, ActorID: actorID,
-	})
+	rec, err := h.resolveWithdrawal(ctx, req.ID, withdrawal.Action(req.Body.Action), note)
 	switch {
 	case errors.Is(err, withdrawal.ErrNotFound):
 		return gen.ResolveWithdrawal404ApplicationProblemPlusJSONResponse{

@@ -5,13 +5,9 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/jackc/pgx/v5"
-
 	"github.com/arc119226/crypto-exchange/internal/admin/gen"
-	"github.com/arc119226/crypto-exchange/internal/audit"
 	"github.com/arc119226/crypto-exchange/internal/chain/reconcile"
 	"github.com/arc119226/crypto-exchange/internal/ledger"
-	"github.com/arc119226/crypto-exchange/internal/telemetry"
 )
 
 // GetReconciliation implements GET /admin/v1/reconciliation.
@@ -71,29 +67,9 @@ func (h *Handler) CreateHouseAdjustment(ctx context.Context, req gen.CreateHouse
 	if key == "" {
 		key = "house_adjust:" + randomID()
 	}
-	var (
-		entry    ledger.JournalEntry
-		replayed bool
-	)
-	err := h.inTx(ctx, func(tx pgx.Tx) error {
-		var err error
-		entry, replayed, err = h.ledger.AdjustHouse(ctx, tx, ledger.HouseAdjustParams{
-			Code: ledger.HouseCode(b.Code), Asset: b.Asset, Amount: b.Amount,
-			Direction: ledger.Direction(b.Direction), Reason: b.Reason,
-			IdempotencyKey: key, CorrelationID: telemetry.CorrelationID(ctx),
-		})
-		if err != nil || replayed {
-			return err
-		}
-		return h.audit.Record(ctx, tx, audit.Event{
-			ActorType: audit.ActorAPIKey, ActorID: actorID, Action: "ledger.house_adjustment.create",
-			TargetType: "journal_entry", TargetID: fmt.Sprint(entry.ID),
-			After: map[string]any{
-				"code": b.Code, "asset": b.Asset, "amount": b.Amount,
-				"direction": b.Direction, "reason": b.Reason, "idempotency_key": key,
-			},
-			CorrelationID: telemetry.CorrelationID(ctx),
-		})
+	entry, replayed, err := h.createHouseAdjustment(ctx, ledger.HouseAdjustParams{
+		Code: ledger.HouseCode(b.Code), Asset: b.Asset, Amount: b.Amount,
+		Direction: ledger.Direction(b.Direction), Reason: b.Reason, IdempotencyKey: key,
 	})
 	switch {
 	case errors.Is(err, ledger.ErrReasonRequired), errors.Is(err, ledger.ErrInvalidEntry), errors.Is(err, ledger.ErrHouseAccount):

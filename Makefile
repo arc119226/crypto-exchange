@@ -159,8 +159,7 @@ run: ## Run one role on the host against infra-up (make run ROLE=api)
 	set -a; . ./$(ENV_FILE); set +a; \
 	export DATABASE_URL="postgres://ex_all:$${POSTGRES_PASSWORD}@localhost:5432/exchange?sslmode=disable" \
 	       NATS_URL=nats://localhost:4222 REDIS_ADDR=localhost:6379 ETH_RPC_URL=http://localhost:8545 \
-	       JWT_JWKS_URL=http://127.0.0.1:8080/.well-known/jwks.json \
-	       EXCHANGE_ADMIN_API_KEY="$${ADMIN_API_KEY}"; \
+	       JWT_JWKS_URL=http://127.0.0.1:8080/.well-known/jwks.json; \
 	go run -ldflags '$(LDFLAGS)' ./cmd/exchange serve --role=$(ROLE)
 
 migrate: ## Apply migrations to the local Postgres started by infra-up

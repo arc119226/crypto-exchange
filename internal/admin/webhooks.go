@@ -6,11 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/jackc/pgx/v5"
-
 	"github.com/arc119226/crypto-exchange/internal/admin/gen"
-	"github.com/arc119226/crypto-exchange/internal/audit"
-	"github.com/arc119226/crypto-exchange/internal/telemetry"
 	"github.com/arc119226/crypto-exchange/internal/webhook"
 )
 
@@ -47,25 +43,7 @@ func (h *Handler) CreateWebhookEndpoint(ctx context.Context, req gen.CreateWebho
 		}, nil
 	}
 	b := req.Body
-	var (
-		ep     webhook.Endpoint
-		secret string
-	)
-	err := h.inTx(ctx, func(tx pgx.Tx) error {
-		var err error
-		ep, secret, err = h.webhooks.Create(ctx, tx, b.URL, b.Events, b.Label)
-		if err != nil {
-			return err
-		}
-		return h.audit.Record(ctx, tx, audit.Event{
-			ActorType: audit.ActorAPIKey, ActorID: actorID, Action: "webhook.endpoint.create",
-			TargetType: "webhook_endpoint", TargetID: ep.ID,
-			After: map[string]any{
-				"url": ep.URL, "events": ep.Events, "label": ep.Label, "status": ep.Status,
-			},
-			CorrelationID: telemetry.CorrelationID(ctx),
-		})
-	})
+	ep, secret, err := h.createWebhookEndpoint(ctx, b.URL, b.Events, b.Label)
 	switch {
 	case errors.Is(err, webhook.ErrInvalid):
 		return gen.CreateWebhookEndpoint400ApplicationProblemPlusJSONResponse{
@@ -93,26 +71,7 @@ func (h *Handler) UpdateWebhookEndpoint(ctx context.Context, req gen.UpdateWebho
 		}, nil
 	}
 	b := req.Body
-	var ep webhook.Endpoint
-	err := h.inTx(ctx, func(tx pgx.Tx) error {
-		before, err := h.webhooks.Get(ctx, req.ID)
-		if err != nil {
-			return err
-		}
-		ep, err = h.webhooks.Update(ctx, tx, req.ID, b.URL, b.Events, b.Label)
-		if err != nil {
-			return err
-		}
-		return h.audit.Record(ctx, tx, audit.Event{
-			ActorType: audit.ActorAPIKey, ActorID: actorID, Action: "webhook.endpoint.update",
-			TargetType: "webhook_endpoint", TargetID: ep.ID,
-			Before: map[string]any{"url": before.URL, "events": before.Events, "label": before.Label},
-			After: map[string]any{
-				"url": ep.URL, "events": ep.Events, "label": ep.Label, "reason": b.Reason,
-			},
-			CorrelationID: telemetry.CorrelationID(ctx),
-		})
-	})
+	ep, err := h.updateWebhookEndpoint(ctx, req.ID, b.URL, b.Events, b.Label, b.Reason)
 	switch {
 	case errors.Is(err, webhook.ErrNotFound):
 		return gen.UpdateWebhookEndpoint404ApplicationProblemPlusJSONResponse{
@@ -143,30 +102,7 @@ func (h *Handler) SetWebhookEndpointStatus(ctx context.Context, req gen.SetWebho
 			BadRequestApplicationProblemPlusJSONResponse: badRequest(ctx, instance, "status and reason are required"),
 		}, nil
 	}
-	status := string(req.Body.Status)
-	var (
-		ep      webhook.Endpoint
-		dropped int64
-	)
-	err := h.inTx(ctx, func(tx pgx.Tx) error {
-		before, err := h.webhooks.Get(ctx, req.ID)
-		if err != nil {
-			return err
-		}
-		ep, dropped, err = h.webhooks.SetStatus(ctx, tx, req.ID, status)
-		if err != nil {
-			return err
-		}
-		return h.audit.Record(ctx, tx, audit.Event{
-			ActorType: audit.ActorAPIKey, ActorID: actorID, Action: "webhook.endpoint.status.update",
-			TargetType: "webhook_endpoint", TargetID: ep.ID,
-			Before: map[string]any{"status": before.Status},
-			After: map[string]any{
-				"status": ep.Status, "reason": req.Body.Reason, "queued_dropped": dropped,
-			},
-			CorrelationID: telemetry.CorrelationID(ctx),
-		})
-	})
+	ep, err := h.setWebhookEndpointStatus(ctx, req.ID, string(req.Body.Status), req.Body.Reason)
 	switch {
 	case errors.Is(err, webhook.ErrNotFound):
 		return gen.SetWebhookEndpointStatus404ApplicationProblemPlusJSONResponse{
@@ -220,22 +156,7 @@ func (h *Handler) ReplayWebhookDelivery(ctx context.Context, req gen.ReplayWebho
 	if h.webhooks == nil {
 		return nil, errWebhooksDisabled
 	}
-	var r webhook.Replay
-	err := h.inTx(ctx, func(tx pgx.Tx) error {
-		var err error
-		r, err = h.webhooks.Replay(ctx, tx, req.ID, req.DeliveryID)
-		if err != nil {
-			return err
-		}
-		return h.audit.Record(ctx, tx, audit.Event{
-			ActorType: audit.ActorAPIKey, ActorID: actorID, Action: "webhook.endpoint.replay",
-			TargetType: "webhook_endpoint", TargetID: req.ID,
-			After: map[string]any{
-				"event_id": r.EventID, "run_id": r.RunID, "delivery_id": req.DeliveryID,
-			},
-			CorrelationID: telemetry.CorrelationID(ctx),
-		})
-	})
+	r, err := h.replayWebhookDelivery(ctx, req.ID, req.DeliveryID)
 	switch {
 	case errors.Is(err, webhook.ErrNotFound):
 		return gen.ReplayWebhookDelivery404ApplicationProblemPlusJSONResponse{

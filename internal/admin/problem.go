@@ -1,8 +1,12 @@
-// Package admin implements the operator REST API (api/admin/v1/openapi.yaml)
-// on top of the oapi-codegen strict server in internal/admin/gen. Phase 2
-// covers ledger accounts, balances, entries, trial balance, adjustments and
-// the audit log; the htmx UI, TOTP sessions and the remaining resources
-// arrive with Phase 5 (docs/plan-v1.0.md §12).
+// Package admin implements the operator API (api/admin/v1/openapi.yaml) on
+// top of the oapi-codegen strict server in internal/admin/gen, and the
+// sessions the back office in internal/admin/ui authenticates with.
+//
+// Every write lives once, as an unexported method on Handler that runs the
+// transaction, the audit record and the outbox event together. The REST
+// method maps its errors to problem+json; the back office maps the same
+// errors to a flash message. Neither can drift from the other because
+// neither owns the write.
 package admin
 
 import (

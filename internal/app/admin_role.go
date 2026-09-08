@@ -58,7 +58,15 @@ func newAdminServer(cfg Config, log *slog.Logger, m *telemetry.HTTPMetrics, reg 
 		return ""
 	}))
 	r.Use(recoverer())
-	r.Use(admin.RequireAPIKey(cfg.Admin.APIKey.Reveal()))
+	r.Use(admin.WithClientIP)
+	// Cross-site request forgery, for the whole listener. Browsers announce
+	// where a request came from (Sec-Fetch-Site, Origin) and this refuses
+	// unsafe methods from anywhere but this origin; a client that sends
+	// neither header -- exchangectl, curl -- is not a browser and passes. The
+	// session cookie is also SameSite=Lax, so this is the second line. Two
+	// groups below: machines with the API key on /admin/v1, people with a
+	// session on /admin.
+	r.Use(http.NewCrossOriginProtection().Handler)
 	r.NotFound(func(w http.ResponseWriter, req *http.Request) {
 		admin.WriteProblem(w, req, http.StatusNotFound, "Not Found", "no route for "+req.Method+" "+req.URL.Path)
 	})
@@ -75,7 +83,7 @@ func newAdminServer(cfg Config, log *slog.Logger, m *telemetry.HTTPMetrics, reg 
 	} else {
 		log.Warn("WEBHOOK_SIGNING_KEY is not set: the webhook endpoints are disabled")
 	}
-	admin.Mount(r, admin.NewHandler(pool, l, registry.NewStore(pool), rec, cfg.TenantID).
+	h := admin.NewHandler(pool, l, registry.NewStore(pool), rec, cfg.TenantID).
 		// Which chain's reconciliation reports this role shows. It cannot
 		// produce one -- it has no node -- so this is only which rows to read.
 		WithChainID(cfg.Chain.ChainID).
@@ -85,7 +93,12 @@ func newAdminServer(cfg Config, log *slog.Logger, m *telemetry.HTTPMetrics, reg 
 		// Endpoint configuration and replay. This role never delivers -- it has
 		// no consumer and no delivery loop -- so the only thing it does to the
 		// queue is add a run to it (migration 0016/0017 grant exactly that).
-		WithWebhooks(webhooks))
+		WithWebhooks(webhooks)
+	// Machines: the static key, on the OpenAPI routes only.
+	r.Group(func(api chi.Router) {
+		api.Use(admin.RequireAPIKey(cfg.Admin.APIKey.Reveal()))
+		admin.Mount(api, h)
+	})
 	return &http.Server{Addr: cfg.AdminAddr, Handler: r, ReadHeaderTimeout: 5 * time.Second}, nil
 }
 

@@ -17,12 +17,8 @@ import (
 	"github.com/arc119226/crypto-exchange/internal/chain/withdrawal"
 	"github.com/arc119226/crypto-exchange/internal/ledger"
 	"github.com/arc119226/crypto-exchange/internal/registry"
-	"github.com/arc119226/crypto-exchange/internal/telemetry"
 	"github.com/arc119226/crypto-exchange/internal/webhook"
 )
-
-// actorID is recorded on audit events for the static admin API key.
-const actorID = "admin-api-key"
 
 // Handler implements gen.StrictServerInterface.
 type Handler struct {
@@ -126,19 +122,7 @@ func (h *Handler) CreateAccount(ctx context.Context, req gen.CreateAccountReques
 	if req.Body == nil {
 		return gen.CreateAccount400ApplicationProblemPlusJSONResponse{BadRequestApplicationProblemPlusJSONResponse: badRequest(ctx, "/admin/v1/accounts", "missing body")}, nil
 	}
-	var created ledger.Account
-	err := h.inTx(ctx, func(tx pgx.Tx) error {
-		a, err := h.ledger.CreateSpotAccount(ctx, tx, req.Body.OwnerUserID)
-		if err != nil {
-			return err
-		}
-		created = a
-		err = h.audit.Record(ctx, tx, audit.Event{
-			ActorType: audit.ActorAPIKey, ActorID: actorID, Action: "account.create", TargetType: "account", TargetID: a.ID,
-			After: toAccount(a), CorrelationID: telemetry.CorrelationID(ctx),
-		})
-		return err
-	})
+	created, err := h.createAccount(ctx, req.Body.OwnerUserID)
 	if err != nil {
 		return nil, err
 	}
@@ -163,24 +147,7 @@ func (h *Handler) SetAccountStatus(ctx context.Context, req gen.SetAccountStatus
 	if req.Body == nil || req.Body.Reason == "" {
 		return gen.SetAccountStatus400ApplicationProblemPlusJSONResponse{BadRequestApplicationProblemPlusJSONResponse: badRequest(ctx, instance, "status and reason are required")}, nil
 	}
-	var before, after ledger.Account
-	err := h.inTx(ctx, func(tx pgx.Tx) error {
-		var err error
-		before, err = h.ledger.Account(ctx, req.ID)
-		if err != nil {
-			return err
-		}
-		after, err = h.ledger.SetAccountStatus(ctx, tx, req.ID, ledger.AccountStatus(req.Body.Status))
-		if err != nil {
-			return err
-		}
-		err = h.audit.Record(ctx, tx, audit.Event{
-			ActorType: audit.ActorAPIKey, ActorID: actorID, Action: "account.status.update", TargetType: "account", TargetID: req.ID,
-			Before: map[string]any{"status": before.Status, "reason": nil}, After: map[string]any{"status": after.Status, "reason": req.Body.Reason},
-			CorrelationID: telemetry.CorrelationID(ctx),
-		})
-		return err
-	})
+	after, err := h.setAccountStatus(ctx, req.ID, string(req.Body.Status), req.Body.Reason)
 	switch {
 	case errors.Is(err, ledger.ErrAccountNotFound):
 		return gen.SetAccountStatus404ApplicationProblemPlusJSONResponse{NotFoundApplicationProblemPlusJSONResponse: notFound(ctx, instance, "account "+req.ID+" does not exist")}, nil
@@ -263,25 +230,9 @@ func (h *Handler) CreateAdjustment(ctx context.Context, req gen.CreateAdjustment
 	if key == "" {
 		key = "adjust:" + randomID()
 	}
-	var (
-		entry    ledger.JournalEntry
-		replayed bool
-	)
-	err := h.inTx(ctx, func(tx pgx.Tx) error {
-		var err error
-		entry, replayed, err = h.ledger.Adjust(ctx, tx, ledger.AdjustParams{
-			AccountID: b.AccountID, Asset: b.Asset, Amount: b.Amount, Direction: ledger.Direction(b.Direction),
-			Reason: b.Reason, IdempotencyKey: key, CorrelationID: telemetry.CorrelationID(ctx),
-		})
-		if err != nil || replayed {
-			return err
-		}
-		err = h.audit.Record(ctx, tx, audit.Event{
-			ActorType: audit.ActorAPIKey, ActorID: actorID, Action: "ledger.adjustment.create", TargetType: "journal_entry", TargetID: fmt.Sprint(entry.ID),
-			After:         map[string]any{"account_id": b.AccountID, "asset": b.Asset, "amount": b.Amount, "direction": b.Direction, "reason": b.Reason, "idempotency_key": key},
-			CorrelationID: telemetry.CorrelationID(ctx),
-		})
-		return err
+	entry, replayed, err := h.createAdjustment(ctx, ledger.AdjustParams{
+		AccountID: b.AccountID, Asset: b.Asset, Amount: b.Amount, Direction: ledger.Direction(b.Direction),
+		Reason: b.Reason, IdempotencyKey: key,
 	})
 	switch {
 	case errors.Is(err, ledger.ErrAccountNotFound):
