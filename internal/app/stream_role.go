@@ -41,7 +41,7 @@ type streamComponents struct {
 }
 
 // newStream builds the role and its HTTP listener.
-func newStream(ctx context.Context, cfg Config, log *slog.Logger, reg prometheus.Registerer, d *deps, ebm *eventbus.Metrics) (*streamComponents, *http.Server, error) {
+func newStream(ctx context.Context, cfg Config, log *slog.Logger, reg prometheus.Registerer, d *deps, ebm *eventbus.Metrics, md *marketdata.Metrics) (*streamComponents, *http.Server, error) {
 	if d.nc == nil {
 		// The feed is the event stream; without NATS there is nothing to
 		// serve, and a WebSocket server that never pushes is worse than none.
@@ -63,7 +63,6 @@ func newStream(ctx context.Context, cfg Config, log *slog.Logger, reg prometheus
 		log.Warn("REDIS_ADDR is empty: the api role will ask the engine for every depth snapshot")
 	}
 	m := stream.NewMetrics(reg)
-	md := marketdata.NewMetrics(reg)
 	hub := stream.NewHub(m)
 	mdStore := marketdata.NewStore(d.pool, cfg.TenantID)
 	scfg := streamConfig(cfg)

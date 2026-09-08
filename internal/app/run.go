@@ -17,6 +17,7 @@ import (
 	"github.com/arc119226/crypto-exchange/internal/admin"
 	"github.com/arc119226/crypto-exchange/internal/eventbus"
 	"github.com/arc119226/crypto-exchange/internal/ledger"
+	"github.com/arc119226/crypto-exchange/internal/marketdata"
 	"github.com/arc119226/crypto-exchange/internal/platform/natsx"
 	"github.com/arc119226/crypto-exchange/internal/platform/pg"
 	"github.com/arc119226/crypto-exchange/internal/platform/redisx"
@@ -63,6 +64,9 @@ func Run(ctx context.Context, cfg Config, roles []Role, bi BuildInfo) error {
 	// one set of outbox / consumer instruments per process: the engine's
 	// relay, the worker's and the stream's consumers all report through it
 	ebMetrics := eventbus.NewMetrics(reg)
+	// likewise the market-data instruments: the worker (candle writer) and
+	// the stream (shadow books) both report through one set
+	mdMetrics := marketdata.NewMetrics(reg)
 	var (
 		servers      []*http.Server
 		adminLedger  *ledger.Service
@@ -167,7 +171,7 @@ func Run(ctx context.Context, cfg Config, roles []Role, bi BuildInfo) error {
 			defer chainRole.close()
 			checker.Register("chain", true, chainRole.ready)
 		case RoleWorker:
-			w, err := newWorker(cfg, log, d.pool, reg, d.nc, ebMetrics)
+			w, err := newWorker(cfg, log, d.pool, reg, d.nc, ebMetrics, mdMetrics)
 			if err != nil {
 				return err
 			}
@@ -175,7 +179,7 @@ func Run(ctx context.Context, cfg Config, roles []Role, bi BuildInfo) error {
 			defer workerRole.close()
 			checker.Register("worker", true, workerRole.ready)
 		case RoleStream:
-			s, srv, err := newStream(ctx, cfg, log, reg, d, ebMetrics)
+			s, srv, err := newStream(ctx, cfg, log, reg, d, ebMetrics, mdMetrics)
 			if err != nil {
 				return err
 			}

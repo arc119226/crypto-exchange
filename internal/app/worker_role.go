@@ -50,7 +50,7 @@ type workerComponents struct {
 }
 
 // newWorker builds the role. It touches neither NATS nor the database.
-func newWorker(cfg Config, log *slog.Logger, db *pgxpool.Pool, reg prometheus.Registerer, nc *nats.Conn, ebm *eventbus.Metrics) (*workerComponents, error) {
+func newWorker(cfg Config, log *slog.Logger, db *pgxpool.Pool, reg prometheus.Registerer, nc *nats.Conn, ebm *eventbus.Metrics, mdm *marketdata.Metrics) (*workerComponents, error) {
 	if nc == nil {
 		// Deliveries arrive over JetStream, so without NATS there is nothing
 		// for this role to consume. Refusing to start is honest; pretending
@@ -69,7 +69,7 @@ func newWorker(cfg Config, log *slog.Logger, db *pgxpool.Pool, reg prometheus.Re
 	w := &workerComponents{
 		dispatcher: d, interval: cfg.Webhook.Interval, metrics: ebm,
 		klines: marketdata.NewKlineWriter(marketdata.NewStore(db, cfg.TenantID), registry.NewStore(db), cfg.TenantID, cfg.MarketData.KlineBatchSeqs, log).
-			WithMetrics(marketdata.NewMetrics(reg)),
+			WithMetrics(mdm),
 		klineEvery: cfg.MarketData.KlinePollInterval,
 		started:    make(chan struct{}),
 		startErr:   errors.New("the worker role has not finished starting"),

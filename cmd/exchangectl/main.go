@@ -31,7 +31,7 @@ func newRootCmd() *cobra.Command {
 	root.PersistentFlags().String("api-key", envOr("EXCHANGE_API_KEY", ""), "API key id for HMAC-signed requests; env EXCHANGE_API_KEY")
 	root.PersistentFlags().String("api-secret", envOr("EXCHANGE_API_SECRET", ""), "API key secret; env EXCHANGE_API_SECRET")
 	root.AddCommand(newMarketsCmd(), newAssetsCmd(), newReplayCmd(), newAdminCmd(),
-		newUserCmd(), newAPIKeysCmd(), newOrdersCmd(), newBalancesCmd(), newDepositAddressCmd(), newDepositsCmd(), newWithdrawalsCmd(), newFillsCmd(), newBookCmd(), newTradesCmd(), newTickerCmd(), newKlinesCmd(), newE2ECmd(), newWebhookSinkCmd())
+		newUserCmd(), newAPIKeysCmd(), newOrdersCmd(), newBalancesCmd(), newDepositAddressCmd(), newDepositsCmd(), newWithdrawalsCmd(), newFillsCmd(), newBookCmd(), newTradesCmd(), newTickerCmd(), newKlinesCmd(), newE2ECmd(), newLoadgenCmd(), newWebhookSinkCmd())
 	root.AddCommand(&cobra.Command{
 		Use:   "version",
 		Short: "Print build information",
