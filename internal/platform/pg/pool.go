@@ -16,6 +16,9 @@ type PoolConfig struct {
 	MaxConns        int32
 	ConnectTimeout  time.Duration
 	ApplicationName string
+	// Tracing attaches the query tracer (one client span per statement
+	// under a sampled span). Off, pgx never calls into it.
+	Tracing bool
 }
 
 // Open parses the DSN, applies the pool settings and pings once. Retrying on
@@ -36,6 +39,9 @@ func Open(ctx context.Context, cfg PoolConfig) (*pgxpool.Pool, error) {
 			pc.ConnConfig.RuntimeParams = map[string]string{}
 		}
 		pc.ConnConfig.RuntimeParams["application_name"] = cfg.ApplicationName
+	}
+	if cfg.Tracing {
+		pc.ConnConfig.Tracer = queryTracer{}
 	}
 	pool, err := pgxpool.NewWithConfig(ctx, pc)
 	if err != nil {

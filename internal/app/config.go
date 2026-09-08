@@ -49,6 +49,12 @@ type Config struct {
 	MarketData      MarketDataConfig `envPrefix:"MARKETDATA_"`
 	Stream          StreamConfig     `envPrefix:"STREAM_"`
 	Shutdown        ShutdownConfig   `envPrefix:"SHUTDOWN_"`
+	// OTLPEndpoint enables tracing (docs/plan-v1.0.md §15): the OTLP/HTTP
+	// base URL spans are exported to, e.g. http://jaeger:4318. It keeps the
+	// OpenTelemetry SDK's own variable name, unprefixed, because the SDK
+	// reads its siblings (OTEL_TRACES_SAMPLER, OTEL_TRACES_SAMPLER_ARG)
+	// the same way. Empty means no tracing and no exporter.
+	OTLPEndpoint string `env:"OTEL_EXPORTER_OTLP_ENDPOINT"`
 }
 
 // StreamConfig tunes the WebSocket server (stream role, docs/plan-v1.0.md
@@ -603,5 +609,6 @@ func (c Config) LogValue() slog.Value {
 		slog.Duration("outbox_poll_interval", c.Outbox.PollInterval),
 		slog.Duration("shutdown_drain_delay", c.Shutdown.DrainDelay),
 		slog.Duration("shutdown_timeout", c.Shutdown.Timeout),
+		slog.Bool("otel_endpoint_set", c.OTLPEndpoint != ""),
 	)
 }

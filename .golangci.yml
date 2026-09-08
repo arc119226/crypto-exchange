@@ -48,6 +48,9 @@ linters:
           allow:
             - $gostd
             - github.com/prometheus/client_golang
+            # OTel lives here (and in platform/pg for the pgx tracer); the
+            # rest of the code base traces through StartSpan / InjectTrace.
+            - go.opentelemetry.io
             - github.com/stretchr/testify
         ledger:
           files:
@@ -71,6 +74,8 @@ linters:
             - $gostd
             - github.com/arc119226/crypto-exchange/internal/eventbus/sqlcgen
             - github.com/arc119226/crypto-exchange/internal/platform
+            # correlation id and trace context ride the outbox headers
+            - github.com/arc119226/crypto-exchange/internal/telemetry
             - github.com/jackc/pgx/v5
             - github.com/nats-io/nats.go
             - github.com/oklog/ulid/v2
@@ -100,6 +105,8 @@ linters:
             - github.com/arc119226/crypto-exchange/internal/eventbus
             - github.com/arc119226/crypto-exchange/internal/money
             - github.com/arc119226/crypto-exchange/internal/platform/pg
+            # the caller's trace context crosses the runner's command queue
+            - github.com/arc119226/crypto-exchange/internal/telemetry
             - github.com/jackc/pgx/v5
             - github.com/prometheus/client_golang
             - github.com/stretchr/testify

@@ -115,18 +115,23 @@ func newAPIServer(ctx context.Context, cfg Config, log *slog.Logger, m *telemetr
 	return srv, refresh, nil
 }
 
+// chiRoute reports the matched route pattern for the metrics and tracing
+// middleware; it is read after the handler ran, when chi has matched.
+func chiRoute(req *http.Request) string {
+	if rc := chi.RouteContext(req.Context()); rc != nil {
+		return rc.RoutePattern()
+	}
+	return ""
+}
+
 // newAPIRouter assembles the middleware chain and the OpenAPI routes. A nil
 // Registry (tests) leaves only the fallbacks mounted; a nil Auth skips the
 // authentication middleware.
 func newAPIRouter(log *slog.Logger, m *telemetry.HTTPMetrics, d api.Deps) http.Handler {
 	r := chi.NewRouter()
 	r.Use(telemetry.CorrelationMiddleware(log))
-	r.Use(m.Middleware(func(req *http.Request) string {
-		if rc := chi.RouteContext(req.Context()); rc != nil {
-			return rc.RoutePattern()
-		}
-		return ""
-	}))
+	r.Use(m.Middleware(chiRoute))
+	r.Use(telemetry.TracingMiddleware(chiRoute))
 	r.Use(recoverer())
 	if d.Auth != nil {
 		r.Use(d.Auth.Authenticate(api.WriteProblem))

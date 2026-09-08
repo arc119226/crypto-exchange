@@ -16,6 +16,7 @@ import (
 	"github.com/arc119226/crypto-exchange/internal/money"
 	"github.com/arc119226/crypto-exchange/internal/policy"
 	"github.com/arc119226/crypto-exchange/internal/registry"
+	"github.com/arc119226/crypto-exchange/internal/telemetry"
 	"github.com/arc119226/crypto-exchange/internal/trading/sqlcgen"
 )
 
@@ -151,6 +152,32 @@ func (r *runner) run(ctx context.Context) {
 }
 
 func (r *runner) handle(ctx context.Context, req request) response {
+	// The caller's context stays behind at the queue (its cancellation must
+	// not abort a command the book already applied); its trace comes along.
+	if req.ctx != nil {
+		ctx = telemetry.WithSpanOf(ctx, req.ctx)
+	}
+	ctx, end := telemetry.StartSpan(ctx, "engine "+req.kind(), telemetry.SpanInternal, map[string]string{"exchange.market": r.symbol})
+	res := r.handleLocked(ctx, req)
+	end(res.err)
+	return res
+}
+
+// kind names a queued request for its span.
+func (req request) kind() string {
+	switch {
+	case req.query && req.depth < 0:
+		return "snapshot"
+	case req.query:
+		return "depth"
+	case req.cancel != nil:
+		return "cancel"
+	default:
+		return "place"
+	}
+}
+
+func (r *runner) handleLocked(ctx context.Context, req request) response {
 	if r.dirty {
 		if err := r.restore(ctx); err != nil {
 			r.log.Error("order book rebuild failed", slog.String("err", err.Error()))

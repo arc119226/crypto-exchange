@@ -24,6 +24,10 @@ x-exchange-env: &exchange-env
   OPS_ADDR: ":9100"
   LOG_LEVEL: ${LOG_LEVEL:-info}
   JWT_JWKS_URL: http://exchange-api:8080/.well-known/jwks.json
+  # Empty = no tracing. gen-dev-secrets writes http://jaeger:4318 so the
+  # observability profile's Jaeger receives spans; with OBS=0 the exporter
+  # fails quietly (debug log) and nothing else changes.
+  OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
 
 x-exchange: &exchange
   image: ghcr.io/arc119226/crypto-exchange:${EXCHANGE_TAG:-dev}
@@ -333,6 +337,15 @@ services:
       - ../../infra/observability/alerts.yml:/etc/prometheus/alerts.yml:ro
       - prom-data:/prometheus
     ports: ["127.0.0.1:9090:9090"]
+    restart: unless-stopped
+    networks: [exchange-net]
+
+  # Jaeger v2 all-in-one: OTLP/HTTP in on 4318 (the roles' exporter), UI on
+  # 16686, in-memory storage -- traces live as long as the container does.
+  jaeger:
+    image: jaegertracing/jaeger:2.4.0
+    profiles: [observability]
+    ports: ["127.0.0.1:16686:16686"]
     restart: unless-stopped
     networks: [exchange-net]
 

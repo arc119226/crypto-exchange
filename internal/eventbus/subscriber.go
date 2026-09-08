@@ -116,7 +116,10 @@ func Subscribe(ctx context.Context, js jetstream.JetStream, cfg ConsumerConfig, 
 			ack(log, msg)
 			return
 		}
-		if err := h(ctx, env); err != nil {
+		hctx, end := consumerSpan(ctx, msg, cfg.Durable, env)
+		err = h(hctx, env)
+		end(err)
+		if err != nil {
 			log.Error("event handler failed, redelivering",
 				slog.String("event_id", env.EventID), slog.String("event_type", env.EventType), slog.String("err", err.Error()))
 			if nerr := msg.NakWithDelay(cfg.Backoff); nerr != nil {

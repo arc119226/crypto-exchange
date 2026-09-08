@@ -54,6 +54,22 @@ func Run(ctx context.Context, cfg Config, roles []Role, bi BuildInfo) error {
 	checker := NewChecker()
 	log.Info("starting", slog.Any("config", cfg), slog.String("roles", label), slog.String("commit", bi.Commit))
 
+	stopTracing, err := telemetry.SetupTracing(ctx, telemetry.TracingConfig{
+		Endpoint: cfg.OTLPEndpoint, ServiceName: "exchange-" + label, Version: bi.Version,
+	}, log)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		// after cleanup (deferred later, so it runs first): the last spans
+		// of the shutdown itself get a chance to leave
+		fctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := stopTracing(fctx); err != nil {
+			log.Debug("tracing shutdown", slog.String("err", err.Error()))
+		}
+	}()
+
 	d, cleanup, err := connectDeps(ctx, cfg, label, log, checker)
 	if err != nil {
 		return err
@@ -278,6 +294,7 @@ func connectDeps(ctx context.Context, cfg Config, appName string, log *slog.Logg
 	err := retryUntil(ctx, log, "postgres", func(ctx context.Context) error {
 		pool, err := pg.Open(ctx, pg.PoolConfig{
 			DSN: cfg.DB.URL.Reveal(), MaxConns: cfg.DB.MaxConns, ConnectTimeout: cfg.DB.ConnectTimeout, ApplicationName: "exchange-" + appName,
+			Tracing: cfg.OTLPEndpoint != "",
 		})
 		if err != nil {
 			return err

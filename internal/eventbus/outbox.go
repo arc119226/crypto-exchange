@@ -9,7 +9,12 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/arc119226/crypto-exchange/internal/eventbus/sqlcgen"
+	"github.com/arc119226/crypto-exchange/internal/telemetry"
 )
+
+// HeaderCorrelationID is the outbox / NATS header carrying the
+// correlation id (docs/plan-v1.0.md §15).
+const HeaderCorrelationID = "Correlation-Id"
 
 // Outbox appends envelopes to eventbus.outbox inside the caller's
 // transaction, so an event exists exactly when the state change it
@@ -22,7 +27,12 @@ func (Outbox) Append(ctx context.Context, tx pgx.Tx, e Envelope) (int64, error) 
 	if err := e.Validate(); err != nil {
 		return 0, err
 	}
-	headers, err := json.Marshal(map[string]string{"Correlation-Id": e.CorrelationID})
+	// The headers travel with the row to NATS (relay) and on to every
+	// consumer: the correlation id for logs, the W3C trace context so a
+	// consumer's span hangs under the request that produced the event.
+	hdr := map[string]string{HeaderCorrelationID: e.CorrelationID}
+	telemetry.InjectTrace(ctx, hdr)
+	headers, err := json.Marshal(hdr)
 	if err != nil {
 		return 0, fmt.Errorf("eventbus: headers: %w", err)
 	}

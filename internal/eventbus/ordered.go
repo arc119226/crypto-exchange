@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/nats-io/nats.go/jetstream"
+
+	"github.com/arc119226/crypto-exchange/internal/telemetry"
 )
 
 // lagSampleInterval is how often a consumer's pending count is read into
@@ -100,7 +102,9 @@ func SubscribeOrdered(ctx context.Context, js jetstream.JetStream, cfg OrderedCo
 			log.Error("undecodable event skipped", slog.String("subject", msg.Subject()), slog.String("err", err.Error()))
 			return
 		}
-		h(sctx, env)
+		hctx, end := consumerSpan(sctx, msg, cfg.Name, env)
+		h(hctx, env)
+		end(nil)
 	})
 	if err != nil {
 		cancel()
@@ -116,6 +120,28 @@ func SubscribeOrdered(ctx context.Context, js jetstream.JetStream, cfg OrderedCo
 	}
 	log.Info("ordered event consumer started", slog.Any("subjects", cfg.FilterSubjects))
 	return sub, nil
+}
+
+// consumerSpan opens the consumer span for one delivery, parented on the
+// traceparent the relay copied from the outbox row, and puts the message's
+// correlation id in the context for the handler's logs.
+func consumerSpan(ctx context.Context, msg jetstream.Msg, consumer string, env Envelope) (context.Context, func(error)) {
+	hdr := map[string]string{}
+	for k, vs := range msg.Headers() {
+		if len(vs) > 0 {
+			hdr[k] = vs[0]
+		}
+	}
+	if cid := hdr[HeaderCorrelationID]; cid != "" && telemetry.CorrelationID(ctx) == "" {
+		ctx = telemetry.WithCorrelationID(ctx, cid)
+	}
+	ctx = telemetry.ExtractTrace(ctx, hdr)
+	return telemetry.StartSpan(ctx, "consume "+env.EventType, telemetry.SpanConsumer, map[string]string{
+		"messaging.system":           "nats",
+		"messaging.destination.name": msg.Subject(),
+		"messaging.consumer.name":    consumer,
+		"exchange.event_id":          env.EventID,
+	})
 }
 
 // sampleLag reads the consumer's pending count into event_consumer_lag

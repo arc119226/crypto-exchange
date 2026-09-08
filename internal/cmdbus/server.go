@@ -119,19 +119,36 @@ func (s *Server) handle(msg *nats.Msg) {
 		ctx = telemetry.WithCorrelationID(ctx, cid)
 		log = log.With(slog.String(telemetry.CorrelationIDKey, cid))
 	}
+	carrier := map[string]string{}
+	for k, vs := range msg.Header {
+		if len(vs) > 0 {
+			carrier[k] = vs[0]
+		}
+	}
+	ctx = telemetry.ExtractTrace(ctx, carrier)
+	ctx, end := telemetry.StartSpan(ctx, "cmdbus "+string(req.Op), telemetry.SpanServer, map[string]string{
+		"messaging.system": "nats", "exchange.market": req.Market,
+	})
+	if tid := telemetry.TraceID(ctx); tid != "" {
+		log = log.With(slog.String(telemetry.TraceIDKey, tid))
+	}
 	ctx = telemetry.WithLogger(ctx, log)
 
 	defer func() {
 		if r := recover(); r != nil {
 			log.Error("command bus handler panicked", slog.Any("panic", r))
+			end(errors.New("cmdbus: handler panicked"))
 			s.reply(msg, Response{Error: &Error{Kind: KindInternal, Message: "cmdbus: handler panicked"}}, string(req.Op), start)
 		}
 	}()
 
 	resp := s.dispatch(ctx, req)
+	var failed error
 	if resp.Error != nil && resp.Error.Kind == KindInternal {
 		log.Error("command failed", slog.String("err", resp.Error.Message))
+		failed = errors.New(resp.Error.Message)
 	}
+	end(failed)
 	s.reply(msg, resp, string(req.Op), start)
 }
 
