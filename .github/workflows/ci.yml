@@ -3,6 +3,7 @@
 #
 #   lint ─┐
 #   unit ─┼─► integration ─┬─► e2e
+#        │                 ├─► helm (the chart on a kind cluster)
 #        │                 └─► image
 #        └─► fuzz-smoke (push only: main merges and v* tags)
 #   fast-checks runs alongside: generated code, compose rendering, contracts.
@@ -70,6 +71,10 @@ concurrency:
 permissions:
   contents: read
 
+env:
+  # helm is not a Go module, so its pin lives here; kind's is on the helm job
+  HELM_VERSION: v3.16.4
+
 jobs:
   lint:
     name: lint
@@ -112,6 +117,15 @@ jobs:
           cache-dependency-path: |
             go.sum
             tools/go.sum
+      # deploy/helm/helm_test.go lints and renders the chart; with CI set it
+      # fails rather than skips when either binary is missing
+      - uses: azure/setup-helm@v4
+        with:
+          version: ${{ env.HELM_VERSION }}
+      - name: install kubeconform (pinned in tools/go.mod)
+        run: |
+          GOBIN="$RUNNER_TEMP/bin" go install -modfile=tools/go.mod github.com/yannh/kubeconform/cmd/kubeconform
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
       - name: unit + property tests (-race)
         run: make test
       - name: coverage gate (internal/money >= 95%)
@@ -206,7 +220,10 @@ jobs:
         # e2e.sh is checked here rather than only by the e2e job: this job
         # finishes in seconds, and a syntax error found twelve minutes into a
         # container run is twelve minutes wasted.
-        run: bash -n scripts/gen-dev-secrets.sh && bash -n scripts/e2e.sh && bash -n scripts/e2e-web.sh
+        run: |
+          for f in scripts/gen-dev-secrets.sh scripts/e2e.sh scripts/e2e-web.sh scripts/kind-secrets.sh scripts/helm-e2e.sh; do
+            bash -n "$f"
+          done
       - name: generated code is in sync (oapi-codegen, sqlc)
         run: make gen-check
       - name: sqlc vet
@@ -291,6 +308,101 @@ jobs:
       - name: tear down
         if: always()
         run: docker compose -f deploy/compose/compose.yaml --env-file .env --profile infra --profile app down -v --remove-orphans || true
+
+  helm:
+    name: helm
+    needs: [integration]
+    runs-on: ubuntu-latest
+    # Not run on a merge to main -- see "what a merge to main runs" at the
+    # top of this file. Tags still run everything.
+    if: ${{ github.event_name != 'push' || github.ref != 'refs/heads/main' }}
+    env:
+      KIND_CLUSTER: exchange
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: |
+            go.sum
+            tools/go.sum
+      - name: read pinned foundry version
+        id: foundry
+        run: echo "tag=$(sed -n 's/^FOUNDRY_TAG=//p' .env.example)" >> "$GITHUB_OUTPUT"
+      # kind-secrets.sh derives the throwaway hot wallet with cast
+      - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: ${{ steps.foundry.outputs.tag }}
+      - uses: azure/setup-helm@v4
+        with:
+          version: ${{ env.HELM_VERSION }}
+      # A release must report its tag; anything else runs as the chart's own
+      # appVersion. helm-e2e.sh checks the running binary against both.
+      - name: app version under test
+        id: appv
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            v="$GITHUB_REF_NAME"
+          else
+            v="$(sed -n 's/^appVersion: *"\{0,1\}\([^"]*\)"\{0,1\}$/\1/p' deploy/helm/exchange/Chart.yaml)"
+          fi
+          test -n "$v"
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@v3
+      - name: build the image under test
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: build/Dockerfile
+          load: true
+          tags: crypto-exchange:ci
+          build-args: |
+            VERSION=${{ steps.appv.outputs.version }}
+            COMMIT=${{ github.sha }}
+            DATE=${{ github.event.head_commit.timestamp || github.event.pull_request.updated_at }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - uses: helm/kind-action@v1
+        with:
+          version: v0.27.0
+          node_image: kindest/node:v1.31.6
+          cluster_name: ${{ env.KIND_CLUSTER }}
+      - name: load the image into the cluster
+        run: kind load docker-image crypto-exchange:ci --name "$KIND_CLUSTER"
+      # the JWT key and the keystore are generated with the binary itself
+      - name: build exchange
+        run: make build
+      - name: create the secrets the chart expects
+        run: scripts/kind-secrets.sh exchange
+      # install with --wait, exchangectl e2e from inside the cluster, delete
+      # the engine pod and compare the book, and check that the running
+      # binary reports the chart's appVersion (docs/plan-v1.0.md §12 Phase 7)
+      - name: install the chart and run the in-cluster e2e
+        env:
+          APP_VERSION: ${{ steps.appv.outputs.version }}
+        run: scripts/helm-e2e.sh
+      - name: collect cluster state
+        if: always()
+        run: |
+          mkdir -p kind-logs
+          kubectl get all,jobs,configmaps,pdb,networkpolicies -o wide > kind-logs/resources.txt 2>&1 || true
+          kubectl get events --sort-by=.lastTimestamp > kind-logs/events.txt 2>&1 || true
+          kubectl describe pods > kind-logs/describe-pods.txt 2>&1 || true
+          kubectl describe jobs > kind-logs/describe-jobs.txt 2>&1 || true
+          for p in $(kubectl get pods -o name); do
+            kubectl logs "$p" --all-containers --prefix > "kind-logs/${p#pod/}.log" 2>&1 || true
+            kubectl logs "$p" --all-containers --prefix --previous > "kind-logs/${p#pod/}.previous.log" 2>/dev/null || true
+          done
+          helm get manifest exchange > kind-logs/manifest.yaml 2>&1 || true
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: helm-kind-logs
+          path: kind-logs
+          if-no-files-found: ignore
+      - name: delete the cluster
+        if: always()
+        run: kind delete cluster --name "$KIND_CLUSTER" || true
 
   image:
     name: image

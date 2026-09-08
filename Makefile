@@ -43,6 +43,7 @@ tools: ## Show pinned tool versions (tools/go.mod)
 	$(GOTOOL) golangci-lint version
 	@# gitleaks under `go tool` has no version stamped in, so read the pin.
 	@printf 'gitleaks %s\n' "$$(sed -n 's|.*zricethezav/gitleaks/v8 \(v[0-9.]*\).*|\1|p' $(TOOLS_MOD) | head -1)"
+	@printf 'kubeconform %s\n' "$$(sed -n 's|.*yannh/kubeconform \(v[0-9.]*\).*|\1|p' $(TOOLS_MOD) | head -1)"
 
 GEN_DIRS := internal/api/gen internal/admin/gen cmd/exchangectl/internal/apiclient cmd/exchangectl/internal/adminclient \
             internal/registry/sqlcgen internal/ledger/sqlcgen internal/audit/sqlcgen \
@@ -193,11 +194,10 @@ compose-config: ## Validate both compose files with every profile (no daemon nee
 	@echo "compose.sepolia.yaml OK"
 
 # --- Helm chart (deploy/helm/exchange; verified in CI on kind, docs/plan-v1.0.md §12 Phase 7)
-helm-lint: ## helm lint + render the chart with the default and the kind values (no cluster needed)
+helm-lint: ## helm lint + render the chart with the default and the kind values through kubeconform (no cluster needed)
 	$(HELM) lint $(HELM_CHART)
-	$(HELM) template exchange $(HELM_CHART) >/dev/null
-	$(HELM) template exchange $(HELM_CHART) -f $(HELM_CHART)/values-kind.yaml >/dev/null
-	@echo "chart OK"
+	$(HELM) template exchange $(HELM_CHART) | $(GOTOOL) kubeconform -strict -summary -ignore-missing-schemas -kubernetes-version 1.31.0
+	$(HELM) template exchange $(HELM_CHART) -f $(HELM_CHART)/values-kind.yaml | $(GOTOOL) kubeconform -strict -summary -ignore-missing-schemas -kubernetes-version 1.31.0
 
 helm-template: ## Print the rendered manifests (VALUES=path to add a values file)
 	$(HELM) template exchange $(HELM_CHART) $(if $(VALUES),-f $(VALUES),)
