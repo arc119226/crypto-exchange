@@ -203,5 +203,6 @@ trace: ## Grep all container logs for a correlation id (make trace ID=...)
 	@test -n "$(ID)" || (echo "usage: make trace ID=<correlation_id>" && exit 2)
 	$(COMPOSE) logs --no-color 2>/dev/null | grep -- "$(ID)"
 
-loadgen: ## Run the load generator against a running stack
-	go run ./cmd/exchangectl loadgen --market ETH-USDC --rate 1000 --duration 60s --accounts 100
+loadgen: ## Run the load generator against a running stack (docs/loadtest.md)
+	go run ./cmd/exchangectl loadgen --market ETH-USDC --rate 1000 --duration 60s --accounts 100 \
+	    --ws-clients 20 --private-clients 10 --idle-connections 1000

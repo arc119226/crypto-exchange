@@ -401,12 +401,13 @@ func (g *generator) run(ctx context.Context, a *loadAccount, idx int) {
 		t0 := time.Now()
 		resp, err := a.client.PlaceOrderWithResponse(ctx, body)
 		lat := time.Since(t0)
+		if err != nil && ctx.Err() != nil {
+			return // the run ended with this request in flight; it is nobody's result
+		}
 		g.sent.Add(1)
 		switch {
 		case err != nil:
-			if ctx.Err() == nil {
-				g.failed.Add(1)
-			}
+			g.failed.Add(1)
 		case resp.JSON201 != nil:
 			g.orderLatency.add(lat)
 			if resp.JSON201.Order.Status == "rejected" {
@@ -510,7 +511,7 @@ func (o *observers) public(ctx context.Context, base, market string) {
 			last = f.Seq
 			o.deltas.Add(1)
 			o.depthDelay.add(now.Sub(f.At))
-		case f.Channel == "trades":
+		case f.Channel == "trades" && f.Type == "update":
 			o.trades.Add(1)
 			o.tradeDelay.add(now.Sub(f.At))
 		}
@@ -540,7 +541,7 @@ func (o *observers) private(ctx context.Context, base, token string) {
 		if json.Unmarshal(b, &f) != nil {
 			continue
 		}
-		if f.Channel == "orders" || f.Channel == "fills" || f.Channel == "balances" {
+		if (f.Channel == "orders" || f.Channel == "fills" || f.Channel == "balances") && !f.OccurredAt.IsZero() {
 			o.privateFrames.Add(1)
 			o.privateDelay.add(time.Since(f.OccurredAt))
 		}
