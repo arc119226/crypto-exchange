@@ -259,6 +259,7 @@ func TestStreamDepthSnapshotAndDeltas(t *testing.T) {
 	h.fund(t, h.ctx, seller.AccountID, "ETH", "10", "faucet:st:eth")
 	h.fund(t, h.ctx, buyer.AccountID, "USDC", "100000", "faucet:st:usdc")
 	s1 := h.place(t, bearer(seller), limitOrder("s1", "sell", "2000", "1"), http.StatusCreated)
+	h.waitBookSeq(t, market, 1) // the snapshot below is compared with the engine's seq
 
 	ws := h.dial(t, "/ws/v1/public", false)
 	ws.send(t, map[string]any{"op": "subscribe", "channel": "depth", "market": market})
@@ -326,6 +327,18 @@ func TestStreamDepthSnapshotAndDeltas(t *testing.T) {
 	assert.Equal(t, 0.0, testutil.ToFloat64(rebuildsOf(t, h.reg, "gap")), "no gap in normal operation")
 }
 
+// waitBookSeq blocks until the feed's book for market has applied seq: the
+// engine replies at COMMIT, the feed learns of the command through the
+// relay and JetStream, and a test that subscribes in between sees a
+// snapshot from before the command.
+func (h *streamHarness) waitBookSeq(t *testing.T, market string, seq uint64) {
+	t.Helper()
+	require.Eventually(t, func() bool {
+		d, ok := h.feed.Depth(market, 1)
+		return ok && d.Seq >= seq
+	}, 10*time.Second, 20*time.Millisecond, "the feed has not applied seq %d", seq)
+}
+
 func rebuildsOf(t *testing.T, reg *prometheus.Registry, reason string) prometheus.Counter {
 	t.Helper()
 	// a fresh counter would be registered in place of the real one; read
@@ -377,6 +390,11 @@ func TestStreamGapTriggersResnapshot(t *testing.T) {
 	seller := h.register(t, "gap-seller@example.com")
 	h.fund(t, h.ctx, seller.AccountID, "ETH", "10", "faucet:gap:eth")
 	h.place(t, bearer(seller), limitOrder("s1", "sell", "2000", "1"), http.StatusCreated)
+	// The engine has committed s1 when place returns; the feed sees it a
+	// relay hop and a JetStream delivery later. Subscribing before that
+	// gets a seq-0 snapshot followed by s1's delta, and the assertions
+	// below are about the message after the forged event.
+	h.waitBookSeq(t, market, 1)
 
 	ws := h.dial(t, "/ws/v1/public", false)
 	ws.send(t, map[string]any{"op": "subscribe", "channel": "depth", "market": market})
