@@ -1048,3 +1048,54 @@ Phase 6 把事件第一次真的扇出給人看:影子訂單簿與 depth delta�
 - **OTel 的環境變數與 option 語意不同。** 規範說 `OTEL_EXPORTER_OTLP_ENDPOINT` 是 base URL(SDK 會補 `/v1/traces`),但 Go SDK 的 `WithEndpointURL` 把參數當完整 URL。假的 collector 收到 `POST /` 才發現;真的 Jaeger 會安靜地回 404,span 一個都不會到。
 - **本機的 NATS 是共用的。** 整合測試的 cmdbus server 與還在跑的 `bin/exchange serve` 都在 queue group `engine` 裡,請求被分流到用另一把 JWT 金鑰的那個,錯誤訊息是「找不到 key ID」。跟 §24 的「jsonb 會重排」一樣:紅的是環境,不是程式。
 - **瀏覽器的 locale 字串也可能是垃圾。** 沙盒的 Chromium 回 `en-US@posix`,lightweight-charts 拿去給 `Intl.DateTimeFormat` 每一幀都 throw,圖是空的但沒有任何錯誤顯示在頁面上。圖表的 locale 釘死 `en-US`。
+
+## 26. Phase 7 程式碼與 §12 / §14 / §16 的對應(Helm、beta 形態、備份、密鑰、runbook、引擎批次)
+
+Phase 7 是把系統交給營運方:一份在 kind 上每個 PR 都裝一次的 chart、單台 VM 的正式 compose、每日備份與每個 PR 一次的還原演練、每一種密鑰的輪替路徑、四段式的 runbook、tag 即發布。在那之前先做了 §5 壓測指出的兩件事——ledger 與 runner 的 pipelining 和 group commit——因為一台 8 GB 的 VM 上每命令 17 次往返不是可以拿去 beta 的數字。計畫經過一輪對抗式檢查,五個原設計缺陷(§26.1)在動手前改掉。表格是對應,小節是為什麼。
+
+| 項目 | 實作 | 備註 |
+|---|---|---|
+| cmdbus 並行派送 | `cmdbus.Server.handle` 解碼後把 `dispatch` 丟進 goroutine,semaphore 限流 `ENGINE_COMMAND_MAX_INFLIGHT`(預設 = `ENGINE_QUEUE_SIZE`),`Close` 等全部回覆 | nats.go 的非同步訂閱**每個 subscription 一次只跑一個 callback**,而 `handle` 同步呼叫 `eng.PlaceOrder`:拆分部署下引擎佇列永遠最多一個命令,group commit 永遠 N=1。`TestCommandBusConcurrentDispatch` 證明佇列深度曾 > 1 |
+| ledger 兩趟 | `pg.Batch`(`QueueOne/Many/Exec` + `RowToStructByPos` 掃進 sqlc 的 row struct,sqlc `emit_exported_queries` 匯出 SQL 常數)、set-based `LockBalances / InsertPostings / ApplyBalanceDeltas`(`ROWS FROM (unnest, unnest)`,sqlc 不認多參數 unnest);`Service.Begin → PendingEntry.QueueLocks → Check → QueueApply → Finish` | 鐵律:**失敗後必須可恢復的語句(餘額檢查在 Go)永不與必須成活的語句同批**——同一個 batch 第一句失敗會 abort 交易,後面全回 `25P02`。`LockBalances` 對不存在的帳戶 `WHERE EXISTS` 跳過,否則 FK 在批裡炸掉整筆交易而 admin 期待的是 404 |
+| group commit(§1.2 的設計) | `trading/batch.go`:runner 一次撈最多 `ENGINE_BATCH_SIZE`(50)個命令,一筆交易,`BEGIN` + 全部預讀 + `LockMarketSequence`(必須 == 記憶體 seq)+ 每個命令 `SAVEPOINT cmd_i` → hold Check → `book.Apply` → 寫入與**下一個**命令的鎖同一趟;最後 outbox 列 + `SetMarketSequence(from, to)` + `COMMIT`;回覆在 COMMIT **之後**;基礎設施錯誤 → ROLLBACK、dirty、**同一份程式碼逐一重跑**(`trading_batch_fallbacks_total{reason}`);撈取遇到查詢或同帳戶同 `client_order_id` 就停 | 往返:純掛單 17 → **3**、一筆成交 45–55 → **4**、取消 9 → 3(`TestEngineRoundTripBudget` 釘住);單市場 165 → **266 orders/s / 355 命令/s**,`POST p99` 1,244 → 548 ms(`docs/loadtest.md` §8)。等價測試在 N=1 與 N=50 各跑一份隨機腳本比投影(簿快照、每 seq 的成交、每 entry 的 postings、每帳戶 `account_seq` 連續、trial balance);批內「先成交後取消」用 `touched` 走記憶體、不消耗 seq、不回滾 |
+| 關機順序 | `app/shutdown.go`:draining → drain delay → HTTP servers → cmdbus 停收 → `engine.Stop`(最後一組 commit,≤ 10 s)→ relay(最後一組的 outbox 先發出去)→ stream `closeWithin` → ops;`terminationGracePeriodSeconds` 由 chart **算**出來(2 + 10 + 20 + 5 = 37),compose `stop_grace_period 40s` | 原本 `engine.Stop()` 與 drain delay 並行,drain 窗口內排隊的命令全拿 `ErrEngineUnavailable` |
+| retention(§7.3) | worker 的 `runRetention`(`RETENTION_INTERVAL` 1h、`RETENTION_OUTBOX` 720h、`RETENTION_WEBHOOK` 2160h、`ctid IN (… LIMIT 5000)` 迴圈),0022 給 worker DELETE;`retention_deleted_rows_total{table}` | 0006 把 DELETE 留給「日後的 worker job」,這就是那個 job;`webhook.events` 只刪沒有 `webhook.queue` 引用的 |
+| Helm chart(§12、§16) | `deploy/helm/exchange`:每 role 一個 Deployment(共用 template;engine / chain / signer `replicas > 1` 直接 `fail`、`Recreate`);**chart 不 render 任何 Secret**,四個 `existingSecret` 以檔案掛到 `/var/run/exchange/…` 走既有 `*_FILE`;migrate Job 為 pre-install hook(權重 0);`dev.enabled=true` 才有 postgres / nats / redis / anvil,**也是 hook**(權重 −10,emptyDir)+ bootstrap Job(權重 5:foundry 部署 → seed → admin bootstrap);`helm_test.go` 在 `make test` 裡 lint + template + kubeconform + 不變量 | 依賴不做成 hook 會死鎖:pre-install hook 跑在一般資源建立**之前**,等同 chart 的 Postgres 的 migrate Job 永遠等不到;hook 的後果是每次 upgrade 重建 dev 依賴 = 乾淨狀態,正是 §16 要的。Bitnami subchart 不用(ADR-0009)。`exchange migrate up --wait` 讓 hook 撐過慢啟動的 DB |
+| CI `helm` job(§13.3) | image 以 chart 的 `appVersion`(tag 上是 tag)build → kind(v0.27.0 / node v1.31.6)→ `scripts/kind-secrets.sh` → `scripts/helm-e2e.sh`:`helm upgrade --install --wait`、**叢集內** `kubectl run … /exchangectl e2e`、刪 engine pod 前後比對 `book`、`exchange version --json` == `helm get metadata` 的 `appVersion` | 不用 port-forward:刪 engine pod 會把它弄斷;kubeconform 釘在 `tools/go.mod`,`unit` job 裝 helm 讓 chart 測試不會靜默 skip |
+| 密鑰輪替(§14) | JWT:`JWT_PREVIOUS_KEY_FILE`(PKCS#8 或 SPKI PEM,同 thumbprint 拒絕),JWKS 發兩個 kid、只用 current 簽,`exchange keys jwt-public`;三把主金鑰:`secretbox.Keyring{Current, Previous}`(Seal 永遠 current、Open 先 current 後 previous)+ `*_PREVIOUS`(+ `_FILE`)+ `exchange keys rewrap --domain api-keys\|webhook\|totp`(一筆交易、冪等、審計列、任一列開不了就整筆回滾);keystore:`exchange keys rekey`(tmp → 重新解開比對 → rename) | 封存格式沒有 key id,加版本欄位要改每一列;keyring 的代價是最多一次失敗的 GCM open。多副本 api 的 JWT 要**先發布再簽**(runbook 三階段),B→C 等 30 分鐘 = access TTL + internal TTL + RemoteVerifier 邊際;`remote_verifier.go` 的 30 秒節流不調,文件寫明 |
+| 備份(§12、§16) | Postgres stock image + `archive_command` 只 cp 到本機 volume(`archive_timeout=900`);sidecar image(postgres + `mc`):每 30 s 出貨 WAL、每 24 h `pg_dump -Fc`(角色 `ex_backup`,`pg_read_all_data`)、`mc rm --older-than`、每個結果一列 `admin.backups`;admin role 讀最新成功列 → `backup_last_success_timestamp_seconds{kind}`(`BackupStale` / `WalArchiveStale` / `BackupNeverTaken`)+ `system/status.last_backup` + 後台首頁;`restore-drill.sh` 還原最新 dump 到拋棄式 DB、驗 migration 版本 + `restore-checks.sql`(試算平衡、餘額快取 = postings、市場 seq = max(orders.seq)、成交 idx 無洞)、印 RTO;CI `e2e` job 每個 PR `make backup-drill` | 本機檔案模式:25.7 MB / 231k postings / 59k orders,**RTO 8 秒**;`archive_command` 永遠不碰 S3,所以儲存端故障不會卡 Postgres,磁碟滿才會(`DiskAlmostFull`)。WAL 有歸檔但**沒有 base backup**,PITR 只寫文件——這是 beta checklist 的已知缺口。原計畫兩個 sidecar 靠共用 volume 的 `.shipped` 握手,改成一個 image 一個腳本:少一個協定 |
+| compose.prod(§11、§16) | 疊三份:`compose.yaml` + `compose.sepolia.yaml`(鏈)+ `compose.prod.yaml`(差異);secrets 全部是檔案(`secrets/prod/*`,root:65532 或 root:999、0640,compose bind mount 保留 owner/mode)走 `*_FILE`;每角色自己的 DB 密碼(`01-roles.sh` 的 `DB_PASSWORD_<ROLE>_FILE`);NATS `authorization` + `NATS_URL_FILE`(userinfo)、Redis `requirepass`;只開 80/443(edge)與 127.0.0.1 的 admin / Grafana;`stop_grace_period 40s`;log 輪替;node-exporter + `DiskAlmostFull`;MinIO 只在 `backup-local` | `ports: !override []`:compose.yaml 綁 127.0.0.1 在筆電沒事,VM 上 Docker 的 iptables 繞過 ufw。`NATS_URL` 進 `secretsWithFileVariant`、config log 用 `RedactURL` |
+| edge image | `build/edge/Dockerfile`:node:22 build `web/trade` → `caddy:2.10.2` + Caddyfile(`/v1`、`/.well-known` → api,`/ws/*` → stream,其餘 SPA;`EDGE_DOMAIN` 有值 ACME、沒有 internal CA);`Dockerfile.dockerignore` 因為根 `.dockerignore` 排除 `web/` | 同 origin,§25 的「不做 CORS」不變;`STREAM_ALLOWED_ORIGINS=https://$EDGE_DOMAIN` |
+| 發布(§12) | `release` job(`v*` tag,`needs: [image, helm, e2e]`):pull 已推的 image 驗 `version --json == tag` → `helm package --app-version tag` 驗 `appVersion` → `helm push oci://ghcr.io/<owner>/charts` → exchangectl linux/amd64、darwin/arm64 + SHA256SUMS → GitHub Release;`make release-check TAG=`;三個 image 帶 OCI label | image tag 不可覆蓋,壞了打新 tag(`docs/release.md`) |
+| runbooks(§12 DoD) | 九本四段(症狀 / 檢查指令 / 處置 / 驗證):engine-restart、stuck-withdrawal、reorg-alert、hot-wallet-low、reconciliation-break、backup-restore、key-rotation、beta-deploy、admin-totp;`sepolia.md` 搬到 `docs/guides/`;`test/docs/runbooks_test.go` 驗四段順序、引用的檔案存在、`exchange` / `exchangectl` 子命令是 binary 有的、引用的指標是 Go 註冊的、checklist 提到每一本 | 「五本」變九本:key-rotation、beta-deploy 是 Phase 7 自己的,admin-totp 是 Phase 5 的,reconciliation-break 拆出 hot-wallet-low |
+| 還原後的程式保護 | stream 的 `resume since_seq > accountSeq` → `resume_failed`(原本回放 0 筆之後把每個較小的 `account_seq` 全丟掉);runbook R4 是 `next_seq += 1,000,000` | 還原之後熱錢包 nonce **不自動對帳**:`ErrForeignTransaction` 是保護,runbook R2/R3 人工 |
+| 未做(刻意) | 多副本 engine、managed K8s、Bitnami subchart、Alertmanager、PITR 演練、Vault/KMS、secretbox 版本欄位、blue/green、mTLS/WAF、SPA 進 Go image、還原後 nonce 自動對帳、`fill.executed` | `docs/beta-checklist.md` 的「限制」與「刻意沒做」 |
+
+### 26.1 設計審查抓到的五個 High
+
+- **H1 cmdbus 序列化。** 沒有這一條,拆分部署下 group commit 的 N 永遠是 1,壓測會「證明」批次沒用。修法一行:把 dispatch 丟進 goroutine;證明是佇列深度 gauge 曾 > 1 的整合測試。
+- **H2 批內相依。** 同帳戶同 `client_order_id` 的第二張單、以及「先成交後取消」——loadgen 的 cancel 節奏一直會撞到——原設計會整批回滾重建。前者停止撈取(下一批的預讀看到已提交的第一張),後者用 `touched` 走記憶體且不消耗 seq。
+- **H3 chart 的 migrate hook 死鎖。** pre-install hook 等不到同 chart 的一般資源。依賴也做成更早的 hook,順便得到「每次 upgrade 乾淨部署」。
+- **H4 還原後 `resume` 靜默丟事件。** `since_seq` 大於現值時舊行為回放 0 筆,之後客戶端把每個較小的 `account_seq` 當重複丟掉,而且沒有任何錯誤。現在回 `resume_failed`。
+- **H5 備份只有 DB 等於沒備份。** seed、passphrase、JWT 私鑰、三把主金鑰都不在 dump 裡;完美的還原簽不了一筆提現、所有充值位址變孤兒。runbook 與 checklist 要求離線加密 escrow,演練寫明不涵蓋它。
+
+### 26.2 與計畫書的偏離,以及刻意不做的
+
+- **chart 的依賴不是 subchart**(§12「以 subchart 或外部 values 二選一」):chart 內建、`dev.enabled` 才 render、hook、emptyDir。正式部署指向外部服務。
+- **CI 不 port-forward**(§12):e2e 在叢集內跑。
+- **beta 是 compose,不是 k3s**(§16 二選一):使用者決定;chart 只在 kind 驗證。
+- **備份 sidecar 是一個自訂 image**(計畫是兩個 stock image + 共用 volume 握手):一個腳本比一個協定好測。
+- **PITR 只寫文件**(§16 managed K8s 那一列的「PITR 備份」):沒有 base backup 就沒有 PITR,checklist 寫明。
+- **runbook 九本不是五本**;`sepolia.md` 不是 runbook,搬到 `docs/guides/`。
+- **group commit 的批次上限 50、失敗退回逐筆**:不往上開,一批失敗就是一次重建。
+- **不做**:上面表格最後一列。
+
+### 26.3 這一輪學到的事
+
+- **先量再批。** §5 的直覺是「fsync 慢」,關掉只值一成;數往返才知道是 17 次。Phase 7 先把往返數釘進測試(`TestEngineRoundTripBudget`),再做 group commit——沒有第一步,第二步的收益會被歸功錯地方。
+- **同一個 batch 裡誰能失敗,決定批次怎麼切。** 這條鐵律讓 `Post` 天然分成兩批,也讓 `LockBalances` 必須用 `WHERE EXISTS` 跳過不存在的帳戶:FK 在批裡炸掉的是整筆交易,而呼叫者期待的是一個 404。
+- **等價測試要比投影,不比列。** faucet 的 postings 順序來自 Go map、outbox 的交錯來自 uuid 排序;逐列比對在 N=1 與 N=50 之間永遠有差,但簿、成交、每 entry 的 postings 集合、每帳戶的序號序列必須一樣。
+- **hook 的語意是「一般資源之前」,不是「排在前面」。** migrate Job 等 Postgres 的死鎖只在 kind 上會發生——本機 compose 的 `depends_on` 把這個順序藏起來了。
+- **bind mount 的 secret 檔,主機上的 owner/mode 就是容器裡的。** distroless 是 uid 65532、postgres 是 999,同一份 `gen-prod-secrets.sh` 要分兩個 group 寫檔;compose 的 `uid`/`gid`/`mode` 只在 swarm 有效。
+- **靜默 skip 的測試等於沒有測試。** chart 測試在沒有 helm 的機器上 skip 是對的,但 CI 沒有 helm 也 skip 就永遠不會紅——`CI=true` 時改成 fail,`unit` job 裝 helm 與 kubeconform。
+- **文件也能有測試,而且抓得到東西。** runbooks 測試第一次跑就抓到三個引用了不存在指標的名字(`sweeps_total`、`withdrawals_total`、`webhook_deliveries_total`)——都是「聽起來應該有」的名字。

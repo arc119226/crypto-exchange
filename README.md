@@ -2,7 +2,7 @@
 
 白牌交易引擎(white-label exchange engine)的商業化原型:現貨撮合、複式記帳帳本、EVM 充提與歸集、行情推播、管理後台,以單一 Go binary 多角色的模組化單體交付,客戶透過 REST / WebSocket / Webhook 與事件契約整合。
 
-**目前狀態:Phase 5b 進行中(webhook 的後台:endpoint 管理、投遞紀錄、手動 replay、本機驗簽的 sink;本 PR)。Phase 4 全數完成,包含 4d 在 Sepolia 上的實跑([`docs/guides/sepolia.md`](docs/guides/sepolia.md) 有逐筆的交易、gas 與區塊);Phase 5a 已合併,worker role 第一次做真的工作。** 已合併:Phase 0 walking skeleton、Phase 1 `internal/matching`(無 I/O、確定性訂單簿)、Phase 2 `internal/ledger`(複式記帳、凍結即分錄、冪等鍵)與 admin API、Phase 3a `internal/trading` + `internal/eventbus`(每市場 runner、一筆交易內 Hold → Apply → 成交 / 分錄 / outbox、重啟重建、JetStream relay)、Phase 3b `internal/auth` + `internal/ratelimit` + public API(JWT / refresh / API key HMAC、限流、`client_order_id` 冪等)。3c 讓拆分部署真的能交易:`internal/cmdbus`(NATS request-reply 命令匯流排,跨容器仍保持 404 / 422 / 503 的錯誤語意,命令帶 `aud=internal` JWT)、`eventbus` 消費端與引擎的`market.updated` 熱載入、`PUT /admin/v1/markets/{symbol}/status`、`api/events/v1/*.json` + `docs/events.md` 事件契約(golden + JSON Schema 測試),以及每個 PR 都跑的多容器 `make e2e`。
+**目前狀態:Phase 7 完成(本 PR):Helm chart 每個 PR 在 kind 上安裝並跑 E2E、單台 VM 的正式 compose、每日備份與每個 PR 一次的還原演練(本機 RTO 8 秒)、每一種密鑰的輪替、九本四段式 runbook、tag 即發布;在那之前把引擎改成 pipelined round trips + group commit(純掛單 17 → 3 次往返、單市場 165 → 266 orders/s)。Phase 0–6 全數合併,4d 在 Sepolia 上實跑過([`docs/guides/sepolia.md`](docs/guides/sepolia.md))。** 已合併:Phase 0 walking skeleton、Phase 1 `internal/matching`(無 I/O、確定性訂單簿)、Phase 2 `internal/ledger`(複式記帳、凍結即分錄、冪等鍵)與 admin API、Phase 3a `internal/trading` + `internal/eventbus`(每市場 runner、一筆交易內 Hold → Apply → 成交 / 分錄 / outbox、重啟重建、JetStream relay)、Phase 3b `internal/auth` + `internal/ratelimit` + public API(JWT / refresh / API key HMAC、限流、`client_order_id` 冪等)。3c 讓拆分部署真的能交易:`internal/cmdbus`(NATS request-reply 命令匯流排,跨容器仍保持 404 / 422 / 503 的錯誤語意,命令帶 `aud=internal` JWT)、`eventbus` 消費端與引擎的`market.updated` 熱載入、`PUT /admin/v1/markets/{symbol}/status`、`api/events/v1/*.json` + `docs/events.md` 事件契約(golden + JSON Schema 測試),以及每個 PR 都跑的多容器 `make e2e`。
 
 4a-1 已合併:`internal/chain/hdwallet`(BIP-44 派生、scrypt + AES-256-GCM 的 `hd-seed.json`)、`exchange keys import-mnemonic`、signer role 維護的**預生成充值地址池**、`GET /v1/deposit-address`——api role 只認領地址,永遠拿不到金鑰。
 
@@ -103,6 +103,17 @@ open http://localhost:3000                      # Grafana(admin / .env 的 GRAFA
 open http://localhost:9090/alerts               # Prometheus:§15 的七條告警(沒有 Alertmanager)
 open http://localhost:16686                     # Jaeger:找 exchange-api 的 POST /v1/orders,看它一路到 engine、Postgres 與每個 consumer
 
+# 營運(Phase 7;每一步的手冊在 docs/runbooks/,上線清單在 docs/beta-checklist.md)
+make up BACKUP=1                                # 多 minio + backup sidecar:每日 pg_dump、每 30 s 出貨 WAL,結果寫 admin.backups
+make backup-drill                               # 現在備份一次 → 還原到拋棄式 DB → 驗試算平衡 / 序號 / 成交 → 印 RTO(CI 每個 PR 跑)
+go run ./cmd/exchange keys jwt-public --in secrets/jwt/ed25519.pem      # JWKS 的 kid;輪替流程在 docs/runbooks/key-rotation.md
+DATABASE_URL=postgres://ex_migrate:...@localhost:5432/exchange API_KEY_MASTER_KEY=新 API_KEY_MASTER_KEY_PREVIOUS=舊 \
+  go run ./cmd/exchange keys rewrap --domain api-keys                    # 主金鑰輪替:一筆交易把每一列改成新金鑰封的,冪等
+make helm-lint                                  # chart:lint + template + kubeconform(不需要叢集)
+make kind-up && make helm-e2e && make kind-down # 需要 kind + kubectl + docker:CI helm job 在本機的樣子
+make release-check TAG=v0.1.0                   # 發布前:chart appVersion 與 binary 都報 v0.1.0(docs/release.md)
+sudo scripts/gen-prod-secrets.sh && make up-prod   # 單台 VM 的正式形態(docs/runbooks/beta-deploy.md;secrets 全是檔案、只開 80/443)
+
 make down               # 停止(保留資料)
 make reset              # 停止並清空 postgres / nats / anvil 狀態與合約產物
 
@@ -136,14 +147,14 @@ make infra-up && make migrate && make seed && make run ROLE=api   # 只起基礎
 ## Repo 結構
 
 ```
-cmd/exchange          單一 binary:serve --role=api|engine|chain|signer|stream|admin|worker|all、migrate、seed、healthcheck、keys
+cmd/exchange          單一 binary:serve --role=api|engine|chain|signer|stream|admin|worker|all、migrate、seed、healthcheck、keys(gen-jwt / jwt-public / import-mnemonic / rekey / rewrap)
 cmd/exchangectl       開發/營運 CLI(產生的 OpenAPI client)
 internal/app          設定、run loop、/healthz /readyz /metrics、SIGTERM drain、依賴退避
 internal/api          public REST(oapi-codegen strict server)+ RFC 7807 + 限流
 internal/auth         最小 auth 參考實作:users、argon2id、Ed25519 JWT / JWKS、refresh 輪替、API key HMAC、Authenticate 中介層
 internal/ratelimit    token bucket(Redis Lua / 記憶體 / Fallback)
 internal/matching     純函式訂單簿(Apply / Restore / Snapshot;無 I/O、無時鐘)
-internal/trading      訂單狀態機、每市場 runner(一筆 PG 交易:Hold → Apply → 成交 / 分錄 / outbox)、client_order_id 冪等、重建
+internal/trading      訂單狀態機、每市場 runner(一組 ≤ 50 個命令一筆 PG 交易,pipelined round trips,失敗退回逐筆)、client_order_id 冪等、重建
 internal/eventbus     事件 envelope、outbox、JetStream relay / streams、durable consumer
 internal/cmdbus       api → engine 的 NATS request-reply 命令匯流排(含 aud=internal JWT)
 internal/policy       同步下單規則(市場狀態、帳戶凍結)
@@ -156,18 +167,24 @@ internal/money        Decimal 金額型別(禁 float;JSON 字串)
 internal/marketdata   影子訂單簿投影(depth delta)、K 線聚合與落地、ticker、Redis 深度快照(sqlc)
 internal/stream       WebSocket server:公開頻道(depth / trades / ticker / kline)、私有頻道(auth、account_seq、resume 自 outbox)、慢客戶端斷線
 internal/telemetry    slog、correlation id、Prometheus、OpenTelemetry(HTTP span、traceparent 注入 / 抽取)
-internal/platform     pgx / NATS / Redis 連線與健康檢查、pgx query tracer、pool collector;secretbox 是 auth 與 webhook 共用的 AES-256-GCM 信封
+internal/platform     pgx / NATS / Redis 連線與健康檢查、pgx query / batch tracer、pool collector、pg.Batch;secretbox 是 auth 與 webhook 共用的 AES-256-GCM 信封 + 輪替用的 Keyring
 api/public/v1         公開 OpenAPI 契約
 api/admin/v1          admin OpenAPI 契約
 migrations            goose SQL(embed)
-deploy/compose        compose.yaml(profiles:infra / app / single / observability)
+deploy/compose        compose.yaml(profiles:infra / app / single / observability / backup)、compose.sepolia.yaml、compose.prod.yaml(beta VM:檔案型 secrets、edge、node-exporter)
+deploy/helm/exchange  Helm chart(每 role 一個 Deployment、migrate hook、dev.enabled 的測試依賴 hook);helm_test.go 在 make test 裡 lint + kubeconform
+deploy/vm             Ubuntu 24.04 的 bootstrap.sh(Docker CE、ufw、systemd unit)
+build                 Dockerfile(Go image)、edge/(Caddy + 前台)、backup/(postgres 客戶端 + mc 的備份 sidecar)
+scripts               gen-dev-secrets、gen-prod-secrets、e2e、helm-e2e、kind-secrets、backup、restore-drill(+ sql/restore-checks.sql)、db-roles.sql
 infra/contracts       MockUSDC + 冪等部署腳本(Foundry)
-infra/postgres        ex_* 登入角色 initdb 腳本
-infra/observability   prometheus(含 alerts.yml)/ grafana 設定與五個 dashboard JSON;observability_test.go 驗指標名
+infra/postgres        ex_* 登入角色 initdb 腳本、postgresql.prod.conf(WAL 歸檔)
+infra/nats            nats.prod.conf(密碼登入)
+infra/observability   prometheus(含 alerts.yml 十一條)/ grafana 設定與五個 dashboard JSON;observability_test.go 驗指標名
 web/trade             參考前台(React + Vite + TS;OpenAPI 產 TS client;Playwright 冒煙)
 test/integration      testcontainers 整合測試(build tag integration)
+test/docs             runbooks_test.go:每本 runbook 四段、引用的檔案 / 子命令 / 指標都存在
 test/fixtures/matching 撮合命令腳本與 golden 事件 / 快照
-docs                  計畫、審查、ADR、領域文件
+docs                  計畫、審查、ADR、領域文件、runbooks/(四段式營運手冊)、guides/(Sepolia 教學)、beta-checklist、release
 ```
 
 ## 文件索引
@@ -181,14 +198,17 @@ docs                  計畫、審查、ADR、領域文件
 | [`docs/events.md`](docs/events.md) | 事件契約:envelope、subject 與 stream、排序與去重、consumer 型別、catalog、相容規則(English);schema 在 [`api/events/v1/`](api/events/v1) |
 | [`docs/webhooks.md`](docs/webhooks.md) | 出站 Webhook:簽章與驗證、重試排程、**至少一次投遞的實際後果**、endpoint 管理與 replay(English) |
 | [`docs/ws-api.md`](docs/ws-api.md) | WebSocket:公開 / 私有頻道的訊息、depth 的客戶端規則、`account_seq` 與 resume、錯誤碼與斷線原因(English) |
-| [`docs/loadtest.md`](docs/loadtest.md) | Phase 6 本機壓測:四組 run 的數字、與 §3.3 目標的對照、瓶頸(每命令一筆 PG 交易)與補法 |
-| [`docs/runbooks/`](docs/runbooks/) | 營運手冊:Sepolia 實跑、卡住的提現、對帳差異、reorg 告警、admin TOTP(啟用、換 secret、鎖定) |
+| [`docs/loadtest.md`](docs/loadtest.md) | 本機壓測:Phase 6 的四組 run、瓶頸(每命令 17 次往返);§8 Phase 7 group commit 之後再量一次(3 次往返、266 orders/s) |
+| [`docs/runbooks/`](docs/runbooks/) | 九本四段式(症狀 / 檢查指令 / 處置 / 驗證)營運手冊:engine 重啟、卡住的提現、reorg 告警、熱錢包低水位、對帳差異、備份還原、密鑰輪替、beta 部署、admin TOTP |
+| [`docs/guides/sepolia.md`](docs/guides/sepolia.md) | 從零到 Sepolia 實跑的教學(4d 的逐筆交易、gas 與區塊) |
+| [`docs/beta-checklist.md`](docs/beta-checklist.md) | Beta 上線檢查表:這個 beta 的限制(單機、RPO 24h、無 PITR)、上線前的勾選項、運維節奏、刻意沒做的 |
+| [`docs/release.md`](docs/release.md) | 發布:`vX.Y.Z` tag 做什麼、版本斷言、`make release-check`、失敗時怎麼辦 |
 | [`docs/screenshots/`](docs/screenshots/) | 後台每一頁的截圖(`make screenshots` 產生)與參考前台的交易頁 / 錢包頁 |
-| [`docs/adr/`](docs/adr/) | ADR-0000 需求訪談決策(8 輪 32 題);ADR-0001~0008 架構決策(單體、真相來源、租戶、數值、帳本、認證、簽名、工具鏈) |
+| [`docs/adr/`](docs/adr/) | ADR-0000 需求訪談決策(8 輪 32 題);ADR-0001~0009 架構決策(單體、真相來源、租戶、數值、帳本、認證、簽名、工具鏈、beta 形態與備份政策) |
 | [`docs/archive/plan-v0.1.md`](docs/archive/plan-v0.1.md) | 原始 v0.1 規劃書(已取代,僅供對照) |
 
 ## 下一步
 
-Phase 3、4、5、6 全數完成,DoD 全滿足;4d 在 Sepolia 上實跑過一次,結果與抓到的缺陷記在 [`docs/guides/sepolia.md`](docs/guides/sepolia.md) 與 [`docs/domain.md`](docs/domain.md) §21–§22;Phase 5 的後台在 §24;Phase 6 的行情、WebSocket、前台、觀測性與 trace 的對應與偏離在 §25。
+Phase 0–7 全數完成,`docs/plan-v1.0.md` §12 的每個 DoD 都有對應的測試或 CI job。Phase 7 的對應與偏離在 [`docs/domain.md`](docs/domain.md) §26,四個沒有唯一答案的決定在 ADR-0009。
 
-壓測([`docs/loadtest.md`](docs/loadtest.md))把 §3.3 的差距量化了:行情與推播那一側全部達標,引擎單市場飽和在每秒約 165 個命令,因為每個命令是一筆約 7 ms、十幾次往返的 Postgres 交易。Phase 7(`docs/plan-v1.0.md` §12:Helm、備份、密鑰、runbook)之前或之中,值得先做 runner 內的 `pgx.Batch` 與 group commit,才有機會碰到 1,000 orders/s。DoD 不過不進下一階段。
+接下來是 beta 本身:照 [`docs/runbooks/beta-deploy.md`](docs/runbooks/beta-deploy.md) 起一台 VM、打勾 [`docs/beta-checklist.md`](docs/beta-checklist.md)、每週演練一次還原、每 90 天輪一次密鑰。已知的缺口寫在 checklist 的第一段:可還原的 RPO 是 24 小時(WAL 有歸檔但沒有 base backup)、還原後熱錢包 nonce 要人工對帳、沒有 Alertmanager、單市場 266 orders/s 離 §3.3 的 1,000 還有距離——下一個瓶頸是每句 SQL 的 Postgres 成本,不再是往返數。

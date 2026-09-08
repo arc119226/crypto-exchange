@@ -1350,18 +1350,19 @@ open http://localhost:16686   # Jaeger:一張單從 api 到 consumer 的 trace
 
 **任務清單**:
 
-- [ ] chart 骨架、values(image、roles、資源、env、secrets 引用)、probes 對應 `/healthz` `/readyz`(1.5 d)
-- [ ] migrate Job hook、engine/chain/signer Deployment(replicas 1、Recreate)、Service/Ingress(api、stream、admin)(1 d)
-- [ ] 依賴(postgres/nats/redis)以 subchart 或外部 values 二選一;kind 用 subchart(1 d)
-- [ ] CI `helm` job:kind 建叢集 → `helm install` → port-forward → `exchangectl e2e`(anvil 以 chart 內測試 Deployment)(1.5 d)
-- [ ] `compose.prod.yaml` + VM 佈署腳本;或 k3s values 覆蓋(1 d)
-- [ ] 備份:`pg_dump` 每日 + WAL 歸檔到物件儲存;還原演練並記錄 RTO(1 d)
-- [ ] 密鑰:JWT 金鑰輪替(JWKS 雙 kid)、keystore passphrase 更換、webhook secret 重設 runbook(1 d)
-- [ ] runbooks:engine 重啟、卡住的提現、reorg 告警、熱錢包低水位、備份還原(1 d)
-- [ ] 發布流程:`git tag vX.Y.Z` → GitHub Actions 推 image + chart package + release notes(0.5 d)
-- [ ] beta checklist:`docs/beta-checklist.md`(限制清單、監控、告警接收人、對帳頻率)(0.5 d)
+- [x] chart 骨架、values(image、roles、資源、env、secrets 引用)、probes 對應 `/healthz` `/readyz`(1.5 d)——`deploy/helm/exchange`;chart 不 render 任何 Secret,四個 `existingSecret` 以檔案掛載走 `*_FILE`;`terminationGracePeriodSeconds` 由 shutdown 預算算出;`helm_test.go` 在 `make test` 裡
+- [x] migrate Job hook、engine/chain/signer Deployment(replicas 1、Recreate)、Service/Ingress(api、stream、admin)(1 d)——`replicas > 1` 直接 `fail`;PDB 只在 api;NetworkPolicy 選用;admin 不進 ingress
+- [x] 依賴(postgres/nats/redis)以 subchart 或外部 values 二選一;kind 用 subchart(1 d)——**偏離**:不用 subchart,chart 內建最小依賴、只在 `dev.enabled=true` render、做成 pre-install hook(migrate hook 等不到一般資源,ADR-0009);正式部署指向外部服務
+- [x] CI `helm` job:kind 建叢集 → `helm install` → port-forward → `exchangectl e2e`(anvil 以 chart 內測試 Deployment)(1.5 d)——**偏離**:不 port-forward,e2e 在叢集內 `kubectl run` 跑;刪 engine pod 前後比對訂單簿;`exchange version --json` == chart `appVersion`
+- [x] `compose.prod.yaml` + VM 佈署腳本;或 k3s values 覆蓋(1 d)——單台 VM compose(使用者決定):`compose.prod.yaml` 疊在 Sepolia overlay 上、`scripts/gen-prod-secrets.sh`、`deploy/vm/bootstrap.sh`、edge image(Caddy + 前台)、node-exporter + `DiskAlmostFull`
+- [x] 備份:`pg_dump` 每日 + WAL 歸檔到物件儲存;還原演練並記錄 RTO(1 d)——sidecar image + `scripts/backup.sh`、`admin.backups` + `backup_last_success_timestamp_seconds` + 三條告警、`scripts/restore-drill.sh` 每個 PR 在 CI 跑;本機 RTO 8 秒(25.7 MB);PITR 只寫文件
+- [x] 密鑰:JWT 金鑰輪替(JWKS 雙 kid)、keystore passphrase 更換、webhook secret 重設 runbook(1 d)——`JWT_PREVIOUS_KEY_FILE`、`exchange keys jwt-public / rekey / rewrap`、三把主金鑰的 `*_PREVIOUS` keyring;`docs/runbooks/key-rotation.md`
+- [x] runbooks:engine 重啟、卡住的提現、reorg 告警、熱錢包低水位、備份還原(1 d)——九本四段(加 key-rotation、beta-deploy、reconciliation-break、admin-totp),`test/docs/runbooks_test.go` 守住;`sepolia.md` 搬到 `docs/guides/`
+- [x] 發布流程:`git tag vX.Y.Z` → GitHub Actions 推 image + chart package + release notes(0.5 d)——`release` job(chart 到 `oci://ghcr.io/<owner>/charts`、版本斷言、exchangectl 二進位、GitHub Release)、`make release-check`、`docs/release.md`
+- [x] beta checklist:`docs/beta-checklist.md`(限制清單、監控、告警接收人、對帳頻率)(0.5 d)
+- [x] (§5 壓測要求,Phase 7 先做)cmdbus 並行派送、ledger 兩趟、runner pipelining + group commit:純掛單 17 → 3 次往返、單市場 165 → 266 orders/s(`docs/loadtest.md` §8);關機順序、retention job、0022
 
-**DoD(CI)**:`helm` job 綠(kind 安裝 + E2E);`helm lint` 綠;還原演練文件含實測時間;`exchange version` 與 chart appVersion 一致(CI 檢查);所有 runbook 有「症狀 / 檢查指令 / 處置 / 驗證」四段。
+**DoD(CI)**:`helm` job 綠(kind 安裝 + E2E);`helm lint` 綠;還原演練文件含實測時間;`exchange version` 與 chart appVersion 一致(CI 檢查);所有 runbook 有「症狀 / 檢查指令 / 處置 / 驗證」四段。**達成**:`helm` job 每個 PR 跑;`helm lint` 在 `helm_test.go`;`docs/runbooks/backup-restore.md` 的演練表(本機 8 秒,CI 每個 PR 一次);版本相等在 `helm-e2e.sh` 與 `release` job 各驗一次;四段由 `test/docs/runbooks_test.go` 守住。細節與偏離在 `docs/domain.md` §26、ADR-0009。
 
 **展示腳本**:
 
