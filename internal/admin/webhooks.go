@@ -213,3 +213,40 @@ func toWebhookDelivery(d webhook.Delivery) gen.WebhookDelivery {
 	}
 	return out
 }
+
+// RotateWebhookSecret implements POST /admin/v1/webhooks/{id}/rotate-secret.
+//
+// Like CreateWebhookEndpoint's 201, this response is the only place the new
+// secret ever appears. The audit record names the grace period and not the
+// secret, for the same reason.
+func (h *Handler) RotateWebhookSecret(ctx context.Context, req gen.RotateWebhookSecretRequestObject) (gen.RotateWebhookSecretResponseObject, error) {
+	instance := "/admin/v1/webhooks/" + req.ID + "/rotate-secret"
+	if h.webhooks == nil {
+		return nil, errWebhooksDisabled
+	}
+	if req.Body == nil || req.Body.Reason == "" {
+		return gen.RotateWebhookSecret400ApplicationProblemPlusJSONResponse{
+			BadRequestApplicationProblemPlusJSONResponse: badRequest(ctx, instance, "a reason is required"),
+		}, nil
+	}
+	grace := 24 * time.Hour
+	if req.Body.GraceHours != nil {
+		grace = time.Duration(*req.Body.GraceHours) * time.Hour
+	}
+	r, err := h.rotateWebhookSecret(ctx, req.ID, grace, req.Body.Reason)
+	switch {
+	case errors.Is(err, webhook.ErrNotFound):
+		return gen.RotateWebhookSecret404ApplicationProblemPlusJSONResponse{
+			NotFoundApplicationProblemPlusJSONResponse: notFound(ctx, instance, "webhook endpoint "+req.ID+" does not exist"),
+		}, nil
+	case errors.Is(err, webhook.ErrInvalid):
+		return gen.RotateWebhookSecret400ApplicationProblemPlusJSONResponse{
+			BadRequestApplicationProblemPlusJSONResponse: badRequest(ctx, instance, err.Error()),
+		}, nil
+	case err != nil:
+		return nil, fmt.Errorf("rotate webhook secret %s: %w", req.ID, err)
+	}
+	return gen.RotateWebhookSecret200JSONResponse(gen.RotatedWebhookSecret{
+		ID: r.Endpoint.ID, Secret: r.Secret, PreviousSecretUntil: r.PreviousUntil,
+	}), nil
+}

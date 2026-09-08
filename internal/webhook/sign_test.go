@@ -100,3 +100,25 @@ func TestSignIsStableAcrossCalls(t *testing.T) {
 	_, err := strconv.ParseInt(aTS, 10, 64)
 	assert.NoError(t, err, "the timestamp header is unix milliseconds")
 }
+
+// During the grace period after a rotation a delivery carries two v1
+// values. A receiver holds one secret and does not know which position it
+// is in, so any match is enough -- and a header with only the other secret's
+// value is still a bad signature.
+func TestVerifyAcceptsAnyMatchingSignatureInTheHeader(t *testing.T) {
+	body := []byte(`{"event_type":"trade.executed"}`)
+	at := time.Date(2026, 9, 8, 12, 0, 0, 0, time.UTC)
+	sig, ts := SignAll([]string{"new-secret", "old-secret"}, body, at)
+	parts := strings.Split(sig, ",")
+	require.Len(t, parts, 2)
+	assert.True(t, strings.HasPrefix(parts[0], "v1=") && strings.HasPrefix(parts[1], "v1="))
+
+	assert.NoError(t, Verify("new-secret", sig, ts, body, at, time.Minute), "a receiver that switched")
+	assert.NoError(t, Verify("old-secret", sig, ts, body, at, time.Minute), "one that has not")
+	assert.ErrorIs(t, Verify("other", sig, ts, body, at, time.Minute), ErrBadSignature)
+
+	single, ts := Sign("new-secret", body, at)
+	assert.Equal(t, parts[0], single, "Sign is SignAll with one secret")
+	assert.ErrorIs(t, Verify("old-secret", single, ts, body, at, time.Minute), ErrBadSignature, "after the grace period the old secret is gone")
+	assert.ErrorIs(t, Verify("new-secret", "v1=,v1=", ts, body, at, time.Minute), ErrBadSignature, "empty values are not signatures")
+}

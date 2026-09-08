@@ -2,6 +2,7 @@ package admin
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -14,11 +15,17 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/arc119226/crypto-exchange/internal/admin/gen"
+	"github.com/arc119226/crypto-exchange/internal/audit"
 	"github.com/arc119226/crypto-exchange/internal/auth"
+	"github.com/arc119226/crypto-exchange/internal/chain/deposit"
+	"github.com/arc119226/crypto-exchange/internal/chain/reconcile"
+	"github.com/arc119226/crypto-exchange/internal/chain/sweep"
+	"github.com/arc119226/crypto-exchange/internal/chain/withdrawal"
 	"github.com/arc119226/crypto-exchange/internal/ledger"
 	"github.com/arc119226/crypto-exchange/internal/money"
 	"github.com/arc119226/crypto-exchange/internal/ratelimit"
 	"github.com/arc119226/crypto-exchange/internal/registry"
+	"github.com/arc119226/crypto-exchange/internal/webhook"
 )
 
 // fakeAuth is auth.Service as the login pages see it. One password, one
@@ -479,4 +486,145 @@ func TestFormReadsFieldsAndKeepsTheFirstComplaint(t *testing.T) {
 	f.r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	f.reason()
 	assert.Contains(t, f.problem, "A reason is required")
+}
+
+func TestOperationsTemplatesRender(t *testing.T) {
+	tpl, err := loadTemplates()
+	require.NoError(t, err)
+	verified := &auth.AdminSession{Email: "ops@example.com", TOTPEnabled: true, TOTPVerified: true}
+	render := func(name string, data any) string {
+		rec := httptest.NewRecorder()
+		tpl.render(rec, httptest.NewRequest(http.MethodGet, "/admin/"+name, nil), http.StatusOK, name, view{Title: name, Session: verified, Data: data})
+		body := rec.Body.String()
+		require.Contains(t, body, "</html>", "%s rendered to the end", name)
+		return body
+	}
+	at := time.Date(2026, 9, 8, 12, 0, 0, 0, time.UTC)
+	eth := registry.Asset{Symbol: "ETH"}
+	acct := ledger.Account{ID: "acct-1", Kind: "spot", Status: ledger.StatusFrozen}
+	entry := ledger.JournalEntry{ID: 42, Kind: "adjustment", RefType: "house_adjustment", RefID: "ui:abc", Reason: "gas booked by hand", CreatedAt: at,
+		Postings: []ledger.Posting{{AccountID: "acct-hot", Asset: "ETH", Bucket: "available", Direction: ledger.Debit, Amount: money.MustParse("0.5")}}}
+
+	body := render("ledger", ledgerData{
+		Trial:     []ledger.TrialBalanceLine{{Asset: "ETH", Debits: money.MustParse("10"), Credits: money.MustParse("9.5"), Diff: money.MustParse("0.5")}},
+		House:     []ledger.HouseBalance{{Code: ledger.HouseCustodyHot, Type: "asset", Asset: "ETH", Balance: money.MustParse("3")}},
+		AccountID: "acct-1", Account: &acct, Balances: []ledger.Balance{{Asset: "ETH", Available: money.MustParse("1"), Hold: money.MustParse("0.25")}},
+		Entries: []ledger.JournalEntry{entry}, Assets: []registry.Asset{eth}, HouseCodes: ledger.AllHouseCodes,
+	})
+	assert.Contains(t, body, "OUT OF BALANCE")
+	assert.Contains(t, body, "<strong>0.5</strong>")
+	assert.Contains(t, body, "custody_hot")
+	assert.Contains(t, body, `class="badge bad">frozen<`)
+	assert.Contains(t, body, ">1.25<", "total = available + hold")
+	assert.Contains(t, body, "gas booked by hand")
+	assert.Contains(t, body, `name="account_id" value="acct-1"`, "the form is pre-filled with the account being looked at")
+	assert.Contains(t, body, `action="/admin/ledger/adjustments"`)
+
+	body = render("ledger", ledgerData{Balanced: true, HouseCodes: ledger.AllHouseCodes})
+	assert.Contains(t, body, ">balanced<")
+	assert.Contains(t, body, "No entries match.")
+
+	slip := time.Date(2026, 9, 8, 11, 0, 0, 0, time.UTC)
+	pending := withdrawal.Record{ID: "w-1", AccountID: "acct-1", Asset: "ETH", Amount: money.MustParse("0.5"), ToAddress: "0xabc", Status: "pending_review", CreatedAt: at}
+	sel := withdrawal.Record{ID: "w-2", AccountID: "acct-1", Asset: "ETH", Amount: money.MustParse("2"), ToAddress: "0xdef", ChainID: 31337, Status: "broadcast",
+		TxHash: "0x1234", ReviewedAt: &slip, ReviewedBy: "u-ops", ReviewNote: "ok", ResolveAction: withdrawal.ActionBump, ResolveError: "fee cap", UpdatedAt: at}
+	body = render("withdrawals", withdrawalsData{Pending: []withdrawal.Record{pending}, Lookup: "w-2", Selected: &sel, Actions: resolveActions})
+	assert.Contains(t, body, `action="/admin/withdrawals/w-1/review"`)
+	assert.Contains(t, body, `name="decision" value="reject"`)
+	assert.Contains(t, body, `action="/admin/withdrawals/w-2/resolve"`)
+	assert.Contains(t, body, `<option value="cancel_nonce">`)
+	assert.Contains(t, body, "bump requested")
+	assert.Contains(t, body, "fee cap")
+	assert.Contains(t, body, "by <span class=\"mono\">u-ops</span>: ok")
+	body = render("withdrawals", withdrawalsData{Actions: resolveActions})
+	assert.Contains(t, body, "Nothing waiting.")
+
+	low := at
+	body = render("chain", chainData{
+		HotWallet: &gen.HotWallet{Address: "0xhot", ChainID: 31337, NextNonce: 9, Low: true, LowAlertedAt: &low, Balances: []gen.HotWalletBalance{{Asset: "ETH", Balance: money.MustParse("1.5")}}, UpdatedAt: at},
+		Deposits:  []deposit.Record{{ID: "d-1", AccountID: "acct-1", Asset: "ETH", Amount: money.MustParse("1"), Address: "0xaddr", TxHash: "0xtx", BlockNumber: 100, Confirmations: 3, Status: "confirming", CreatedAt: at}},
+		Status:    "confirming", Statuses: depositStatuses,
+		Sweeps: []sweep.Record{{ID: "s-1", FromAddress: "0xaddr", Asset: "USDC", Amount: money.MustParse("50"), Status: "failed", FailureReason: "gas", TxHash: "0xs", GasFundingTxHash: "0xg", GasCost: money.MustParse("0.001"), CreatedAt: at}},
+	})
+	assert.Contains(t, body, "0xhot")
+	assert.Contains(t, body, "low since 2026-09-08 12:00:00Z")
+	assert.Contains(t, body, "1.5 ETH")
+	assert.Contains(t, body, `<option value="confirming" selected>`)
+	assert.Contains(t, body, `class="badge warn">confirming<`)
+	assert.Contains(t, body, "gas: 0xg")
+	assert.Contains(t, body, `class="badge bad">failed<`)
+	body = render("chain", chainData{Statuses: depositStatuses})
+	assert.Contains(t, body, "No hot wallet recorded")
+	assert.Contains(t, body, "No deposits match.")
+
+	line := reconcile.Line{Asset: "ETH", BlockHeight: 10, LedgerTotal: money.MustParse("1"), ChainTotal: money.MustParse("0.5"), Diff: money.MustParse("-0.5")}
+	report := reconcile.Report{ID: "r-1", ChainID: 31337, FinishedAt: at, Balanced: false, Lines: []reconcile.Line{line}}
+	body = render("reconciliation", reconciliationData{
+		Latest: &report, Reports: []reconcile.Report{report},
+		ChainBreaks:      []reconcile.Break{{ID: "b-1", ReportID: "r-1", Line: line, DetectedAt: at}},
+		LedgerBreaks:     []ledger.Break{{ID: "lb-1", Asset: "USDC", Debits: money.MustParse("10"), Credits: money.MustParse("9"), Diff: money.MustParse("1"), DetectedAt: at}},
+		HouseAdjustments: []ledger.JournalEntry{entry}, Assets: []registry.Asset{eth}, HouseCodes: ledger.AllHouseCodes,
+	})
+	assert.Contains(t, body, `class="badge bad">BREAK<`)
+	assert.Contains(t, body, `<tr class="bad">`)
+	assert.Contains(t, body, "<strong>-0.5</strong>")
+	assert.Contains(t, body, `class="badge bad">open<`)
+	assert.Contains(t, body, "gas booked by hand")
+	assert.Contains(t, body, `action="/admin/ledger/house-adjustments"`)
+	assert.Contains(t, body, `<option value="custody_hot">`)
+	body = render("reconciliation", reconciliationData{HouseCodes: ledger.AllHouseCodes})
+	assert.Contains(t, body, "No pass has been recorded yet.")
+
+	body = render("audit", auditData{
+		Filter: audit.Filter{ActorType: "admin", ActorID: "u-1"}, ActorTypes: actorTypes,
+		Events: []audit.Record{{ID: 7, ActorType: audit.ActorAdmin, ActorID: "u-1", Action: "user.status.update", TargetType: "user", TargetID: "u-9",
+			Before: []byte(`{"status":"active"}`), After: []byte(`{"status":"frozen","reason":"x"}`), IP: "203.0.113.1", CreatedAt: at}},
+	})
+	assert.Contains(t, body, `<option value="admin" selected>`)
+	assert.Contains(t, body, `<code>{&#34;status&#34;:&#34;active&#34;}</code>`)
+	assert.Contains(t, body, "user.status.update")
+	assert.Contains(t, body, `href="/admin/audit?actor_type=admin&amp;actor_id=u-1"`)
+	body = render("audit", auditData{ActorTypes: actorTypes})
+	assert.Contains(t, body, "Nothing matches.")
+
+	until := at.Add(24 * time.Hour)
+	ep := webhook.Endpoint{ID: "ep-1", URL: "https://example.com/hooks", Events: []string{"trade.executed"}, Label: "acme", Status: "active", UpdatedAt: at}
+	body = render("webhooks", webhooksData{
+		Endpoints:  []webhook.Endpoint{ep, {ID: "ep-2", URL: "https://example.net/x", Status: "disabled", UpdatedAt: at}},
+		Reveal:     &revealed{EndpointID: "ep-1", Secret: "abc123", Until: &until},
+		Selected:   &ep,
+		Deliveries: []webhook.Delivery{{ID: "dl-1", EventID: "evt-1", EventType: "trade.executed", Attempt: 2, Status: "failed", Error: "endpoint answered 500", Duration: 120 * time.Millisecond, CreatedAt: at}},
+	})
+	assert.Contains(t, body, "<pre class=\"mono\">abc123</pre>")
+	assert.Contains(t, body, "both signatures until 2026-09-09 12:00:00Z")
+	assert.Contains(t, body, `action="/admin/webhooks/ep-1/rotate-secret"`)
+	assert.Contains(t, body, `<input type="hidden" name="status" value="disabled">`, "an active endpoint offers Disable")
+	assert.Contains(t, body, `<input type="hidden" name="status" value="active">`, "a disabled one offers Enable")
+	assert.Contains(t, body, `action="/admin/webhooks/ep-1/deliveries/dl-1/replay"`)
+	assert.Contains(t, body, "endpoint answered 500")
+	assert.Contains(t, body, ">120<")
+	body = render("webhooks", webhooksData{})
+	assert.NotContains(t, body, "reveal")
+	assert.Contains(t, body, "No endpoints.")
+}
+
+func TestRevealStashHandsASecretOutOnce(t *testing.T) {
+	var s revealStash
+	token := s.put(revealed{EndpointID: "ep", Secret: "s3"})
+	assert.Len(t, token, 32)
+	got, ok := s.take(token)
+	assert.True(t, ok)
+	assert.Equal(t, "s3", got.Secret)
+	_, ok = s.take(token)
+	assert.False(t, ok, "once")
+	_, ok = s.take("nope")
+	assert.False(t, ok)
+}
+
+func TestSentenceAndKeepQuery(t *testing.T) {
+	assert.Equal(t, "Not resolvable that way.", sentence(errors.New("withdrawal: not resolvable that way")))
+	assert.Equal(t, "Signature does not verify.", sentence(errors.New("webhook: signature does not verify")))
+	assert.Equal(t, "Plain words.", sentence(errors.New("plain words")))
+	q := url.Values{"status": {"frozen"}, "email": {""}, "limit": {"5"}}
+	assert.Equal(t, url.Values{"status": {"frozen"}}, keepQuery(q, "status", "email"))
 }

@@ -32,7 +32,7 @@ ON CONFLICT DO NOTHING;
 -- ticks and both POSTing. deliveries_attempt_uniq is what makes the second
 -- one's bookkeeping a no-op, and run_id is what fences its queue mutation.
 SELECT q.tenant_id, q.endpoint_id, q.event_id, q.run_id, ev.event_type, ev.body, q.attempts,
-       e.url, e.secret_enc
+       e.url, e.secret_enc, e.previous_secret_enc, e.previous_secret_until
 FROM webhook.queue q
 JOIN webhook.endpoints e ON e.id = q.endpoint_id
 JOIN webhook.events ev ON ev.tenant_id = q.tenant_id AND ev.event_id = q.event_id
@@ -152,3 +152,12 @@ WHERE tenant_id = $1 AND endpoint_id = $2;
 -- worth: past that a customer has already noticed, or never will.
 SELECT count(*) FROM webhook.deliveries
 WHERE tenant_id = $1 AND status = 'dead' AND created_at >= $2;
+
+-- name: RotateEndpointSecret :one
+-- The secret in force moves to previous_* for the grace period and the new
+-- one takes its place. A second rotation inside the grace period replaces
+-- the previous one: at most two secrets are ever valid, the newest two.
+UPDATE webhook.endpoints
+SET previous_secret_enc = secret_enc, previous_secret_until = $4, secret_enc = $3, updated_at = now()
+WHERE tenant_id = $1 AND id = $2
+RETURNING id, url, events, label, status, created_at, updated_at, previous_secret_until;

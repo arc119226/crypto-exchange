@@ -48,3 +48,8 @@ td.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px}
 section+section{margin-top:1.6rem}
 details summary{cursor:pointer;color:var(--accent)}
 .kv{display:grid;grid-template-columns:max-content 1fr;gap:.3rem 1rem}.kv dt{color:var(--muted)}.kv dd{margin:0}
+
+/* the one-time secret after a create or a rotation */
+.reveal { border: 2px solid var(--warn, #b8860b); }
+.reveal pre { font-size: 1.05rem; user-select: all; }
+tr.bad td { background: var(--bad-bg, #fff1f0); }

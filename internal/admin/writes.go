@@ -645,3 +645,28 @@ func ptrEq[T comparable](a, b *T) bool {
 	}
 	return *a == *b
 }
+
+// rotateWebhookSecret issues a new signing secret for an endpoint and keeps
+// the old one for grace. The audit row says when the old one stops, and
+// nothing about either secret.
+func (h *Handler) rotateWebhookSecret(ctx context.Context, id string, grace time.Duration, reason string) (webhook.Rotated, error) {
+	if h.webhooks == nil {
+		return webhook.Rotated{}, errWebhooksDisabled
+	}
+	a := actorFrom(ctx)
+	var out webhook.Rotated
+	err := h.inTx(ctx, func(tx pgx.Tx) error {
+		r, err := h.webhooks.RotateSecret(ctx, tx, id, grace, time.Now().UTC())
+		if err != nil {
+			return err
+		}
+		out = r
+		return h.audit.Record(ctx, tx, audit.Event{
+			ActorType: a.Type, ActorID: a.ID, IP: a.IP, Action: "webhook.endpoint.rotate_secret",
+			TargetType: "webhook_endpoint", TargetID: id,
+			After:         map[string]any{"previous_secret_until": r.PreviousUntil, "grace": grace.String(), "reason": reason},
+			CorrelationID: telemetry.CorrelationID(ctx),
+		})
+	})
+	return out, err
+}

@@ -71,6 +71,36 @@ func (e AdjustmentRequestDirection) Valid() bool {
 	}
 }
 
+// Defines values for AdminDepositStatus.
+const (
+	AdminDepositStatusConfirming AdminDepositStatus = "confirming"
+	AdminDepositStatusCredited   AdminDepositStatus = "credited"
+	AdminDepositStatusDetected   AdminDepositStatus = "detected"
+	AdminDepositStatusDropped    AdminDepositStatus = "dropped"
+	AdminDepositStatusOrphaned   AdminDepositStatus = "orphaned"
+	AdminDepositStatusReversed   AdminDepositStatus = "reversed"
+)
+
+// Valid indicates whether the value is a known member of the AdminDepositStatus enum.
+func (e AdminDepositStatus) Valid() bool {
+	switch e {
+	case AdminDepositStatusConfirming:
+		return true
+	case AdminDepositStatusCredited:
+		return true
+	case AdminDepositStatusDetected:
+		return true
+	case AdminDepositStatusDropped:
+		return true
+	case AdminDepositStatusOrphaned:
+		return true
+	case AdminDepositStatusReversed:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for AssetStatus.
 const (
 	AssetStatusActive   AssetStatus = "active"
@@ -407,6 +437,60 @@ func (e WithdrawalReviewRequestDecision) Valid() bool {
 	}
 }
 
+// Defines values for ListAuditEventsParamsActorType.
+const (
+	ListAuditEventsParamsActorTypeAPIKey ListAuditEventsParamsActorType = "api_key"
+	ListAuditEventsParamsActorTypeAdmin  ListAuditEventsParamsActorType = "admin"
+	ListAuditEventsParamsActorTypeSystem ListAuditEventsParamsActorType = "system"
+	ListAuditEventsParamsActorTypeUser   ListAuditEventsParamsActorType = "user"
+)
+
+// Valid indicates whether the value is a known member of the ListAuditEventsParamsActorType enum.
+func (e ListAuditEventsParamsActorType) Valid() bool {
+	switch e {
+	case ListAuditEventsParamsActorTypeAPIKey:
+		return true
+	case ListAuditEventsParamsActorTypeAdmin:
+		return true
+	case ListAuditEventsParamsActorTypeSystem:
+		return true
+	case ListAuditEventsParamsActorTypeUser:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ListDepositsParamsStatus.
+const (
+	ListDepositsParamsStatusConfirming ListDepositsParamsStatus = "confirming"
+	ListDepositsParamsStatusCredited   ListDepositsParamsStatus = "credited"
+	ListDepositsParamsStatusDetected   ListDepositsParamsStatus = "detected"
+	ListDepositsParamsStatusDropped    ListDepositsParamsStatus = "dropped"
+	ListDepositsParamsStatusOrphaned   ListDepositsParamsStatus = "orphaned"
+	ListDepositsParamsStatusReversed   ListDepositsParamsStatus = "reversed"
+)
+
+// Valid indicates whether the value is a known member of the ListDepositsParamsStatus enum.
+func (e ListDepositsParamsStatus) Valid() bool {
+	switch e {
+	case ListDepositsParamsStatusConfirming:
+		return true
+	case ListDepositsParamsStatusCredited:
+		return true
+	case ListDepositsParamsStatusDetected:
+		return true
+	case ListDepositsParamsStatusDropped:
+		return true
+	case ListDepositsParamsStatusOrphaned:
+		return true
+	case ListDepositsParamsStatusReversed:
+		return true
+	default:
+		return false
+	}
+}
+
 // Account defines model for Account.
 type Account struct {
 	CreatedAt time.Time `json:"created_at"`
@@ -461,6 +545,34 @@ type AdjustmentRequest struct {
 
 // AdjustmentRequestDirection credit adds to the user's available balance, debit removes.
 type AdjustmentRequestDirection string
+
+// AdminDeposit defines model for AdminDeposit.
+type AdminDeposit struct {
+	AccountID string `json:"account_id"`
+	Address   string `json:"address"`
+
+	// Amount Decimal serialized as a string (NUMERIC(36,18)); never a JSON number.
+	//
+	// Example: 1990.00
+	Amount        Amount             `json:"amount"`
+	Asset         string             `json:"asset"`
+	BlockNumber   int64              `json:"block_number"`
+	Confirmations int32              `json:"confirmations"`
+	CreatedAt     time.Time          `json:"created_at"`
+	CreditedAt    *time.Time         `json:"credited_at,omitempty"`
+	ID            string             `json:"id"`
+	LogIndex      int32              `json:"log_index"`
+	Status        AdminDepositStatus `json:"status"`
+	TxHash        string             `json:"tx_hash"`
+}
+
+// AdminDepositStatus defines model for AdminDeposit.Status.
+type AdminDepositStatus string
+
+// AdminDepositList defines model for AdminDepositList.
+type AdminDepositList struct {
+	Deposits []AdminDeposit `json:"deposits"`
+}
 
 // AdminWithdrawal defines model for AdminWithdrawal.
 type AdminWithdrawal struct {
@@ -629,6 +741,45 @@ type BalanceList struct {
 	Balances  []Balance `json:"balances"`
 }
 
+// ChainBreak defines model for ChainBreak.
+type ChainBreak struct {
+	// AboveFrontier Decimal serialized as a string (NUMERIC(36,18)); never a JSON number.
+	//
+	// Example: 1990.00
+	AboveFrontier Amount `json:"above_frontier"`
+	Asset         string `json:"asset"`
+	BlockHeight   int64  `json:"block_height"`
+	ChainID       int64  `json:"chain_id"`
+
+	// ChainTotal Decimal serialized as a string (NUMERIC(36,18)); never a JSON number.
+	//
+	// Example: 1990.00
+	ChainTotal Amount    `json:"chain_total"`
+	DetectedAt time.Time `json:"detected_at"`
+
+	// Diff Decimal serialized as a string (NUMERIC(36,18)); never a JSON number.
+	//
+	// Example: 1990.00
+	Diff Amount `json:"diff"`
+	ID   string `json:"id"`
+
+	// InFlight Decimal serialized as a string (NUMERIC(36,18)); never a JSON number.
+	//
+	// Example: 1990.00
+	InFlight Amount `json:"in_flight"`
+
+	// LedgerTotal Decimal serialized as a string (NUMERIC(36,18)); never a JSON number.
+	//
+	// Example: 1990.00
+	LedgerTotal Amount `json:"ledger_total"`
+	ReportID    string `json:"report_id"`
+
+	// Uncredited Decimal serialized as a string (NUMERIC(36,18)); never a JSON number.
+	//
+	// Example: 1990.00
+	Uncredited Amount `json:"uncredited"`
+}
+
 // CreateAccountRequest defines model for CreateAccountRequest.
 type CreateAccountRequest struct {
 	// OwnerUserID Optional until Phase 3 introduces users.
@@ -759,6 +910,31 @@ type FeeScheduleRequest struct {
 	TakerBps int32  `json:"taker_bps"`
 }
 
+// HotWallet defines model for HotWallet.
+type HotWallet struct {
+	Address string `json:"address"`
+
+	// Balances The ledger's custody_hot balance per asset.
+	Balances []HotWalletBalance `json:"balances"`
+	ChainID  int64              `json:"chain_id"`
+
+	// Low alert.hot_wallet_low has been raised and not cleared.
+	Low          bool       `json:"low"`
+	LowAlertedAt *time.Time `json:"low_alerted_at,omitempty"`
+	NextNonce    int64      `json:"next_nonce"`
+	UpdatedAt    time.Time  `json:"updated_at"`
+}
+
+// HotWalletBalance defines model for HotWalletBalance.
+type HotWalletBalance struct {
+	Asset string `json:"asset"`
+
+	// Balance Decimal serialized as a string (NUMERIC(36,18)); never a JSON number.
+	//
+	// Example: 1990.00
+	Balance Amount `json:"balance"`
+}
+
 // HouseAdjustmentRequest defines model for HouseAdjustmentRequest.
 type HouseAdjustmentRequest struct {
 	// Amount Decimal serialized as a string (NUMERIC(36,18)); never a JSON number.
@@ -828,6 +1004,29 @@ type JournalEntryList struct {
 type KycLevelRequest struct {
 	KycLevel int    `json:"kyc_level"`
 	Reason   string `json:"reason"`
+}
+
+// LedgerBreak defines model for LedgerBreak.
+type LedgerBreak struct {
+	Asset string `json:"asset"`
+
+	// Credits Decimal serialized as a string (NUMERIC(36,18)); never a JSON number.
+	//
+	// Example: 1990.00
+	Credits Amount `json:"credits"`
+
+	// Debits Decimal serialized as a string (NUMERIC(36,18)); never a JSON number.
+	//
+	// Example: 1990.00
+	Debits     Amount    `json:"debits"`
+	DetectedAt time.Time `json:"detected_at"`
+
+	// Diff Decimal serialized as a string (NUMERIC(36,18)); never a JSON number.
+	//
+	// Example: 1990.00
+	Diff       Amount     `json:"diff"`
+	ID         string     `json:"id"`
+	ResolvedAt *time.Time `json:"resolved_at,omitempty"`
 }
 
 // Market defines model for Market.
@@ -945,6 +1144,12 @@ type Problem struct {
 	Type          string `json:"type"`
 }
 
+// ReconciliationBreaks defines model for ReconciliationBreaks.
+type ReconciliationBreaks struct {
+	ChainBreaks  []ChainBreak  `json:"chain_breaks"`
+	LedgerBreaks []LedgerBreak `json:"ledger_breaks"`
+}
+
 // ReconciliationLine defines model for ReconciliationLine.
 type ReconciliationLine struct {
 	// AboveFrontier The net effect the ledger booked for transactions mined above block_height.
@@ -984,6 +1189,11 @@ type ReconciliationReport struct {
 	StartedAt  time.Time            `json:"started_at"`
 }
 
+// ReconciliationReportList defines model for ReconciliationReportList.
+type ReconciliationReportList struct {
+	Reports []ReconciliationReport `json:"reports"`
+}
+
 // ReconciliationSummary defines model for ReconciliationSummary.
 type ReconciliationSummary struct {
 	Balanced   bool      `json:"balanced"`
@@ -1000,6 +1210,24 @@ type ReloadAccepted struct {
 // ReloadRequest defines model for ReloadRequest.
 type ReloadRequest struct {
 	Reason string `json:"reason"`
+}
+
+// RotateSecretRequest defines model for RotateSecretRequest.
+type RotateSecretRequest struct {
+	// GraceHours How long the old secret keeps signing alongside the new one.
+	GraceHours *int32 `json:"grace_hours,omitempty"`
+	Reason     string `json:"reason"`
+}
+
+// RotatedWebhookSecret defines model for RotatedWebhookSecret.
+type RotatedWebhookSecret struct {
+	ID string `json:"id"`
+
+	// PreviousSecretUntil Until when deliveries also carry the old secret's signature
+	PreviousSecretUntil time.Time `json:"previous_secret_until"`
+
+	// Secret The new HMAC signing secret, shown exactly once
+	Secret string `json:"secret"`
 }
 
 // Sweep defines model for Sweep.
@@ -1328,12 +1556,28 @@ type ListAccountsParams struct {
 
 // ListAuditEventsParams defines parameters for ListAuditEvents.
 type ListAuditEventsParams struct {
-	Action     *string `form:"action,omitempty" json:"action,omitempty"`
-	TargetType *string `form:"target_type,omitempty" json:"target_type,omitempty"`
-	TargetID   *string `form:"target_id,omitempty" json:"target_id,omitempty"`
-	Limit      *Limit  `form:"limit,omitempty" json:"limit,omitempty"`
-	Offset     *Offset `form:"offset,omitempty" json:"offset,omitempty"`
+	Action     *string                         `form:"action,omitempty" json:"action,omitempty"`
+	TargetType *string                         `form:"target_type,omitempty" json:"target_type,omitempty"`
+	TargetID   *string                         `form:"target_id,omitempty" json:"target_id,omitempty"`
+	ActorType  *ListAuditEventsParamsActorType `form:"actor_type,omitempty" json:"actor_type,omitempty"`
+	ActorID    *string                         `form:"actor_id,omitempty" json:"actor_id,omitempty"`
+	Limit      *Limit                          `form:"limit,omitempty" json:"limit,omitempty"`
+	Offset     *Offset                         `form:"offset,omitempty" json:"offset,omitempty"`
 }
+
+// ListAuditEventsParamsActorType defines parameters for ListAuditEvents.
+type ListAuditEventsParamsActorType string
+
+// ListDepositsParams defines parameters for ListDeposits.
+type ListDepositsParams struct {
+	Status *ListDepositsParamsStatus `form:"status,omitempty" json:"status,omitempty"`
+	Asset  *string                   `form:"asset,omitempty" json:"asset,omitempty"`
+	Limit  *Limit                    `form:"limit,omitempty" json:"limit,omitempty"`
+	Offset *Offset                   `form:"offset,omitempty" json:"offset,omitempty"`
+}
+
+// ListDepositsParamsStatus defines parameters for ListDeposits.
+type ListDepositsParamsStatus string
 
 // ListEntriesParams defines parameters for ListEntries.
 type ListEntriesParams struct {
@@ -1342,6 +1586,18 @@ type ListEntriesParams struct {
 	RefID     *string `form:"ref_id,omitempty" json:"ref_id,omitempty"`
 	Limit     *Limit  `form:"limit,omitempty" json:"limit,omitempty"`
 	Offset    *Offset `form:"offset,omitempty" json:"offset,omitempty"`
+}
+
+// ListReconciliationBreaksParams defines parameters for ListReconciliationBreaks.
+type ListReconciliationBreaksParams struct {
+	Limit  *Limit  `form:"limit,omitempty" json:"limit,omitempty"`
+	Offset *Offset `form:"offset,omitempty" json:"offset,omitempty"`
+}
+
+// ListReconciliationReportsParams defines parameters for ListReconciliationReports.
+type ListReconciliationReportsParams struct {
+	Limit  *Limit  `form:"limit,omitempty" json:"limit,omitempty"`
+	Offset *Offset `form:"offset,omitempty" json:"offset,omitempty"`
 }
 
 // ListSweepsParams defines parameters for ListSweeps.
@@ -1417,6 +1673,9 @@ type CreateWebhookEndpointJSONRequestBody = WebhookEndpointRequest
 // UpdateWebhookEndpointJSONRequestBody defines body for UpdateWebhookEndpoint for application/json ContentType.
 type UpdateWebhookEndpointJSONRequestBody = WebhookEndpointUpdateRequest
 
+// RotateWebhookSecretJSONRequestBody defines body for RotateWebhookSecret for application/json ContentType.
+type RotateWebhookSecretJSONRequestBody = RotateSecretRequest
+
 // SetWebhookEndpointStatusJSONRequestBody defines body for SetWebhookEndpointStatus for application/json ContentType.
 type SetWebhookEndpointStatusJSONRequestBody = WebhookEndpointStatusRequest
 
@@ -1461,6 +1720,9 @@ type ServerInterface interface {
 	// ListAuditEvents Audit trail, newest first
 	// (GET /admin/v1/audit-events)
 	ListAuditEvents(w http.ResponseWriter, r *http.Request, params ListAuditEventsParams)
+	// ListDeposits Deposits the chain role has seen, newest first
+	// (GET /admin/v1/deposits)
+	ListDeposits(w http.ResponseWriter, r *http.Request, params ListDepositsParams)
 	// RequestReload Ask every engine to reload its registry cache
 	// (POST /admin/v1/engine/reload)
 	RequestReload(w http.ResponseWriter, r *http.Request)
@@ -1473,6 +1735,9 @@ type ServerInterface interface {
 	// UpdateFeeSchedule Change a fee schedule's rates
 	// (PUT /admin/v1/fee-schedules/{name})
 	UpdateFeeSchedule(w http.ResponseWriter, r *http.Request, name FeeScheduleName)
+	// GetHotWallet The hot wallet, as the chain role keeps it
+	// (GET /admin/v1/hot-wallet)
+	GetHotWallet(w http.ResponseWriter, r *http.Request)
 	// CreateAdjustment Post a manual adjustment against the external account
 	// (POST /admin/v1/ledger/adjustments)
 	CreateAdjustment(w http.ResponseWriter, r *http.Request)
@@ -1503,6 +1768,12 @@ type ServerInterface interface {
 	// GetReconciliation The latest comparison of ledger custody against on-chain balances
 	// (GET /admin/v1/reconciliation)
 	GetReconciliation(w http.ResponseWriter, r *http.Request)
+	// ListReconciliationBreaks Every break on record, both kinds, newest first
+	// (GET /admin/v1/reconciliation/breaks)
+	ListReconciliationBreaks(w http.ResponseWriter, r *http.Request, params ListReconciliationBreaksParams)
+	// ListReconciliationReports Reconciliation passes, newest first
+	// (GET /admin/v1/reconciliation/reports)
+	ListReconciliationReports(w http.ResponseWriter, r *http.Request, params ListReconciliationReportsParams)
 	// ListSweeps Recent collections into the hot wallet
 	// (GET /admin/v1/sweeps)
 	ListSweeps(w http.ResponseWriter, r *http.Request, params ListSweepsParams)
@@ -1536,6 +1807,9 @@ type ServerInterface interface {
 	// ReplayWebhookDelivery Send the event behind a delivery again
 	// (POST /admin/v1/webhooks/{id}/deliveries/{delivery_id}/replay)
 	ReplayWebhookDelivery(w http.ResponseWriter, r *http.Request, id WebhookEndpointID, deliveryID WebhookDeliveryID)
+	// RotateWebhookSecret Issue a new signing secret and keep the old one for a grace period
+	// (POST /admin/v1/webhooks/{id}/rotate-secret)
+	RotateWebhookSecret(w http.ResponseWriter, r *http.Request, id WebhookEndpointID)
 	// SetWebhookEndpointStatus Enable or disable an endpoint
 	// (PUT /admin/v1/webhooks/{id}/status)
 	SetWebhookEndpointStatus(w http.ResponseWriter, r *http.Request, id WebhookEndpointID)
@@ -1620,6 +1894,12 @@ func (_ Unimplemented) ListAuditEvents(w http.ResponseWriter, r *http.Request, p
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// ListDeposits Deposits the chain role has seen, newest first
+// (GET /admin/v1/deposits)
+func (_ Unimplemented) ListDeposits(w http.ResponseWriter, r *http.Request, params ListDepositsParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // RequestReload Ask every engine to reload its registry cache
 // (POST /admin/v1/engine/reload)
 func (_ Unimplemented) RequestReload(w http.ResponseWriter, r *http.Request) {
@@ -1641,6 +1921,12 @@ func (_ Unimplemented) CreateFeeSchedule(w http.ResponseWriter, r *http.Request)
 // UpdateFeeSchedule Change a fee schedule's rates
 // (PUT /admin/v1/fee-schedules/{name})
 func (_ Unimplemented) UpdateFeeSchedule(w http.ResponseWriter, r *http.Request, name FeeScheduleName) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetHotWallet The hot wallet, as the chain role keeps it
+// (GET /admin/v1/hot-wallet)
+func (_ Unimplemented) GetHotWallet(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -1701,6 +1987,18 @@ func (_ Unimplemented) SetMarketStatus(w http.ResponseWriter, r *http.Request, s
 // GetReconciliation The latest comparison of ledger custody against on-chain balances
 // (GET /admin/v1/reconciliation)
 func (_ Unimplemented) GetReconciliation(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ListReconciliationBreaks Every break on record, both kinds, newest first
+// (GET /admin/v1/reconciliation/breaks)
+func (_ Unimplemented) ListReconciliationBreaks(w http.ResponseWriter, r *http.Request, params ListReconciliationBreaksParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ListReconciliationReports Reconciliation passes, newest first
+// (GET /admin/v1/reconciliation/reports)
+func (_ Unimplemented) ListReconciliationReports(w http.ResponseWriter, r *http.Request, params ListReconciliationReportsParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -1767,6 +2065,12 @@ func (_ Unimplemented) ListWebhookDeliveries(w http.ResponseWriter, r *http.Requ
 // ReplayWebhookDelivery Send the event behind a delivery again
 // (POST /admin/v1/webhooks/{id}/deliveries/{delivery_id}/replay)
 func (_ Unimplemented) ReplayWebhookDelivery(w http.ResponseWriter, r *http.Request, id WebhookEndpointID, deliveryID WebhookDeliveryID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// RotateWebhookSecret Issue a new signing secret and keep the old one for a grace period
+// (POST /admin/v1/webhooks/{id}/rotate-secret)
+func (_ Unimplemented) RotateWebhookSecret(w http.ResponseWriter, r *http.Request, id WebhookEndpointID) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -2094,6 +2398,32 @@ func (siw *ServerInterfaceWrapper) ListAuditEvents(w http.ResponseWriter, r *htt
 		return
 	}
 
+	// ------------- Optional query parameter "actor_type" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "actor_type", r.URL.Query(), &params.ActorType, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "actor_type"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "actor_type", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "actor_id" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "actor_id", r.URL.Query(), &params.ActorID, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "actor_id"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "actor_id", Err: err})
+		}
+		return
+	}
+
 	// ------------- Optional query parameter "limit" -------------
 
 	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: "int32"})
@@ -2122,6 +2452,78 @@ func (siw *ServerInterfaceWrapper) ListAuditEvents(w http.ResponseWriter, r *htt
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ListAuditEvents(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListDeposits operation middleware
+func (siw *ServerInterfaceWrapper) ListDeposits(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListDepositsParams
+
+	// ------------- Optional query parameter "status" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "status", r.URL.Query(), &params.Status, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "status"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "status", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "asset" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "asset", r.URL.Query(), &params.Asset, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "asset"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "asset", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: "int32"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "offset" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "offset", r.URL.Query(), &params.Offset, runtime.BindQueryParameterOptions{Type: "integer", Format: "int32"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "offset"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "offset", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListDeposits(w, r, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -2190,6 +2592,20 @@ func (siw *ServerInterfaceWrapper) UpdateFeeSchedule(w http.ResponseWriter, r *h
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.UpdateFeeSchedule(w, r, name)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetHotWallet operation middleware
+func (siw *ServerInterfaceWrapper) GetHotWallet(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetHotWallet(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -2437,6 +2853,98 @@ func (siw *ServerInterfaceWrapper) GetReconciliation(w http.ResponseWriter, r *h
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetReconciliation(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListReconciliationBreaks operation middleware
+func (siw *ServerInterfaceWrapper) ListReconciliationBreaks(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListReconciliationBreaksParams
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: "int32"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "offset" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "offset", r.URL.Query(), &params.Offset, runtime.BindQueryParameterOptions{Type: "integer", Format: "int32"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "offset"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "offset", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListReconciliationBreaks(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListReconciliationReports operation middleware
+func (siw *ServerInterfaceWrapper) ListReconciliationReports(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListReconciliationReportsParams
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: "int32"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "offset" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "offset", r.URL.Query(), &params.Offset, runtime.BindQueryParameterOptions{Type: "integer", Format: "int32"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "offset"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "offset", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListReconciliationReports(w, r, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -2791,6 +3299,32 @@ func (siw *ServerInterfaceWrapper) ReplayWebhookDelivery(w http.ResponseWriter, 
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ReplayWebhookDelivery(w, r, id, deliveryID)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RotateWebhookSecret operation middleware
+func (siw *ServerInterfaceWrapper) RotateWebhookSecret(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id WebhookEndpointID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RotateWebhookSecret(w, r, id)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -3170,6 +3704,18 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Post(options.BaseURL+"/admin/v1/ledger/house-adjustments", wrapper.CreateHouseAdjustment)
 	})
 	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/admin/v1/deposits", wrapper.ListDeposits)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/admin/v1/hot-wallet", wrapper.GetHotWallet)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/admin/v1/reconciliation/reports", wrapper.ListReconciliationReports)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/admin/v1/reconciliation/breaks", wrapper.ListReconciliationBreaks)
+	})
+	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/admin/v1/reconciliation", wrapper.GetReconciliation)
 	})
 	r.Group(func(r chi.Router) {
@@ -3186,6 +3732,9 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Put(options.BaseURL+"/admin/v1/webhooks/{id}/status", wrapper.SetWebhookEndpointStatus)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/admin/v1/webhooks/{id}/rotate-secret", wrapper.RotateWebhookSecret)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/admin/v1/webhooks/{id}/deliveries", wrapper.ListWebhookDeliveries)
@@ -3911,6 +4460,60 @@ func (response ListAuditEvents500ApplicationProblemPlusJSONResponse) VisitListAu
 	return err
 }
 
+type ListDepositsRequestObject struct {
+	Params ListDepositsParams
+}
+
+type ListDepositsResponseObject interface {
+	VisitListDepositsResponse(w http.ResponseWriter) error
+}
+
+type ListDeposits200JSONResponse AdminDepositList
+
+func (response ListDeposits200JSONResponse) VisitListDepositsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListDeposits401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response ListDeposits401ApplicationProblemPlusJSONResponse) VisitListDepositsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListDeposits500ApplicationProblemPlusJSONResponse struct {
+	InternalErrorApplicationProblemPlusJSONResponse
+}
+
+func (response ListDeposits500ApplicationProblemPlusJSONResponse) VisitListDepositsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type RequestReloadRequestObject struct {
 	Body *RequestReloadJSONRequestBody
 }
@@ -4196,6 +4799,75 @@ type UpdateFeeSchedule500ApplicationProblemPlusJSONResponse struct {
 }
 
 func (response UpdateFeeSchedule500ApplicationProblemPlusJSONResponse) VisitUpdateFeeScheduleResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetHotWalletRequestObject struct {
+}
+
+type GetHotWalletResponseObject interface {
+	VisitGetHotWalletResponse(w http.ResponseWriter) error
+}
+
+type GetHotWallet200JSONResponse HotWallet
+
+func (response GetHotWallet200JSONResponse) VisitGetHotWalletResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetHotWallet401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response GetHotWallet401ApplicationProblemPlusJSONResponse) VisitGetHotWalletResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetHotWallet404ApplicationProblemPlusJSONResponse struct {
+	NotFoundApplicationProblemPlusJSONResponse
+}
+
+func (response GetHotWallet404ApplicationProblemPlusJSONResponse) VisitGetHotWalletResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetHotWallet500ApplicationProblemPlusJSONResponse struct {
+	InternalErrorApplicationProblemPlusJSONResponse
+}
+
+func (response GetHotWallet500ApplicationProblemPlusJSONResponse) VisitGetHotWalletResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
@@ -4969,6 +5641,114 @@ type GetReconciliation500ApplicationProblemPlusJSONResponse struct {
 }
 
 func (response GetReconciliation500ApplicationProblemPlusJSONResponse) VisitGetReconciliationResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListReconciliationBreaksRequestObject struct {
+	Params ListReconciliationBreaksParams
+}
+
+type ListReconciliationBreaksResponseObject interface {
+	VisitListReconciliationBreaksResponse(w http.ResponseWriter) error
+}
+
+type ListReconciliationBreaks200JSONResponse ReconciliationBreaks
+
+func (response ListReconciliationBreaks200JSONResponse) VisitListReconciliationBreaksResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListReconciliationBreaks401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response ListReconciliationBreaks401ApplicationProblemPlusJSONResponse) VisitListReconciliationBreaksResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListReconciliationBreaks500ApplicationProblemPlusJSONResponse struct {
+	InternalErrorApplicationProblemPlusJSONResponse
+}
+
+func (response ListReconciliationBreaks500ApplicationProblemPlusJSONResponse) VisitListReconciliationBreaksResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListReconciliationReportsRequestObject struct {
+	Params ListReconciliationReportsParams
+}
+
+type ListReconciliationReportsResponseObject interface {
+	VisitListReconciliationReportsResponse(w http.ResponseWriter) error
+}
+
+type ListReconciliationReports200JSONResponse ReconciliationReportList
+
+func (response ListReconciliationReports200JSONResponse) VisitListReconciliationReportsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListReconciliationReports401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response ListReconciliationReports401ApplicationProblemPlusJSONResponse) VisitListReconciliationReportsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListReconciliationReports500ApplicationProblemPlusJSONResponse struct {
+	InternalErrorApplicationProblemPlusJSONResponse
+}
+
+func (response ListReconciliationReports500ApplicationProblemPlusJSONResponse) VisitListReconciliationReportsResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
@@ -5769,6 +6549,93 @@ func (response ReplayWebhookDelivery500ApplicationProblemPlusJSONResponse) Visit
 	return err
 }
 
+type RotateWebhookSecretRequestObject struct {
+	ID   WebhookEndpointID `json:"id"`
+	Body *RotateWebhookSecretJSONRequestBody
+}
+
+type RotateWebhookSecretResponseObject interface {
+	VisitRotateWebhookSecretResponse(w http.ResponseWriter) error
+}
+
+type RotateWebhookSecret200JSONResponse RotatedWebhookSecret
+
+func (response RotateWebhookSecret200JSONResponse) VisitRotateWebhookSecretResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RotateWebhookSecret400ApplicationProblemPlusJSONResponse struct {
+	BadRequestApplicationProblemPlusJSONResponse
+}
+
+func (response RotateWebhookSecret400ApplicationProblemPlusJSONResponse) VisitRotateWebhookSecretResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RotateWebhookSecret401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response RotateWebhookSecret401ApplicationProblemPlusJSONResponse) VisitRotateWebhookSecretResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RotateWebhookSecret404ApplicationProblemPlusJSONResponse struct {
+	NotFoundApplicationProblemPlusJSONResponse
+}
+
+func (response RotateWebhookSecret404ApplicationProblemPlusJSONResponse) VisitRotateWebhookSecretResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RotateWebhookSecret500ApplicationProblemPlusJSONResponse struct {
+	InternalErrorApplicationProblemPlusJSONResponse
+}
+
+func (response RotateWebhookSecret500ApplicationProblemPlusJSONResponse) VisitRotateWebhookSecretResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type SetWebhookEndpointStatusRequestObject struct {
 	ID   WebhookEndpointID `json:"id"`
 	Body *SetWebhookEndpointStatusJSONRequestBody
@@ -6289,6 +7156,9 @@ type StrictServerInterface interface {
 	// ListAuditEvents Audit trail, newest first
 	// (GET /admin/v1/audit-events)
 	ListAuditEvents(ctx context.Context, request ListAuditEventsRequestObject) (ListAuditEventsResponseObject, error)
+	// ListDeposits Deposits the chain role has seen, newest first
+	// (GET /admin/v1/deposits)
+	ListDeposits(ctx context.Context, request ListDepositsRequestObject) (ListDepositsResponseObject, error)
 	// RequestReload Ask every engine to reload its registry cache
 	// (POST /admin/v1/engine/reload)
 	RequestReload(ctx context.Context, request RequestReloadRequestObject) (RequestReloadResponseObject, error)
@@ -6301,6 +7171,9 @@ type StrictServerInterface interface {
 	// UpdateFeeSchedule Change a fee schedule's rates
 	// (PUT /admin/v1/fee-schedules/{name})
 	UpdateFeeSchedule(ctx context.Context, request UpdateFeeScheduleRequestObject) (UpdateFeeScheduleResponseObject, error)
+	// GetHotWallet The hot wallet, as the chain role keeps it
+	// (GET /admin/v1/hot-wallet)
+	GetHotWallet(ctx context.Context, request GetHotWalletRequestObject) (GetHotWalletResponseObject, error)
 	// CreateAdjustment Post a manual adjustment against the external account
 	// (POST /admin/v1/ledger/adjustments)
 	CreateAdjustment(ctx context.Context, request CreateAdjustmentRequestObject) (CreateAdjustmentResponseObject, error)
@@ -6331,6 +7204,12 @@ type StrictServerInterface interface {
 	// GetReconciliation The latest comparison of ledger custody against on-chain balances
 	// (GET /admin/v1/reconciliation)
 	GetReconciliation(ctx context.Context, request GetReconciliationRequestObject) (GetReconciliationResponseObject, error)
+	// ListReconciliationBreaks Every break on record, both kinds, newest first
+	// (GET /admin/v1/reconciliation/breaks)
+	ListReconciliationBreaks(ctx context.Context, request ListReconciliationBreaksRequestObject) (ListReconciliationBreaksResponseObject, error)
+	// ListReconciliationReports Reconciliation passes, newest first
+	// (GET /admin/v1/reconciliation/reports)
+	ListReconciliationReports(ctx context.Context, request ListReconciliationReportsRequestObject) (ListReconciliationReportsResponseObject, error)
 	// ListSweeps Recent collections into the hot wallet
 	// (GET /admin/v1/sweeps)
 	ListSweeps(ctx context.Context, request ListSweepsRequestObject) (ListSweepsResponseObject, error)
@@ -6364,6 +7243,9 @@ type StrictServerInterface interface {
 	// ReplayWebhookDelivery Send the event behind a delivery again
 	// (POST /admin/v1/webhooks/{id}/deliveries/{delivery_id}/replay)
 	ReplayWebhookDelivery(ctx context.Context, request ReplayWebhookDeliveryRequestObject) (ReplayWebhookDeliveryResponseObject, error)
+	// RotateWebhookSecret Issue a new signing secret and keep the old one for a grace period
+	// (POST /admin/v1/webhooks/{id}/rotate-secret)
+	RotateWebhookSecret(ctx context.Context, request RotateWebhookSecretRequestObject) (RotateWebhookSecretResponseObject, error)
 	// SetWebhookEndpointStatus Enable or disable an endpoint
 	// (PUT /admin/v1/webhooks/{id}/status)
 	SetWebhookEndpointStatus(ctx context.Context, request SetWebhookEndpointStatusRequestObject) (SetWebhookEndpointStatusResponseObject, error)
@@ -6705,6 +7587,32 @@ func (sh *strictHandler) ListAuditEvents(w http.ResponseWriter, r *http.Request,
 	}
 }
 
+// ListDeposits operation middleware
+func (sh *strictHandler) ListDeposits(w http.ResponseWriter, r *http.Request, params ListDepositsParams) {
+	var request ListDepositsRequestObject
+
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListDeposits(ctx, request.(ListDepositsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListDeposits")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListDepositsResponseObject); ok {
+		if err := validResponse.VisitListDepositsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // RequestReload operation middleware
 func (sh *strictHandler) RequestReload(w http.ResponseWriter, r *http.Request) {
 	var request RequestReloadRequestObject
@@ -6817,6 +7725,30 @@ func (sh *strictHandler) UpdateFeeSchedule(w http.ResponseWriter, r *http.Reques
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(UpdateFeeScheduleResponseObject); ok {
 		if err := validResponse.VisitUpdateFeeScheduleResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetHotWallet operation middleware
+func (sh *strictHandler) GetHotWallet(w http.ResponseWriter, r *http.Request) {
+	var request GetHotWalletRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetHotWallet(ctx, request.(GetHotWalletRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetHotWallet")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetHotWalletResponseObject); ok {
+		if err := validResponse.VisitGetHotWalletResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
@@ -7100,6 +8032,58 @@ func (sh *strictHandler) GetReconciliation(w http.ResponseWriter, r *http.Reques
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(GetReconciliationResponseObject); ok {
 		if err := validResponse.VisitGetReconciliationResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListReconciliationBreaks operation middleware
+func (sh *strictHandler) ListReconciliationBreaks(w http.ResponseWriter, r *http.Request, params ListReconciliationBreaksParams) {
+	var request ListReconciliationBreaksRequestObject
+
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListReconciliationBreaks(ctx, request.(ListReconciliationBreaksRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListReconciliationBreaks")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListReconciliationBreaksResponseObject); ok {
+		if err := validResponse.VisitListReconciliationBreaksResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListReconciliationReports operation middleware
+func (sh *strictHandler) ListReconciliationReports(w http.ResponseWriter, r *http.Request, params ListReconciliationReportsParams) {
+	var request ListReconciliationReportsRequestObject
+
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListReconciliationReports(ctx, request.(ListReconciliationReportsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListReconciliationReports")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListReconciliationReportsResponseObject); ok {
+		if err := validResponse.VisitListReconciliationReportsResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
@@ -7410,6 +8394,39 @@ func (sh *strictHandler) ReplayWebhookDelivery(w http.ResponseWriter, r *http.Re
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(ReplayWebhookDeliveryResponseObject); ok {
 		if err := validResponse.VisitReplayWebhookDeliveryResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RotateWebhookSecret operation middleware
+func (sh *strictHandler) RotateWebhookSecret(w http.ResponseWriter, r *http.Request, id WebhookEndpointID) {
+	var request RotateWebhookSecretRequestObject
+
+	request.ID = id
+
+	var body RotateWebhookSecretJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RotateWebhookSecret(ctx, request.(RotateWebhookSecretRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RotateWebhookSecret")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RotateWebhookSecretResponseObject); ok {
+		if err := validResponse.VisitRotateWebhookSecretResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

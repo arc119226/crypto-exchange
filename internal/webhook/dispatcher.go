@@ -84,6 +84,13 @@ func New(db *pgxpool.Pool, cfg Config, log *slog.Logger) *Dispatcher {
 	}
 }
 
+// WithClock replaces the dispatcher's clock, so a test can stand on either
+// side of a rotation's grace period without waiting for it.
+func (d *Dispatcher) WithClock(now func() time.Time) *Dispatcher {
+	d.now = now
+	return d
+}
+
 // WithMetrics attaches Prometheus collectors.
 func (d *Dispatcher) WithMetrics(m *Metrics) *Dispatcher {
 	if m != nil {
@@ -196,7 +203,16 @@ func (d *Dispatcher) deliverOne(ctx context.Context, row sqlcgen.ClaimDueRow) er
 		// rather than spinning.
 		return d.settle(ctx, row, attempt{status: StatusFailed, err: "cannot open the signing secret"})
 	}
-	res := d.post(ctx, row, secret)
+	secrets := []string{secret}
+	// A rotated-out secret still signs until its grace period ends, so a
+	// receiver that has not switched yet keeps verifying. The clock is ours,
+	// not the database's: the row says when, and a test can move it.
+	if row.PreviousSecretUntil.Valid && d.now().Before(row.PreviousSecretUntil.Time) && len(row.PreviousSecretEnc) > 0 {
+		if previous, err := secretbox.Open(d.cfg.MasterKey, row.PreviousSecretEnc); err == nil {
+			secrets = append(secrets, previous)
+		}
+	}
+	res := d.post(ctx, row, secrets)
 	return d.settle(ctx, row, res)
 }
 
@@ -208,8 +224,8 @@ type attempt struct {
 	duration time.Duration
 }
 
-func (d *Dispatcher) post(ctx context.Context, row sqlcgen.ClaimDueRow, secret string) attempt {
-	sig, ts := Sign(secret, row.Body, d.now())
+func (d *Dispatcher) post(ctx context.Context, row sqlcgen.ClaimDueRow, secrets []string) attempt {
+	sig, ts := SignAll(secrets, row.Body, d.now())
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, row.Url, bytes.NewReader(row.Body))
 	if err != nil {
 		return attempt{status: StatusFailed, err: err.Error()}

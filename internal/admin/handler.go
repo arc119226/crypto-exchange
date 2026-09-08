@@ -273,7 +273,14 @@ func (h *Handler) CreateAdjustment(ctx context.Context, req gen.CreateAdjustment
 // ListAuditEvents implements GET /admin/v1/audit-events.
 func (h *Handler) ListAuditEvents(ctx context.Context, req gen.ListAuditEventsRequestObject) (gen.ListAuditEventsResponseObject, error) {
 	limit, offset := page(req.Params.Limit, req.Params.Offset)
-	events, err := h.audit.List(ctx, h.pool, audit.Filter{Action: deref(req.Params.Action), TargetType: deref(req.Params.TargetType), TargetID: deref(req.Params.TargetID), Limit: limit, Offset: offset})
+	actorType := ""
+	if req.Params.ActorType != nil {
+		actorType = string(*req.Params.ActorType)
+	}
+	events, err := h.audit.List(ctx, h.pool, audit.Filter{
+		Action: deref(req.Params.Action), TargetType: deref(req.Params.TargetType), TargetID: deref(req.Params.TargetID),
+		ActorType: actorType, ActorID: deref(req.Params.ActorID), Limit: limit, Offset: offset,
+	})
 	if err != nil {
 		return nil, err
 	}

@@ -4,6 +4,7 @@ package integration
 
 import (
 	"context"
+	"crypto/rand"
 	"io"
 	"log/slog"
 	"net/http"
@@ -20,10 +21,14 @@ import (
 
 	"github.com/arc119226/crypto-exchange/internal/admin"
 	"github.com/arc119226/crypto-exchange/internal/audit"
+	"github.com/arc119226/crypto-exchange/internal/chain/deposit"
+	"github.com/arc119226/crypto-exchange/internal/chain/withdrawal"
 	"github.com/arc119226/crypto-exchange/internal/ledger"
+	"github.com/arc119226/crypto-exchange/internal/platform/secretbox"
 	"github.com/arc119226/crypto-exchange/internal/ratelimit"
 	"github.com/arc119226/crypto-exchange/internal/registry"
 	"github.com/arc119226/crypto-exchange/internal/telemetry"
+	"github.com/arc119226/crypto-exchange/internal/webhook"
 )
 
 // browser is an http.Client that keeps cookies and stops at redirects, so a
@@ -94,7 +99,14 @@ func adminUIServer(t *testing.T, h *adminAuthHarness, limit ratelimit.Limit) *ht
 	l := ledger.New(h.adminPool, "default")
 	require.NoError(t, l.LoadHouseAccounts(context.Background()))
 	rec := audit.NewRecorder("default")
-	handler := admin.NewHandler(h.adminPool, l, registry.NewStore(h.adminPool), rec, "default").WithUsers(h.svc)
+	master := make([]byte, secretbox.KeySize)
+	_, err := rand.Read(master)
+	require.NoError(t, err)
+	handler := admin.NewHandler(h.adminPool, l, registry.NewStore(h.adminPool), rec, "default").
+		WithUsers(h.svc).WithChainID(anvilChainID).
+		WithDeposits(deposit.NewReader(h.adminPool, "default")).
+		WithWithdrawals(withdrawal.NewReviewer(h.adminPool, "default", l, rec)).
+		WithWebhooks(webhook.NewStore(h.adminPool, "default", master))
 	ui, err := admin.NewUI(handler, h.svc, admin.UIConfig{LoginLimit: limit})
 	require.NoError(t, err)
 	r := chi.NewRouter()

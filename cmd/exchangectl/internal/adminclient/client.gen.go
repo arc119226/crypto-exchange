@@ -72,6 +72,36 @@ func (e AdjustmentRequestDirection) Valid() bool {
 	}
 }
 
+// Defines values for AdminDepositStatus.
+const (
+	AdminDepositStatusConfirming AdminDepositStatus = "confirming"
+	AdminDepositStatusCredited   AdminDepositStatus = "credited"
+	AdminDepositStatusDetected   AdminDepositStatus = "detected"
+	AdminDepositStatusDropped    AdminDepositStatus = "dropped"
+	AdminDepositStatusOrphaned   AdminDepositStatus = "orphaned"
+	AdminDepositStatusReversed   AdminDepositStatus = "reversed"
+)
+
+// Valid indicates whether the value is a known member of the AdminDepositStatus enum.
+func (e AdminDepositStatus) Valid() bool {
+	switch e {
+	case AdminDepositStatusConfirming:
+		return true
+	case AdminDepositStatusCredited:
+		return true
+	case AdminDepositStatusDetected:
+		return true
+	case AdminDepositStatusDropped:
+		return true
+	case AdminDepositStatusOrphaned:
+		return true
+	case AdminDepositStatusReversed:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for AssetStatus.
 const (
 	AssetStatusActive   AssetStatus = "active"
@@ -408,6 +438,60 @@ func (e WithdrawalReviewRequestDecision) Valid() bool {
 	}
 }
 
+// Defines values for ListAuditEventsParamsActorType.
+const (
+	ListAuditEventsParamsActorTypeAPIKey ListAuditEventsParamsActorType = "api_key"
+	ListAuditEventsParamsActorTypeAdmin  ListAuditEventsParamsActorType = "admin"
+	ListAuditEventsParamsActorTypeSystem ListAuditEventsParamsActorType = "system"
+	ListAuditEventsParamsActorTypeUser   ListAuditEventsParamsActorType = "user"
+)
+
+// Valid indicates whether the value is a known member of the ListAuditEventsParamsActorType enum.
+func (e ListAuditEventsParamsActorType) Valid() bool {
+	switch e {
+	case ListAuditEventsParamsActorTypeAPIKey:
+		return true
+	case ListAuditEventsParamsActorTypeAdmin:
+		return true
+	case ListAuditEventsParamsActorTypeSystem:
+		return true
+	case ListAuditEventsParamsActorTypeUser:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ListDepositsParamsStatus.
+const (
+	ListDepositsParamsStatusConfirming ListDepositsParamsStatus = "confirming"
+	ListDepositsParamsStatusCredited   ListDepositsParamsStatus = "credited"
+	ListDepositsParamsStatusDetected   ListDepositsParamsStatus = "detected"
+	ListDepositsParamsStatusDropped    ListDepositsParamsStatus = "dropped"
+	ListDepositsParamsStatusOrphaned   ListDepositsParamsStatus = "orphaned"
+	ListDepositsParamsStatusReversed   ListDepositsParamsStatus = "reversed"
+)
+
+// Valid indicates whether the value is a known member of the ListDepositsParamsStatus enum.
+func (e ListDepositsParamsStatus) Valid() bool {
+	switch e {
+	case ListDepositsParamsStatusConfirming:
+		return true
+	case ListDepositsParamsStatusCredited:
+		return true
+	case ListDepositsParamsStatusDetected:
+		return true
+	case ListDepositsParamsStatusDropped:
+		return true
+	case ListDepositsParamsStatusOrphaned:
+		return true
+	case ListDepositsParamsStatusReversed:
+		return true
+	default:
+		return false
+	}
+}
+
 // Account defines model for Account.
 type Account struct {
 	CreatedAt time.Time `json:"created_at"`
@@ -462,6 +546,34 @@ type AdjustmentRequest struct {
 
 // AdjustmentRequestDirection credit adds to the user's available balance, debit removes.
 type AdjustmentRequestDirection string
+
+// AdminDeposit defines model for AdminDeposit.
+type AdminDeposit struct {
+	AccountID string `json:"account_id"`
+	Address   string `json:"address"`
+
+	// Amount Decimal serialized as a string (NUMERIC(36,18)); never a JSON number.
+	//
+	// Example: 1990.00
+	Amount        Amount             `json:"amount"`
+	Asset         string             `json:"asset"`
+	BlockNumber   int64              `json:"block_number"`
+	Confirmations int32              `json:"confirmations"`
+	CreatedAt     time.Time          `json:"created_at"`
+	CreditedAt    *time.Time         `json:"credited_at,omitempty"`
+	ID            string             `json:"id"`
+	LogIndex      int32              `json:"log_index"`
+	Status        AdminDepositStatus `json:"status"`
+	TxHash        string             `json:"tx_hash"`
+}
+
+// AdminDepositStatus defines model for AdminDeposit.Status.
+type AdminDepositStatus string
+
+// AdminDepositList defines model for AdminDepositList.
+type AdminDepositList struct {
+	Deposits []AdminDeposit `json:"deposits"`
+}
 
 // AdminWithdrawal defines model for AdminWithdrawal.
 type AdminWithdrawal struct {
@@ -630,6 +742,45 @@ type BalanceList struct {
 	Balances  []Balance `json:"balances"`
 }
 
+// ChainBreak defines model for ChainBreak.
+type ChainBreak struct {
+	// AboveFrontier Decimal serialized as a string (NUMERIC(36,18)); never a JSON number.
+	//
+	// Example: 1990.00
+	AboveFrontier Amount `json:"above_frontier"`
+	Asset         string `json:"asset"`
+	BlockHeight   int64  `json:"block_height"`
+	ChainID       int64  `json:"chain_id"`
+
+	// ChainTotal Decimal serialized as a string (NUMERIC(36,18)); never a JSON number.
+	//
+	// Example: 1990.00
+	ChainTotal Amount    `json:"chain_total"`
+	DetectedAt time.Time `json:"detected_at"`
+
+	// Diff Decimal serialized as a string (NUMERIC(36,18)); never a JSON number.
+	//
+	// Example: 1990.00
+	Diff Amount `json:"diff"`
+	ID   string `json:"id"`
+
+	// InFlight Decimal serialized as a string (NUMERIC(36,18)); never a JSON number.
+	//
+	// Example: 1990.00
+	InFlight Amount `json:"in_flight"`
+
+	// LedgerTotal Decimal serialized as a string (NUMERIC(36,18)); never a JSON number.
+	//
+	// Example: 1990.00
+	LedgerTotal Amount `json:"ledger_total"`
+	ReportID    string `json:"report_id"`
+
+	// Uncredited Decimal serialized as a string (NUMERIC(36,18)); never a JSON number.
+	//
+	// Example: 1990.00
+	Uncredited Amount `json:"uncredited"`
+}
+
 // CreateAccountRequest defines model for CreateAccountRequest.
 type CreateAccountRequest struct {
 	// OwnerUserID Optional until Phase 3 introduces users.
@@ -760,6 +911,31 @@ type FeeScheduleRequest struct {
 	TakerBps int32  `json:"taker_bps"`
 }
 
+// HotWallet defines model for HotWallet.
+type HotWallet struct {
+	Address string `json:"address"`
+
+	// Balances The ledger's custody_hot balance per asset.
+	Balances []HotWalletBalance `json:"balances"`
+	ChainID  int64              `json:"chain_id"`
+
+	// Low alert.hot_wallet_low has been raised and not cleared.
+	Low          bool       `json:"low"`
+	LowAlertedAt *time.Time `json:"low_alerted_at,omitempty"`
+	NextNonce    int64      `json:"next_nonce"`
+	UpdatedAt    time.Time  `json:"updated_at"`
+}
+
+// HotWalletBalance defines model for HotWalletBalance.
+type HotWalletBalance struct {
+	Asset string `json:"asset"`
+
+	// Balance Decimal serialized as a string (NUMERIC(36,18)); never a JSON number.
+	//
+	// Example: 1990.00
+	Balance Amount `json:"balance"`
+}
+
 // HouseAdjustmentRequest defines model for HouseAdjustmentRequest.
 type HouseAdjustmentRequest struct {
 	// Amount Decimal serialized as a string (NUMERIC(36,18)); never a JSON number.
@@ -829,6 +1005,29 @@ type JournalEntryList struct {
 type KycLevelRequest struct {
 	KycLevel int    `json:"kyc_level"`
 	Reason   string `json:"reason"`
+}
+
+// LedgerBreak defines model for LedgerBreak.
+type LedgerBreak struct {
+	Asset string `json:"asset"`
+
+	// Credits Decimal serialized as a string (NUMERIC(36,18)); never a JSON number.
+	//
+	// Example: 1990.00
+	Credits Amount `json:"credits"`
+
+	// Debits Decimal serialized as a string (NUMERIC(36,18)); never a JSON number.
+	//
+	// Example: 1990.00
+	Debits     Amount    `json:"debits"`
+	DetectedAt time.Time `json:"detected_at"`
+
+	// Diff Decimal serialized as a string (NUMERIC(36,18)); never a JSON number.
+	//
+	// Example: 1990.00
+	Diff       Amount     `json:"diff"`
+	ID         string     `json:"id"`
+	ResolvedAt *time.Time `json:"resolved_at,omitempty"`
 }
 
 // Market defines model for Market.
@@ -946,6 +1145,12 @@ type Problem struct {
 	Type          string `json:"type"`
 }
 
+// ReconciliationBreaks defines model for ReconciliationBreaks.
+type ReconciliationBreaks struct {
+	ChainBreaks  []ChainBreak  `json:"chain_breaks"`
+	LedgerBreaks []LedgerBreak `json:"ledger_breaks"`
+}
+
 // ReconciliationLine defines model for ReconciliationLine.
 type ReconciliationLine struct {
 	// AboveFrontier The net effect the ledger booked for transactions mined above block_height.
@@ -985,6 +1190,11 @@ type ReconciliationReport struct {
 	StartedAt  time.Time            `json:"started_at"`
 }
 
+// ReconciliationReportList defines model for ReconciliationReportList.
+type ReconciliationReportList struct {
+	Reports []ReconciliationReport `json:"reports"`
+}
+
 // ReconciliationSummary defines model for ReconciliationSummary.
 type ReconciliationSummary struct {
 	Balanced   bool      `json:"balanced"`
@@ -1001,6 +1211,24 @@ type ReloadAccepted struct {
 // ReloadRequest defines model for ReloadRequest.
 type ReloadRequest struct {
 	Reason string `json:"reason"`
+}
+
+// RotateSecretRequest defines model for RotateSecretRequest.
+type RotateSecretRequest struct {
+	// GraceHours How long the old secret keeps signing alongside the new one.
+	GraceHours *int32 `json:"grace_hours,omitempty"`
+	Reason     string `json:"reason"`
+}
+
+// RotatedWebhookSecret defines model for RotatedWebhookSecret.
+type RotatedWebhookSecret struct {
+	ID string `json:"id"`
+
+	// PreviousSecretUntil Until when deliveries also carry the old secret's signature
+	PreviousSecretUntil time.Time `json:"previous_secret_until"`
+
+	// Secret The new HMAC signing secret, shown exactly once
+	Secret string `json:"secret"`
 }
 
 // Sweep defines model for Sweep.
@@ -1329,12 +1557,28 @@ type ListAccountsParams struct {
 
 // ListAuditEventsParams defines parameters for ListAuditEvents.
 type ListAuditEventsParams struct {
-	Action     *string `form:"action,omitempty" json:"action,omitempty"`
-	TargetType *string `form:"target_type,omitempty" json:"target_type,omitempty"`
-	TargetID   *string `form:"target_id,omitempty" json:"target_id,omitempty"`
-	Limit      *Limit  `form:"limit,omitempty" json:"limit,omitempty"`
-	Offset     *Offset `form:"offset,omitempty" json:"offset,omitempty"`
+	Action     *string                         `form:"action,omitempty" json:"action,omitempty"`
+	TargetType *string                         `form:"target_type,omitempty" json:"target_type,omitempty"`
+	TargetID   *string                         `form:"target_id,omitempty" json:"target_id,omitempty"`
+	ActorType  *ListAuditEventsParamsActorType `form:"actor_type,omitempty" json:"actor_type,omitempty"`
+	ActorID    *string                         `form:"actor_id,omitempty" json:"actor_id,omitempty"`
+	Limit      *Limit                          `form:"limit,omitempty" json:"limit,omitempty"`
+	Offset     *Offset                         `form:"offset,omitempty" json:"offset,omitempty"`
 }
+
+// ListAuditEventsParamsActorType defines parameters for ListAuditEvents.
+type ListAuditEventsParamsActorType string
+
+// ListDepositsParams defines parameters for ListDeposits.
+type ListDepositsParams struct {
+	Status *ListDepositsParamsStatus `form:"status,omitempty" json:"status,omitempty"`
+	Asset  *string                   `form:"asset,omitempty" json:"asset,omitempty"`
+	Limit  *Limit                    `form:"limit,omitempty" json:"limit,omitempty"`
+	Offset *Offset                   `form:"offset,omitempty" json:"offset,omitempty"`
+}
+
+// ListDepositsParamsStatus defines parameters for ListDeposits.
+type ListDepositsParamsStatus string
 
 // ListEntriesParams defines parameters for ListEntries.
 type ListEntriesParams struct {
@@ -1343,6 +1587,18 @@ type ListEntriesParams struct {
 	RefID     *string `form:"ref_id,omitempty" json:"ref_id,omitempty"`
 	Limit     *Limit  `form:"limit,omitempty" json:"limit,omitempty"`
 	Offset    *Offset `form:"offset,omitempty" json:"offset,omitempty"`
+}
+
+// ListReconciliationBreaksParams defines parameters for ListReconciliationBreaks.
+type ListReconciliationBreaksParams struct {
+	Limit  *Limit  `form:"limit,omitempty" json:"limit,omitempty"`
+	Offset *Offset `form:"offset,omitempty" json:"offset,omitempty"`
+}
+
+// ListReconciliationReportsParams defines parameters for ListReconciliationReports.
+type ListReconciliationReportsParams struct {
+	Limit  *Limit  `form:"limit,omitempty" json:"limit,omitempty"`
+	Offset *Offset `form:"offset,omitempty" json:"offset,omitempty"`
 }
 
 // ListSweepsParams defines parameters for ListSweeps.
@@ -1417,6 +1673,9 @@ type CreateWebhookEndpointJSONRequestBody = WebhookEndpointRequest
 
 // UpdateWebhookEndpointJSONRequestBody defines body for UpdateWebhookEndpoint for application/json ContentType.
 type UpdateWebhookEndpointJSONRequestBody = WebhookEndpointUpdateRequest
+
+// RotateWebhookSecretJSONRequestBody defines body for RotateWebhookSecret for application/json ContentType.
+type RotateWebhookSecretJSONRequestBody = RotateSecretRequest
 
 // SetWebhookEndpointStatusJSONRequestBody defines body for SetWebhookEndpointStatus for application/json ContentType.
 type SetWebhookEndpointStatusJSONRequestBody = WebhookEndpointStatusRequest
@@ -1602,6 +1861,11 @@ type ClientInterface interface {
 	// Corresponds with GET /admin/v1/audit-events (the `ListAuditEvents` operationId).
 	ListAuditEvents(ctx context.Context, params *ListAuditEventsParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// ListDeposits Deposits the chain role has seen, newest first
+	//
+	// Corresponds with GET /admin/v1/deposits (the `ListDeposits` operationId).
+	ListDeposits(ctx context.Context, params *ListDepositsParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// RequestReloadWithBody Ask every engine to reload its registry cache
 	//
 	// Publishes registry.reload with no row changed: after a seed, or when in doubt. 202: the request is in the outbox; the engine's reload consumer acts on it.
@@ -1656,6 +1920,13 @@ type ClientInterface interface {
 	//
 	// Corresponds with PUT /admin/v1/fee-schedules/{name} (the `UpdateFeeSchedule` operationId).
 	UpdateFeeSchedule(ctx context.Context, name FeeScheduleName, body UpdateFeeScheduleJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetHotWallet The hot wallet, as the chain role keeps it
+	//
+	// Address, next nonce and the low-balance alert state from chain.hot_wallets, with the ledger's custody_hot balance per asset. The chain's own figure is what reconciliation compares that balance to. 404 until the chain role has started once against this chain.
+	//
+	// Corresponds with GET /admin/v1/hot-wallet (the `GetHotWallet` operationId).
+	GetHotWallet(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// CreateAdjustmentWithBody Post a manual adjustment against the external account
 	//
@@ -1834,6 +2105,18 @@ type ClientInterface interface {
 	// Corresponds with GET /admin/v1/reconciliation (the `GetReconciliation` operationId).
 	GetReconciliation(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// ListReconciliationBreaks Every break on record, both kinds, newest first
+	//
+	// Two families with different terms. A chain break is one asset of one reconciliation pass whose on-chain custody did not match the ledger's; the chain role writes it (docs/plan-v1.0.md §6.4.4). A ledger break is one asset whose debits and credits do not agree, found by the admin role checking the ledger against itself; it has an open/resolved state because the condition can end.
+	//
+	// Corresponds with GET /admin/v1/reconciliation/breaks (the `ListReconciliationBreaks` operationId).
+	ListReconciliationBreaks(ctx context.Context, params *ListReconciliationBreaksParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ListReconciliationReports Reconciliation passes, newest first
+	//
+	// Corresponds with GET /admin/v1/reconciliation/reports (the `ListReconciliationReports` operationId).
+	ListReconciliationReports(ctx context.Context, params *ListReconciliationReportsParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// ListSweeps Recent collections into the hot wallet
 	//
 	// Sweeps move deposits from the per-account addresses they landed on to the hot wallet withdrawals are paid from (docs/plan-v1.0.md §6.4.3). No user balance is involved: a sweep moves the exchange's own custody between two of its own house accounts.
@@ -1984,6 +2267,24 @@ type ClientInterface interface {
 	//
 	// Corresponds with POST /admin/v1/webhooks/{id}/deliveries/{delivery_id}/replay (the `ReplayWebhookDelivery` operationId).
 	ReplayWebhookDelivery(ctx context.Context, id WebhookEndpointID, deliveryID WebhookDeliveryID, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// RotateWebhookSecretWithBody Issue a new signing secret and keep the old one for a grace period
+	//
+	// The new secret is in this response and nowhere else. Until previous_secret_until, every delivery carries two signatures, `v1=<new>,v1=<old>`, so a receiver that has switched and one that has not both keep verifying; after it, only the new one signs. Rotating again inside the grace period replaces the old secret: the newest two are the only ones ever valid.
+	//
+	// Takes any type of body and a specified content type.
+	//
+	// Corresponds with POST /admin/v1/webhooks/{id}/rotate-secret (the `RotateWebhookSecret` operationId).
+	RotateWebhookSecretWithBody(ctx context.Context, id WebhookEndpointID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// RotateWebhookSecret Issue a new signing secret and keep the old one for a grace period
+	//
+	// The new secret is in this response and nowhere else. Until previous_secret_until, every delivery carries two signatures, `v1=<new>,v1=<old>`, so a receiver that has switched and one that has not both keep verifying; after it, only the new one signs. Rotating again inside the grace period replaces the old secret: the newest two are the only ones ever valid.
+	//
+	// Takes a body of the `application/json` content type.
+	//
+	// Corresponds with POST /admin/v1/webhooks/{id}/rotate-secret (the `RotateWebhookSecret` operationId).
+	RotateWebhookSecret(ctx context.Context, id WebhookEndpointID, body RotateWebhookSecretJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// SetWebhookEndpointStatusWithBody Enable or disable an endpoint
 	//
@@ -2320,6 +2621,21 @@ func (c *Client) ListAuditEvents(ctx context.Context, params *ListAuditEventsPar
 	return c.Client.Do(req)
 }
 
+// ListDeposits Deposits the chain role has seen, newest first
+//
+// Corresponds with GET /admin/v1/deposits (the `ListDeposits` operationId).
+func (c *Client) ListDeposits(ctx context.Context, params *ListDepositsParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListDepositsRequest(c.Server, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
 // RequestReloadWithBody Ask every engine to reload its registry cache
 //
 // Publishes registry.reload with no row changed: after a seed, or when in doubt. 202: the request is in the outbox; the engine's reload consumer acts on it.
@@ -2435,6 +2751,23 @@ func (c *Client) UpdateFeeScheduleWithBody(ctx context.Context, name FeeSchedule
 // Corresponds with PUT /admin/v1/fee-schedules/{name} (the `UpdateFeeSchedule` operationId).
 func (c *Client) UpdateFeeSchedule(ctx context.Context, name FeeScheduleName, body UpdateFeeScheduleJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewUpdateFeeScheduleRequest(c.Server, name, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// GetHotWallet The hot wallet, as the chain role keeps it
+//
+// Address, next nonce and the low-balance alert state from chain.hot_wallets, with the ledger's custody_hot balance per asset. The chain's own figure is what reconciliation compares that balance to. 404 until the chain role has started once against this chain.
+//
+// Corresponds with GET /admin/v1/hot-wallet (the `GetHotWallet` operationId).
+func (c *Client) GetHotWallet(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetHotWalletRequest(c.Server)
 	if err != nil {
 		return nil, err
 	}
@@ -2772,6 +3105,38 @@ func (c *Client) GetReconciliation(ctx context.Context, reqEditors ...RequestEdi
 	return c.Client.Do(req)
 }
 
+// ListReconciliationBreaks Every break on record, both kinds, newest first
+//
+// Two families with different terms. A chain break is one asset of one reconciliation pass whose on-chain custody did not match the ledger's; the chain role writes it (docs/plan-v1.0.md §6.4.4). A ledger break is one asset whose debits and credits do not agree, found by the admin role checking the ledger against itself; it has an open/resolved state because the condition can end.
+//
+// Corresponds with GET /admin/v1/reconciliation/breaks (the `ListReconciliationBreaks` operationId).
+func (c *Client) ListReconciliationBreaks(ctx context.Context, params *ListReconciliationBreaksParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListReconciliationBreaksRequest(c.Server, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// ListReconciliationReports Reconciliation passes, newest first
+//
+// Corresponds with GET /admin/v1/reconciliation/reports (the `ListReconciliationReports` operationId).
+func (c *Client) ListReconciliationReports(ctx context.Context, params *ListReconciliationReportsParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListReconciliationReportsRequest(c.Server, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
 // ListSweeps Recent collections into the hot wallet
 //
 // Sweeps move deposits from the per-account addresses they landed on to the hot wallet withdrawals are paid from (docs/plan-v1.0.md §6.4.3). No user balance is involved: a sweep moves the exchange's own custody between two of its own house accounts.
@@ -3063,6 +3428,44 @@ func (c *Client) ListWebhookDeliveries(ctx context.Context, id WebhookEndpointID
 // Corresponds with POST /admin/v1/webhooks/{id}/deliveries/{delivery_id}/replay (the `ReplayWebhookDelivery` operationId).
 func (c *Client) ReplayWebhookDelivery(ctx context.Context, id WebhookEndpointID, deliveryID WebhookDeliveryID, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewReplayWebhookDeliveryRequest(c.Server, id, deliveryID)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// RotateWebhookSecretWithBody Issue a new signing secret and keep the old one for a grace period
+//
+// The new secret is in this response and nowhere else. Until previous_secret_until, every delivery carries two signatures, `v1=<new>,v1=<old>`, so a receiver that has switched and one that has not both keep verifying; after it, only the new one signs. Rotating again inside the grace period replaces the old secret: the newest two are the only ones ever valid.
+//
+// Takes any type of body and a specified content type.
+//
+// Corresponds with POST /admin/v1/webhooks/{id}/rotate-secret (the `RotateWebhookSecret` operationId).
+func (c *Client) RotateWebhookSecretWithBody(ctx context.Context, id WebhookEndpointID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewRotateWebhookSecretRequestWithBody(c.Server, id, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// RotateWebhookSecret Issue a new signing secret and keep the old one for a grace period
+//
+// The new secret is in this response and nowhere else. Until previous_secret_until, every delivery carries two signatures, `v1=<new>,v1=<old>`, so a receiver that has switched and one that has not both keep verifying; after it, only the new one signs. Rotating again inside the grace period replaces the old secret: the newest two are the only ones ever valid.
+//
+// Takes a body of the `application/json` content type.
+//
+// Corresponds with POST /admin/v1/webhooks/{id}/rotate-secret (the `RotateWebhookSecret` operationId).
+func (c *Client) RotateWebhookSecret(ctx context.Context, id WebhookEndpointID, body RotateWebhookSecretJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewRotateWebhookSecretRequest(c.Server, id, body)
 	if err != nil {
 		return nil, err
 	}
@@ -3714,6 +4117,120 @@ func NewListAuditEventsRequest(server string, params *ListAuditEventsParams) (*h
 
 		}
 
+		if params.ActorType != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "actor_type", *params.ActorType, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.ActorID != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "actor_id", *params.ActorID, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.Limit != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "limit", *params.Limit, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "integer", Format: "int32"}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.Offset != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "offset", *params.Offset, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "integer", Format: "int32"}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if encoded := queryValues.Encode(); encoded != "" {
+			rawQueryFragments = append(rawQueryFragments, encoded)
+		}
+		queryURL.RawQuery = strings.Join(rawQueryFragments, "&")
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewListDepositsRequest constructs an http.Request for the ListDeposits method
+func NewListDepositsRequest(server string, params *ListDepositsParams) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/admin/v1/deposits")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		// queryValues collects non-styled parameters (passthrough, JSON)
+		// that are safe to round-trip through url.Values.Encode().
+		queryValues := queryURL.Query()
+		// rawQueryFragments collects pre-encoded query fragments from
+		// styled parameters, preserving literal commas as delimiters
+		// per the OpenAPI spec (e.g. "color=blue,black,brown").
+		var rawQueryFragments []string
+
+		if params.Status != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "status", *params.Status, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.Asset != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "asset", *params.Asset, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
 		if params.Limit != nil {
 
 			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "limit", *params.Limit, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "integer", Format: "int32"}); err != nil {
@@ -3902,6 +4419,33 @@ func NewUpdateFeeScheduleRequestWithBody(server string, name FeeScheduleName, co
 	}
 
 	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewGetHotWalletRequest constructs an http.Request for the GetHotWallet method
+func NewGetHotWalletRequest(server string) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/admin/v1/hot-wallet")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
 
 	return req, nil
 }
@@ -4327,6 +4871,138 @@ func NewGetReconciliationRequest(server string) (*http.Request, error) {
 	queryURL, err := serverURL.Parse(operationPath)
 	if err != nil {
 		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewListReconciliationBreaksRequest constructs an http.Request for the ListReconciliationBreaks method
+func NewListReconciliationBreaksRequest(server string, params *ListReconciliationBreaksParams) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/admin/v1/reconciliation/breaks")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		// queryValues collects non-styled parameters (passthrough, JSON)
+		// that are safe to round-trip through url.Values.Encode().
+		queryValues := queryURL.Query()
+		// rawQueryFragments collects pre-encoded query fragments from
+		// styled parameters, preserving literal commas as delimiters
+		// per the OpenAPI spec (e.g. "color=blue,black,brown").
+		var rawQueryFragments []string
+
+		if params.Limit != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "limit", *params.Limit, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "integer", Format: "int32"}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.Offset != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "offset", *params.Offset, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "integer", Format: "int32"}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if encoded := queryValues.Encode(); encoded != "" {
+			rawQueryFragments = append(rawQueryFragments, encoded)
+		}
+		queryURL.RawQuery = strings.Join(rawQueryFragments, "&")
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewListReconciliationReportsRequest constructs an http.Request for the ListReconciliationReports method
+func NewListReconciliationReportsRequest(server string, params *ListReconciliationReportsParams) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/admin/v1/reconciliation/reports")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		// queryValues collects non-styled parameters (passthrough, JSON)
+		// that are safe to round-trip through url.Values.Encode().
+		queryValues := queryURL.Query()
+		// rawQueryFragments collects pre-encoded query fragments from
+		// styled parameters, preserving literal commas as delimiters
+		// per the OpenAPI spec (e.g. "color=blue,black,brown").
+		var rawQueryFragments []string
+
+		if params.Limit != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "limit", *params.Limit, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "integer", Format: "int32"}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.Offset != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "offset", *params.Offset, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "integer", Format: "int32"}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if encoded := queryValues.Encode(); encoded != "" {
+			rawQueryFragments = append(rawQueryFragments, encoded)
+		}
+		queryURL.RawQuery = strings.Join(rawQueryFragments, "&")
 	}
 
 	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
@@ -4876,6 +5552,53 @@ func NewReplayWebhookDeliveryRequest(server string, id WebhookEndpointID, delive
 	return req, nil
 }
 
+// NewRotateWebhookSecretRequest calls the generic RotateWebhookSecret builder with application/json body
+func NewRotateWebhookSecretRequest(server string, id WebhookEndpointID, body RotateWebhookSecretJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewRotateWebhookSecretRequestWithBody(server, id, "application/json", bodyReader)
+}
+
+// NewRotateWebhookSecretRequestWithBody constructs an http.Request for the RotateWebhookSecret method, with any body, and a specified content type
+func NewRotateWebhookSecretRequestWithBody(server string, id WebhookEndpointID, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "id", id, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/admin/v1/webhooks/%s/rotate-secret", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
 // NewSetWebhookEndpointStatusRequest calls the generic SetWebhookEndpointStatus builder with application/json body
 func NewSetWebhookEndpointStatusRequest(server string, id WebhookEndpointID, body SetWebhookEndpointStatusJSONRequestBody) (*http.Request, error) {
 	var bodyReader io.Reader
@@ -5306,6 +6029,13 @@ type ClientWithResponsesInterface interface {
 	// Corresponds with GET /admin/v1/audit-events (the `ListAuditEvents` operationId).
 	ListAuditEventsWithResponse(ctx context.Context, params *ListAuditEventsParams, reqEditors ...RequestEditorFn) (*ListAuditEventsResponse, error)
 
+	// ListDepositsWithResponse Deposits the chain role has seen, newest first
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /admin/v1/deposits (the `ListDeposits` operationId).
+	ListDepositsWithResponse(ctx context.Context, params *ListDepositsParams, reqEditors ...RequestEditorFn) (*ListDepositsResponse, error)
+
 	// RequestReloadWithBodyWithResponse Ask every engine to reload its registry cache
 	//
 	// Publishes registry.reload with no row changed: after a seed, or when in doubt. 202: the request is in the outbox; the engine's reload consumer acts on it.
@@ -5362,6 +6092,15 @@ type ClientWithResponsesInterface interface {
 	//
 	// Corresponds with PUT /admin/v1/fee-schedules/{name} (the `UpdateFeeSchedule` operationId).
 	UpdateFeeScheduleWithResponse(ctx context.Context, name FeeScheduleName, body UpdateFeeScheduleJSONRequestBody, reqEditors ...RequestEditorFn) (*UpdateFeeScheduleResponse, error)
+
+	// GetHotWalletWithResponse The hot wallet, as the chain role keeps it
+	//
+	// Address, next nonce and the low-balance alert state from chain.hot_wallets, with the ledger's custody_hot balance per asset. The chain's own figure is what reconciliation compares that balance to. 404 until the chain role has started once against this chain.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /admin/v1/hot-wallet (the `GetHotWallet` operationId).
+	GetHotWalletWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*GetHotWalletResponse, error)
 
 	// CreateAdjustmentWithBodyWithResponse Post a manual adjustment against the external account
 	//
@@ -5550,6 +6289,22 @@ type ClientWithResponsesInterface interface {
 	// Corresponds with GET /admin/v1/reconciliation (the `GetReconciliation` operationId).
 	GetReconciliationWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*GetReconciliationResponse, error)
 
+	// ListReconciliationBreaksWithResponse Every break on record, both kinds, newest first
+	//
+	// Two families with different terms. A chain break is one asset of one reconciliation pass whose on-chain custody did not match the ledger's; the chain role writes it (docs/plan-v1.0.md §6.4.4). A ledger break is one asset whose debits and credits do not agree, found by the admin role checking the ledger against itself; it has an open/resolved state because the condition can end.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /admin/v1/reconciliation/breaks (the `ListReconciliationBreaks` operationId).
+	ListReconciliationBreaksWithResponse(ctx context.Context, params *ListReconciliationBreaksParams, reqEditors ...RequestEditorFn) (*ListReconciliationBreaksResponse, error)
+
+	// ListReconciliationReportsWithResponse Reconciliation passes, newest first
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /admin/v1/reconciliation/reports (the `ListReconciliationReports` operationId).
+	ListReconciliationReportsWithResponse(ctx context.Context, params *ListReconciliationReportsParams, reqEditors ...RequestEditorFn) (*ListReconciliationReportsResponse, error)
+
 	// ListSweepsWithResponse Recent collections into the hot wallet
 	//
 	// Sweeps move deposits from the per-account addresses they landed on to the hot wallet withdrawals are paid from (docs/plan-v1.0.md §6.4.3). No user balance is involved: a sweep moves the exchange's own custody between two of its own house accounts.
@@ -5714,6 +6469,24 @@ type ClientWithResponsesInterface interface {
 	//
 	// Corresponds with POST /admin/v1/webhooks/{id}/deliveries/{delivery_id}/replay (the `ReplayWebhookDelivery` operationId).
 	ReplayWebhookDeliveryWithResponse(ctx context.Context, id WebhookEndpointID, deliveryID WebhookDeliveryID, reqEditors ...RequestEditorFn) (*ReplayWebhookDeliveryResponse, error)
+
+	// RotateWebhookSecretWithBodyWithResponse Issue a new signing secret and keep the old one for a grace period
+	//
+	// The new secret is in this response and nowhere else. Until previous_secret_until, every delivery carries two signatures, `v1=<new>,v1=<old>`, so a receiver that has switched and one that has not both keep verifying; after it, only the new one signs. Rotating again inside the grace period replaces the old secret: the newest two are the only ones ever valid.
+	//
+	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /admin/v1/webhooks/{id}/rotate-secret (the `RotateWebhookSecret` operationId).
+	RotateWebhookSecretWithBodyWithResponse(ctx context.Context, id WebhookEndpointID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*RotateWebhookSecretResponse, error)
+
+	// RotateWebhookSecretWithResponse Issue a new signing secret and keep the old one for a grace period
+	//
+	// The new secret is in this response and nowhere else. Until previous_secret_until, every delivery carries two signatures, `v1=<new>,v1=<old>`, so a receiver that has switched and one that has not both keep verifying; after it, only the new one signs. Rotating again inside the grace period replaces the old secret: the newest two are the only ones ever valid.
+	//
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /admin/v1/webhooks/{id}/rotate-secret (the `RotateWebhookSecret` operationId).
+	RotateWebhookSecretWithResponse(ctx context.Context, id WebhookEndpointID, body RotateWebhookSecretJSONRequestBody, reqEditors ...RequestEditorFn) (*RotateWebhookSecretResponse, error)
 
 	// SetWebhookEndpointStatusWithBodyWithResponse Enable or disable an endpoint
 	//
@@ -6436,6 +7209,61 @@ func (r ListAuditEventsResponse) ContentType() string {
 	return ""
 }
 
+type ListDepositsResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *AdminDepositList
+	// ApplicationProblemJSON401 the response for an HTTP 401 `application/problem+json` response
+	ApplicationProblemJSON401 *Unauthorized
+	// ApplicationProblemJSON500 the response for an HTTP 500 `application/problem+json` response
+	ApplicationProblemJSON500 *InternalError
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r ListDepositsResponse) GetJSON200() *AdminDepositList {
+	return r.JSON200
+}
+
+// GetApplicationProblemJSON401 returns the response for an HTTP 401 `application/problem+json` response
+func (r ListDepositsResponse) GetApplicationProblemJSON401() *Unauthorized {
+	return r.ApplicationProblemJSON401
+}
+
+// GetApplicationProblemJSON500 returns the response for an HTTP 500 `application/problem+json` response
+func (r ListDepositsResponse) GetApplicationProblemJSON500() *InternalError {
+	return r.ApplicationProblemJSON500
+}
+
+// GetBody returns the raw response body bytes
+func (r ListDepositsResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r ListDepositsResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListDepositsResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r ListDepositsResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
 type RequestReloadResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -6685,6 +7513,68 @@ func (r UpdateFeeScheduleResponse) StatusCode() int {
 
 // ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
 func (r UpdateFeeScheduleResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type GetHotWalletResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *HotWallet
+	// ApplicationProblemJSON401 the response for an HTTP 401 `application/problem+json` response
+	ApplicationProblemJSON401 *Unauthorized
+	// ApplicationProblemJSON404 the response for an HTTP 404 `application/problem+json` response
+	ApplicationProblemJSON404 *NotFound
+	// ApplicationProblemJSON500 the response for an HTTP 500 `application/problem+json` response
+	ApplicationProblemJSON500 *InternalError
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r GetHotWalletResponse) GetJSON200() *HotWallet {
+	return r.JSON200
+}
+
+// GetApplicationProblemJSON401 returns the response for an HTTP 401 `application/problem+json` response
+func (r GetHotWalletResponse) GetApplicationProblemJSON401() *Unauthorized {
+	return r.ApplicationProblemJSON401
+}
+
+// GetApplicationProblemJSON404 returns the response for an HTTP 404 `application/problem+json` response
+func (r GetHotWalletResponse) GetApplicationProblemJSON404() *NotFound {
+	return r.ApplicationProblemJSON404
+}
+
+// GetApplicationProblemJSON500 returns the response for an HTTP 500 `application/problem+json` response
+func (r GetHotWalletResponse) GetApplicationProblemJSON500() *InternalError {
+	return r.ApplicationProblemJSON500
+}
+
+// GetBody returns the raw response body bytes
+func (r GetHotWalletResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r GetHotWalletResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetHotWalletResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r GetHotWalletResponse) ContentType() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Header.Get("Content-Type")
 	}
@@ -7340,6 +8230,116 @@ func (r GetReconciliationResponse) StatusCode() int {
 
 // ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
 func (r GetReconciliationResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type ListReconciliationBreaksResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *ReconciliationBreaks
+	// ApplicationProblemJSON401 the response for an HTTP 401 `application/problem+json` response
+	ApplicationProblemJSON401 *Unauthorized
+	// ApplicationProblemJSON500 the response for an HTTP 500 `application/problem+json` response
+	ApplicationProblemJSON500 *InternalError
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r ListReconciliationBreaksResponse) GetJSON200() *ReconciliationBreaks {
+	return r.JSON200
+}
+
+// GetApplicationProblemJSON401 returns the response for an HTTP 401 `application/problem+json` response
+func (r ListReconciliationBreaksResponse) GetApplicationProblemJSON401() *Unauthorized {
+	return r.ApplicationProblemJSON401
+}
+
+// GetApplicationProblemJSON500 returns the response for an HTTP 500 `application/problem+json` response
+func (r ListReconciliationBreaksResponse) GetApplicationProblemJSON500() *InternalError {
+	return r.ApplicationProblemJSON500
+}
+
+// GetBody returns the raw response body bytes
+func (r ListReconciliationBreaksResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r ListReconciliationBreaksResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListReconciliationBreaksResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r ListReconciliationBreaksResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type ListReconciliationReportsResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *ReconciliationReportList
+	// ApplicationProblemJSON401 the response for an HTTP 401 `application/problem+json` response
+	ApplicationProblemJSON401 *Unauthorized
+	// ApplicationProblemJSON500 the response for an HTTP 500 `application/problem+json` response
+	ApplicationProblemJSON500 *InternalError
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r ListReconciliationReportsResponse) GetJSON200() *ReconciliationReportList {
+	return r.JSON200
+}
+
+// GetApplicationProblemJSON401 returns the response for an HTTP 401 `application/problem+json` response
+func (r ListReconciliationReportsResponse) GetApplicationProblemJSON401() *Unauthorized {
+	return r.ApplicationProblemJSON401
+}
+
+// GetApplicationProblemJSON500 returns the response for an HTTP 500 `application/problem+json` response
+func (r ListReconciliationReportsResponse) GetApplicationProblemJSON500() *InternalError {
+	return r.ApplicationProblemJSON500
+}
+
+// GetBody returns the raw response body bytes
+func (r ListReconciliationReportsResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r ListReconciliationReportsResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListReconciliationReportsResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r ListReconciliationReportsResponse) ContentType() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Header.Get("Content-Type")
 	}
@@ -8035,6 +9035,75 @@ func (r ReplayWebhookDeliveryResponse) ContentType() string {
 	return ""
 }
 
+type RotateWebhookSecretResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *RotatedWebhookSecret
+	// ApplicationProblemJSON400 the response for an HTTP 400 `application/problem+json` response
+	ApplicationProblemJSON400 *BadRequest
+	// ApplicationProblemJSON401 the response for an HTTP 401 `application/problem+json` response
+	ApplicationProblemJSON401 *Unauthorized
+	// ApplicationProblemJSON404 the response for an HTTP 404 `application/problem+json` response
+	ApplicationProblemJSON404 *NotFound
+	// ApplicationProblemJSON500 the response for an HTTP 500 `application/problem+json` response
+	ApplicationProblemJSON500 *InternalError
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r RotateWebhookSecretResponse) GetJSON200() *RotatedWebhookSecret {
+	return r.JSON200
+}
+
+// GetApplicationProblemJSON400 returns the response for an HTTP 400 `application/problem+json` response
+func (r RotateWebhookSecretResponse) GetApplicationProblemJSON400() *BadRequest {
+	return r.ApplicationProblemJSON400
+}
+
+// GetApplicationProblemJSON401 returns the response for an HTTP 401 `application/problem+json` response
+func (r RotateWebhookSecretResponse) GetApplicationProblemJSON401() *Unauthorized {
+	return r.ApplicationProblemJSON401
+}
+
+// GetApplicationProblemJSON404 returns the response for an HTTP 404 `application/problem+json` response
+func (r RotateWebhookSecretResponse) GetApplicationProblemJSON404() *NotFound {
+	return r.ApplicationProblemJSON404
+}
+
+// GetApplicationProblemJSON500 returns the response for an HTTP 500 `application/problem+json` response
+func (r RotateWebhookSecretResponse) GetApplicationProblemJSON500() *InternalError {
+	return r.ApplicationProblemJSON500
+}
+
+// GetBody returns the raw response body bytes
+func (r RotateWebhookSecretResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r RotateWebhookSecretResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r RotateWebhookSecretResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r RotateWebhookSecretResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
 type SetWebhookEndpointStatusResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -8629,6 +9698,19 @@ func (c *ClientWithResponses) ListAuditEventsWithResponse(ctx context.Context, p
 	return ParseListAuditEventsResponse(rsp)
 }
 
+// ListDepositsWithResponse Deposits the chain role has seen, newest first
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /admin/v1/deposits (the `ListDeposits` operationId).
+func (c *ClientWithResponses) ListDepositsWithResponse(ctx context.Context, params *ListDepositsParams, reqEditors ...RequestEditorFn) (*ListDepositsResponse, error) {
+	rsp, err := c.ListDeposits(ctx, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListDepositsResponse(rsp)
+}
+
 // RequestReloadWithBodyWithResponse Ask every engine to reload its registry cache
 //
 // Publishes registry.reload with no row changed: after a seed, or when in doubt. 202: the request is in the outbox; the engine's reload consumer acts on it.
@@ -8726,6 +9808,21 @@ func (c *ClientWithResponses) UpdateFeeScheduleWithResponse(ctx context.Context,
 		return nil, err
 	}
 	return ParseUpdateFeeScheduleResponse(rsp)
+}
+
+// GetHotWalletWithResponse The hot wallet, as the chain role keeps it
+//
+// Address, next nonce and the low-balance alert state from chain.hot_wallets, with the ledger's custody_hot balance per asset. The chain's own figure is what reconciliation compares that balance to. 404 until the chain role has started once against this chain.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /admin/v1/hot-wallet (the `GetHotWallet` operationId).
+func (c *ClientWithResponses) GetHotWalletWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*GetHotWalletResponse, error) {
+	rsp, err := c.GetHotWallet(ctx, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetHotWalletResponse(rsp)
 }
 
 // CreateAdjustmentWithBodyWithResponse Post a manual adjustment against the external account
@@ -9005,6 +10102,34 @@ func (c *ClientWithResponses) GetReconciliationWithResponse(ctx context.Context,
 	return ParseGetReconciliationResponse(rsp)
 }
 
+// ListReconciliationBreaksWithResponse Every break on record, both kinds, newest first
+//
+// Two families with different terms. A chain break is one asset of one reconciliation pass whose on-chain custody did not match the ledger's; the chain role writes it (docs/plan-v1.0.md §6.4.4). A ledger break is one asset whose debits and credits do not agree, found by the admin role checking the ledger against itself; it has an open/resolved state because the condition can end.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /admin/v1/reconciliation/breaks (the `ListReconciliationBreaks` operationId).
+func (c *ClientWithResponses) ListReconciliationBreaksWithResponse(ctx context.Context, params *ListReconciliationBreaksParams, reqEditors ...RequestEditorFn) (*ListReconciliationBreaksResponse, error) {
+	rsp, err := c.ListReconciliationBreaks(ctx, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListReconciliationBreaksResponse(rsp)
+}
+
+// ListReconciliationReportsWithResponse Reconciliation passes, newest first
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /admin/v1/reconciliation/reports (the `ListReconciliationReports` operationId).
+func (c *ClientWithResponses) ListReconciliationReportsWithResponse(ctx context.Context, params *ListReconciliationReportsParams, reqEditors ...RequestEditorFn) (*ListReconciliationReportsResponse, error) {
+	rsp, err := c.ListReconciliationReports(ctx, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListReconciliationReportsResponse(rsp)
+}
+
 // ListSweepsWithResponse Recent collections into the hot wallet
 //
 // Sweeps move deposits from the per-account addresses they landed on to the hot wallet withdrawals are paid from (docs/plan-v1.0.md §6.4.3). No user balance is involved: a sweep moves the exchange's own custody between two of its own house accounts.
@@ -9258,6 +10383,36 @@ func (c *ClientWithResponses) ReplayWebhookDeliveryWithResponse(ctx context.Cont
 		return nil, err
 	}
 	return ParseReplayWebhookDeliveryResponse(rsp)
+}
+
+// RotateWebhookSecretWithBodyWithResponse Issue a new signing secret and keep the old one for a grace period
+//
+// The new secret is in this response and nowhere else. Until previous_secret_until, every delivery carries two signatures, `v1=<new>,v1=<old>`, so a receiver that has switched and one that has not both keep verifying; after it, only the new one signs. Rotating again inside the grace period replaces the old secret: the newest two are the only ones ever valid.
+//
+// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /admin/v1/webhooks/{id}/rotate-secret (the `RotateWebhookSecret` operationId).
+func (c *ClientWithResponses) RotateWebhookSecretWithBodyWithResponse(ctx context.Context, id WebhookEndpointID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*RotateWebhookSecretResponse, error) {
+	rsp, err := c.RotateWebhookSecretWithBody(ctx, id, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseRotateWebhookSecretResponse(rsp)
+}
+
+// RotateWebhookSecretWithResponse Issue a new signing secret and keep the old one for a grace period
+//
+// The new secret is in this response and nowhere else. Until previous_secret_until, every delivery carries two signatures, `v1=<new>,v1=<old>`, so a receiver that has switched and one that has not both keep verifying; after it, only the new one signs. Rotating again inside the grace period replaces the old secret: the newest two are the only ones ever valid.
+//
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /admin/v1/webhooks/{id}/rotate-secret (the `RotateWebhookSecret` operationId).
+func (c *ClientWithResponses) RotateWebhookSecretWithResponse(ctx context.Context, id WebhookEndpointID, body RotateWebhookSecretJSONRequestBody, reqEditors ...RequestEditorFn) (*RotateWebhookSecretResponse, error) {
+	rsp, err := c.RotateWebhookSecret(ctx, id, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseRotateWebhookSecretResponse(rsp)
 }
 
 // SetWebhookEndpointStatusWithBodyWithResponse Enable or disable an endpoint
@@ -9890,6 +11045,46 @@ func ParseListAuditEventsResponse(rsp *http.Response) (*ListAuditEventsResponse,
 	return response, nil
 }
 
+// ParseListDepositsResponse parses an HTTP response from a ListDepositsWithResponse call
+func ParseListDepositsResponse(rsp *http.Response) (*ListDepositsResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListDepositsResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest AdminDepositList
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON500 = &dest
+
+	}
+
+	return response, nil
+}
+
 // ParseRequestReloadResponse parses an HTTP response from a RequestReloadWithResponse call
 func ParseRequestReloadResponse(rsp *http.Response) (*RequestReloadResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
@@ -10058,6 +11253,53 @@ func ParseUpdateFeeScheduleResponse(rsp *http.Response) (*UpdateFeeScheduleRespo
 			return nil, err
 		}
 		response.ApplicationProblemJSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON500 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetHotWalletResponse parses an HTTP response from a GetHotWalletWithResponse call
+func ParseGetHotWalletResponse(rsp *http.Response) (*GetHotWalletResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetHotWalletResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest HotWallet
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
 		var dest Unauthorized
@@ -10590,6 +11832,86 @@ func ParseGetReconciliationResponse(rsp *http.Response) (*GetReconciliationRespo
 	return response, nil
 }
 
+// ParseListReconciliationBreaksResponse parses an HTTP response from a ListReconciliationBreaksWithResponse call
+func ParseListReconciliationBreaksResponse(rsp *http.Response) (*ListReconciliationBreaksResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListReconciliationBreaksResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest ReconciliationBreaks
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON500 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseListReconciliationReportsResponse parses an HTTP response from a ListReconciliationReportsWithResponse call
+func ParseListReconciliationReportsResponse(rsp *http.Response) (*ListReconciliationReportsResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListReconciliationReportsResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest ReconciliationReportList
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON500 = &dest
+
+	}
+
+	return response, nil
+}
+
 // ParseListSweepsResponse parses an HTTP response from a ListSweepsWithResponse call
 func ParseListSweepsResponse(rsp *http.Response) (*ListSweepsResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
@@ -11101,6 +12423,60 @@ func ParseReplayWebhookDeliveryResponse(rsp *http.Response) (*ReplayWebhookDeliv
 			return nil, err
 		}
 		response.ApplicationProblemJSON409 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON500 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseRotateWebhookSecretResponse parses an HTTP response from a RotateWebhookSecretWithResponse call
+func ParseRotateWebhookSecretResponse(rsp *http.Response) (*RotateWebhookSecretResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &RotateWebhookSecretResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest RotatedWebhookSecret
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest BadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON404 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
 		var dest InternalError

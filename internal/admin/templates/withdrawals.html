@@ -1,0 +1,56 @@
+{{define "content"}}
+<h1>Withdrawals</h1>
+{{with .Data}}
+<section id="list">
+<h2>Waiting for review</h2>
+<table>
+  <thead><tr><th>Requested</th><th>Account</th><th class="num">Amount</th><th>To</th><th>Decision</th></tr></thead>
+  <tbody>
+  {{range .Pending}}
+  <tr>
+    <td>{{when .CreatedAt}}<br><a class="mono muted" href="/admin/withdrawals?id={{.ID}}">{{.ID}}</a></td>
+    <td><a class="mono" href="/admin/ledger?account_id={{.AccountID}}">{{.AccountID}}</a></td>
+    <td class="num">{{amount .Amount}} {{.Asset}}</td>
+    <td class="mono">{{.ToAddress}}</td>
+    <td>
+      <form method="post" action="/admin/withdrawals/{{.ID}}/review" class="inline">
+        <input type="text" name="note" placeholder="note (required to reject)">
+        <button type="submit" name="decision" value="approve">Approve</button>
+        <button type="submit" name="decision" value="reject" class="danger">Reject</button>
+      </form>
+    </td>
+  </tr>
+  {{else}}
+  <tr><td colspan="5" class="muted">Nothing waiting. Withdrawals within the auto-approve limit never come here.</td></tr>
+  {{end}}
+  </tbody>
+</table>
+</section>
+<section class="card">
+  <h2>One withdrawal</h2>
+  <form method="get" action="/admin/withdrawals" class="row">
+    <label>Withdrawal id <input type="text" name="id" value="{{.Lookup}}" class="mono" placeholder="uuid"></label>
+    <button type="submit" class="quiet">Show</button>
+  </form>
+  {{with .Selected}}
+  <dl class="kv">
+    <dt>ID</dt><dd class="mono">{{.ID}}</dd>
+    <dt>Status</dt><dd><span class="badge {{badge .Status}}">{{.Status}}</span>{{if .FailureReason}} <span class="muted">{{.FailureReason}}</span>{{end}}</dd>
+    <dt>Account</dt><dd><a class="mono" href="/admin/ledger?account_id={{.AccountID}}">{{.AccountID}}</a></dd>
+    <dt>Amount</dt><dd>{{amount .Amount}} {{.Asset}} to <span class="mono">{{.ToAddress}}</span> on chain {{.ChainID}}</dd>
+    <dt>Review</dt><dd>{{if .ReviewedAt}}{{whenp .ReviewedAt}}{{if .ReviewedBy}} by <span class="mono">{{.ReviewedBy}}</span>{{end}}{{if .ReviewNote}}: {{.ReviewNote}}{{end}}{{else}}<span class="muted">none</span>{{end}}</dd>
+    <dt>Transaction</dt><dd>{{if .TxHash}}<span class="mono">{{.TxHash}}</span>{{else}}<span class="muted">none yet</span>{{end}}</dd>
+    <dt>Resolution</dt><dd>{{if .ResolveAction}}<span class="badge warn">{{.ResolveAction}} requested</span>{{if .ResolveError}} <span class="muted">last attempt: {{.ResolveError}}</span>{{end}}{{else}}<span class="muted">none requested</span>{{end}}</dd>
+    <dt>Updated</dt><dd>{{when .UpdatedAt}}</dd>
+  </dl>
+  <h3>Resolve</h3>
+  <p class="muted">Records what the chain role should do on its next tick; nothing is signed here. Bump and cancel apply to a transaction in flight, refund and retry to one that reverted.</p>
+  <form method="post" action="/admin/withdrawals/{{.ID}}/resolve" class="row">
+    <label>Action <select name="action">{{range $.Data.Actions}}<option value="{{.}}">{{.}}</option>{{end}}</select></label>
+    <label>Note <input type="text" name="note" required placeholder="why; recorded in the audit trail"></label>
+    <button type="submit" class="danger">Request</button>
+  </form>
+  {{end}}
+</section>
+{{end}}
+{{end}}

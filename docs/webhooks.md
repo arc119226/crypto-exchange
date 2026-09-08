@@ -155,3 +155,30 @@ ones, so a replay can never be a rewrite.
 A replay is refused if the event is still queued for you (the schedule is
 going to send it anyway) or if the endpoint is disabled (nothing would pick
 the work up).
+
+## Rotating the secret
+
+```sh
+exchangectl admin webhooks rotate-secret <endpoint-id> --grace-hours 24 --reason 'quarterly rotation'
+```
+
+`POST /admin/v1/webhooks/{id}/rotate-secret` issues a new secret and prints
+it once, like the create did. Nothing has to happen at the same instant on
+your side: for the grace period (24 hours by default, up to a week) every
+delivery carries **two** signatures,
+
+```
+X-Exchange-Signature: v1=<with the new secret>,v1=<with the old secret>
+```
+
+and a receiver that verifies with either passes. That is why the header has
+always been described as "one or more `v1=` values, any of which may match":
+verify against each `v1=` you find and accept the delivery if any one of them
+matches. A receiver that compares the whole header string, or only the first
+value, breaks on the day of a rotation.
+
+When the grace period ends the old secret stops signing and deliveries go
+back to a single `v1=`. Rotating again inside the grace period replaces the
+old secret rather than adding a third: the newest two are the only secrets
+ever valid. The audit trail records who rotated and until when the old secret
+signs, and never a secret.

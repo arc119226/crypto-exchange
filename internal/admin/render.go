@@ -3,6 +3,7 @@ package admin
 import (
 	"embed"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"html/template"
 	"io/fs"
@@ -90,6 +91,23 @@ var funcs = template.FuncMap{
 	},
 	"marketForm": func(m registry.Market, d marketsData) marketFormData {
 		return marketFormData{Market: m, FeeSchedules: d.FeeSchedules, Statuses: d.Statuses, Policies: d.Policies}
+	},
+	// jsonc renders a stored JSON document, or a map the audit trail kept,
+	// compactly on one line.
+	"jsonc": func(v any) string {
+		switch x := v.(type) {
+		case nil:
+			return ""
+		case json.RawMessage:
+			return string(x)
+		case []byte:
+			return string(x)
+		}
+		b, err := json.Marshal(v)
+		if err != nil {
+			return "?"
+		}
+		return string(b)
 	},
 	"active": func(path, prefix string) string {
 		if prefix == HomePath && path == HomePath || prefix != HomePath && strings.HasPrefix(path, prefix) {
@@ -244,3 +262,30 @@ type marketFormData struct {
 	Statuses     []string
 	Policies     []string
 }
+
+// keepQuery copies the named filters out of a page's query so paging links
+// keep them.
+func keepQuery(q url.Values, names ...string) url.Values {
+	keep := url.Values{}
+	for _, k := range names {
+		if v := q.Get(k); v != "" {
+			keep.Set(k, v)
+		}
+	}
+	return keep
+}
+
+// sentence turns a domain error into a flash: the package prefix goes, the
+// first letter goes up, a full stop goes on.
+func sentence(err error) string {
+	msg := err.Error()
+	if i := strings.Index(msg, ": "); i > 0 && !strings.Contains(msg[:i], " ") {
+		msg = msg[i+2:]
+	}
+	if msg == "" {
+		return "Refused."
+	}
+	return strings.ToUpper(msg[:1]) + msg[1:] + "."
+}
+
+func itoa64(n int64) string { return strconv.FormatInt(n, 10) }

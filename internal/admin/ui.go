@@ -40,6 +40,7 @@ type UI struct {
 	cfg      UIConfig
 	tpl      *templates
 	metrics  *uiMetrics
+	reveals  revealStash
 }
 
 // NewUI parses the templates and wires the pages to the handler whose writes
@@ -117,6 +118,21 @@ func (u *UI) mount(r chi.Router) {
 			admin.Get("/admin/withdrawal-limits", u.withdrawalLimits)
 			admin.Post("/admin/withdrawal-limits", u.setWithdrawalLimitPage)
 			admin.Post("/admin/withdrawal-limits/{asset}", u.setWithdrawalLimitPage)
+			admin.Get("/admin/ledger", u.ledger)
+			admin.Post("/admin/ledger/adjustments", u.createAdjustment)
+			admin.Post("/admin/ledger/house-adjustments", u.createHouseAdjustment)
+			admin.Get("/admin/withdrawals", u.withdrawals)
+			admin.Post("/admin/withdrawals/{id}/review", u.reviewWithdrawalPage)
+			admin.Post("/admin/withdrawals/{id}/resolve", u.resolveWithdrawalPage)
+			admin.Get("/admin/chain", u.chain)
+			admin.Get("/admin/reconciliation", u.reconciliation)
+			admin.Get("/admin/audit", u.audit)
+			admin.Get("/admin/webhooks", u.webhooks)
+			admin.Post("/admin/webhooks", u.createWebhook)
+			admin.Post("/admin/webhooks/{id}", u.updateWebhook)
+			admin.Post("/admin/webhooks/{id}/status", u.setWebhookStatus)
+			admin.Post("/admin/webhooks/{id}/rotate-secret", u.rotateWebhookSecretPage)
+			admin.Post("/admin/webhooks/{id}/deliveries/{delivery_id}/replay", u.replayWebhookPage)
 		})
 	})
 }

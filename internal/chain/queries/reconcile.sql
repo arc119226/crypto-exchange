@@ -135,3 +135,17 @@ UPDATE chain.nonce_fills
 SET status = $4, block_number = $5, gas_cost = $6, updated_at = now()
 WHERE tenant_id = $1 AND chain_id = $2 AND nonce = $3
 RETURNING *;
+
+-- name: ListReconciliationReports :many
+SELECT * FROM admin.reconciliation_reports
+WHERE tenant_id = $1 AND chain_id = $2
+ORDER BY finished_at DESC
+LIMIT $3 OFFSET $4;
+
+-- name: ListReconciliationBreaksForTenant :many
+-- Every break on record, newest first, for the back office; the per-report
+-- read above is what the pass itself uses.
+SELECT * FROM admin.reconciliation_breaks
+WHERE tenant_id = $1 AND chain_id = $2
+ORDER BY created_at DESC, asset
+LIMIT $3 OFFSET $4;

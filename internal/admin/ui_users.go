@@ -11,9 +11,11 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/arc119226/crypto-exchange/internal/auth"
+	"github.com/arc119226/crypto-exchange/internal/chain/withdrawal"
 	"github.com/arc119226/crypto-exchange/internal/ledger"
 	"github.com/arc119226/crypto-exchange/internal/registry"
 	"github.com/arc119226/crypto-exchange/internal/telemetry"
+	"github.com/arc119226/crypto-exchange/internal/webhook"
 )
 
 // The people. A list to find one, a page to read one and change the two
@@ -143,7 +145,9 @@ func (u *UI) bounce(w http.ResponseWriter, r *http.Request, back, text string) {
 func (u *UI) done(w http.ResponseWriter, r *http.Request, back string, err error, ok string) {
 	switch {
 	case err == nil:
-		setFlash(w, "ok", ok)
+		if ok != "" {
+			setFlash(w, "ok", ok)
+		}
 	case errors.Is(err, auth.ErrNotFound):
 		setFlash(w, "err", "That user no longer exists.")
 		back = "/admin/users"
@@ -157,6 +161,16 @@ func (u *UI) done(w http.ResponseWriter, r *http.Request, back string, err error
 		setFlash(w, "err", strings.TrimPrefix(err.Error(), "registry: not found: ")+" does not exist.")
 	case errors.Is(err, registry.ErrInvalid):
 		setFlash(w, "err", strings.TrimPrefix(err.Error(), "registry: invalid input: ")+".")
+	case errors.Is(err, ledger.ErrAccountNotFound):
+		setFlash(w, "err", "That account does not exist.")
+	case errors.Is(err, ledger.ErrInvalidEntry), errors.Is(err, withdrawal.ErrInvalid), errors.Is(err, webhook.ErrInvalid),
+		errors.Is(err, withdrawal.ErrNotReviewable), errors.Is(err, withdrawal.ErrNotResolvable),
+		errors.Is(err, webhook.ErrDisabled), errors.Is(err, webhook.ErrQueued):
+		setFlash(w, "err", sentence(err))
+	case errors.Is(err, withdrawal.ErrNotFound):
+		setFlash(w, "err", "That withdrawal does not exist.")
+	case errors.Is(err, webhook.ErrNotFound):
+		setFlash(w, "err", "That webhook endpoint or delivery does not exist.")
 	default:
 		telemetry.Logger(r.Context()).Error("admin: write failed", "path", r.URL.Path, "err", err.Error())
 		setFlash(w, "err", "Something went wrong; nothing was changed.")
