@@ -29,6 +29,14 @@ type Config struct {
 	RefreshTTL time.Duration // default 7 days
 	MasterKey  []byte        // AES-256 key for API secrets (ParseMasterKey)
 	Password   PasswordParams
+	// TOTPKey seals administrators' TOTP secrets (ADMIN_TOTP_KEY). A different
+	// key from MasterKey: that one opens every API-key secret, and the admin
+	// role has no reason to hold it.
+	TOTPKey []byte
+	// AdminSessionTTL is the life of a verified back-office session; default
+	// 8 hours. The password-only session before the code is fixed at ten
+	// minutes.
+	AdminSessionTTL time.Duration
 }
 
 func (c Config) withDefaults() Config {
@@ -47,19 +55,24 @@ func (c Config) withDefaults() Config {
 	if c.Password == (PasswordParams{}) {
 		c.Password = DefaultPasswordParams
 	}
+	if c.AdminSessionTTL <= 0 {
+		c.AdminSessionTTL = 8 * time.Hour
+	}
 	return c
 }
 
 // User is a row of auth.users without the password hash.
 type User struct {
-	ID        string
-	TenantID  string
-	Email     string
-	Role      string
-	KYCLevel  int
-	Status    string
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	ID       string
+	TenantID string
+	Email    string
+	Role     string
+	KYCLevel int
+	Status   string
+	// TOTPEnabled is only ever true for administrators.
+	TOTPEnabled bool
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
 }
 
 // Session is what register / login / refresh return.
@@ -117,6 +130,9 @@ func New(pool *pgxpool.Pool, cfg Config, signer *Signer, verifier *Verifier, l *
 	cfg = cfg.withDefaults()
 	if len(cfg.MasterKey) != 0 && len(cfg.MasterKey) != MasterKeyLen {
 		return nil, errors.New("auth: master key must be 32 bytes (API_KEY_MASTER_KEY)")
+	}
+	if len(cfg.TOTPKey) != 0 && len(cfg.TOTPKey) != MasterKeyLen {
+		return nil, errors.New("auth: totp key must be 32 bytes (ADMIN_TOTP_KEY)")
 	}
 	dummy, err := HashPassword("timing-equaliser-password", cfg.Password)
 	if err != nil {
@@ -218,6 +234,12 @@ func (s *Service) Login(ctx context.Context, email, password, ip string) (Sessio
 		return Session{}, ErrInvalidCredentials
 	}
 	u := userFromRow(row)
+	// After the password, not before: a frozen user's wrong password is still
+	// a wrong password, and saying "frozen" to it would confirm the account.
+	if u.Status != StatusActive {
+		_ = s.audit.Record(ctx, s.pool, audit.Event{ActorType: audit.ActorUser, ActorID: u.ID, Action: "auth.login.failed", TargetType: "user", TargetID: u.ID, IP: ip, After: map[string]any{"reason": "user " + u.Status}})
+		return Session{}, ErrUserFrozen
+	}
 	acct, err := s.ledger.SpotAccountOf(ctx, s.pool, u.ID)
 	if err != nil {
 		return Session{}, err
@@ -272,6 +294,9 @@ func (s *Service) Refresh(ctx context.Context, refreshToken string) (Session, er
 		return Session{}, fmt.Errorf("auth: get user: %w", err)
 	}
 	u := userFromRow(urow)
+	if u.Status != StatusActive {
+		return Session{}, ErrUserFrozen
+	}
 	acct, err := s.ledger.SpotAccountOf(ctx, s.pool, u.ID)
 	if err != nil {
 		return Session{}, err
@@ -487,6 +512,9 @@ func (s *Service) VerifyAPIKeyRequest(ctx context.Context, r APIKeyRequest) (Pri
 	if err != nil {
 		return Principal{}, fmt.Errorf("auth: get user: %w", err)
 	}
+	if urow.Status != StatusActive {
+		return Principal{}, ErrUserFrozen
+	}
 	acct, err := s.ledger.SpotAccountOf(ctx, s.pool, row.UserID)
 	if err != nil {
 		return Principal{}, err
@@ -588,7 +616,7 @@ func hashToken(raw string) []byte {
 }
 
 func userFromRow(r sqlcgen.AuthUser) User {
-	return User{ID: r.ID, TenantID: r.TenantID, Email: r.Email, Role: r.Role, KYCLevel: int(r.KycLevel), Status: r.Status, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt}
+	return User{ID: r.ID, TenantID: r.TenantID, Email: r.Email, Role: r.Role, KYCLevel: int(r.KycLevel), Status: r.Status, TOTPEnabled: r.TotpEnabled, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt}
 }
 
 func apiKeyFromRow(r sqlcgen.AuthApiKey) APIKey {

@@ -91,12 +91,48 @@ type RateLimitConfig struct {
 	OrdersPerAccount string `env:"ORDERS_PER_ACCOUNT" envDefault:"20/1s"`
 }
 
-// AdminConfig configures the operator API (admin role). APIKey is the static
-// key of Phase 2–4 (docs/plan-v1.0.md §14); Phase 5 adds sessions + TOTP.
+// AdminConfig configures the admin role: the static API key that machine
+// integrations present (docs/plan-v1.0.md §14; scoped, HMAC-signed admin keys
+// are not built yet), and the browser back office, where a person logs in
+// with a password and a TOTP code and holds a server-side session.
 type AdminConfig struct {
 	APIKey            telemetry.Secret `env:"API_KEY"`
 	BootstrapEmail    string           `env:"BOOTSTRAP_EMAIL"`
 	BootstrapPassword telemetry.Secret `env:"BOOTSTRAP_PASSWORD"`
+	// TOTPKey (ADMIN_TOTP_KEY, 32 bytes hex) seals administrators' TOTP
+	// secrets at rest. Deliberately not API_KEY_MASTER_KEY: that key opens
+	// every API-key secret, and the admin role has no reason to hold it.
+	TOTPKey telemetry.Secret `env:"TOTP_KEY"`
+	// SessionTTL is the life of a verified back-office session.
+	SessionTTL time.Duration `env:"SESSION_TTL" envDefault:"8h"`
+	// CookieSecure is "true", "false", or "" for "everywhere but dev". The
+	// admin listener has no TLS of its own, so "when the connection is TLS"
+	// would never fire; the flag says what the deployment in front of it does.
+	CookieSecure string `env:"COOKIE_SECURE" envDefault:""`
+}
+
+// TOTPMaster decodes TOTPKey. Empty is not an error here: only the admin role
+// needs it, and Run refuses to start that role without one.
+func (a AdminConfig) TOTPMaster() ([]byte, error) {
+	if !a.TOTPKey.IsSet() {
+		return nil, nil
+	}
+	k, err := hex.DecodeString(strings.TrimSpace(a.TOTPKey.Reveal()))
+	if err != nil || len(k) != secretbox.KeySize {
+		return nil, fmt.Errorf("config: ADMIN_TOTP_KEY must be %d bytes hex-encoded", secretbox.KeySize)
+	}
+	return k, nil
+}
+
+// SecureCookies reports whether the session cookie carries the Secure flag.
+func (c Config) SecureCookies() bool {
+	switch strings.ToLower(c.Admin.CookieSecure) {
+	case "true":
+		return true
+	case "false":
+		return false
+	}
+	return c.Env != "dev"
 }
 
 // DBConfig configures the Postgres pool. URL is required for every role.
@@ -266,6 +302,7 @@ var secretsWithFileVariant = []string{
 	"WEBHOOK_SIGNING_KEY",
 	"ADMIN_BOOTSTRAP_PASSWORD",
 	"ADMIN_API_KEY",
+	"ADMIN_TOTP_KEY",
 	"API_KEY_MASTER_KEY",
 }
 
@@ -405,6 +442,17 @@ func (c Config) Validate() error {
 	if _, err := c.Webhook.Master(); err != nil {
 		return err
 	}
+	if _, err := c.Admin.TOTPMaster(); err != nil {
+		return err
+	}
+	if c.Admin.SessionTTL <= 0 {
+		return fmt.Errorf("config: ADMIN_SESSION_TTL must be positive")
+	}
+	switch strings.ToLower(c.Admin.CookieSecure) {
+	case "", "true", "false":
+	default:
+		return fmt.Errorf("config: ADMIN_COOKIE_SECURE must be true, false or empty")
+	}
 	if _, err := c.Chain.MinHotWallet(); err != nil {
 		return err
 	}
@@ -451,6 +499,9 @@ func (c Config) LogValue() slog.Value {
 		slog.Duration("auth_access_ttl", c.Auth.AccessTTL),
 		slog.Duration("auth_refresh_ttl", c.Auth.RefreshTTL),
 		slog.Bool("api_key_master_key_set", c.APIKeyMasterKey.IsSet()),
+		slog.Bool("admin_totp_key_set", c.Admin.TOTPKey.IsSet()),
+		slog.Duration("admin_session_ttl", c.Admin.SessionTTL),
+		slog.Bool("admin_cookie_secure", c.SecureCookies()),
 		slog.Bool("webhook_signing_key_set", c.Webhook.SigningKey.IsSet()),
 		slog.Int("webhook_attempts", len(c.Webhook.Backoff)),
 		slog.String("ratelimit_login_per_ip", c.RateLimit.LoginPerIP),

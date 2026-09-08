@@ -129,6 +129,13 @@ func Run(ctx context.Context, cfg Config, roles []Role, bi BuildInfo) error {
 			if cfg.Admin.APIKey.Reveal() == "" {
 				return fmt.Errorf("config: ADMIN_API_KEY is required for the admin role")
 			}
+			// Administrators must use TOTP (docs/plan-v1.0.md §14), so a role
+			// that cannot open their secrets cannot log anyone in. Refusing
+			// to start is the honest failure; an admin that came up and then
+			// 500ed every login would be found later and less clearly.
+			if !cfg.Admin.TOTPKey.IsSet() {
+				return fmt.Errorf("config: ADMIN_TOTP_KEY is required for the admin role (run `make gen-dev-secrets`)")
+			}
 			l, err := ledgerFor()
 			if err != nil {
 				return err

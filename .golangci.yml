@@ -184,6 +184,8 @@ linters:
             - github.com/jackc/pgx/v5
             - github.com/lestrrat-go/jwx/v3
             - golang.org/x/crypto
+            # RFC 6238 for administrator login (docs/plan-v1.0.md §8 names it).
+            - github.com/pquerna/otp
             - github.com/stretchr/testify
         ratelimit:
           list-mode: strict
