@@ -102,7 +102,8 @@ make down-sepolia
 ## 開發循環
 
 ```sh
-make lint               # go vet + golangci-lint(depguard 模組邊界、forbidigo 禁 float;版本釘在 tools/go.mod)
+make lint               # go vet + golangci-lint(depguard 模組邊界、forbidigo 禁 float)+ gitleaks;版本全釘在 tools/go.mod
+make secrets-scan       # 只跑 gitleaks(掃 git 歷史,不掃工作目錄——.env 與 secrets/ 是本機真金鑰,本來就 gitignored)
 make test               # 單元 + 屬性測試(-race;rapid 每個性質 1,000 個序列)
 make test-fuzz          # 每個 Fuzz* 目標跑 FUZZ_TIME(預設 30s)
 go run ./cmd/exchangectl replay --file test/fixtures/matching/market_buy_two_levels.jsonl   # 重播撮合腳本、印事件與深度
