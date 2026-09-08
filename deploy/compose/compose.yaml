@@ -244,6 +244,9 @@ services:
       <<: *exchange-env
       DATABASE_URL: postgres://ex_stream:${POSTGRES_PASSWORD}@postgres:5432/exchange?sslmode=disable
       WS_ADDR: ":8081"
+      # The browser front end runs on its own origin in development
+      # (web/trade on :5173); "*" is refused outside EXCHANGE_ENV=dev.
+      STREAM_ALLOWED_ORIGINS: "*"
     ports: ["8081:8081"]
     depends_on: *app-deps
 
@@ -305,6 +308,7 @@ services:
       ADMIN_BOOTSTRAP_PASSWORD: ${ADMIN_BOOTSTRAP_PASSWORD}
       ADMIN_TOTP_KEY: ${ADMIN_TOTP_KEY}
       ADMIN_COOKIE_SECURE: "false"
+      STREAM_ALLOWED_ORIGINS: "*"               # same reasoning as exchange-stream
       ETH_REQUIRED_CONFIRMATIONS_DEFAULT: "1"   # anvil: a deposit in the head block is already confirmed
       ETH_SCAN_INTERVAL: 2s
       ETH_SWEEP_INTERVAL: 3s                    # same reasoning as exchange-chain above

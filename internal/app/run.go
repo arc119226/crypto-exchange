@@ -73,6 +73,7 @@ func Run(ctx context.Context, cfg Config, roles []Role, bi BuildInfo) error {
 		signer       *signerComponents
 		chainRole    *chainComponents
 		workerRole   *workerComponents
+		streamRole   *streamComponents
 	)
 	// the ledger service is shared by every role in the process that needs it
 	ledgerFor := func() (*ledger.Service, error) {
@@ -173,6 +174,15 @@ func Run(ctx context.Context, cfg Config, roles []Role, bi BuildInfo) error {
 			workerRole = w
 			defer workerRole.close()
 			checker.Register("worker", true, workerRole.ready)
+		case RoleStream:
+			s, srv, err := newStream(ctx, cfg, log, reg, d, ebMetrics)
+			if err != nil {
+				return err
+			}
+			streamRole = s
+			defer streamRole.close()
+			servers = append(servers, srv)
+			checker.Register("stream", true, streamRole.ready)
 		case RoleSigner:
 			// built above
 		default:
@@ -197,6 +207,10 @@ func Run(ctx context.Context, cfg Config, roles []Role, bi BuildInfo) error {
 		g.Go(func() error { return workerRole.start(gctx) })
 		g.Go(func() error { return workerRole.runDelivering(gctx, log) })
 		g.Go(func() error { return workerRole.runKlines(gctx, log) })
+	}
+	if streamRole != nil {
+		g.Go(func() error { return streamRole.start(gctx) })
+		g.Go(func() error { return streamRole.run(gctx) })
 	}
 	if chainRole != nil {
 		// start blocks while the node is verified and the signer answers; the

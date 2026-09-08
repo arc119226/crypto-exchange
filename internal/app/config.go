@@ -47,7 +47,50 @@ type Config struct {
 	Outbox          OutboxConfig     `envPrefix:"OUTBOX_"`
 	Webhook         WebhookConfig    `envPrefix:"WEBHOOK_"`
 	MarketData      MarketDataConfig `envPrefix:"MARKETDATA_"`
+	Stream          StreamConfig     `envPrefix:"STREAM_"`
 	Shutdown        ShutdownConfig   `envPrefix:"SHUTDOWN_"`
+}
+
+// StreamConfig tunes the WebSocket server (stream role, docs/plan-v1.0.md
+// §7.5). The listener address is WS_ADDR.
+type StreamConfig struct {
+	// WriteBuffer is the per-connection send queue; a client that lets it
+	// fill is disconnected (slow_consumer) rather than waited for.
+	WriteBuffer int `env:"WRITE_BUFFER" envDefault:"256"`
+	// PingInterval and PongTimeout: a ping every interval, and a pong that
+	// does not come back within the timeout closes the connection.
+	PingInterval time.Duration `env:"PING_INTERVAL" envDefault:"15s"`
+	PongTimeout  time.Duration `env:"PONG_TIMEOUT" envDefault:"15s"`
+	WriteTimeout time.Duration `env:"WRITE_TIMEOUT" envDefault:"5s"`
+	// MaxMessageBytes caps a client frame.
+	MaxMessageBytes int64 `env:"MAX_MESSAGE_BYTES" envDefault:"4096"`
+	// AuthTimeout is how long a private connection may stay unauthenticated.
+	AuthTimeout time.Duration `env:"AUTH_TIMEOUT" envDefault:"5s"`
+	// ResumeWindow is how long after the auth acknowledgement a resume is
+	// accepted; live frames are held meanwhile (docs/ws-api.md).
+	ResumeWindow   time.Duration `env:"RESUME_WINDOW" envDefault:"1s"`
+	ResumePageSize int32         `env:"RESUME_PAGE_SIZE" envDefault:"500"`
+	// MaxSubscriptions caps public subscriptions per connection.
+	MaxSubscriptions int `env:"MAX_SUBSCRIPTIONS" envDefault:"64"`
+	// DepthLevels bounds the levels per side of a depth snapshot.
+	DepthLevels int `env:"DEPTH_LEVELS" envDefault:"200"`
+	// FlushInterval is the last-resort close of an open engine command in
+	// the shadow book (marketdata.BookProjector). Longer than a relay batch
+	// boundary on purpose: a command split across two batches must not be
+	// closed early.
+	FlushInterval time.Duration `env:"FLUSH_INTERVAL" envDefault:"50ms"`
+	// TickerInterval and KlineInterval coalesce pushes per market.
+	TickerInterval time.Duration `env:"TICKER_INTERVAL" envDefault:"1s"`
+	KlineInterval  time.Duration `env:"KLINE_INTERVAL" envDefault:"250ms"`
+	// SnapshotInterval bounds how often a market's depth is written to the
+	// cache the api role serves GET /depth from.
+	SnapshotInterval time.Duration `env:"SNAPSHOT_INTERVAL" envDefault:"100ms"`
+	// AllowedOrigins are the browser origins accepted on upgrade, comma
+	// separated. "*" accepts any and is refused outside dev; empty accepts
+	// the listener's own host only. No cookie is involved -- the private
+	// endpoint authenticates with an explicit token frame -- so this bounds
+	// who may consume resources, not who may act as a user.
+	AllowedOrigins []string `env:"ALLOWED_ORIGINS" envSeparator:","`
 }
 
 // MarketDataConfig tunes the candle writer (worker role) and the shadow
@@ -126,6 +169,24 @@ type AdminConfig struct {
 	// admin listener has no TLS of its own, so "when the connection is TLS"
 	// would never fire; the flag says what the deployment in front of it does.
 	CookieSecure string `env:"COOKIE_SECURE" envDefault:""`
+}
+
+// validate checks the stream settings; "*" origins are a dev convenience.
+func (s StreamConfig) validate(env string) error {
+	if s.WriteBuffer <= 0 || s.MaxMessageBytes <= 0 || s.ResumePageSize <= 0 || s.MaxSubscriptions <= 0 || s.DepthLevels <= 0 {
+		return fmt.Errorf("config: STREAM_WRITE_BUFFER, STREAM_MAX_MESSAGE_BYTES, STREAM_RESUME_PAGE_SIZE, STREAM_MAX_SUBSCRIPTIONS and STREAM_DEPTH_LEVELS must be positive")
+	}
+	for _, d := range []time.Duration{s.PingInterval, s.PongTimeout, s.WriteTimeout, s.AuthTimeout, s.ResumeWindow, s.FlushInterval, s.TickerInterval, s.KlineInterval, s.SnapshotInterval} {
+		if d <= 0 {
+			return fmt.Errorf("config: every STREAM_* interval and timeout must be positive")
+		}
+	}
+	for _, o := range s.AllowedOrigins {
+		if o == "*" && env != "dev" {
+			return fmt.Errorf("config: STREAM_ALLOWED_ORIGINS=* is only allowed when EXCHANGE_ENV=dev; list the front end's origins")
+		}
+	}
+	return nil
 }
 
 // TOTPMaster decodes TOTPKey. Empty is not an error here: only the admin role
@@ -459,6 +520,9 @@ func (c Config) Validate() error {
 	if c.MarketData.KlinePollInterval <= 0 || c.MarketData.KlineBatchSeqs <= 0 || c.MarketData.RebuildBuffer <= 0 || c.MarketData.SnapshotTTL <= 0 {
 		return fmt.Errorf("config: MARKETDATA_KLINE_POLL_INTERVAL, MARKETDATA_KLINE_BATCH_SEQS, MARKETDATA_REBUILD_BUFFER and MARKETDATA_SNAPSHOT_TTL must be positive")
 	}
+	if err := c.Stream.validate(c.Env); err != nil {
+		return err
+	}
 	if _, err := c.Webhook.Master(); err != nil {
 		return err
 	}
@@ -528,6 +592,10 @@ func (c Config) LogValue() slog.Value {
 		slog.Int64("marketdata_kline_batch_seqs", c.MarketData.KlineBatchSeqs),
 		slog.Int("marketdata_rebuild_buffer", c.MarketData.RebuildBuffer),
 		slog.Duration("marketdata_snapshot_ttl", c.MarketData.SnapshotTTL),
+		slog.Int("stream_write_buffer", c.Stream.WriteBuffer),
+		slog.Duration("stream_ping_interval", c.Stream.PingInterval),
+		slog.Duration("stream_resume_window", c.Stream.ResumeWindow),
+		slog.Any("stream_allowed_origins", c.Stream.AllowedOrigins),
 		slog.String("ratelimit_login_per_ip", c.RateLimit.LoginPerIP),
 		slog.String("ratelimit_login_per_account", c.RateLimit.LoginPerAccount),
 		slog.String("ratelimit_orders_per_account", c.RateLimit.OrdersPerAccount),
