@@ -1,0 +1,21 @@
+{{- if .Values.pdb.enabled }}
+{{- $root := . -}}
+{{- range $role, $spec := .Values.roles }}
+{{- if and $spec.enabled (gt (int $spec.replicas) 1) }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "exchange.fullname" $root }}-{{ $role }}
+  labels:
+    {{- include "exchange.labels" $root | nindent 4 }}
+    app.kubernetes.io/component: {{ $role }}
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      {{- include "exchange.selectorLabels" $root | nindent 6 }}
+      app.kubernetes.io/component: {{ $role }}
+{{- end }}
+{{- end }}
+{{- end }}

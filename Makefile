@@ -23,10 +23,16 @@ GOTOOL        := go tool -modfile=$(TOOLS_MOD)
 FOUNDRY_TAG   ?= $(shell sed -n 's/^FOUNDRY_TAG=//p' .env.example)
 FOUNDRY_IMAGE := ghcr.io/foundry-rs/foundry:$(FOUNDRY_TAG)
 ALL_PROFILES  := --profile infra --profile observability --profile app --profile single
+HELM          ?= helm
+HELM_CHART    := deploy/helm/exchange
+KIND          ?= kind
+KIND_CLUSTER  ?= exchange
+KIND_IMAGE    := crypto-exchange:ci
 
 .PHONY: help tools gen gen-check fmt tidy lint secrets-scan test test-fuzz test-integration e2e cover-money build image \
 	    up up-single up-sepolia down down-sepolia logs-sepolia ps-sepolia reset infra-up run migrate seed artifacts compose-config contracts-test \
-	    gen-dev-secrets demo trace loadgen web-gen web-check web-build web-e2e
+	    gen-dev-secrets demo trace loadgen web-gen web-check web-build web-e2e \
+	    helm-lint helm-template kind-up helm-e2e kind-down
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
@@ -185,6 +191,28 @@ compose-config: ## Validate both compose files with every profile (no daemon nee
 	ETH_RPC_URL=https://example.invalid ETH_SCAN_START_BLOCK=1 \
 	  docker compose -f $(COMPOSE_FILE) -f $(SEPOLIA_FILE) --env-file .env.example $(ALL_PROFILES) config -q
 	@echo "compose.sepolia.yaml OK"
+
+# --- Helm chart (deploy/helm/exchange; verified in CI on kind, docs/plan-v1.0.md §12 Phase 7)
+helm-lint: ## helm lint + render the chart with the default and the kind values (no cluster needed)
+	$(HELM) lint $(HELM_CHART)
+	$(HELM) template exchange $(HELM_CHART) >/dev/null
+	$(HELM) template exchange $(HELM_CHART) -f $(HELM_CHART)/values-kind.yaml >/dev/null
+	@echo "chart OK"
+
+helm-template: ## Print the rendered manifests (VALUES=path to add a values file)
+	$(HELM) template exchange $(HELM_CHART) $(if $(VALUES),-f $(VALUES),)
+
+kind-up: image ## Create the kind cluster, load the image and create the chart's secrets (needs kind + kubectl + docker)
+	$(KIND) get clusters 2>/dev/null | grep -qx $(KIND_CLUSTER) || $(KIND) create cluster --name $(KIND_CLUSTER)
+	docker tag $(IMAGE) $(KIND_IMAGE)
+	$(KIND) load docker-image $(KIND_IMAGE) --name $(KIND_CLUSTER)
+	scripts/kind-secrets.sh exchange
+
+helm-e2e: ## Install the chart into the current cluster and run the in-cluster e2e (after kind-up; KEEP=1 keeps the release)
+	bash scripts/helm-e2e.sh
+
+kind-down: ## Delete the kind cluster
+	$(KIND) delete cluster --name $(KIND_CLUSTER)
 
 contracts-test: ## forge build + test inside the pinned foundry image (no local foundry needed)
 	docker run --rm -v $(CURDIR)/infra/contracts:/contracts:ro --entrypoint sh $(FOUNDRY_IMAGE) \

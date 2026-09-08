@@ -1,0 +1,27 @@
+# Values for the kind cluster the CI helm job installs into
+# (scripts/helm-e2e.sh). Throwaway dependencies inside the chart, the image
+# loaded into kind by hand, no Ingress, tiny resource requests.
+image:
+  repository: crypto-exchange
+  tag: ci
+  pullPolicy: Never
+config:
+  EXCHANGE_ENV: dev
+  ETH_CHAIN_ID: "31337"
+  ETH_SCAN_INTERVAL: 2s
+  ETH_RECONCILE_INTERVAL: 5s
+  STREAM_ALLOWED_ORIGINS: "*"
+  WEBHOOK_BACKOFF: 2s,5s,15s
+  WEBHOOK_INTERVAL: 1s
+  ADMIN_COOKIE_SECURE: "false"
+  ADMIN_BOOTSTRAP_EMAIL: admin@kind.local
+roles:
+  api: { replicas: 1, resources: { requests: { cpu: 10m, memory: 64Mi } } }
+  engine: { resources: { requests: { cpu: 10m, memory: 64Mi } } }
+  chain: { resources: { requests: { cpu: 10m, memory: 64Mi } } }
+  signer: { resources: { requests: { cpu: 10m, memory: 320Mi } } }
+  stream: { resources: { requests: { cpu: 10m, memory: 64Mi } } }
+  admin: { resources: { requests: { cpu: 10m, memory: 64Mi } } }
+  worker: { resources: { requests: { cpu: 10m, memory: 64Mi } } }
+dev:
+  enabled: true

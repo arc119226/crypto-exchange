@@ -1,0 +1,200 @@
+# Default values for the exchange chart (docs/plan-v1.0.md §11, §16).
+#
+# What this chart does not do, on purpose:
+#   * It renders no Secret. Every secret is an existing Secret you create
+#     (secrets.* below); the pods mount them as files and read them through
+#     the *_FILE variables the binary already supports (docs/plan-v1.0.md §14).
+#   * It ships no Postgres, NATS or Redis for real use. With dev.enabled=true
+#     it renders throwaway single-replica copies on emptyDir, as Helm hooks,
+#     for a kind cluster (CI). Production points config.* at managed services.
+#   * engine, chain and signer never scale past one replica (the engine holds
+#     a database advisory lock, the chain role owns the scanner cursor and the
+#     hot-wallet nonce, the signer the keystore); the templates refuse more.
+
+image:
+  repository: ghcr.io/arc119226/crypto-exchange
+  # Defaults to the chart's appVersion.
+  tag: ""
+  pullPolicy: IfNotPresent
+imagePullSecrets: []
+
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  name: ""
+
+# The image is distroless and runs as nonroot (uid 65532); the filesystem
+# stays read-only (the binary writes nothing).
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65532
+  runAsGroup: 65532
+  fsGroup: 65532
+  seccompProfile:
+    type: RuntimeDefault
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: [ALL]
+
+# Non-secret environment shared by every role (one ConfigMap). Anything from
+# internal/app/config.go can go here; a few are filled in by the chart:
+# JWT_JWKS_URL points at the api Service and OPS_ADDR is fixed at :9100.
+config:
+  EXCHANGE_ENV: prod
+  TENANT_ID: default
+  LOG_LEVEL: info
+  REDIS_ADDR: ""
+  ETH_RPC_URL: ""
+  ETH_CHAIN_ID: "11155111"
+  ETH_SCAN_START_BLOCK: "0"
+  # Comma-separated browser origins for the WebSocket; "*" is refused unless
+  # EXCHANGE_ENV=dev.
+  STREAM_ALLOWED_ORIGINS: ""
+  OTEL_EXPORTER_OTLP_ENDPOINT: ""
+  ADMIN_BOOTSTRAP_EMAIL: admin@example.com
+# Extra non-secret variables merged into the same ConfigMap.
+extraEnv: {}
+
+# Graceful shutdown (internal/app/shutdown.go): readiness goes red, DrainDelay
+# passes, then the servers, the engine (its last group may take up to ten
+# seconds), the relay and the stream stop within Timeout. The pods'
+# terminationGracePeriodSeconds is derived: drainDelay + 10 + timeout + 5.
+shutdown:
+  drainDelaySeconds: 2
+  timeoutSeconds: 20
+
+# Existing Secrets (create them before installing; scripts/kind-secrets.sh
+# shows the exact keys for a test cluster).
+secrets:
+  # keys: DATABASE_URL_MIGRATE, DATABASE_URL_API, DATABASE_URL_ENGINE,
+  # DATABASE_URL_CHAIN, DATABASE_URL_SIGNER, DATABASE_URL_STREAM,
+  # DATABASE_URL_ADMIN, DATABASE_URL_WORKER (one DSN per login role), and
+  # POSTGRES_PASSWORD when dev.enabled (the throwaway Postgres reads it).
+  db: exchange-db
+  # keys: ed25519.pem (JWT_PRIVATE_KEY_FILE); previous.pem when jwt.previous
+  # is true, for a rotation (docs/runbooks/key-rotation.md).
+  jwt: exchange-jwt
+  # keys: hd-seed.json, passphrase. Mounted by the signer alone.
+  keystore: exchange-keystore
+  # keys: API_KEY_MASTER_KEY, WEBHOOK_SIGNING_KEY, ADMIN_TOTP_KEY,
+  # ADMIN_API_KEY, ADMIN_BOOTSTRAP_PASSWORD, NATS_URL (may carry credentials),
+  # REDIS_PASSWORD when redis.password is true, HOT_WALLET_ADDRESS when
+  # dev.enabled (the contract deployer funds it).
+  app: exchange-app
+
+jwt:
+  # Set while a previous signing key is still published in the JWKS.
+  previous: false
+redis:
+  # Set when the app Secret carries REDIS_PASSWORD.
+  password: false
+
+# Probes hit the ops port: /healthz for liveness, /readyz for readiness.
+# Engine, chain, stream and worker wait on other services at start (the
+# engine on its advisory lock and book rebuild, the chain on its anchor
+# block), so their startup probe allows failureThreshold × 5 s.
+probes:
+  startupFailureThreshold: 60
+
+roles:
+  api:
+    enabled: true
+    replicas: 2
+    resources:
+      requests: { cpu: 100m, memory: 128Mi }
+      limits: { memory: 512Mi }
+  engine:
+    enabled: true
+    replicas: 1
+    resources:
+      requests: { cpu: 250m, memory: 256Mi }
+      limits: { memory: 1Gi }
+  chain:
+    enabled: true
+    replicas: 1
+    resources:
+      requests: { cpu: 100m, memory: 128Mi }
+      limits: { memory: 512Mi }
+  signer:
+    enabled: true
+    replicas: 1
+    resources:
+      # scrypt opens the keystore with 256 MiB at start
+      requests: { cpu: 100m, memory: 384Mi }
+      limits: { memory: 768Mi }
+  stream:
+    enabled: true
+    replicas: 1
+    resources:
+      requests: { cpu: 100m, memory: 128Mi }
+      limits: { memory: 512Mi }
+  admin:
+    enabled: true
+    replicas: 1
+    resources:
+      requests: { cpu: 50m, memory: 128Mi }
+      limits: { memory: 512Mi }
+  worker:
+    enabled: true
+    replicas: 1
+    resources:
+      requests: { cpu: 50m, memory: 128Mi }
+      limits: { memory: 512Mi }
+
+migrate:
+  enabled: true
+  # The Job pod restarts on failure; `exchange migrate up --wait` retries the
+  # connection itself for this long first.
+  waitForDatabase: 5m
+  backoffLimit: 6
+
+ingress:
+  enabled: false
+  className: ""
+  host: exchange.example.com
+  annotations: {}
+  # - secretName: exchange-tls
+  #   hosts: [exchange.example.com]
+  tls: []
+  # The admin API stays off the Ingress; reach it through port-forward or a
+  # private ingress of your own.
+
+# A PodDisruptionBudget is rendered for every role with more than one replica.
+pdb:
+  enabled: true
+
+networkPolicy:
+  enabled: false
+  # Namespace whose pods may scrape the ops port.
+  monitoringNamespace: monitoring
+
+# Throwaway dependencies for a test cluster. Rendered as Helm hooks (weight
+# -10) because the migrate hook needs a database before any regular resource
+# exists; every `helm upgrade` recreates them, which is the point of a test
+# cluster (a fresh chain and a fresh database, in step). `helm uninstall`
+# leaves hook resources behind: delete them with
+#   kubectl delete all,cm -l app.kubernetes.io/instance=<release>
+dev:
+  enabled: false
+  postgres:
+    image: postgres:16.4
+    # ConfigMap holding infra/postgres/initdb/01-roles.sh (scripts/kind-secrets.sh creates it).
+    initdbConfigMap: ""
+  nats:
+    image: nats:2.10.22-alpine
+  redis:
+    image: redis:7.4-alpine
+  anvil:
+    # FOUNDRY_TAG in .env.example; deploy/helm/helm_test.go keeps them equal.
+    image: ghcr.io/foundry-rs/foundry:v1.8.1
+  contracts:
+    # ConfigMap holding infra/contracts (scripts/kind-secrets.sh creates it).
+    configMap: ""
+    # anvil account #0: a public development key, test chain only.
+    deployerKey: "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
+  bootstrap:
+    backoffLimit: 6

@@ -54,7 +54,7 @@ func setupLedger(t *testing.T) ledgerHarness {
 	t.Helper()
 	h := startPostgres(t)
 	ctx := context.Background()
-	require.NoError(t, app.MigrateUp(ctx, h.DSN("ex_migrate"), discard{}))
+	require.NoError(t, app.MigrateUp(ctx, h.DSN("ex_migrate"), discard{}, 0))
 	pool, err := pg.Open(ctx, pg.PoolConfig{DSN: h.DSN("ex_all"), MaxConns: 30})
 	require.NoError(t, err)
 	t.Cleanup(pool.Close)

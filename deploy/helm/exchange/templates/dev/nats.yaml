@@ -1,0 +1,57 @@
+{{- if .Values.dev.enabled }}
+{{- $ctx := dict "root" . "name" "nats" }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "exchange.fullname" . }}-nats
+  labels:
+    {{- include "exchange.devLabels" $ctx | nindent 4 }}
+  annotations:
+    {{- include "exchange.devHookAnnotations" . | nindent 4 }}
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector:
+    matchLabels:
+      {{- include "exchange.devSelector" $ctx | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "exchange.devSelector" $ctx | nindent 8 }}
+    spec:
+      containers:
+        - name: nats
+          image: {{ .Values.dev.nats.image }}
+          args: ["-js", "-sd", "/data", "-m", "8222"]
+          ports:
+            - name: client
+              containerPort: 4222
+            - name: monitor
+              containerPort: 8222
+          readinessProbe:
+            httpGet: { path: /healthz, port: monitor }
+            periodSeconds: 5
+          volumeMounts:
+            - name: data
+              mountPath: /data
+      volumes:
+        - name: data
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "exchange.fullname" . }}-nats
+  labels:
+    {{- include "exchange.devLabels" $ctx | nindent 4 }}
+  annotations:
+    {{- include "exchange.devHookAnnotations" . | nindent 4 }}
+spec:
+  selector:
+    {{- include "exchange.devSelector" $ctx | nindent 4 }}
+  ports:
+    - name: client
+      port: 4222
+      targetPort: client
+{{- end }}

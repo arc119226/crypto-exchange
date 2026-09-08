@@ -38,11 +38,11 @@ func TestMigrateSeedAndRegistry(t *testing.T) {
 
 	// migrate twice: second run is a no-op
 	var out bytes.Buffer
-	require.NoError(t, app.MigrateUp(ctx, h.DSN("ex_migrate"), &out))
+	require.NoError(t, app.MigrateUp(ctx, h.DSN("ex_migrate"), &out, 0))
 	assert.Contains(t, out.String(), "0001_bootstrap_schemas.sql")
 	assert.Contains(t, out.String(), "0002_registry_core.sql")
 	out.Reset()
-	require.NoError(t, app.MigrateUp(ctx, h.DSN("ex_migrate"), &out))
+	require.NoError(t, app.MigrateUp(ctx, h.DSN("ex_migrate"), &out, 0))
 	assert.Contains(t, out.String(), "no pending migrations")
 	out.Reset()
 	require.NoError(t, app.MigrateStatus(ctx, h.DSN("ex_migrate"), &out))

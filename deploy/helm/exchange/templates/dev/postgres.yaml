@@ -1,0 +1,76 @@
+{{- if .Values.dev.enabled }}
+{{- $ctx := dict "root" . "name" "postgres" }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "exchange.fullname" . }}-postgres
+  labels:
+    {{- include "exchange.devLabels" $ctx | nindent 4 }}
+  annotations:
+    {{- include "exchange.devHookAnnotations" . | nindent 4 }}
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector:
+    matchLabels:
+      {{- include "exchange.devSelector" $ctx | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "exchange.devSelector" $ctx | nindent 8 }}
+    spec:
+      containers:
+        - name: postgres
+          image: {{ .Values.dev.postgres.image }}
+          env:
+            - name: POSTGRES_DB
+              value: exchange
+            - name: POSTGRES_USER
+              value: exchange
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.db }}
+                  key: POSTGRES_PASSWORD
+          ports:
+            - name: postgres
+              containerPort: 5432
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "exchange", "-d", "exchange"]
+            periodSeconds: 5
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+            {{- if .Values.dev.postgres.initdbConfigMap }}
+            - name: initdb
+              mountPath: /docker-entrypoint-initdb.d
+              readOnly: true
+            {{- end }}
+      volumes:
+        - name: data
+          emptyDir: {}
+        {{- if .Values.dev.postgres.initdbConfigMap }}
+        - name: initdb
+          configMap:
+            name: {{ .Values.dev.postgres.initdbConfigMap }}
+            defaultMode: 0555
+        {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "exchange.fullname" . }}-postgres
+  labels:
+    {{- include "exchange.devLabels" $ctx | nindent 4 }}
+  annotations:
+    {{- include "exchange.devHookAnnotations" . | nindent 4 }}
+spec:
+  selector:
+    {{- include "exchange.devSelector" $ctx | nindent 4 }}
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: postgres
+{{- end }}
