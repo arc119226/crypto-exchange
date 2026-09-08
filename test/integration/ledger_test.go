@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"sort"
 	"sync/atomic"
 	"testing"
 
@@ -680,12 +681,19 @@ func TestLedgerPostRoundTrips(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, replayed)
 	assert.EqualValues(t, 2, n, "locks, then writes")
+	// key order is (account_id, asset) sorted, the lock order: which of the
+	// two random account ids comes first is decided by the ids themselves
 	require.Len(t, je.Balances, 4, "one balance per (account, asset), in key order")
-	assert.Equal(t, []string{a + "/ETH", a + "/USDC", b + "/ETH", b + "/USDC"}, []string{
-		je.Balances[0].AccountID + "/" + je.Balances[0].Asset, je.Balances[1].AccountID + "/" + je.Balances[1].Asset,
-		je.Balances[2].AccountID + "/" + je.Balances[2].Asset, je.Balances[3].AccountID + "/" + je.Balances[3].Asset,
-	})
-	eq(t, "3", je.Balances[2].Hold)
+	wantKeys := []string{a + "/ETH", a + "/USDC", b + "/ETH", b + "/USDC"}
+	sort.Strings(wantKeys)
+	gotKeys := make([]string, 0, len(je.Balances))
+	holds := map[string]money.Amount{}
+	for _, bal := range je.Balances {
+		gotKeys = append(gotKeys, bal.AccountID+"/"+bal.Asset)
+		holds[bal.AccountID+"/"+bal.Asset] = bal.Hold
+	}
+	assert.Equal(t, wantKeys, gotKeys)
+	eq(t, "3", holds[b+"/ETH"])
 	eq(t, "2000", h.balance(t, ctx, a, "USDC").Available)
 
 	// a replay reads the existing entry instead: the batch, then the entry
