@@ -86,7 +86,7 @@ func startLocalDatabase(t *testing.T, ctx context.Context, adminURL string) pgHa
 	t.Cleanup(func() {
 		_, _ = admin.Exec(context.Background(), fmt.Sprintf(`DROP DATABASE IF EXISTS %q WITH (FORCE)`, name))
 	})
-	for _, role := range []string{"ex_migrate", "ex_api", "ex_engine", "ex_chain", "ex_signer", "ex_stream", "ex_admin", "ex_worker", "ex_all"} {
+	for _, role := range []string{"ex_migrate", "ex_api", "ex_engine", "ex_chain", "ex_signer", "ex_stream", "ex_admin", "ex_worker", "ex_all", "ex_backup"} {
 		if _, err := admin.Exec(ctx, fmt.Sprintf(`GRANT CONNECT ON DATABASE %q TO %s`, name, role)); err != nil {
 			t.Fatalf("grant connect %s: %v", role, err)
 		}

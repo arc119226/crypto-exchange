@@ -76,8 +76,9 @@ type Server struct {
 	eng trading.CommandBus
 	sub *nats.Subscription
 
-	inflight chan struct{} // one token per command being handled
-	wg       sync.WaitGroup
+	inflight  chan struct{} // one token per command being handled
+	wg        sync.WaitGroup
+	closeOnce sync.Once
 }
 
 // Serve subscribes to the tenant's command subjects and answers them from
@@ -110,16 +111,19 @@ func Serve(nc *nats.Conn, eng trading.CommandBus, cfg ServerConfig) (*Server, er
 }
 
 // Close drains the subscription and waits for the commands already handed
-// to the engine to answer.
+// to the engine to answer. Calling it again is a no-op.
 func (s *Server) Close() error {
-	if s.sub == nil {
-		return nil
-	}
-	if err := s.sub.Drain(); err != nil {
-		return fmt.Errorf("cmdbus: drain: %w", err)
-	}
-	s.wg.Wait()
-	return nil
+	var err error
+	s.closeOnce.Do(func() {
+		if s.sub == nil {
+			return
+		}
+		if derr := s.sub.Drain(); derr != nil {
+			err = fmt.Errorf("cmdbus: drain: %w", derr)
+		}
+		s.wg.Wait()
+	})
+	return err
 }
 
 // handle is the subscription callback: it decodes the command and hands it

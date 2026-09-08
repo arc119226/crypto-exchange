@@ -791,3 +791,25 @@ func TestStreamDepositsWithdrawalsChannels(t *testing.T) {
 	assert.Equal(t, "resumed", done["type"])
 	assert.EqualValues(t, 1, done["replayed"])
 }
+
+// TestStreamResumeAheadOfAccountFails: a client whose since_seq is beyond
+// the account's sequence is a client that outlived a database restore
+// (docs/runbooks/backup-restore.md). It gets resume_failed and a live
+// connection, not a silent replay of nothing.
+func TestStreamResumeAheadOfAccountFails(t *testing.T) {
+	h := setupStream(t, defaultStreamConfig())
+	user := h.register(t, "ahead@example.com")
+	h.fund(t, h.ctx, user.AccountID, "USDC", "1000", "faucet:ahead")
+	ws, seq := h.authed(t, user)
+	ws.send(t, map[string]any{"op": "resume", "since_seq": seq + 1000})
+	m, _ := ws.recv(t, 5*time.Second)
+	assert.Equal(t, "error", m["type"])
+	assert.Equal(t, "resume_failed", m["code"])
+
+	// live from here: the next event arrives with the real sequence
+	h.place(t, bearer(user), limitOrder("ahead-1", "buy", "1000", "0.1"), http.StatusCreated)
+	frames := ws.recvUntil(t, 10*time.Second, func(m map[string]any) bool { return frameOf(m).typ == "order.accepted" })
+	f := frameOf(frames[len(frames)-1])
+	require.NotNil(t, f.accountSeq)
+	assert.Equal(t, seq+1, *f.accountSeq)
+}

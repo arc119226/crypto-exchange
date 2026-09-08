@@ -8,6 +8,8 @@ package sqlcgen
 import (
 	"context"
 	"time"
+
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 const InsertOutbox = `-- name: InsertOutbox :one
@@ -263,4 +265,50 @@ func (q *Queries) OutboxBacklog(ctx context.Context) (OutboxBacklogRow, error) {
 	var i OutboxBacklogRow
 	err := row.Scan(&i.Backlog, &i.OldestAgeSeconds)
 	return i, err
+}
+
+const PruneOutbox = `-- name: PruneOutbox :execrows
+
+DELETE FROM eventbus.outbox o
+ WHERE o.id IN (SELECT i.id FROM eventbus.outbox i
+                 WHERE i.published_at IS NOT NULL AND i.published_at < $1
+                 ORDER BY i.id LIMIT $2)
+`
+
+type PruneOutboxParams struct {
+	PublishedAt pgtype.Timestamptz
+	Limit       int32
+}
+
+// Retention (docs/plan-v1.0.md §7.3: the outbox is kept 30 days) --------
+// The worker role's retention loop calls these with a cutoff and a batch
+// size until a call deletes fewer rows than the batch.
+// Published rows older than the cutoff; unpublished rows are never touched
+// (the relay still owes them to JetStream). Old rows have the lowest ids,
+// so walking the primary key finds them without a new index.
+func (q *Queries) PruneOutbox(ctx context.Context, arg PruneOutboxParams) (int64, error) {
+	result, err := q.db.Exec(ctx, PruneOutbox, arg.PublishedAt, arg.Limit)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const PruneProcessedEvents = `-- name: PruneProcessedEvents :execrows
+DELETE FROM eventbus.processed_events p
+ WHERE (p.consumer, p.event_id) IN (SELECT i.consumer, i.event_id FROM eventbus.processed_events i
+                                     WHERE i.processed_at < $1 LIMIT $2)
+`
+
+type PruneProcessedEventsParams struct {
+	ProcessedAt time.Time
+	Limit       int32
+}
+
+func (q *Queries) PruneProcessedEvents(ctx context.Context, arg PruneProcessedEventsParams) (int64, error) {
+	result, err := q.db.Exec(ctx, PruneProcessedEvents, arg.ProcessedAt, arg.Limit)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }

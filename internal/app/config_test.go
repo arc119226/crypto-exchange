@@ -165,3 +165,26 @@ func TestParseRoles(t *testing.T) {
 	_, err = ParseRoles(" , ")
 	assert.Error(t, err)
 }
+
+// TestValidateForKeepsTheKeystoreSecretWithTheSigner: the passphrase is
+// refused by any process that runs no signer (docs/plan-v1.0.md §14), so a
+// deployment that hands it to every role fails at start, not in a later
+// review.
+func TestValidateForKeepsTheKeystoreSecretWithTheSigner(t *testing.T) {
+	clearEnv(t)
+	t.Setenv("DATABASE_URL", "postgres://x@db/x")
+	t.Setenv("WALLET_KEYSTORE_PASSPHRASE", "open sesame")
+	cfg, err := LoadConfig()
+	require.NoError(t, err)
+	assert.NoError(t, cfg.ValidateFor([]Role{RoleSigner}))
+	assert.NoError(t, cfg.ValidateFor([]Role{RoleAll}))
+	assert.NoError(t, cfg.ValidateFor([]Role{RoleChain, RoleSigner}))
+	err = cfg.ValidateFor([]Role{RoleAPI, RoleEngine})
+	assert.ErrorContains(t, err, "WALLET_KEYSTORE_PASSPHRASE")
+	assert.ErrorContains(t, err, "api,engine")
+
+	t.Setenv("WALLET_KEYSTORE_PASSPHRASE", "")
+	cfg, err = LoadConfig()
+	require.NoError(t, err)
+	assert.NoError(t, cfg.ValidateFor([]Role{RoleAPI}), "no secret, nothing to refuse")
+}

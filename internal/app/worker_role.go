@@ -37,6 +37,7 @@ type workerComponents struct {
 	metrics    *eventbus.Metrics
 	klines     *marketdata.KlineWriter
 	klineEvery time.Duration
+	retention  *retention
 
 	// The start-state shape is copied from chainComponents, deliberately and
 	// exactly: newWorker only builds, bringUp does the waiting, and start runs
@@ -71,6 +72,7 @@ func newWorker(cfg Config, log *slog.Logger, db *pgxpool.Pool, reg prometheus.Re
 		klines: marketdata.NewKlineWriter(marketdata.NewStore(db, cfg.TenantID), registry.NewStore(db), cfg.TenantID, cfg.MarketData.KlineBatchSeqs, log).
 			WithMetrics(mdm),
 		klineEvery: cfg.MarketData.KlinePollInterval,
+		retention:  newRetention(db, cfg.Retention, reg),
 		started:    make(chan struct{}),
 		startErr:   errors.New("the worker role has not finished starting"),
 	}
@@ -181,6 +183,16 @@ func (w *workerComponents) runKlines(ctx context.Context, log *slog.Logger) erro
 	}
 	log.Info("folding trades into candles", slog.Duration("poll_interval", w.klineEvery))
 	return w.klines.Run(ctx, w.klineEvery)
+}
+
+// runRetention prunes what only history needs, on its own clock
+// (RetentionConfig). Like the candle writer it waits for start so /readyz
+// reports one reason for the whole role.
+func (w *workerComponents) runRetention(ctx context.Context, log *slog.Logger) error {
+	if !w.awaitStart(ctx) {
+		return nil
+	}
+	return w.retention.run(ctx, log)
 }
 
 // ready reports the role is up. The start check comes first for the same

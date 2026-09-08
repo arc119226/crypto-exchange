@@ -49,6 +49,7 @@ type Config struct {
 	Webhook         WebhookConfig    `envPrefix:"WEBHOOK_"`
 	MarketData      MarketDataConfig `envPrefix:"MARKETDATA_"`
 	Stream          StreamConfig     `envPrefix:"STREAM_"`
+	Retention       RetentionConfig  `envPrefix:"RETENTION_"`
 	Shutdown        ShutdownConfig   `envPrefix:"SHUTDOWN_"`
 	// OTLPEndpoint enables tracing (docs/plan-v1.0.md §15): the OTLP/HTTP
 	// base URL spans are exported to, e.g. http://jaeger:4318. It keeps the
@@ -388,6 +389,22 @@ type ShutdownConfig struct {
 	Timeout    time.Duration `env:"TIMEOUT" envDefault:"20s"`
 }
 
+// ValidateFor checks what depends on which roles the process runs: the
+// keystore passphrase belongs to the signer alone (docs/plan-v1.0.md §14),
+// so a process without one that was handed it refuses to start rather
+// than carry a secret it has no use for.
+func (c Config) ValidateFor(roles []Role) error {
+	if !c.Wallet.Passphrase.IsSet() {
+		return nil
+	}
+	for _, r := range roles {
+		if r == RoleSigner || r == RoleAll {
+			return nil
+		}
+	}
+	return fmt.Errorf("config: WALLET_KEYSTORE_PASSPHRASE is set but roles %s include no signer; only the signer holds the keystore secret", RolesLabel(roles))
+}
+
 // secretsWithFileVariant lists variables that may be supplied as NAME_FILE.
 var secretsWithFileVariant = []string{
 	"DATABASE_URL",
@@ -539,6 +556,9 @@ func (c Config) Validate() error {
 	if c.Webhook.BatchSize <= 0 {
 		return fmt.Errorf("config: WEBHOOK_BATCH_SIZE must be positive")
 	}
+	if c.Retention.Interval <= 0 || c.Retention.Outbox <= 0 || c.Retention.Webhook <= 0 || c.Retention.BatchSize <= 0 {
+		return fmt.Errorf("config: RETENTION_INTERVAL, RETENTION_OUTBOX, RETENTION_WEBHOOK and RETENTION_BATCH_SIZE must be positive")
+	}
 	if c.MarketData.KlinePollInterval <= 0 || c.MarketData.KlineBatchSeqs <= 0 || c.MarketData.RebuildBuffer <= 0 || c.MarketData.SnapshotTTL <= 0 {
 		return fmt.Errorf("config: MARKETDATA_KLINE_POLL_INTERVAL, MARKETDATA_KLINE_BATCH_SEQS, MARKETDATA_REBUILD_BUFFER and MARKETDATA_SNAPSHOT_TTL must be positive")
 	}
@@ -614,6 +634,8 @@ func (c Config) LogValue() slog.Value {
 		slog.Int64("marketdata_kline_batch_seqs", c.MarketData.KlineBatchSeqs),
 		slog.Int("marketdata_rebuild_buffer", c.MarketData.RebuildBuffer),
 		slog.Duration("marketdata_snapshot_ttl", c.MarketData.SnapshotTTL),
+		slog.Duration("retention_outbox", c.Retention.Outbox),
+		slog.Duration("retention_webhook", c.Retention.Webhook),
 		slog.Int("stream_write_buffer", c.Stream.WriteBuffer),
 		slog.Duration("stream_ping_interval", c.Stream.PingInterval),
 		slog.Duration("stream_resume_window", c.Stream.ResumeWindow),

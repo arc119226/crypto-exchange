@@ -509,6 +509,53 @@ func (q *Queries) ListEndpoints(ctx context.Context, tenantID string) ([]ListEnd
 	return items, nil
 }
 
+const pruneDeliveries = `-- name: PruneDeliveries :execrows
+
+DELETE FROM webhook.deliveries d
+ WHERE d.id IN (SELECT i.id FROM webhook.deliveries i WHERE i.created_at < $1 LIMIT $2)
+`
+
+type PruneDeliveriesParams struct {
+	CreatedAt time.Time
+	Limit     int32
+}
+
+// Retention (docs/plan-v1.0.md §12 Phase 7) --------------------------------
+// Attempt records older than the cutoff. Evidence has a shelf life too;
+// ninety days is the default (RETENTION_WEBHOOK).
+func (q *Queries) PruneDeliveries(ctx context.Context, arg PruneDeliveriesParams) (int64, error) {
+	result, err := q.db.Exec(ctx, pruneDeliveries, arg.CreatedAt, arg.Limit)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const pruneEvents = `-- name: PruneEvents :execrows
+DELETE FROM webhook.events w
+ WHERE (w.tenant_id, w.event_id) IN (
+   SELECT e.tenant_id, e.event_id FROM webhook.events e
+    WHERE e.created_at < $1
+      AND NOT EXISTS (SELECT 1 FROM webhook.queue q WHERE q.tenant_id = e.tenant_id AND q.event_id = e.event_id)
+    LIMIT $2)
+`
+
+type PruneEventsParams struct {
+	CreatedAt time.Time
+	Limit     int32
+}
+
+// Stored event bodies older than the cutoff that no queue row references
+// any more (queue_event_fk): a body still queued for an endpoint that is
+// retrying or paused stays until that row is gone.
+func (q *Queries) PruneEvents(ctx context.Context, arg PruneEventsParams) (int64, error) {
+	result, err := q.db.Exec(ctx, pruneEvents, arg.CreatedAt, arg.Limit)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const recordAttempt = `-- name: RecordAttempt :exec
 INSERT INTO webhook.deliveries (
     tenant_id, endpoint_id, event_id, run_id, event_type, attempt, status,

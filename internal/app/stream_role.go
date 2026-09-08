@@ -34,10 +34,11 @@ type streamComponents struct {
 	subs    []*eventbus.OrderedSubscription
 	metrics *eventbus.Metrics
 
-	bringUp  func(context.Context) error
-	started  chan struct{}
-	startMu  sync.Mutex
-	startErr error
+	bringUp   func(context.Context) error
+	started   chan struct{}
+	startMu   sync.Mutex
+	startErr  error
+	closeOnce sync.Once
 }
 
 // newStream builds the role and its HTTP listener.
@@ -210,19 +211,28 @@ func (s *streamComponents) run(ctx context.Context) error {
 	return err
 }
 
-// close stops the consumers and closes every connection (1001 going away):
-// http.Server.Shutdown does not touch hijacked sockets.
+// close is closeWithin with a budget of its own, for the deferred call
+// that catches a Run that never reached its shutdown plan.
 func (s *streamComponents) close() {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	s.closeWithin(ctx)
+}
+
+// closeWithin stops the consumers and closes every connection (1001 going
+// away) within ctx: http.Server.Shutdown does not touch hijacked sockets.
+// Idempotent, so the shutdown plan and the deferred close can both call it.
+func (s *streamComponents) closeWithin(ctx context.Context) {
 	if s == nil {
 		return
 	}
-	for _, sub := range s.subs {
-		sub.Stop()
-	}
-	s.subs = nil
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	s.server.CloseAll(ctx)
+	s.closeOnce.Do(func() {
+		for _, sub := range s.subs {
+			sub.Stop()
+		}
+		s.subs = nil
+		s.server.CloseAll(ctx)
+	})
 }
 
 var _ = (*pgxpool.Pool)(nil)
