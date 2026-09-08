@@ -222,6 +222,43 @@ linters:
           allow:
             - $gostd
             - github.com/stretchr/testify
+        marketdata:
+          list-mode: strict
+          files:
+            - "**/internal/marketdata/**"
+          allow:
+            - $gostd
+            - github.com/arc119226/crypto-exchange/internal/marketdata # external test package
+            - github.com/arc119226/crypto-exchange/internal/marketdata/sqlcgen
+            - github.com/arc119226/crypto-exchange/internal/eventbus
+            - github.com/arc119226/crypto-exchange/internal/registry
+            - github.com/arc119226/crypto-exchange/internal/money
+            # the property test replays scripts through the real order book
+            - github.com/arc119226/crypto-exchange/internal/matching
+            - github.com/arc119226/crypto-exchange/internal/platform/pg
+            - github.com/arc119226/crypto-exchange/internal/platform/redisx
+            - github.com/jackc/pgx/v5
+            - github.com/redis/go-redis/v9
+            - github.com/prometheus/client_golang
+            - github.com/stretchr/testify
+            - pgregory.net/rapid
+        stream:
+          list-mode: strict
+          files:
+            - "**/internal/stream/**"
+          allow:
+            - $gostd
+            - github.com/arc119226/crypto-exchange/internal/stream # external test package
+            - github.com/arc119226/crypto-exchange/internal/marketdata
+            - github.com/arc119226/crypto-exchange/internal/auth
+            - github.com/arc119226/crypto-exchange/internal/eventbus
+            - github.com/arc119226/crypto-exchange/internal/registry
+            - github.com/arc119226/crypto-exchange/internal/telemetry
+            - github.com/arc119226/crypto-exchange/internal/money
+            - github.com/coder/websocket
+            - github.com/go-chi/chi/v5
+            - github.com/prometheus/client_golang
+            - github.com/stretchr/testify
         entrypoints-only-from-app:
           files:
             - $all
@@ -255,6 +292,8 @@ linters:
             # from the receiving side. It is the customer's half of docs/webhooks.md.
             - github.com/arc119226/crypto-exchange/internal/webhook
             - github.com/arc119226/crypto-exchange/cmd/exchangectl/internal
+            # exchangectl loadgen subscribes to the stream role like any customer would
+            - github.com/coder/websocket
             - github.com/spf13/cobra
             - github.com/oapi-codegen/runtime
             - github.com/stretchr/testify
@@ -301,6 +340,7 @@ linters:
       - internal/trading/sqlcgen
       - internal/eventbus/sqlcgen
       - internal/auth/sqlcgen
+      - internal/marketdata/sqlcgen
       - cmd/exchangectl/internal/apiclient
       - cmd/exchangectl/internal/adminclient
     rules:
@@ -333,5 +373,6 @@ formatters:
       - internal/trading/sqlcgen
       - internal/eventbus/sqlcgen
       - internal/auth/sqlcgen
+      - internal/marketdata/sqlcgen
       - cmd/exchangectl/internal/apiclient
       - cmd/exchangectl/internal/adminclient
