@@ -196,7 +196,7 @@ export const zhTW: Record<Key, string> = {
   'trade.price_label': '價格({quote},最小跳動 {tick})',
   'trade.spend_label': '花費({quote})',
   'trade.qty_label': '數量({base},最小單位 {step})',
-  'trade.result': '{status} · 已成交 {filled}',
+  'trade.result': '{status} · 成交量 {filled}',
   'trade.rejected': '已拒絕:{reason}',
   'trade.market_status': '市場{status}',
   'trade.validate.quote_qty': '請輸入要花費的金額',

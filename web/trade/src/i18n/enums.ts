@@ -12,7 +12,7 @@ const enumsZhTW: Record<Group, Record<string, string>> = {
   order: {
     open: '掛單中',
     partially_filled: '部分成交',
-    filled: '已成交',
+    filled: '全部成交',
     cancelled: '已取消',
     rejected: '已拒絕',
   },
