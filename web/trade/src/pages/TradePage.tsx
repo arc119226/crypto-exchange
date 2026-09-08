@@ -7,10 +7,13 @@ import { OrderBook } from '../components/OrderBook'
 import { OrderForm } from '../components/OrderForm'
 import { TickerBar } from '../components/TickerBar'
 import { TradesList } from '../components/TradesList'
+import { enumLabel } from '../i18n/enums'
+import { useLocale } from '../i18n/LocaleProvider'
 import { PublicFeed, wsURL, type FeedStatus } from '../ws/public'
 
 export function TradePage() {
   const { symbol = '' } = useParams()
+  const { locale, t } = useLocale()
   const [market, setMarket] = useState<Market | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [picked, setPicked] = useState<string | null>(null)
@@ -37,11 +40,12 @@ export function TradePage() {
         if (!cancelled) setMarket(m)
       })
       .catch((err: unknown) => {
-        if (!cancelled) setError(describeError(err))
+        if (!cancelled) setError(describeError(err, t))
       })
     return () => {
       cancelled = true
     }
+    // one load per market; a language switch re-words an error on the next load
   }, [symbol])
 
   if (error) return <p className="page error">{error}</p>
@@ -52,14 +56,14 @@ export function TradePage() {
         <TickerBar feed={feed} market={symbol} info={market} />
         <span className="muted" data-testid="public-status" data-status={feedStatus}>
           <span className={`status-dot ${feedStatus}`} />
-          public stream {feedStatus}
+          {t('trade.public_stream', { status: enumLabel(locale, 'feed', feedStatus) })}
         </span>
       </div>
       <div className="trade-grid">
         <OrderBook feed={feed} market={symbol} info={market} onPickPrice={setPicked} />
         <KlineChart feed={feed} market={symbol} />
         <div className="side">
-          {market ? <OrderForm market={market} pickedPrice={picked} onPlaced={() => setRefreshKey((k) => k + 1)} /> : <div className="card muted">Loading market…</div>}
+          {market ? <OrderForm market={market} pickedPrice={picked} onPlaced={() => setRefreshKey((k) => k + 1)} /> : <div className="card muted">{t('trade.loading_market')}</div>}
           <Balances market={market} refreshKey={refreshKey} />
           <TradesList feed={feed} market={symbol} />
         </div>

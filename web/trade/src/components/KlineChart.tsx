@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { CandlestickSeries, createChart, type IChartApi, type ISeriesApi, type UTCTimestamp } from 'lightweight-charts'
-import { call, client, type KlineInterval } from '../api/client'
+import { call, client, describeError, type KlineInterval } from '../api/client'
+import { useLocale } from '../i18n/LocaleProvider'
 import { toNumberUnsafe } from '../lib/decimal'
 import type { PublicFeed } from '../ws/public'
 
@@ -28,6 +29,7 @@ function toBar(c: { start: string; open: string; high: string; low: string; clos
 // updates from the stream. Amounts become floats only here, for pixels;
 // nothing computed from them goes back to the API (docs/plan-v1.0.md §6.5).
 export function KlineChart({ feed, market }: { feed: PublicFeed; market: string }) {
+  const { intl, t } = useLocale()
   const container = useRef<HTMLDivElement>(null)
   const chart = useRef<IChartApi | null>(null)
   const series = useRef<ISeriesApi<'Candlestick'> | null>(null)
@@ -40,9 +42,9 @@ export function KlineChart({ feed, market }: { feed: PublicFeed; market: string 
       layout: { background: { color: '#171d25' }, textColor: '#8b95a7' },
       grid: { vertLines: { color: '#262e3a' }, horzLines: { color: '#262e3a' } },
       timeScale: { timeVisible: true, secondsVisible: false },
-      // the chart formats its axis with Intl; pin the locale so an odd
-      // browser locale tag cannot make every frame throw
-      localization: { locale: 'en-US' },
+      // the chart formats its axis with Intl; the tag is one of the two
+      // the interface knows, so an odd browser tag cannot make a frame throw
+      localization: { locale: intl },
       autoSize: true,
     })
     const s = c.addSeries(CandlestickSeries, {
@@ -59,7 +61,12 @@ export function KlineChart({ feed, market }: { feed: PublicFeed; market: string 
       chart.current = null
       series.current = null
     }
+    // created once; a later language switch is applied by the effect below
   }, [])
+
+  useEffect(() => {
+    chart.current?.applyOptions({ localization: { locale: intl } })
+  }, [intl])
 
   useEffect(() => {
     let cancelled = false
@@ -77,7 +84,7 @@ export function KlineChart({ feed, market }: { feed: PublicFeed; market: string 
         chart.current?.timeScale().fitContent()
       })
       .catch((err: unknown) => {
-        if (!cancelled) setError(err instanceof Error ? err.message : String(err))
+        if (!cancelled) setError(describeError(err, t))
       })
     const unsubscribe = feed.subscribe(`kline.${interval}`, market, (m) => {
       if (m.type !== 'update' || !m.candle || !series.current) return

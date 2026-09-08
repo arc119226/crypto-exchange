@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { describeError } from '../api/client'
+import { useLocale } from '../i18n/LocaleProvider'
 
 // useResource fetches once per change of `key`, exposes a `bump` that
 // refetches after a short debounce (private-stream frames arrive in bursts:
@@ -11,6 +12,11 @@ export function useResource<T>(load: () => Promise<T>, key: string): { data: T |
   const [version, setVersion] = useState(0)
   const loader = useRef(load)
   loader.current = load
+  // the error sentence is worded in the language of the fetch that failed;
+  // a later switch re-words it on the next fetch, not before
+  const { t } = useLocale()
+  const translate = useRef(t)
+  translate.current = t
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
@@ -24,7 +30,7 @@ export function useResource<T>(load: () => Promise<T>, key: string): { data: T |
         }
       })
       .catch((err: unknown) => {
-        if (!cancelled) setError(describeError(err))
+        if (!cancelled) setError(describeError(err, translate.current))
       })
     return () => {
       cancelled = true

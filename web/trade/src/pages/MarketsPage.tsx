@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { call, client, describeError, type Market, type Ticker } from '../api/client'
+import { enumLabel } from '../i18n/enums'
+import { useLocale } from '../i18n/LocaleProvider'
 import { trimZeros } from '../lib/decimal'
 
 interface Row {
@@ -10,6 +12,7 @@ interface Row {
 
 export function MarketsPage() {
   const navigate = useNavigate()
+  const { locale, t } = useLocale()
   const [rows, setRows] = useState<Row[] | null>(null)
   const [error, setError] = useState<string | null>(null)
 
@@ -30,30 +33,31 @@ export function MarketsPage() {
         )
         if (!cancelled) setRows(out)
       } catch (err) {
-        if (!cancelled) setError(describeError(err))
+        if (!cancelled) setError(describeError(err, t))
       }
     })()
     return () => {
       cancelled = true
     }
+    // one load per visit; a language switch re-words an error on the next visit
   }, [])
 
   return (
     <div className="page">
       <div className="card">
-        <h2>Markets</h2>
+        <h2>{t('markets.title')}</h2>
         {error && <p className="error">{error}</p>}
-        {!rows && !error && <p className="muted">Loading…</p>}
+        {!rows && !error && <p className="muted">{t('common.loading')}</p>}
         {rows && (
           <table className="markets-table">
             <thead>
               <tr>
-                <th>Market</th>
-                <th>Last</th>
-                <th>24h change</th>
-                <th>24h volume</th>
-                <th>Trades</th>
-                <th>Status</th>
+                <th>{t('markets.col.market')}</th>
+                <th>{t('markets.col.last')}</th>
+                <th>{t('markets.col.change')}</th>
+                <th>{t('markets.col.volume')}</th>
+                <th>{t('markets.col.trades')}</th>
+                <th>{t('col.status')}</th>
               </tr>
             </thead>
             <tbody>
@@ -69,7 +73,7 @@ export function MarketsPage() {
                     <td className={pct === undefined ? 'muted' : up ? 'buy' : 'sell'}>{pct !== undefined ? `${pct}%` : '—'}</td>
                     <td>{ticker ? `${trimZeros(ticker.volume)} ${market.base_asset}` : '—'}</td>
                     <td>{ticker?.trades ?? '—'}</td>
-                    <td className={market.status === 'active' ? 'ok' : 'muted'}>{market.status}</td>
+                    <td className={market.status === 'active' ? 'ok' : 'muted'}>{enumLabel(locale, 'market', market.status)}</td>
                   </tr>
                 )
               })}

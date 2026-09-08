@@ -1,6 +1,9 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { call, client, describeError, type Asset, type DepositAddress } from '../api/client'
+import { useAuth } from '../auth/session'
 import { useResource } from '../hooks/useRefetch'
+import { enumLabel } from '../i18n/enums'
+import { useLocale } from '../i18n/LocaleProvider'
 import { trimZeros } from '../lib/decimal'
 import { formatDateTime, idempotencyKey, shortId } from '../lib/format'
 import { useAccountEvents, usePrivateFeed } from '../ws/PrivateFeedProvider'
@@ -10,6 +13,8 @@ import { useAccountEvents, usePrivateFeed } from '../ws/PrivateFeedProvider'
 // balances (the balance change itself is a ledger posting, which has no
 // event of its own -- docs/domain.md §25).
 export function WalletPage() {
+  const { locale, intl, t } = useLocale()
+  const { session } = useAuth()
   const { resyncVersion } = usePrivateFeed()
   const assets = useResource(() => call(() => client.GET('/v1/assets')).then((r) => r.assets), 'assets')
   const balances = useResource(() => call(() => client.GET('/v1/balances')).then((r) => r.balances), `balances:${resyncVersion}`)
@@ -31,17 +36,22 @@ export function WalletPage() {
 
   return (
     <div className="page stack">
+      {/* the full id: the top bar shows only its first characters, and the
+          dev faucet (make faucet ACCOUNT=...) needs all of it */}
+      <p className="muted" style={{ margin: 0 }}>
+        {t('wallet.account_id')} <code data-testid="account-id">{session?.accountId ?? ''}</code>
+      </p>
       <div className="row" style={{ alignItems: 'flex-start' }}>
         <div className="card" style={{ flex: 1 }}>
-          <h2>Balances</h2>
+          <h2>{t('balances.title')}</h2>
           {balances.error && <p className="error">{balances.error}</p>}
           <table>
             <thead>
               <tr>
-                <th>Asset</th>
-                <th>Available</th>
-                <th>On hold</th>
-                <th>Total</th>
+                <th>{t('col.asset')}</th>
+                <th>{t('balances.col.available')}</th>
+                <th>{t('balances.col.hold')}</th>
+                <th>{t('balances.col.total')}</th>
               </tr>
             </thead>
             <tbody>
@@ -60,29 +70,29 @@ export function WalletPage() {
         <WithdrawPanel assets={assets.data ?? []} onCreated={() => withdrawals.bump()} />
       </div>
       <div className="card">
-        <h2>Deposits</h2>
+        <h2>{t('wallet.deposits')}</h2>
         {deposits.error && <p className="error">{deposits.error}</p>}
         <table>
           <thead>
             <tr>
-              <th>Time</th>
-              <th>Asset</th>
-              <th>Amount</th>
-              <th>Confirmations</th>
-              <th>Status</th>
-              <th>Tx</th>
+              <th>{t('col.time')}</th>
+              <th>{t('col.asset')}</th>
+              <th>{t('col.amount')}</th>
+              <th>{t('wallet.col.confirmations')}</th>
+              <th>{t('col.status')}</th>
+              <th>{t('col.tx')}</th>
             </tr>
           </thead>
           <tbody>
             {(deposits.data ?? []).map((d) => (
               <tr key={d.id} data-testid="deposit-row">
-                <td className="muted">{formatDateTime(d.created_at)}</td>
+                <td className="muted">{formatDateTime(d.created_at, intl)}</td>
                 <td>{d.asset}</td>
                 <td>{trimZeros(d.amount)}</td>
                 <td className="muted">
                   {d.confirmations}/{d.required_confirmations}
                 </td>
-                <td>{d.status}</td>
+                <td>{enumLabel(locale, 'deposit', d.status)}</td>
                 <td className="muted">
                   <code>{shortId(d.tx_hash)}</code>
                 </td>
@@ -91,7 +101,7 @@ export function WalletPage() {
             {deposits.data && deposits.data.length === 0 && (
               <tr>
                 <td colSpan={6} className="muted">
-                  No deposits yet
+                  {t('wallet.deposits_empty')}
                 </td>
               </tr>
             )}
@@ -99,30 +109,30 @@ export function WalletPage() {
         </table>
       </div>
       <div className="card">
-        <h2>Withdrawals</h2>
+        <h2>{t('wallet.withdrawals')}</h2>
         {withdrawals.error && <p className="error">{withdrawals.error}</p>}
         <table>
           <thead>
             <tr>
-              <th>Time</th>
-              <th>Asset</th>
-              <th>Amount</th>
-              <th>To</th>
-              <th>Status</th>
-              <th>Tx</th>
+              <th>{t('col.time')}</th>
+              <th>{t('col.asset')}</th>
+              <th>{t('col.amount')}</th>
+              <th>{t('wallet.col.to')}</th>
+              <th>{t('col.status')}</th>
+              <th>{t('col.tx')}</th>
             </tr>
           </thead>
           <tbody>
             {(withdrawals.data ?? []).map((w) => (
               <tr key={w.id} data-testid="withdrawal-row" data-status={w.status}>
-                <td className="muted">{formatDateTime(w.created_at)}</td>
+                <td className="muted">{formatDateTime(w.created_at, intl)}</td>
                 <td>{w.asset}</td>
                 <td>{trimZeros(w.amount)}</td>
                 <td className="muted">
                   <code>{shortId(w.to_address)}</code>
                 </td>
                 <td>
-                  {w.status}
+                  {enumLabel(locale, 'withdrawal', w.status)}
                   {w.failure_reason ? <span className="error"> · {w.failure_reason}</span> : null}
                 </td>
                 <td className="muted">{w.tx_hash ? <code>{shortId(w.tx_hash)}</code> : '—'}</td>
@@ -131,7 +141,7 @@ export function WalletPage() {
             {withdrawals.data && withdrawals.data.length === 0 && (
               <tr>
                 <td colSpan={6} className="muted">
-                  No withdrawals yet
+                  {t('wallet.withdrawals_empty')}
                 </td>
               </tr>
             )}
@@ -143,6 +153,7 @@ export function WalletPage() {
 }
 
 function DepositPanel({ assets, asset, setAsset }: { assets: Asset[]; asset: string; setAsset: (a: string) => void }) {
+  const { t } = useLocale()
   const [address, setAddress] = useState<DepositAddress | null>(null)
   const [error, setError] = useState<string | null>(null)
   const info = assets.find((a) => a.symbol === asset)
@@ -156,21 +167,22 @@ function DepositPanel({ assets, asset, setAsset }: { assets: Asset[]; asset: str
         if (!cancelled) setAddress(a)
       })
       .catch((err: unknown) => {
-        if (!cancelled) setError(describeError(err))
+        if (!cancelled) setError(describeError(err, t))
       })
     return () => {
       cancelled = true
     }
+    // one request per asset; a language switch re-words an error on the next one
   }, [asset])
   return (
     <div className="card stack" style={{ flex: 1 }}>
-      <h2>Deposit</h2>
+      <h2>{t('wallet.deposit')}</h2>
       <div className="field">
-        <label htmlFor="deposit-asset">Asset</label>
+        <label htmlFor="deposit-asset">{t('col.asset')}</label>
         <select id="deposit-asset" value={asset} onChange={(e) => setAsset(e.target.value)}>
           {assets.map((a) => (
             <option key={a.symbol} value={a.symbol} disabled={!a.deposit_enabled}>
-              {a.symbol} {a.deposit_enabled ? '' : '(deposits disabled)'}
+              {a.symbol} {a.deposit_enabled ? '' : t('wallet.deposits_disabled')}
             </option>
           ))}
         </select>
@@ -178,19 +190,16 @@ function DepositPanel({ assets, asset, setAsset }: { assets: Asset[]; asset: str
       {error && <p className="error">{error}</p>}
       {address && (
         <p>
-          Send {asset} on chain {address.chain_id} to <code data-testid="deposit-address">{address.address}</code>
+          {t('wallet.send_to', { asset, chain: address.chain_id })} <code data-testid="deposit-address">{address.address}</code>
         </p>
       )}
-      {info && (
-        <p className="muted">
-          Minimum {trimZeros(info.min_deposit)} {info.symbol}; credited after {info.required_confirmations} confirmations.
-        </p>
-      )}
+      {info && <p className="muted">{t('wallet.deposit_min', { min: trimZeros(info.min_deposit), asset: info.symbol, confirmations: info.required_confirmations })}</p>}
     </div>
   )
 }
 
 function WithdrawPanel({ assets, onCreated }: { assets: Asset[]; onCreated: () => void }) {
+  const { locale, t } = useLocale()
   const [asset, setAsset] = useState('')
   const [amount, setAmount] = useState('')
   const [to, setTo] = useState('')
@@ -214,12 +223,12 @@ function WithdrawPanel({ assets, onCreated }: { assets: Asset[]; onCreated: () =
           body: { asset, amount, to_address: to },
         }),
       )
-      setOk(`Withdrawal ${shortId(w.id)} ${w.status}`)
+      setOk(t('wallet.withdrawal_created', { id: shortId(w.id), status: enumLabel(locale, 'withdrawal', w.status) }))
       setAmount('')
       setTo('')
       onCreated()
     } catch (err) {
-      setError(describeError(err))
+      setError(describeError(err, t))
     } finally {
       setBusy(false)
     }
@@ -227,29 +236,31 @@ function WithdrawPanel({ assets, onCreated }: { assets: Asset[]; onCreated: () =
 
   return (
     <form className="card stack" style={{ flex: 1 }} onSubmit={submit} data-testid="withdraw-form">
-      <h2>Withdraw</h2>
+      <h2>{t('wallet.withdraw')}</h2>
       <div className="field">
-        <label htmlFor="withdraw-asset">Asset</label>
+        <label htmlFor="withdraw-asset">{t('col.asset')}</label>
         <select id="withdraw-asset" value={asset} onChange={(e) => setAsset(e.target.value)}>
           {assets.map((a) => (
             <option key={a.symbol} value={a.symbol} disabled={!a.withdraw_enabled}>
-              {a.symbol} {a.withdraw_enabled ? '' : '(withdrawals disabled)'}
+              {a.symbol} {a.withdraw_enabled ? '' : t('wallet.withdrawals_disabled')}
             </option>
           ))}
         </select>
       </div>
       <div className="field">
-        <label htmlFor="withdraw-amount">Amount{info ? ` (min ${trimZeros(info.min_withdrawal)}, fee ${trimZeros(info.withdrawal_fee)} ${info.symbol})` : ''}</label>
+        <label htmlFor="withdraw-amount">
+          {info ? t('wallet.amount_label', { min: trimZeros(info.min_withdrawal), fee: trimZeros(info.withdrawal_fee), asset: info.symbol }) : t('wallet.amount')}
+        </label>
         <input id="withdraw-amount" inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} required />
       </div>
       <div className="field">
-        <label htmlFor="withdraw-to">To address</label>
+        <label htmlFor="withdraw-to">{t('wallet.to_address')}</label>
         <input id="withdraw-to" value={to} onChange={(e) => setTo(e.target.value)} required placeholder="0x…" />
       </div>
       {error && <p className="error" role="alert">{error}</p>}
       {ok && <p className="ok">{ok}</p>}
       <button type="submit" className="primary" disabled={busy || !asset}>
-        Request withdrawal
+        {t('wallet.request_withdrawal')}
       </button>
     </form>
   )
