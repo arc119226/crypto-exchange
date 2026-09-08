@@ -14,3 +14,5 @@ FROM caddy:2.10.2
 COPY --from=build /web/dist /srv
 COPY build/edge/Caddyfile /etc/caddy/Caddyfile
 EXPOSE 80 443 443/udp
+LABEL org.opencontainers.image.source="https://github.com/arc119226/crypto-exchange" \
+      org.opencontainers.image.title="crypto-exchange-edge"

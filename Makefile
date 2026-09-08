@@ -43,7 +43,7 @@ KIND_IMAGE    := crypto-exchange:ci
 	    up up-single up-sepolia down down-sepolia logs-sepolia ps-sepolia reset infra-up run migrate seed artifacts compose-config contracts-test \
 	    gen-dev-secrets demo trace loadgen web-gen web-check web-build web-e2e \
 	    helm-lint helm-template kind-up helm-e2e kind-down backup-drill \
-	    image-edge image-backup images up-prod down-prod logs-prod ps-prod gen-prod-secrets
+	    image-edge image-backup images up-prod down-prod logs-prod ps-prod gen-prod-secrets release-check
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
@@ -265,6 +265,18 @@ helm-e2e: ## Install the chart into the current cluster and run the in-cluster e
 
 kind-down: ## Delete the kind cluster
 	$(KIND) delete cluster --name $(KIND_CLUSTER)
+
+release-check: ## Dry run of the release assertions for TAG=vX.Y.Z: chart packages with that appVersion and the binary reports it (docs/release.md; no Docker)
+	@test -n "$(TAG)" || (echo "usage: make release-check TAG=vX.Y.Z" && exit 2)
+	@case "$(TAG)" in v[0-9]*.[0-9]*.[0-9]*) ;; *) echo "TAG must look like vX.Y.Z"; exit 2;; esac
+	@test -z "$$(git status --porcelain)" || (echo "the working tree is not clean; a release is a commit on main" && exit 2)
+	$(HELM) lint $(HELM_CHART) >/dev/null
+	rm -rf dist/release && mkdir -p dist/release
+	$(HELM) package $(HELM_CHART) --version $(patsubst v%,%,$(TAG)) --app-version $(TAG) --destination dist/release >/dev/null
+	@test "$$($(HELM) show chart dist/release/exchange-$(patsubst v%,%,$(TAG)).tgz | sed -n 's/^appVersion: *//p')" = "$(TAG)" || (echo "chart appVersion does not equal $(TAG)" && exit 1)
+	go build -trimpath -ldflags "-s -w -X main.version=$(TAG) -X main.commit=$(COMMIT) -X main.date=$(DATE)" -o dist/release/exchange ./cmd/exchange
+	@test "$$(dist/release/exchange version --json | jq -r .version)" = "$(TAG)" || (echo "the binary does not report $(TAG)" && exit 1)
+	@echo "release-check $(TAG) OK: dist/release/exchange-$(patsubst v%,%,$(TAG)).tgz reports $(TAG), and so does the binary"
 
 contracts-test: ## forge build + test inside the pinned foundry image (no local foundry needed)
 	docker run --rm -v $(CURDIR)/infra/contracts:/contracts:ro --entrypoint sh $(FOUNDRY_IMAGE) \

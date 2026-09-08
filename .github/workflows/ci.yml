@@ -2,9 +2,9 @@
 # go.mod / tools/go.mod / .env.example so CI and laptops run the same binaries.
 #
 #   lint ─┐
-#   unit ─┼─► integration ─┬─► e2e
-#        │                 ├─► helm (the chart on a kind cluster)
-#        │                 └─► image
+#   unit ─┼─► integration ─┬─► e2e  ─┐
+#        │                 ├─► helm ─┼─► release (v* tags only: chart to ghcr, GitHub Release)
+#        │                 └─► image ┘
 #        └─► fuzz-smoke (push only: main merges and v* tags)
 #   fast-checks runs alongside: generated code, compose rendering, contracts.
 #
@@ -545,3 +545,81 @@ jobs:
           tags: ${{ steps.meta-backup.outputs.tags }}
           labels: ${{ steps.meta-backup.outputs.labels }}
           cache-from: type=gha,scope=backup
+
+  # A v* tag is a release (docs/release.md): the images are already on ghcr
+  # (image pushes on every push event, a tag included), the chart has run on
+  # kind and the compose e2e passed. What is left is to publish the chart,
+  # prove the running binary and the chart agree on the version, and open
+  # the GitHub Release with the chart and the exchangectl binaries attached.
+  release:
+    name: release
+    needs: [image, helm, e2e]
+    if: ${{ startsWith(github.ref, 'refs/tags/v') }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: |
+            go.sum
+            tools/go.sum
+      - uses: azure/setup-helm@v4
+        with:
+          version: ${{ env.HELM_VERSION }}
+      - name: versions
+        id: v
+        run: |
+          echo "tag=$GITHUB_REF_NAME" >> "$GITHUB_OUTPUT"
+          echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      # docs/plan-v1.0.md §12 Phase 7 DoD: the image that was pushed reports
+      # the tag, and so will the chart
+      - name: the released image reports the tag
+        env:
+          IMAGE: ghcr.io/${{ github.repository }}:${{ steps.v.outputs.version }}
+          TAG: ${{ steps.v.outputs.tag }}
+        run: |
+          docker pull --quiet "$IMAGE"
+          got="$(docker run --rm "$IMAGE" version --json | jq -r .version)"
+          test "$got" = "$TAG" || { echo "image reports $got, tag is $TAG"; exit 1; }
+          for extra in edge backup; do docker manifest inspect "ghcr.io/${{ github.repository }}-$extra:${{ steps.v.outputs.version }}" >/dev/null; done
+      - name: package the chart
+        env:
+          VERSION: ${{ steps.v.outputs.version }}
+          TAG: ${{ steps.v.outputs.tag }}
+        run: |
+          mkdir -p dist
+          helm package deploy/helm/exchange --version "$VERSION" --app-version "$TAG" --destination dist
+          got="$(helm show chart "dist/exchange-$VERSION.tgz" | sed -n 's/^appVersion: *//p')"
+          test "$got" = "$TAG" || { echo "chart appVersion is $got, tag is $TAG"; exit 1; }
+      - name: push the chart
+        env:
+          VERSION: ${{ steps.v.outputs.version }}
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io -u "${{ github.actor }}" --password-stdin
+          helm push "dist/exchange-$VERSION.tgz" "oci://ghcr.io/${{ github.repository_owner }}/charts"
+      - name: build exchangectl for the release
+        env:
+          TAG: ${{ steps.v.outputs.tag }}
+        run: |
+          for target in linux/amd64 darwin/arm64; do
+            GOOS="${target%/*}" GOARCH="${target#*/}" CGO_ENABLED=0 go build -trimpath \
+              -ldflags "-s -w -X main.version=$TAG -X main.commit=$GITHUB_SHA -X main.date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+              -o "dist/exchangectl-${target%/*}-${target#*/}" ./cmd/exchangectl
+          done
+          (cd dist && sha256sum exchange-*.tgz exchangectl-* > SHA256SUMS)
+      - uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            dist/exchange-*.tgz
+            dist/exchangectl-*
+            dist/SHA256SUMS

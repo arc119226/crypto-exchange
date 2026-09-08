@@ -16,3 +16,5 @@ RUN chmod 0755 /usr/local/bin/backup.sh /usr/local/bin/restore-drill.sh /usr/loc
 ENV MC_CONFIG_DIR=/tmp/.mc
 ENTRYPOINT ["/usr/local/bin/backup.sh"]
 CMD ["run"]
+LABEL org.opencontainers.image.source="https://github.com/arc119226/crypto-exchange" \
+      org.opencontainers.image.title="crypto-exchange-backup"

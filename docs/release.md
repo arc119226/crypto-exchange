@@ -21,7 +21,7 @@
 make release-check TAG=v0.1.0
 ```
 
-在本機做 CI 會做的斷言:`helm package` 得出來、`helm show chart` 的 `appVersion` 是 `v0.1.0`、`bin/exchange version` 在 `VERSION=v0.1.0` 下印 `v0.1.0`、`make lint && make test`、工作樹乾淨且 HEAD 在 `main` 上。它不需要 Docker。
+在本機做 CI 會做的兩個版本斷言:`helm package --version 0.1.0 --app-version v0.1.0` 得出來且 `helm show chart` 的 `appVersion` 是 `v0.1.0`;用同樣的 ldflags build 出來的 `exchange version --json` 印 `v0.1.0`。工作樹必須乾淨(一次發布就是 `main` 上的一個 commit)。它不需要 Docker,也不跑 `make lint && make test`——那是 tag 上 CI 的事,tag 之前 PR 已經跑過。
 
 ## 失敗時
 
