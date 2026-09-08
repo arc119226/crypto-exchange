@@ -2749,9 +2749,30 @@ components:
           description: Deposits seen on chain and not yet credited.
         dead_webhook_deliveries_24h:
           type: integer
+        last_backup:
+          $ref: "#/components/schemas/BackupSummary"
         now:
           type: string
           format: date-time
+
+    BackupSummary:
+      type: object
+      nullable: true
+      description: The newest successful pg_dump (admin.backups, written by the backup sidecar); null until one has been taken.
+      required: [kind, finished_at, size_bytes, location]
+      properties:
+        kind:
+          type: string
+          enum: [dump, wal]
+        finished_at:
+          type: string
+          format: date-time
+        size_bytes:
+          type: integer
+          format: int64
+        location:
+          type: string
+          description: The object key inside the backup bucket.
 
     ReconciliationSummary:
       type: object

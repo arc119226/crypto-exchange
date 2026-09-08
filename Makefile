@@ -22,7 +22,10 @@ FUZZ_TIME     ?= 30s
 GOTOOL        := go tool -modfile=$(TOOLS_MOD)
 FOUNDRY_TAG   ?= $(shell sed -n 's/^FOUNDRY_TAG=//p' .env.example)
 FOUNDRY_IMAGE := ghcr.io/foundry-rs/foundry:$(FOUNDRY_TAG)
-ALL_PROFILES  := --profile infra --profile observability --profile app --profile single
+ALL_PROFILES  := --profile infra --profile observability --profile app --profile single --profile backup
+BACKUP        ?= 0
+BACKUP_PROFILE := $(if $(filter 1,$(BACKUP)),--profile backup,)
+LATEST_MIGRATION := $(shell ls migrations | sed -n 's/^0*\([0-9]*\)_.*\.sql$$/\1/p' | sort -n | tail -1)
 HELM          ?= helm
 HELM_CHART    := deploy/helm/exchange
 KIND          ?= kind
@@ -32,7 +35,7 @@ KIND_IMAGE    := crypto-exchange:ci
 .PHONY: help tools gen gen-check fmt tidy lint secrets-scan test test-fuzz test-integration e2e cover-money build image \
 	    up up-single up-sepolia down down-sepolia logs-sepolia ps-sepolia reset infra-up run migrate seed artifacts compose-config contracts-test \
 	    gen-dev-secrets demo trace loadgen web-gen web-check web-build web-e2e \
-	    helm-lint helm-template kind-up helm-e2e kind-down
+	    helm-lint helm-template kind-up helm-e2e kind-down backup-drill
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
@@ -48,7 +51,7 @@ tools: ## Show pinned tool versions (tools/go.mod)
 GEN_DIRS := internal/api/gen internal/admin/gen cmd/exchangectl/internal/apiclient cmd/exchangectl/internal/adminclient \
             internal/registry/sqlcgen internal/ledger/sqlcgen internal/audit/sqlcgen \
             internal/trading/sqlcgen internal/eventbus/sqlcgen internal/auth/sqlcgen \
-            internal/chain/sqlcgen internal/webhook/sqlcgen internal/marketdata/sqlcgen
+            internal/chain/sqlcgen internal/webhook/sqlcgen internal/marketdata/sqlcgen internal/admin/sqlcgen
 
 gen: ## Regenerate OpenAPI server/client and sqlc code (outputs are committed)
 	$(GOTOOL) oapi-codegen -config internal/api/gen/oapi-codegen.yaml api/public/v1/openapi.yaml
@@ -185,6 +188,16 @@ artifacts: ## Copy addresses.json out of the compose artifacts volume (for make 
 
 e2e: ## Multi-container end-to-end test (compose app profile + exchangectl e2e; needs Docker)
 	bash scripts/e2e.sh
+
+backup-drill: ## Take a backup into the compose MinIO and restore it into a throwaway database, printing the RTO (needs a running stack; docs/runbooks/backup-restore.md)
+	$(COMPOSE) --profile infra --profile backup build backup
+	$(COMPOSE) --profile infra --profile backup up -d --wait minio
+	$(COMPOSE) --profile infra --profile backup run --rm backup once
+	$(COMPOSE) --profile infra --profile backup run --rm --entrypoint /usr/local/bin/restore-drill.sh \
+	    -e BACKUP_STORE=s3 -e EXPECTED_MIGRATION=$(LATEST_MIGRATION) \
+	    -e DRILL_ADMIN_URL="postgres://exchange:$$(sed -n 's/^POSTGRES_PASSWORD=//p' $(ENV_FILE))@postgres:5432/postgres?sslmode=disable" \
+	    -e SOURCE_DATABASE_URL="postgres://ex_backup:$$(sed -n 's/^POSTGRES_PASSWORD=//p' $(ENV_FILE))@postgres:5432/exchange?sslmode=disable" \
+	    backup
 
 compose-config: ## Validate both compose files with every profile (no daemon needed)
 	docker compose -f $(COMPOSE_FILE) --env-file .env.example $(ALL_PROFILES) config -q

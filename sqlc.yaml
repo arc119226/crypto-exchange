@@ -130,6 +130,17 @@ sql:
         omit_unused_structs: true
   - engine: postgresql
     schema: migrations
+    queries: internal/admin/queries
+    gen:
+      go:
+        package: sqlcgen
+        out: internal/admin/sqlcgen
+        sql_package: pgx/v5
+        emit_empty_slices: true
+        emit_pointers_for_null_types: true
+        omit_unused_structs: true
+  - engine: postgresql
+    schema: migrations
     queries: internal/marketdata/queries
     gen:
       go:

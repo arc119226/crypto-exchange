@@ -271,9 +271,13 @@ func TestAlertRules(t *testing.T) {
 			requireKnownMetrics(t, known, where, r.Expr)
 		}
 	}
-	assert.Equal(t, 7, n, "docs/plan-v1.0.md §15 lists seven alerts")
-	for _, want := range []string{"ExchangeNotReady", "LedgerTrialBalanceBroken", "ChainScannerLagging", "OutboxBacklog", "HotWalletLow", "WithdrawalsPendingReview", "ReconciliationBreak"} {
-		assert.True(t, seen[want], "missing alert %s", want)
+	// the seven of docs/plan-v1.0.md §15, plus what Phase 7 added for the
+	// backups (docs/runbooks/backup-restore.md)
+	want := []string{"ExchangeNotReady", "LedgerTrialBalanceBroken", "ChainScannerLagging", "OutboxBacklog", "HotWalletLow", "WithdrawalsPendingReview", "ReconciliationBreak",
+		"BackupStale", "WalArchiveStale", "BackupNeverTaken"}
+	assert.Equal(t, len(want), n, "every alert is listed here so a new one is a deliberate addition")
+	for _, w := range want {
+		assert.True(t, seen[w], "missing alert %s", w)
 	}
 }
 

@@ -107,7 +107,9 @@ func newAdminServer(cfg Config, log *slog.Logger, m *telemetry.HTTPMetrics, reg 
 		// Read-only: what the chain role has seen and not yet credited.
 		WithDeposits(deposit.NewReader(pool, cfg.TenantID)).
 		// People: the directory, KYC levels, freezes.
-		WithUsers(sessions)
+		WithUsers(sessions).
+		// The backup sidecar's record, as the gauge the BackupStale alert reads.
+		WithBackupMetrics(admin.NewBackupMetrics(reg))
 	// One admin replica (docs/plan-v1.0.md §5.2), so the login throttle can
 	// live in memory: a second replica would only double the allowance.
 	ui, err := admin.NewUI(h, sessions, admin.UIConfig{
@@ -137,6 +139,9 @@ func observeLedger(ctx context.Context, log *slog.Logger, l *ledger.Service, h *
 		}
 		if _, _, err := h.WatchLedgerBreaks(ctx); err != nil && ctx.Err() == nil {
 			log.Warn("ledger break check failed", slog.String("err", err.Error()))
+		}
+		if err := h.ObserveBackups(ctx); err != nil && ctx.Err() == nil {
+			log.Warn("backup record refresh failed", slog.String("err", err.Error()))
 		}
 		select {
 		case <-ctx.Done():
