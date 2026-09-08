@@ -7,6 +7,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/prometheus/client_golang/prometheus"
 )
 
 // CheckFunc probes one dependency.
@@ -25,6 +27,10 @@ type Checker struct {
 	draining atomic.Bool
 	timeout  time.Duration
 }
+
+// readinessSampleInterval is how often exchange_ready is refreshed; six
+// samples fit in the alert's one-minute window.
+const readinessSampleInterval = 10 * time.Second
 
 // NewChecker returns a Checker with a 2 s per-check timeout.
 func NewChecker() *Checker { return &Checker{timeout: 2 * time.Second} }
@@ -118,4 +124,42 @@ func (c *Checker) ReadyzHandler() http.Handler {
 		w.WriteHeader(code)
 		_ = json.NewEncoder(w).Encode(body)
 	})
+}
+
+// readinessGauge publishes exchange_ready (docs/plan-v1.0.md §15). The
+// alert "readyz failed for more than a minute" has to come from the
+// process's own view sampled on a clock: a load balancer's probes are not
+// scraped, and a dead process has no /readyz at all (that case is `up == 0`,
+// which the same rule covers). 1 means /readyz would answer 200 right now.
+type readinessGauge struct {
+	ready prometheus.Gauge
+}
+
+func newReadinessGauge(reg prometheus.Registerer) *readinessGauge {
+	g := &readinessGauge{ready: prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "exchange_ready",
+		Help: "1 when every required readiness check passes and the process is not draining; 0 otherwise.",
+	})}
+	reg.MustRegister(g.ready)
+	return g
+}
+
+// run samples the checker immediately and then every interval until ctx
+// ends. It returns nil on cancellation so it can sit in the role errgroup.
+func (g *readinessGauge) run(ctx context.Context, c *Checker, every time.Duration) error {
+	t := time.NewTicker(every)
+	defer t.Stop()
+	for {
+		_, code := c.Evaluate(ctx)
+		if code == http.StatusOK {
+			g.ready.Set(1)
+		} else {
+			g.ready.Set(0)
+		}
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-t.C:
+		}
+	}
 }

@@ -61,6 +61,8 @@ func Run(ctx context.Context, cfg Config, roles []Role, bi BuildInfo) error {
 	defer cleanup()
 
 	httpMetrics := telemetry.NewHTTPMetrics(reg)
+	reg.MustRegister(pg.NewPoolCollector(d.pool))
+	readiness := newReadinessGauge(reg)
 	// one set of outbox / consumer instruments per process: the engine's
 	// relay, the worker's and the stream's consumers all report through it
 	ebMetrics := eventbus.NewMetrics(reg)
@@ -199,6 +201,7 @@ func Run(ctx context.Context, cfg Config, roles []Role, bi BuildInfo) error {
 	for _, s := range append(servers, ops) {
 		g.Go(listenAndServe(s, log))
 	}
+	g.Go(func() error { return readiness.run(gctx, checker, readinessSampleInterval) })
 	if adminLedger != nil {
 		g.Go(func() error { return observeLedger(gctx, log, adminLedger, adminHandler) })
 	}
