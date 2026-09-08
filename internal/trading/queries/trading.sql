@@ -109,3 +109,18 @@ UPDATE trading.market_sequences
 
 -- name: GetMarketSequence :one
 SELECT last_seq FROM trading.market_sequences WHERE market_id = $1;
+
+-- name: LockMarketSequence :one
+-- The engine's per-command transaction (or group of commands) starts by
+-- locking the sequence row and comparing it with what it committed last:
+-- a second engine instance that advanced it is caught here, before any
+-- write, and the row lock serialises the two until one of them fails.
+SELECT last_seq FROM trading.market_sequences WHERE market_id = $1 FOR UPDATE;
+
+-- name: SetMarketSequence :execrows
+-- The last statement before COMMIT: guarded like AdvanceMarketSequence,
+-- but from the sequence the transaction started at to the last one it
+-- consumed, however many commands that was.
+UPDATE trading.market_sequences
+   SET last_seq = sqlc.arg(to_seq), updated_at = now()
+ WHERE market_id = $1 AND last_seq = sqlc.arg(from_seq);

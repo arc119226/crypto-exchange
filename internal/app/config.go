@@ -17,6 +17,7 @@ import (
 	"github.com/arc119226/crypto-exchange/internal/money"
 	"github.com/arc119226/crypto-exchange/internal/platform/secretbox"
 	"github.com/arc119226/crypto-exchange/internal/telemetry"
+	"github.com/arc119226/crypto-exchange/internal/trading"
 )
 
 // Config is the 12-factor configuration of the exchange binary. Every value
@@ -119,6 +120,11 @@ type MarketDataConfig struct {
 // that reaches it from a separate api role (docs/plan-v1.0.md §5.2).
 type EngineConfig struct {
 	QueueSize int `env:"QUEUE_SIZE" envDefault:"1024"` // commands waiting per market
+	// BatchSize is how many queued commands a market's runner commits in
+	// one transaction at most (group commit, docs/plan-v1.0.md §5.2). 1
+	// commits every command on its own; the ceiling is trading.MaxBatchSize
+	// because a failed group costs one order-book rebuild.
+	BatchSize int `env:"BATCH_SIZE" envDefault:"50"`
 	// CommandSubjectPrefix is the first tokens of cmd.trading.<tenant>.<market>.
 	CommandSubjectPrefix string `env:"COMMAND_SUBJECT_PREFIX" envDefault:"cmd.trading"`
 	// CommandTimeout bounds one request-reply round trip; exceeding it is a 503.
@@ -487,6 +493,9 @@ func (c Config) Validate() error {
 	if c.Engine.CommandMaxInFlight < 0 {
 		return fmt.Errorf("config: ENGINE_COMMAND_MAX_INFLIGHT must not be negative")
 	}
+	if c.Engine.BatchSize < 1 || c.Engine.BatchSize > trading.MaxBatchSize {
+		return fmt.Errorf("config: ENGINE_BATCH_SIZE must be 1..%d", trading.MaxBatchSize)
+	}
 	if c.Outbox.PollInterval <= 0 || c.Outbox.BatchSize <= 0 {
 		return fmt.Errorf("config: OUTBOX_POLL_INTERVAL and OUTBOX_BATCH_SIZE must be positive")
 	}
@@ -614,6 +623,7 @@ func (c Config) LogValue() slog.Value {
 		slog.String("ratelimit_orders_per_account", c.RateLimit.OrdersPerAccount),
 		slog.Int("engine_queue_size", c.Engine.QueueSize),
 		slog.Int("engine_command_max_inflight", c.Engine.CommandMaxInFlight),
+		slog.Int("engine_batch_size", c.Engine.BatchSize),
 		slog.Duration("outbox_poll_interval", c.Outbox.PollInterval),
 		slog.Duration("shutdown_drain_delay", c.Shutdown.DrainDelay),
 		slog.Duration("shutdown_timeout", c.Shutdown.Timeout),

@@ -176,15 +176,3 @@ func getOrder(ctx context.Context, db sqlcgen.DBTX, id string) (Order, error) {
 	}
 	return orderFromRow(row)
 }
-
-// getOrderByClientID loads the order an account placed under a client id.
-func getOrderByClientID(ctx context.Context, db sqlcgen.DBTX, tenant, account, clientID string) (Order, error) {
-	row, err := sqlcgen.New(db).GetOrderByClientID(ctx, sqlcgen.GetOrderByClientIDParams{TenantID: tenant, AccountID: account, ClientOrderID: clientID})
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return Order{}, ErrOrderNotFound
-		}
-		return Order{}, fmt.Errorf("trading: get order by client id: %w", err)
-	}
-	return orderFromRow(row)
-}

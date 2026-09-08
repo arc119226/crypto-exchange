@@ -96,5 +96,6 @@ func newEngine(cfg Config, log *slog.Logger, pool *pgxpool.Pool, l *ledger.Servi
 	cache := registry.NewCache(cfg.TenantID)
 	return trading.NewEngine(pool, l, cache, store, cfg.TenantID, log).
 		WithMetrics(trading.NewMetrics(reg)).
-		WithQueueSize(cfg.Engine.QueueSize)
+		WithQueueSize(cfg.Engine.QueueSize).
+		WithBatchSize(cfg.Engine.BatchSize)
 }

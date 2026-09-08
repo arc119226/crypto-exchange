@@ -619,6 +619,44 @@ func (q *Queries) ListTradesByOrder(ctx context.Context, makerOrderID string) ([
 	return items, nil
 }
 
+const LockMarketSequence = `-- name: LockMarketSequence :one
+SELECT last_seq FROM trading.market_sequences WHERE market_id = $1 FOR UPDATE
+`
+
+// The engine's per-command transaction (or group of commands) starts by
+// locking the sequence row and comparing it with what it committed last:
+// a second engine instance that advanced it is caught here, before any
+// write, and the row lock serialises the two until one of them fails.
+func (q *Queries) LockMarketSequence(ctx context.Context, marketID string) (int64, error) {
+	row := q.db.QueryRow(ctx, LockMarketSequence, marketID)
+	var last_seq int64
+	err := row.Scan(&last_seq)
+	return last_seq, err
+}
+
+const SetMarketSequence = `-- name: SetMarketSequence :execrows
+UPDATE trading.market_sequences
+   SET last_seq = $2, updated_at = now()
+ WHERE market_id = $1 AND last_seq = $3
+`
+
+type SetMarketSequenceParams struct {
+	MarketID string
+	ToSeq    int64
+	FromSeq  int64
+}
+
+// The last statement before COMMIT: guarded like AdvanceMarketSequence,
+// but from the sequence the transaction started at to the last one it
+// consumed, however many commands that was.
+func (q *Queries) SetMarketSequence(ctx context.Context, arg SetMarketSequenceParams) (int64, error) {
+	result, err := q.db.Exec(ctx, SetMarketSequence, arg.MarketID, arg.ToSeq, arg.FromSeq)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const UpdateOrderProgress = `-- name: UpdateOrderProgress :one
 UPDATE trading.orders
    SET filled_qty     = $2,

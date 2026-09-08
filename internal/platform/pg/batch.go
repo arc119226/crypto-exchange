@@ -5,6 +5,7 @@ import (
 	"errors"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 // Batch queues statements of different shapes into one pgx batch (one round
@@ -111,6 +112,22 @@ func (b *Batch) QueueExecRows(sql string, args ...any) *Result[int64] {
 			return err
 		}
 		r.Val = tag.RowsAffected()
+		return nil
+	})
+	return r
+}
+
+// QueueExecTag queues a statement and records its command tag (a queued
+// COMMIT answers ROLLBACK when the transaction had already failed).
+func (b *Batch) QueueExecTag(sql string, args ...any) *Result[pgconn.CommandTag] {
+	r := &Result[pgconn.CommandTag]{}
+	b.b.Queue(sql, args...)
+	b.reads = append(b.reads, func(br pgx.BatchResults) error {
+		tag, err := br.Exec()
+		if err != nil {
+			return err
+		}
+		r.Val = tag
 		return nil
 	})
 	return r

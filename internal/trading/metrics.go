@@ -12,6 +12,9 @@ type Metrics struct {
 	openOrders      *prometheus.GaugeVec
 	rebuildDuration prometheus.Histogram
 	rebuilds        prometheus.Counter
+	batchSize       *prometheus.HistogramVec
+	batchDuration   *prometheus.HistogramVec
+	batchFallbacks  *prometheus.CounterVec
 }
 
 // NewMetrics registers the trading metrics on reg.
@@ -43,9 +46,26 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 		rebuilds: prometheus.NewCounter(prometheus.CounterOpts{
 			Name: "engine_rebuilds_total", Help: "Order book rebuilds after a failed transaction.",
 		}),
+		batchSize: prometheus.NewHistogramVec(prometheus.HistogramOpts{
+			Name: "trading_batch_size", Help: "Commands committed per transaction (group commit).",
+			Buckets: []float64{1, 2, 4, 8, 16, 32, 50}, //nolint:forbidigo // Prometheus API, not money
+		}, []string{"market"}),
+		batchDuration: prometheus.NewHistogramVec(prometheus.HistogramOpts{
+			Name: "trading_batch_duration_seconds", Help: "Time from taking a group of commands off the queue to its COMMIT.",
+			Buckets: []float64{.001, .0025, .005, .01, .025, .05, .1, .25, .5, 1, 2.5}, //nolint:forbidigo // Prometheus API, not money
+		}, []string{"market"}),
+		batchFallbacks: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "trading_batch_fallbacks_total", Help: "Groups that failed as a whole and were re-run one command per transaction, by reason.",
+		}, []string{"market", "reason"}),
 	}
-	reg.MustRegister(m.queueDepth, m.applyDuration, m.orders, m.trades, m.seq, m.openOrders, m.rebuildDuration, m.rebuilds)
+	reg.MustRegister(m.queueDepth, m.applyDuration, m.orders, m.trades, m.seq, m.openOrders, m.rebuildDuration, m.rebuilds,
+		m.batchSize, m.batchDuration, m.batchFallbacks)
 	return m
+}
+
+// observeBatch records the size of one committed group.
+func (m *Metrics) observeBatch(market string, n int) {
+	m.batchSize.WithLabelValues(market).Observe(float64(n)) //nolint:forbidigo // Prometheus histogram, not money
 }
 
 // observeQueue records the runner's queue length.

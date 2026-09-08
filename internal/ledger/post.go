@@ -97,12 +97,27 @@ func (p *PendingEntry) QueueLocks(b *pg.Batch) {
 	}
 }
 
+// BalanceKey is one (account, asset) pair an entry moves funds in.
+type BalanceKey struct{ AccountID, Asset string }
+
+// BalanceKeys lists the spot balances the entry changes, in the order
+// Finish reports them; known before anything is sent, so a caller can
+// count the balance events it will publish.
+func (p *PendingEntry) BalanceKeys() []BalanceKey {
+	out := make([]BalanceKey, 0, len(p.keys))
+	for _, k := range p.keys {
+		out = append(out, BalanceKey{AccountID: k.account, Asset: k.asset})
+	}
+	return out
+}
+
 // Check reads the first round trip: a replayed key returns (true, nil) and
 // Entry() is the existing entry; otherwise the accounts and funds are
-// checked (ErrAccountNotFound, ErrAccountKind, ErrInsufficient).
-func (p *PendingEntry) Check(ctx context.Context, tx pgx.Tx) (bool, error) {
+// checked (ErrAccountNotFound, ErrAccountKind, ErrInsufficient). db is the
+// transaction the batch ran on (a pgx.Tx or the connection holding it).
+func (p *PendingEntry) Check(ctx context.Context, db sqlcgen.DBTX) (bool, error) {
 	if p.entry.Err != nil { // ON CONFLICT DO NOTHING returned no row
-		existing, err := p.s.entryByKey(ctx, tx, p.e.IdempotencyKey)
+		existing, err := p.s.entryByKey(ctx, db, p.e.IdempotencyKey)
 		if err != nil {
 			return false, err
 		}
@@ -219,6 +234,28 @@ func (p *PendingEntry) Entry() JournalEntry { return p.result }
 
 // Kind is the entry kind, for error messages.
 func (p *PendingEntry) Kind() string { return p.e.Kind }
+
+// PendingAccount is an account row queued into a batch.
+type PendingAccount struct {
+	tenant string
+	res    *pg.Result[sqlcgen.LedgerAccount]
+}
+
+// QueueAccount queues the read that Account does.
+func (s *Service) QueueAccount(b *pg.Batch, id string) *PendingAccount {
+	return &PendingAccount{tenant: s.tenant, res: pg.QueueOne[sqlcgen.LedgerAccount](b, sqlcgen.GetAccount, id)}
+}
+
+// Get returns the account, or ErrAccountNotFound.
+func (p *PendingAccount) Get() (Account, error) {
+	if p.res.Err != nil {
+		return Account{}, ErrAccountNotFound
+	}
+	if p.res.Val.TenantID != p.tenant {
+		return Account{}, ErrAccountNotFound
+	}
+	return accountFromRow(p.res.Val), nil
+}
 
 func splitKeys(keys []balanceKey) (accounts, assets []string) {
 	accounts, assets = make([]string, 0, len(keys)), make([]string, 0, len(keys))

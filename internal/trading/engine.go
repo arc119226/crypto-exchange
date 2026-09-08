@@ -26,6 +26,14 @@ const lockRetry = time.Second
 // defaultQueueSize bounds the commands waiting per market.
 const defaultQueueSize = 1024
 
+// DefaultBatchSize is how many queued commands a runner commits in one
+// transaction at most (docs/plan-v1.0.md §5.2 group commit). MaxBatchSize
+// is the ceiling: a failed group costs one book rebuild, so it stays small.
+const (
+	DefaultBatchSize = 50
+	MaxBatchSize     = 50
+)
+
 // Engine runs one runner per market of a tenant. Exactly one engine per
 // database may run: Start takes a Postgres advisory lock and blocks until
 // it gets it (docs/plan-v1.0.md §5.1). Engine implements CommandBus for the
@@ -41,7 +49,11 @@ type Engine struct {
 	log       *slog.Logger
 	metrics   *Metrics
 	queueSize int
+	batchSize int
 
+	beforeCommit func(market string, commands int) error // test hook, see WithFaultInjection
+
+	enqueue sync.Mutex // PlaceMany's requests enter a queue without interleaving
 	mu      sync.RWMutex
 	runners map[string]*runner
 	ready   atomic.Bool
@@ -59,7 +71,7 @@ func NewEngine(pool *pgxpool.Pool, l *ledger.Service, reg *registry.Cache, store
 	}
 	return &Engine{
 		pool: pool, ledger: l, reg: reg, store: store, policy: policy.Basic{}, tenant: tenant, log: log,
-		queueSize: defaultQueueSize, runners: map[string]*runner{},
+		queueSize: defaultQueueSize, batchSize: DefaultBatchSize, runners: map[string]*runner{},
 	}
 }
 
@@ -79,6 +91,15 @@ func (e *Engine) WithPolicy(p policy.OrderPolicy) *Engine {
 func (e *Engine) WithQueueSize(n int) *Engine {
 	if n > 0 {
 		e.queueSize = n
+	}
+	return e
+}
+
+// WithBatchSize sets how many queued commands a runner commits per
+// transaction (1..MaxBatchSize; 1 turns group commit off).
+func (e *Engine) WithBatchSize(n int) *Engine {
+	if n > 0 {
+		e.batchSize = min(n, MaxBatchSize)
 	}
 	return e
 }
@@ -261,9 +282,12 @@ func (e *Engine) submit(ctx context.Context, symbol string, req request) (respon
 	}
 	req.ctx = ctx
 	req.reply = make(chan response, 1)
+	e.enqueue.Lock()
 	select {
 	case r.cmds <- req:
+		e.enqueue.Unlock()
 	case <-ctx.Done():
+		e.enqueue.Unlock()
 		return response{}, fmt.Errorf("%w: queue full: %v", ErrEngineUnavailable, ctx.Err())
 	}
 	select {
@@ -273,6 +297,90 @@ func (e *Engine) submit(ctx context.Context, symbol string, req request) (respon
 		// the runner still executes the command; the caller only stops waiting
 		return response{}, fmt.Errorf("%w: %v", ErrEngineUnavailable, ctx.Err())
 	}
+}
+
+// Command is one of the two things ExecuteMany can hand a runner.
+type Command struct {
+	Place  *PlaceOrderRequest
+	Cancel *CancelRequest
+}
+
+// CommandResult is ExecuteMany's answer for one Command: for a place the
+// result, for a cancel the order in Result.Order.
+type CommandResult struct {
+	Result PlaceOrderResult
+	Err    error
+}
+
+// ExecuteMany enqueues commands for one market back to back, so they
+// reach the runner as one contiguous stretch of its queue (one group when
+// they fit, docs/plan-v1.0.md §5.2). Results are positional. Tests use it
+// to decide what a group contains; a bulk endpoint could too.
+func (e *Engine) ExecuteMany(ctx context.Context, market string, cmds []Command) []CommandResult {
+	results := make([]CommandResult, len(cmds))
+	fail := func(from int, err error) {
+		for i := from; i < len(results); i++ {
+			results[i].Err = err
+		}
+	}
+	if !e.Ready() {
+		fail(0, ErrEngineUnavailable)
+		return results
+	}
+	r, err := e.runner(market)
+	if err != nil {
+		fail(0, err)
+		return results
+	}
+	queued := make([]request, 0, len(cmds))
+	e.enqueue.Lock()
+	for i := range cmds {
+		req := request{ctx: ctx, place: cmds[i].Place, cancel: cmds[i].Cancel, reply: make(chan response, 1)}
+		if req.place == nil && req.cancel == nil {
+			results[i].Err = fmt.Errorf("%w: empty command", ErrInvalidRequest)
+			continue
+		}
+		select {
+		case r.cmds <- req:
+			queued = append(queued, req)
+			results[i].Err = nil
+		case <-ctx.Done():
+			e.enqueue.Unlock()
+			fail(i, fmt.Errorf("%w: queue full: %v", ErrEngineUnavailable, ctx.Err()))
+			return e.collect(ctx, queued, results)
+		}
+	}
+	e.enqueue.Unlock()
+	return e.collect(ctx, queued, results)
+}
+
+// collect waits for the queued requests' replies, in order; results
+// already carrying an error were never queued.
+func (e *Engine) collect(ctx context.Context, queued []request, results []CommandResult) []CommandResult {
+	next := 0
+	for i := range results {
+		if results[i].Err != nil {
+			continue
+		}
+		req := queued[next]
+		next++
+		select {
+		case res := <-req.reply:
+			results[i] = CommandResult{Result: res.result, Err: res.err}
+		case <-ctx.Done():
+			results[i].Err = fmt.Errorf("%w: %v", ErrEngineUnavailable, ctx.Err())
+		}
+	}
+	return results
+}
+
+// WithFaultInjection installs a hook the runner calls right before every
+// group's COMMIT; a non-nil error fails the group. For tests and chaos
+// drills only: it is how "a group fails as a whole" is exercised without
+// pulling the database's plug.
+func (e *Engine) WithFaultInjection(f func(market string, commands int) error) *Engine {
+	e.beforeCommit = f
+	return e
 }
 
 // PlaceOrder implements CommandBus.
