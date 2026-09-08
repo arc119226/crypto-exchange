@@ -181,19 +181,29 @@ func newAuthService(cfg Config, log *slog.Logger, d *deps, l *ledger.Service) (*
 	if err != nil {
 		return nil, err
 	}
+	if cfg.JWT.PreviousKeyFile != "" {
+		pub, err := auth.LoadPublicKey(cfg.JWT.PreviousKeyFile)
+		if err != nil {
+			return nil, fmt.Errorf("JWT_PREVIOUS_KEY_FILE: %w", err)
+		}
+		if err := signer.WithPreviousKey(pub); err != nil {
+			return nil, fmt.Errorf("JWT_PREVIOUS_KEY_FILE: %w", err)
+		}
+		log.Info("publishing a second JWT key", "kid", signer.KeyID(), "previous_kid", signer.PreviousKeyID())
+	}
 	verifier, err := signer.VerifierFor()
 	if err != nil {
 		return nil, err
 	}
-	var master []byte
+	keys, err := cfg.APIKeyKeys()
+	if err != nil {
+		return nil, err
+	}
 	switch {
-	case cfg.APIKeyMasterKey.IsSet():
-		if master, err = auth.ParseMasterKey(cfg.APIKeyMasterKey.Reveal()); err != nil {
-			return nil, err
-		}
+	case !keys.Empty():
 	case cfg.Env == "dev":
-		master = make([]byte, auth.MasterKeyLen)
-		if _, err := rand.Read(master); err != nil {
+		keys.Current = make([]byte, auth.MasterKeyLen)
+		if _, err := rand.Read(keys.Current); err != nil {
 			return nil, fmt.Errorf("auth: ephemeral master key: %w", err)
 		}
 		log.Warn("API_KEY_MASTER_KEY is empty: API keys created now stop working when the process restarts (dev only)")
@@ -201,7 +211,8 @@ func newAuthService(cfg Config, log *slog.Logger, d *deps, l *ledger.Service) (*
 		log.Warn("API_KEY_MASTER_KEY is empty: API keys are disabled")
 	}
 	return auth.New(d.pool, auth.Config{
-		Tenant: cfg.TenantID, Issuer: cfg.Auth.Issuer, AccessTTL: cfg.Auth.AccessTTL, RefreshTTL: cfg.Auth.RefreshTTL, MasterKey: master,
+		Tenant: cfg.TenantID, Issuer: cfg.Auth.Issuer, AccessTTL: cfg.Auth.AccessTTL, RefreshTTL: cfg.Auth.RefreshTTL,
+		MasterKey: keys.Current, PreviousMasterKey: keys.Previous,
 	}, signer, verifier, l, audit.NewRecorder(cfg.TenantID))
 }
 

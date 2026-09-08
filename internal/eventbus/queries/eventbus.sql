@@ -41,3 +41,21 @@ LIMIT $3 OFFSET $4;
 INSERT INTO eventbus.processed_events (consumer, event_id)
 VALUES ($1, $2)
 ON CONFLICT (consumer, event_id) DO NOTHING;
+
+-- Retention (docs/plan-v1.0.md §7.3: the outbox is kept 30 days) --------
+-- The worker role's retention loop calls these with a cutoff and a batch
+-- size until a call deletes fewer rows than the batch.
+
+-- name: PruneOutbox :execrows
+-- Published rows older than the cutoff; unpublished rows are never touched
+-- (the relay still owes them to JetStream). Old rows have the lowest ids,
+-- so walking the primary key finds them without a new index.
+DELETE FROM eventbus.outbox o
+ WHERE o.id IN (SELECT i.id FROM eventbus.outbox i
+                 WHERE i.published_at IS NOT NULL AND i.published_at < $1
+                 ORDER BY i.id LIMIT $2);
+
+-- name: PruneProcessedEvents :execrows
+DELETE FROM eventbus.processed_events p
+ WHERE (p.consumer, p.event_id) IN (SELECT i.consumer, i.event_id FROM eventbus.processed_events i
+                                     WHERE i.processed_at < $1 LIMIT $2);

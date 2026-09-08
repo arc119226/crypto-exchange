@@ -26,6 +26,7 @@ go.work.sum
 
 # env file
 .env
+.env.prod
 
 # Editor/IDE
 # .idea/
@@ -33,6 +34,7 @@ go.work.sum
 
 # Project
 secrets/
+.kind/
 bin/
 dist/
 web/trade/node_modules/

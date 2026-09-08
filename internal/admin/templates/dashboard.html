@@ -29,6 +29,16 @@
     <span class="label">Dead webhook deliveries, 24h</span>
     <span class="value">{{.DeadWebhookDeliveries24H}}</span>
   </a>
+  <div class="tile {{if .LastBackup}}ok{{else}}muted{{end}}">
+    <span class="label">Last backup</span>
+    {{if .LastBackup}}
+    <span class="value">{{when .LastBackup.FinishedAt}}</span>
+    <span class="sub">{{.LastBackup.Location}}</span>
+    {{else}}
+    <span class="value">none yet</span>
+    <span class="sub">the backup sidecar writes admin.backups</span>
+    {{end}}
+  </div>
 </section>
 <p class="muted">As of {{when .Now}}. Database: {{.Database}}.</p>
 {{end}}

@@ -161,3 +161,31 @@ UPDATE webhook.endpoints
 SET previous_secret_enc = secret_enc, previous_secret_until = $4, secret_enc = $3, updated_at = now()
 WHERE tenant_id = $1 AND id = $2
 RETURNING id, url, events, label, status, created_at, updated_at, previous_secret_until;
+
+-- Retention (docs/plan-v1.0.md §12 Phase 7) --------------------------------
+
+-- name: PruneDeliveries :execrows
+-- Attempt records older than the cutoff. Evidence has a shelf life too;
+-- ninety days is the default (RETENTION_WEBHOOK).
+DELETE FROM webhook.deliveries d
+ WHERE d.id IN (SELECT i.id FROM webhook.deliveries i WHERE i.created_at < $1 LIMIT $2);
+
+-- name: PruneEvents :execrows
+-- Stored event bodies older than the cutoff that no queue row references
+-- any more (queue_event_fk): a body still queued for an endpoint that is
+-- retrying or paused stays until that row is gone.
+DELETE FROM webhook.events w
+ WHERE (w.tenant_id, w.event_id) IN (
+   SELECT e.tenant_id, e.event_id FROM webhook.events e
+    WHERE e.created_at < $1
+      AND NOT EXISTS (SELECT 1 FROM webhook.queue q WHERE q.tenant_id = e.tenant_id AND q.event_id = e.event_id)
+    LIMIT $2);
+
+-- Rewrap under a rotated master key (exchange keys rewrap): both the live
+-- secret and, while a grace period holds one, the previous secret.
+
+-- name: ListEndpointSecretsForUpdate :many
+SELECT id, secret_enc, previous_secret_enc FROM webhook.endpoints WHERE tenant_id = $1 ORDER BY created_at, id FOR UPDATE;
+
+-- name: SetEndpointSecretEnc :exec
+UPDATE webhook.endpoints SET secret_enc = $2, previous_secret_enc = $3 WHERE id = $1;

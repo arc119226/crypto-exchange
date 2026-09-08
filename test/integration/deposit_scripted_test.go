@@ -410,7 +410,7 @@ func TestScriptedAnchorRefusesAMovedStartBlock(t *testing.T) {
 
 // Every start says which chain it is on, not only the first. The anchor is
 // recorded once, so "chain recorded" appears once in the life of a database --
-// while docs/runbooks/sepolia.md tells an operator to look for that line every
+// while docs/guides/sepolia.md tells an operator to look for that line every
 // time they bring the exchange up, and to go hunting for a red error if it is
 // missing. From the second start on there was no line and no error.
 func TestScannerSaysItVerifiedTheChainOnEveryStart(t *testing.T) {

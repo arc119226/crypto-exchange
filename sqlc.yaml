@@ -50,6 +50,10 @@ sql:
         emit_empty_slices: true
         emit_pointers_for_null_types: true
         omit_unused_structs: true
+        # Exported SQL constants: the hot paths queue several of these
+        # statements into one pgx.Batch (internal/platform/pg/batch.go) and
+        # scan the results into the generated row structs by position.
+        emit_exported_queries: true
   - engine: postgresql
     schema: migrations
     queries: internal/audit/queries
@@ -72,6 +76,10 @@ sql:
         emit_empty_slices: true
         emit_pointers_for_null_types: true
         omit_unused_structs: true
+        # Exported SQL constants: the hot paths queue several of these
+        # statements into one pgx.Batch (internal/platform/pg/batch.go) and
+        # scan the results into the generated row structs by position.
+        emit_exported_queries: true
   - engine: postgresql
     schema: migrations
     queries: internal/eventbus/queries
@@ -83,6 +91,10 @@ sql:
         emit_empty_slices: true
         emit_pointers_for_null_types: true
         omit_unused_structs: true
+        # Exported SQL constants: the hot paths queue several of these
+        # statements into one pgx.Batch (internal/platform/pg/batch.go) and
+        # scan the results into the generated row structs by position.
+        emit_exported_queries: true
   - engine: postgresql
     schema: migrations
     queries: internal/auth/queries
@@ -112,6 +124,17 @@ sql:
       go:
         package: sqlcgen
         out: internal/webhook/sqlcgen
+        sql_package: pgx/v5
+        emit_empty_slices: true
+        emit_pointers_for_null_types: true
+        omit_unused_structs: true
+  - engine: postgresql
+    schema: migrations
+    queries: internal/admin/queries
+    gen:
+      go:
+        package: sqlcgen
+        out: internal/admin/sqlcgen
         sql_package: pgx/v5
         emit_empty_slices: true
         emit_pointers_for_null_types: true

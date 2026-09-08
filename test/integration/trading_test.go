@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -35,6 +36,12 @@ type tradingHarness struct {
 	engine *trading.Engine
 	svc    *trading.Service
 	log    *slog.Logger
+
+	// engine options (set before startEngine / crash)
+	batchSize  int                                     // 0 = the engine default
+	fault      func(market string, commands int) error // trading.Engine.WithFaultInjection
+	enginePool *pgxpool.Pool                           // nil = h.all
+	reg        *prometheus.Registry                    // the running engine's metrics
 }
 
 func setupTrading(t *testing.T) *tradingHarness {
@@ -58,7 +65,13 @@ func (h *tradingHarness) startEngine(t *testing.T) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	eng := trading.NewEngine(h.all, h.svc2(), h.cache, h.store, "default", h.log).WithMetrics(trading.NewMetrics(prometheus.NewRegistry()))
+	pool := h.all
+	if h.enginePool != nil {
+		pool = h.enginePool
+	}
+	h.reg = prometheus.NewRegistry()
+	eng := trading.NewEngine(pool, h.svc2(), h.cache, h.store, "default", h.log).WithMetrics(trading.NewMetrics(h.reg)).
+		WithBatchSize(h.batchSize).WithFaultInjection(h.fault)
 	require.NoError(t, eng.Start(ctx))
 	t.Cleanup(eng.Stop)
 	h.engine = eng

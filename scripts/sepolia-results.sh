@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Collect the Sepolia walkthrough's result tables (docs/runbooks/sepolia.md §5).
+# Collect the Sepolia walkthrough's result tables (docs/guides/sepolia.md §5).
 #
 # Almost every number §5 asks for is already in the system: deposits, sweeps
 # and withdrawals all record their transaction hashes, and the chain will hand
@@ -372,7 +372,7 @@ PY
 {
 	echo "# Sepolia 實測結果"
 	echo
-	echo "由 \`scripts/sepolia-results.sh\` 產生。填進 docs/runbooks/sepolia.md §5。"
+	echo "由 \`scripts/sepolia-results.sh\` 產生。填進 docs/guides/sepolia.md §5。"
 	echo
 	cat "$WORK/tables.md"
 	if [[ -s "$NOTES" ]]; then

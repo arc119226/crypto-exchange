@@ -58,6 +58,19 @@ if [[ -f .env && "$FORCE" != 1 ]]; then
     set_var .env ADMIN_TOTP_KEY "$(openssl rand -hex 32)"
     log "ADMIN_TOTP_KEY was missing; generated it (it encrypts administrators' TOTP secrets)"
   fi
+  # Phase 7 added the backup profile; an .env from before it has no store
+  # credentials and MinIO would refuse to start with an empty password.
+  for key in BACKUP_S3_ENDPOINT BACKUP_S3_BUCKET BACKUP_INTERVAL BACKUP_RETENTION_DAYS; do
+    if ! grep -q "^$key=" .env; then
+      set_var .env "$key" "$(sed -n "s/^$key=//p" .env.example)"
+    fi
+  done
+  if ! grep -q '^BACKUP_S3_ACCESS_KEY=' .env; then set_var .env BACKUP_S3_ACCESS_KEY "exchange-backup"; fi
+  backup_secret="$(sed -n 's/^BACKUP_S3_SECRET_KEY=//p' .env | tr -d '[:space:]')"
+  if [ -z "$backup_secret" ] || [ "$backup_secret" = CHANGE_ME ]; then
+    set_var .env BACKUP_S3_SECRET_KEY "$(rand_hex)"
+    log "BACKUP_S3_SECRET_KEY was missing; generated it (the backup profile's MinIO root password)"
+  fi
 else
   cp .env.example .env
   chmod 600 .env
@@ -68,6 +81,8 @@ else
   set_var .env WEBHOOK_SIGNING_KEY "$(openssl rand -hex 32)"   # AES-256 key: 32 bytes
   set_var .env ADMIN_TOTP_KEY "$(openssl rand -hex 32)"        # AES-256 key: 32 bytes
   set_var .env OTEL_EXPORTER_OTLP_ENDPOINT "http://jaeger:4318" # the observability profile's Jaeger
+  set_var .env BACKUP_S3_ACCESS_KEY "exchange-backup"
+  set_var .env BACKUP_S3_SECRET_KEY "$(rand_hex)"               # MinIO root password for the backup profile
   log "wrote .env"
 fi
 

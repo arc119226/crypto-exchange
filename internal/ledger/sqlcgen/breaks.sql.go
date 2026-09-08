@@ -12,18 +12,18 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-const countOpenLedgerBreaks = `-- name: CountOpenLedgerBreaks :one
+const CountOpenLedgerBreaks = `-- name: CountOpenLedgerBreaks :one
 SELECT count(*) FROM admin.ledger_breaks WHERE tenant_id = $1 AND resolved_at IS NULL
 `
 
 func (q *Queries) CountOpenLedgerBreaks(ctx context.Context, tenantID string) (int64, error) {
-	row := q.db.QueryRow(ctx, countOpenLedgerBreaks, tenantID)
+	row := q.db.QueryRow(ctx, CountOpenLedgerBreaks, tenantID)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
 }
 
-const insertLedgerBreak = `-- name: InsertLedgerBreak :one
+const InsertLedgerBreak = `-- name: InsertLedgerBreak :one
 INSERT INTO admin.ledger_breaks (tenant_id, asset, debits, credits, diff, detected_at)
 VALUES ($1, $2, $3, $4, $5, $6)
 RETURNING id, tenant_id, asset, debits, credits, diff, detected_at, resolved_at
@@ -39,7 +39,7 @@ type InsertLedgerBreakParams struct {
 }
 
 func (q *Queries) InsertLedgerBreak(ctx context.Context, arg InsertLedgerBreakParams) (AdminLedgerBreak, error) {
-	row := q.db.QueryRow(ctx, insertLedgerBreak,
+	row := q.db.QueryRow(ctx, InsertLedgerBreak,
 		arg.TenantID,
 		arg.Asset,
 		arg.Debits,
@@ -61,7 +61,7 @@ func (q *Queries) InsertLedgerBreak(ctx context.Context, arg InsertLedgerBreakPa
 	return i, err
 }
 
-const listLedgerBreaks = `-- name: ListLedgerBreaks :many
+const ListLedgerBreaks = `-- name: ListLedgerBreaks :many
 SELECT id, tenant_id, asset, debits, credits, diff, detected_at, resolved_at FROM admin.ledger_breaks WHERE tenant_id = $1 ORDER BY detected_at DESC, asset LIMIT $2 OFFSET $3
 `
 
@@ -72,7 +72,7 @@ type ListLedgerBreaksParams struct {
 }
 
 func (q *Queries) ListLedgerBreaks(ctx context.Context, arg ListLedgerBreaksParams) ([]AdminLedgerBreak, error) {
-	rows, err := q.db.Query(ctx, listLedgerBreaks, arg.TenantID, arg.Limit, arg.Offset)
+	rows, err := q.db.Query(ctx, ListLedgerBreaks, arg.TenantID, arg.Limit, arg.Offset)
 	if err != nil {
 		return nil, err
 	}
@@ -100,7 +100,7 @@ func (q *Queries) ListLedgerBreaks(ctx context.Context, arg ListLedgerBreaksPara
 	return items, nil
 }
 
-const listOpenLedgerBreaks = `-- name: ListOpenLedgerBreaks :many
+const ListOpenLedgerBreaks = `-- name: ListOpenLedgerBreaks :many
 
 SELECT id, tenant_id, asset, debits, credits, diff, detected_at, resolved_at FROM admin.ledger_breaks WHERE tenant_id = $1 AND resolved_at IS NULL ORDER BY asset
 `
@@ -110,7 +110,7 @@ SELECT id, tenant_id, asset, debits, credits, diff, detected_at, resolved_at FRO
 // asset -- is the ledger's, even though the table sits in the admin schema
 // next to the chain reconciliation it complements.
 func (q *Queries) ListOpenLedgerBreaks(ctx context.Context, tenantID string) ([]AdminLedgerBreak, error) {
-	rows, err := q.db.Query(ctx, listOpenLedgerBreaks, tenantID)
+	rows, err := q.db.Query(ctx, ListOpenLedgerBreaks, tenantID)
 	if err != nil {
 		return nil, err
 	}
@@ -138,7 +138,7 @@ func (q *Queries) ListOpenLedgerBreaks(ctx context.Context, tenantID string) ([]
 	return items, nil
 }
 
-const resolveLedgerBreak = `-- name: ResolveLedgerBreak :execrows
+const ResolveLedgerBreak = `-- name: ResolveLedgerBreak :execrows
 UPDATE admin.ledger_breaks SET resolved_at = $2 WHERE id = $1 AND resolved_at IS NULL
 `
 
@@ -148,7 +148,7 @@ type ResolveLedgerBreakParams struct {
 }
 
 func (q *Queries) ResolveLedgerBreak(ctx context.Context, arg ResolveLedgerBreakParams) (int64, error) {
-	result, err := q.db.Exec(ctx, resolveLedgerBreak, arg.ID, arg.ResolvedAt)
+	result, err := q.db.Exec(ctx, ResolveLedgerBreak, arg.ID, arg.ResolvedAt)
 	if err != nil {
 		return 0, err
 	}

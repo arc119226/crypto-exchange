@@ -19,6 +19,7 @@ import (
 	"github.com/arc119226/crypto-exchange/internal/audit"
 	"github.com/arc119226/crypto-exchange/internal/auth/sqlcgen"
 	"github.com/arc119226/crypto-exchange/internal/ledger"
+	"github.com/arc119226/crypto-exchange/internal/platform/secretbox"
 )
 
 // Config tunes the service.
@@ -28,11 +29,18 @@ type Config struct {
 	AccessTTL  time.Duration // default 15 min (ADR-0006)
 	RefreshTTL time.Duration // default 7 days
 	MasterKey  []byte        // AES-256 key for API secrets (ParseMasterKey)
-	Password   PasswordParams
+	// PreviousMasterKey is the key MasterKey replaced, kept only until
+	// `exchange keys rewrap --domain api-keys` has re-sealed every row
+	// (API_KEY_MASTER_KEY_PREVIOUS, docs/runbooks/key-rotation.md).
+	PreviousMasterKey []byte
+	Password          PasswordParams
 	// TOTPKey seals administrators' TOTP secrets (ADMIN_TOTP_KEY). A different
 	// key from MasterKey: that one opens every API-key secret, and the admin
 	// role has no reason to hold it.
 	TOTPKey []byte
+	// PreviousTOTPKey is TOTPKey's predecessor during a rotation
+	// (ADMIN_TOTP_KEY_PREVIOUS).
+	PreviousTOTPKey []byte
 	// AdminSessionTTL is the life of a verified back-office session; default
 	// 8 hours. The password-only session before the code is fixed at ten
 	// minutes.
@@ -125,23 +133,30 @@ type Service struct {
 	audit    *audit.Recorder
 	now      func() time.Time
 	dummy    string // hash verified for unknown emails so timing does not leak existence
+	apiKeys  secretbox.Keyring
+	totp     secretbox.Keyring
 }
 
 // New wires the service. signer may be nil for roles that only verify;
 // verifier must be set.
 func New(pool *pgxpool.Pool, cfg Config, signer *Signer, verifier *Verifier, l *ledger.Service, a *audit.Recorder) (*Service, error) {
 	cfg = cfg.withDefaults()
-	if len(cfg.MasterKey) != 0 && len(cfg.MasterKey) != MasterKeyLen {
-		return nil, errors.New("auth: master key must be 32 bytes (API_KEY_MASTER_KEY)")
+	apiKeys := secretbox.Keyring{Current: cfg.MasterKey, Previous: cfg.PreviousMasterKey}
+	if err := apiKeys.Validate(); err != nil {
+		return nil, fmt.Errorf("auth: master key (API_KEY_MASTER_KEY): %w", err)
 	}
-	if len(cfg.TOTPKey) != 0 && len(cfg.TOTPKey) != MasterKeyLen {
-		return nil, errors.New("auth: totp key must be 32 bytes (ADMIN_TOTP_KEY)")
+	totp := secretbox.Keyring{Current: cfg.TOTPKey, Previous: cfg.PreviousTOTPKey}
+	if err := totp.Validate(); err != nil {
+		return nil, fmt.Errorf("auth: totp key (ADMIN_TOTP_KEY): %w", err)
 	}
 	dummy, err := HashPassword("timing-equaliser-password", cfg.Password)
 	if err != nil {
 		return nil, err
 	}
-	return &Service{pool: pool, cfg: cfg, signer: signer, verifier: verifier, ledger: l, audit: a, now: func() time.Time { return time.Now().UTC() }, dummy: dummy}, nil
+	return &Service{
+		pool: pool, cfg: cfg, signer: signer, verifier: verifier, ledger: l, audit: a,
+		now: func() time.Time { return time.Now().UTC() }, dummy: dummy, apiKeys: apiKeys, totp: totp,
+	}, nil
 }
 
 // WithClock overrides the clock (tests).
@@ -420,7 +435,7 @@ func (s *Service) CreateAPIKey(ctx context.Context, userID, label string, scopes
 	if err != nil {
 		return APIKey{}, "", err
 	}
-	sealed, err := encryptSecret(s.cfg.MasterKey, secret)
+	sealed, err := sealSecret(s.apiKeys, secret)
 	if err != nil {
 		return APIKey{}, "", err
 	}
@@ -501,7 +516,7 @@ func (s *Service) VerifyAPIKeyRequest(ctx context.Context, r APIKeyRequest) (Pri
 	if row.RevokedAt.Valid || row.TenantID != s.cfg.Tenant {
 		return Principal{}, fmt.Errorf("%w: api key revoked", ErrInvalidCredentials)
 	}
-	secret, err := decryptSecret(s.cfg.MasterKey, row.SecretEnc)
+	secret, err := openSecret(s.apiKeys, row.SecretEnc)
 	if err != nil {
 		return Principal{}, err
 	}

@@ -1,0 +1,44 @@
+{{- if .Values.ingress.enabled }}
+# The public surface: REST and the JWKS on the api role, the WebSocket on
+# the stream role. The admin role is deliberately absent (values.yaml).
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "exchange.fullname" . }}
+  labels:
+    {{- include "exchange.labels" . | nindent 4 }}
+  {{- with .Values.ingress.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- with .Values.ingress.className }}
+  ingressClassName: {{ . }}
+  {{- end }}
+  {{- with .Values.ingress.tls }}
+  tls:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  rules:
+    - host: {{ .Values.ingress.host | quote }}
+      http:
+        paths:
+          - path: /v1
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "exchange.fullname" . }}-api
+                port: { name: http }
+          - path: /.well-known
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "exchange.fullname" . }}-api
+                port: { name: http }
+          - path: /ws
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "exchange.fullname" . }}-stream
+                port: { name: ws }
+{{- end }}

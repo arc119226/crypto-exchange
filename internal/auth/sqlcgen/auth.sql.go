@@ -365,6 +365,38 @@ func (q *Queries) InsertRefreshToken(ctx context.Context, arg InsertRefreshToken
 	return i, err
 }
 
+const listAPIKeySecretsForUpdate = `-- name: ListAPIKeySecretsForUpdate :many
+
+SELECT id, secret_enc FROM auth.api_keys WHERE tenant_id = $1 ORDER BY created_at, id FOR UPDATE
+`
+
+type ListAPIKeySecretsForUpdateRow struct {
+	ID        string
+	SecretEnc []byte
+}
+
+// Rewrap under a rotated master key (exchange keys rewrap): every sealed
+// secret of the tenant, locked so a concurrent create or enrol waits.
+func (q *Queries) ListAPIKeySecretsForUpdate(ctx context.Context, tenantID string) ([]ListAPIKeySecretsForUpdateRow, error) {
+	rows, err := q.db.Query(ctx, listAPIKeySecretsForUpdate, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListAPIKeySecretsForUpdateRow{}
+	for rows.Next() {
+		var i ListAPIKeySecretsForUpdateRow
+		if err := rows.Scan(&i.ID, &i.SecretEnc); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listAPIKeysByUser = `-- name: ListAPIKeysByUser :many
 SELECT id, tenant_id, user_id, key_id, secret_enc, label, scopes, ip_allowlist, created_at, last_used_at, revoked_at FROM auth.api_keys WHERE user_id = $1 ORDER BY created_at, id
 `
@@ -391,6 +423,35 @@ func (q *Queries) ListAPIKeysByUser(ctx context.Context, userID string) ([]AuthA
 			&i.LastUsedAt,
 			&i.RevokedAt,
 		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listTOTPSecretsForUpdate = `-- name: ListTOTPSecretsForUpdate :many
+SELECT id, totp_secret_enc FROM auth.users WHERE tenant_id = $1 AND totp_secret_enc IS NOT NULL ORDER BY created_at, id FOR UPDATE
+`
+
+type ListTOTPSecretsForUpdateRow struct {
+	ID            string
+	TotpSecretEnc []byte
+}
+
+func (q *Queries) ListTOTPSecretsForUpdate(ctx context.Context, tenantID string) ([]ListTOTPSecretsForUpdateRow, error) {
+	rows, err := q.db.Query(ctx, listTOTPSecretsForUpdate, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListTOTPSecretsForUpdateRow{}
+	for rows.Next() {
+		var i ListTOTPSecretsForUpdateRow
+		if err := rows.Scan(&i.ID, &i.TotpSecretEnc); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -582,6 +643,20 @@ func (q *Queries) RevokeUserRefreshTokens(ctx context.Context, userID string) (i
 	return result.RowsAffected(), nil
 }
 
+const setAPIKeySecretEnc = `-- name: SetAPIKeySecretEnc :exec
+UPDATE auth.api_keys SET secret_enc = $2 WHERE id = $1
+`
+
+type SetAPIKeySecretEncParams struct {
+	ID        string
+	SecretEnc []byte
+}
+
+func (q *Queries) SetAPIKeySecretEnc(ctx context.Context, arg SetAPIKeySecretEncParams) error {
+	_, err := q.db.Exec(ctx, setAPIKeySecretEnc, arg.ID, arg.SecretEnc)
+	return err
+}
+
 const setPendingTOTPSecret = `-- name: SetPendingTOTPSecret :exec
 
 UPDATE auth.users
@@ -601,6 +676,20 @@ type SetPendingTOTPSecretParams struct {
 // optimistic check elsewhere see phantom changes.
 func (q *Queries) SetPendingTOTPSecret(ctx context.Context, arg SetPendingTOTPSecretParams) error {
 	_, err := q.db.Exec(ctx, setPendingTOTPSecret, arg.ID, arg.TotpSecretEnc)
+	return err
+}
+
+const setTOTPSecretEnc = `-- name: SetTOTPSecretEnc :exec
+UPDATE auth.users SET totp_secret_enc = $2 WHERE id = $1
+`
+
+type SetTOTPSecretEncParams struct {
+	ID            string
+	TotpSecretEnc []byte
+}
+
+func (q *Queries) SetTOTPSecretEnc(ctx context.Context, arg SetTOTPSecretEncParams) error {
+	_, err := q.db.Exec(ctx, setTOTPSecretEnc, arg.ID, arg.TotpSecretEnc)
 	return err
 }
 

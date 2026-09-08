@@ -130,3 +130,18 @@ UPDATE auth.users
                                 ELSE totp_locked_until END
  WHERE id = $1
 RETURNING totp_failures, totp_locked_until;
+
+-- Rewrap under a rotated master key (exchange keys rewrap): every sealed
+-- secret of the tenant, locked so a concurrent create or enrol waits.
+
+-- name: ListAPIKeySecretsForUpdate :many
+SELECT id, secret_enc FROM auth.api_keys WHERE tenant_id = $1 ORDER BY created_at, id FOR UPDATE;
+
+-- name: SetAPIKeySecretEnc :exec
+UPDATE auth.api_keys SET secret_enc = $2 WHERE id = $1;
+
+-- name: ListTOTPSecretsForUpdate :many
+SELECT id, totp_secret_enc FROM auth.users WHERE tenant_id = $1 AND totp_secret_enc IS NOT NULL ORDER BY created_at, id FOR UPDATE;
+
+-- name: SetTOTPSecretEnc :exec
+UPDATE auth.users SET totp_secret_enc = $2 WHERE id = $1;

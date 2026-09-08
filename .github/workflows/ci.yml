@@ -2,8 +2,9 @@
 # go.mod / tools/go.mod / .env.example so CI and laptops run the same binaries.
 #
 #   lint ─┐
-#   unit ─┼─► integration ─┬─► e2e
-#        │                 └─► image
+#   unit ─┼─► integration ─┬─► e2e  ─┐
+#        │                 ├─► helm ─┼─► release (v* tags only: chart to ghcr, GitHub Release)
+#        │                 └─► image ┘
 #        └─► fuzz-smoke (push only: main merges and v* tags)
 #   fast-checks runs alongside: generated code, compose rendering, contracts.
 #
@@ -70,6 +71,10 @@ concurrency:
 permissions:
   contents: read
 
+env:
+  # helm is not a Go module, so its pin lives here; kind's is on the helm job
+  HELM_VERSION: v3.16.4
+
 jobs:
   lint:
     name: lint
@@ -112,6 +117,15 @@ jobs:
           cache-dependency-path: |
             go.sum
             tools/go.sum
+      # deploy/helm/helm_test.go lints and renders the chart; with CI set it
+      # fails rather than skips when either binary is missing
+      - uses: azure/setup-helm@v4
+        with:
+          version: ${{ env.HELM_VERSION }}
+      - name: install kubeconform (pinned in tools/go.mod)
+        run: |
+          GOBIN="$RUNNER_TEMP/bin" go install -modfile=tools/go.mod github.com/yannh/kubeconform/cmd/kubeconform
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
       - name: unit + property tests (-race)
         run: make test
       - name: coverage gate (internal/money >= 95%)
@@ -206,7 +220,10 @@ jobs:
         # e2e.sh is checked here rather than only by the e2e job: this job
         # finishes in seconds, and a syntax error found twelve minutes into a
         # container run is twelve minutes wasted.
-        run: bash -n scripts/gen-dev-secrets.sh && bash -n scripts/e2e.sh && bash -n scripts/e2e-web.sh
+        run: |
+          for f in scripts/gen-dev-secrets.sh scripts/e2e.sh scripts/e2e-web.sh scripts/kind-secrets.sh scripts/helm-e2e.sh scripts/backup.sh scripts/restore-drill.sh scripts/gen-prod-secrets.sh deploy/vm/bootstrap.sh; do
+            bash -n "$f"
+          done
       - name: generated code is in sync (oapi-codegen, sqlc)
         run: make gen-check
       - name: sqlc vet
@@ -271,6 +288,20 @@ jobs:
       # browser, fund through the admin faucet, trade, watch both streams
       - name: web/trade — Playwright smoke against the compose stack
         run: make web-e2e
+      # the stack is still up: back it up into the compose MinIO, restore the
+      # dump into a throwaway database, check it, and print the RTO
+      # (docs/runbooks/backup-restore.md)
+      # shell: bash makes the step's shell `bash -eo pipefail`, so a failed
+      # drill fails the step instead of tee's exit status hiding it
+      - name: backup and restore drill
+        shell: bash
+        run: make backup-drill 2>&1 | tee backup-drill.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: backup-drill-log
+          path: backup-drill.log
+          if-no-files-found: ignore
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
@@ -281,7 +312,7 @@ jobs:
           if-no-files-found: ignore
       - name: collect container logs
         if: always()
-        run: docker compose -f deploy/compose/compose.yaml --env-file .env --profile infra --profile app logs --no-color > compose-logs.txt || true
+        run: docker compose -f deploy/compose/compose.yaml --env-file .env --profile infra --profile app --profile backup logs --no-color > compose-logs.txt || true
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
@@ -290,7 +321,102 @@ jobs:
           if-no-files-found: ignore
       - name: tear down
         if: always()
-        run: docker compose -f deploy/compose/compose.yaml --env-file .env --profile infra --profile app down -v --remove-orphans || true
+        run: docker compose -f deploy/compose/compose.yaml --env-file .env --profile infra --profile app --profile backup down -v --remove-orphans || true
+
+  helm:
+    name: helm
+    needs: [integration]
+    runs-on: ubuntu-latest
+    # Not run on a merge to main -- see "what a merge to main runs" at the
+    # top of this file. Tags still run everything.
+    if: ${{ github.event_name != 'push' || github.ref != 'refs/heads/main' }}
+    env:
+      KIND_CLUSTER: exchange
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: |
+            go.sum
+            tools/go.sum
+      - name: read pinned foundry version
+        id: foundry
+        run: echo "tag=$(sed -n 's/^FOUNDRY_TAG=//p' .env.example)" >> "$GITHUB_OUTPUT"
+      # kind-secrets.sh derives the throwaway hot wallet with cast
+      - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: ${{ steps.foundry.outputs.tag }}
+      - uses: azure/setup-helm@v4
+        with:
+          version: ${{ env.HELM_VERSION }}
+      # A release must report its tag; anything else runs as the chart's own
+      # appVersion. helm-e2e.sh checks the running binary against both.
+      - name: app version under test
+        id: appv
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            v="$GITHUB_REF_NAME"
+          else
+            v="$(sed -n 's/^appVersion: *"\{0,1\}\([^"]*\)"\{0,1\}$/\1/p' deploy/helm/exchange/Chart.yaml)"
+          fi
+          test -n "$v"
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@v3
+      - name: build the image under test
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: build/Dockerfile
+          load: true
+          tags: crypto-exchange:ci
+          build-args: |
+            VERSION=${{ steps.appv.outputs.version }}
+            COMMIT=${{ github.sha }}
+            DATE=${{ github.event.head_commit.timestamp || github.event.pull_request.updated_at }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - uses: helm/kind-action@v1
+        with:
+          version: v0.27.0
+          node_image: kindest/node:v1.31.6
+          cluster_name: ${{ env.KIND_CLUSTER }}
+      - name: load the image into the cluster
+        run: kind load docker-image crypto-exchange:ci --name "$KIND_CLUSTER"
+      # the JWT key and the keystore are generated with the binary itself
+      - name: build exchange
+        run: make build
+      - name: create the secrets the chart expects
+        run: scripts/kind-secrets.sh exchange
+      # install with --wait, exchangectl e2e from inside the cluster, delete
+      # the engine pod and compare the book, and check that the running
+      # binary reports the chart's appVersion (docs/plan-v1.0.md §12 Phase 7)
+      - name: install the chart and run the in-cluster e2e
+        env:
+          APP_VERSION: ${{ steps.appv.outputs.version }}
+        run: scripts/helm-e2e.sh
+      - name: collect cluster state
+        if: always()
+        run: |
+          mkdir -p kind-logs
+          kubectl get all,jobs,configmaps,pdb,networkpolicies -o wide > kind-logs/resources.txt 2>&1 || true
+          kubectl get events --sort-by=.lastTimestamp > kind-logs/events.txt 2>&1 || true
+          kubectl describe pods > kind-logs/describe-pods.txt 2>&1 || true
+          kubectl describe jobs > kind-logs/describe-jobs.txt 2>&1 || true
+          for p in $(kubectl get pods -o name); do
+            kubectl logs "$p" --all-containers --prefix > "kind-logs/${p#pod/}.log" 2>&1 || true
+            kubectl logs "$p" --all-containers --prefix --previous > "kind-logs/${p#pod/}.previous.log" 2>/dev/null || true
+          done
+          helm get manifest exchange > kind-logs/manifest.yaml 2>&1 || true
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: helm-kind-logs
+          path: kind-logs
+          if-no-files-found: ignore
+      - name: delete the cluster
+        if: always()
+        run: kind delete cluster --name "$KIND_CLUSTER" || true
 
   image:
     name: image
@@ -332,6 +458,55 @@ jobs:
         run: |
           docker run --rm crypto-exchange:ci version
           docker run --rm --entrypoint /exchangectl crypto-exchange:ci version
+      # The two images the production overlay adds (deploy/compose/compose.prod.yaml):
+      # Caddy with the built front end, and the backup sidecar. Same tags,
+      # their own cache scopes.
+      - name: edge image metadata
+        id: meta-edge
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}-edge
+          tags: |
+            type=raw,value=dev,enable=${{ github.ref == 'refs/heads/main' }}
+            type=semver,pattern={{version}}
+            type=sha,format=short
+      - name: build the edge image (load locally)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: build/edge/Dockerfile
+          load: true
+          tags: crypto-exchange-edge:ci
+          cache-from: type=gha,scope=edge
+          cache-to: type=gha,scope=edge,mode=max
+      - name: edge image smoke
+        run: |
+          docker run --rm crypto-exchange-edge:ci caddy version
+          docker run --rm crypto-exchange-edge:ci caddy validate --config /etc/caddy/Caddyfile
+          docker run --rm --entrypoint sh crypto-exchange-edge:ci -c 'test -s /srv/index.html && ls /srv/assets | grep -q "\.js$"'
+      - name: backup image metadata
+        id: meta-backup
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}-backup
+          tags: |
+            type=raw,value=dev,enable=${{ github.ref == 'refs/heads/main' }}
+            type=semver,pattern={{version}}
+            type=sha,format=short
+      - name: build the backup image (load locally)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: build/backup/Dockerfile
+          load: true
+          tags: crypto-exchange-backup:ci
+          cache-from: type=gha,scope=backup
+          cache-to: type=gha,scope=backup,mode=max
+      - name: backup image smoke
+        run: |
+          docker run --rm --entrypoint mc crypto-exchange-backup:ci --version
+          docker run --rm --entrypoint pg_dump crypto-exchange-backup:ci --version
+          docker run --rm --entrypoint bash crypto-exchange-backup:ci -n /usr/local/bin/backup.sh
       - name: login to ghcr
         if: github.event_name == 'push'
         uses: docker/login-action@v3
@@ -353,3 +528,101 @@ jobs:
             COMMIT=${{ github.sha }}
             DATE=${{ github.event.head_commit.timestamp }}
           cache-from: type=gha
+      - name: push the edge image
+        if: github.event_name == 'push'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: build/edge/Dockerfile
+          push: true
+          tags: ${{ steps.meta-edge.outputs.tags }}
+          labels: ${{ steps.meta-edge.outputs.labels }}
+          cache-from: type=gha,scope=edge
+      - name: push the backup image
+        if: github.event_name == 'push'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: build/backup/Dockerfile
+          push: true
+          tags: ${{ steps.meta-backup.outputs.tags }}
+          labels: ${{ steps.meta-backup.outputs.labels }}
+          cache-from: type=gha,scope=backup
+
+  # A v* tag is a release (docs/release.md): the images are already on ghcr
+  # (image pushes on every push event, a tag included), the chart has run on
+  # kind and the compose e2e passed. What is left is to publish the chart,
+  # prove the running binary and the chart agree on the version, and open
+  # the GitHub Release with the chart and the exchangectl binaries attached.
+  release:
+    name: release
+    needs: [image, helm, e2e]
+    if: ${{ startsWith(github.ref, 'refs/tags/v') }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: |
+            go.sum
+            tools/go.sum
+      - uses: azure/setup-helm@v4
+        with:
+          version: ${{ env.HELM_VERSION }}
+      - name: versions
+        id: v
+        run: |
+          echo "tag=$GITHUB_REF_NAME" >> "$GITHUB_OUTPUT"
+          echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      # docs/plan-v1.0.md §12 Phase 7 DoD: the image that was pushed reports
+      # the tag, and so will the chart
+      - name: the released image reports the tag
+        env:
+          IMAGE: ghcr.io/${{ github.repository }}:${{ steps.v.outputs.version }}
+          TAG: ${{ steps.v.outputs.tag }}
+        run: |
+          docker pull --quiet "$IMAGE"
+          got="$(docker run --rm "$IMAGE" version --json | jq -r .version)"
+          test "$got" = "$TAG" || { echo "image reports $got, tag is $TAG"; exit 1; }
+          for extra in edge backup; do docker manifest inspect "ghcr.io/${{ github.repository }}-$extra:${{ steps.v.outputs.version }}" >/dev/null; done
+      - name: package the chart
+        env:
+          VERSION: ${{ steps.v.outputs.version }}
+          TAG: ${{ steps.v.outputs.tag }}
+        run: |
+          mkdir -p dist
+          helm package deploy/helm/exchange --version "$VERSION" --app-version "$TAG" --destination dist
+          got="$(helm show chart "dist/exchange-$VERSION.tgz" | sed -n 's/^appVersion: *//p')"
+          test "$got" = "$TAG" || { echo "chart appVersion is $got, tag is $TAG"; exit 1; }
+      - name: push the chart
+        env:
+          VERSION: ${{ steps.v.outputs.version }}
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io -u "${{ github.actor }}" --password-stdin
+          helm push "dist/exchange-$VERSION.tgz" "oci://ghcr.io/${{ github.repository_owner }}/charts"
+      - name: build exchangectl for the release
+        env:
+          TAG: ${{ steps.v.outputs.tag }}
+        run: |
+          for target in linux/amd64 darwin/arm64; do
+            GOOS="${target%/*}" GOARCH="${target#*/}" CGO_ENABLED=0 go build -trimpath \
+              -ldflags "-s -w -X main.version=$TAG -X main.commit=$GITHUB_SHA -X main.date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+              -o "dist/exchangectl-${target%/*}-${target#*/}" ./cmd/exchangectl
+          done
+          (cd dist && sha256sum exchange-*.tgz exchangectl-* > SHA256SUMS)
+      - uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            dist/exchange-*.tgz
+            dist/exchangectl-*
+            dist/SHA256SUMS

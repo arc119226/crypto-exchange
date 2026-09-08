@@ -12,7 +12,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-const advanceMarketSequence = `-- name: AdvanceMarketSequence :execrows
+const AdvanceMarketSequence = `-- name: AdvanceMarketSequence :execrows
 UPDATE trading.market_sequences
    SET last_seq = $2, updated_at = now()
  WHERE market_id = $1 AND last_seq = $2 - 1
@@ -26,25 +26,25 @@ type AdvanceMarketSequenceParams struct {
 // Guarded: succeeds only when nobody else advanced the sequence since the
 // engine last read it (a second engine instance would fail here).
 func (q *Queries) AdvanceMarketSequence(ctx context.Context, arg AdvanceMarketSequenceParams) (int64, error) {
-	result, err := q.db.Exec(ctx, advanceMarketSequence, arg.MarketID, arg.LastSeq)
+	result, err := q.db.Exec(ctx, AdvanceMarketSequence, arg.MarketID, arg.LastSeq)
 	if err != nil {
 		return 0, err
 	}
 	return result.RowsAffected(), nil
 }
 
-const countOpenOrdersByMarket = `-- name: CountOpenOrdersByMarket :one
+const CountOpenOrdersByMarket = `-- name: CountOpenOrdersByMarket :one
 SELECT count(*) FROM trading.orders WHERE market_id = $1 AND status IN ('open', 'partially_filled')
 `
 
 func (q *Queries) CountOpenOrdersByMarket(ctx context.Context, marketID string) (int64, error) {
-	row := q.db.QueryRow(ctx, countOpenOrdersByMarket, marketID)
+	row := q.db.QueryRow(ctx, CountOpenOrdersByMarket, marketID)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
 }
 
-const ensureMarketSequence = `-- name: EnsureMarketSequence :one
+const EnsureMarketSequence = `-- name: EnsureMarketSequence :one
 
 INSERT INTO trading.market_sequences (market_id)
 VALUES ($1)
@@ -54,24 +54,24 @@ RETURNING last_seq
 
 // Sequences ---------------------------------------------------------------
 func (q *Queries) EnsureMarketSequence(ctx context.Context, marketID string) (int64, error) {
-	row := q.db.QueryRow(ctx, ensureMarketSequence, marketID)
+	row := q.db.QueryRow(ctx, EnsureMarketSequence, marketID)
 	var last_seq int64
 	err := row.Scan(&last_seq)
 	return last_seq, err
 }
 
-const getMarketSequence = `-- name: GetMarketSequence :one
+const GetMarketSequence = `-- name: GetMarketSequence :one
 SELECT last_seq FROM trading.market_sequences WHERE market_id = $1
 `
 
 func (q *Queries) GetMarketSequence(ctx context.Context, marketID string) (int64, error) {
-	row := q.db.QueryRow(ctx, getMarketSequence, marketID)
+	row := q.db.QueryRow(ctx, GetMarketSequence, marketID)
 	var last_seq int64
 	err := row.Scan(&last_seq)
 	return last_seq, err
 }
 
-const getOrder = `-- name: GetOrder :one
+const GetOrder = `-- name: GetOrder :one
 
 
 SELECT id, tenant_id, account_id, market_id, market_symbol, client_order_id, side, type, time_in_force, price, qty, quote_qty, filled_qty, filled_quote, remaining_qty, hold_asset, hold_amount, hold_remaining, status, reject_reason, cancel_reason, seq, correlation_id, created_at, updated_at FROM trading.orders WHERE id = $1
@@ -80,7 +80,7 @@ SELECT id, tenant_id, account_id, market_id, market_symbol, client_order_id, sid
 // Trading queries (engine role writes, every role reads). Schema-qualified.
 // Orders -----------------------------------------------------------------
 func (q *Queries) GetOrder(ctx context.Context, id string) (TradingOrder, error) {
-	row := q.db.QueryRow(ctx, getOrder, id)
+	row := q.db.QueryRow(ctx, GetOrder, id)
 	var i TradingOrder
 	err := row.Scan(
 		&i.ID,
@@ -112,7 +112,7 @@ func (q *Queries) GetOrder(ctx context.Context, id string) (TradingOrder, error)
 	return i, err
 }
 
-const getOrderByClientID = `-- name: GetOrderByClientID :one
+const GetOrderByClientID = `-- name: GetOrderByClientID :one
 SELECT id, tenant_id, account_id, market_id, market_symbol, client_order_id, side, type, time_in_force, price, qty, quote_qty, filled_qty, filled_quote, remaining_qty, hold_asset, hold_amount, hold_remaining, status, reject_reason, cancel_reason, seq, correlation_id, created_at, updated_at FROM trading.orders
 WHERE tenant_id = $1 AND account_id = $2 AND client_order_id = $3
 `
@@ -124,7 +124,7 @@ type GetOrderByClientIDParams struct {
 }
 
 func (q *Queries) GetOrderByClientID(ctx context.Context, arg GetOrderByClientIDParams) (TradingOrder, error) {
-	row := q.db.QueryRow(ctx, getOrderByClientID, arg.TenantID, arg.AccountID, arg.ClientOrderID)
+	row := q.db.QueryRow(ctx, GetOrderByClientID, arg.TenantID, arg.AccountID, arg.ClientOrderID)
 	var i TradingOrder
 	err := row.Scan(
 		&i.ID,
@@ -156,7 +156,7 @@ func (q *Queries) GetOrderByClientID(ctx context.Context, arg GetOrderByClientID
 	return i, err
 }
 
-const insertOrder = `-- name: InsertOrder :one
+const InsertOrder = `-- name: InsertOrder :one
 INSERT INTO trading.orders (
     id, tenant_id, account_id, market_id, market_symbol, client_order_id,
     side, type, time_in_force, price, qty, quote_qty,
@@ -201,7 +201,7 @@ type InsertOrderParams struct {
 }
 
 func (q *Queries) InsertOrder(ctx context.Context, arg InsertOrderParams) (TradingOrder, error) {
-	row := q.db.QueryRow(ctx, insertOrder,
+	row := q.db.QueryRow(ctx, InsertOrder,
 		arg.ID,
 		arg.TenantID,
 		arg.AccountID,
@@ -258,7 +258,7 @@ func (q *Queries) InsertOrder(ctx context.Context, arg InsertOrderParams) (Tradi
 	return i, err
 }
 
-const insertTrade = `-- name: InsertTrade :exec
+const InsertTrade = `-- name: InsertTrade :exec
 
 INSERT INTO trading.trades (
     id, tenant_id, market_id, market_symbol, seq, idx,
@@ -295,7 +295,7 @@ type InsertTradeParams struct {
 
 // Trades ------------------------------------------------------------------
 func (q *Queries) InsertTrade(ctx context.Context, arg InsertTradeParams) error {
-	_, err := q.db.Exec(ctx, insertTrade,
+	_, err := q.db.Exec(ctx, InsertTrade,
 		arg.ID,
 		arg.TenantID,
 		arg.MarketID,
@@ -319,7 +319,7 @@ func (q *Queries) InsertTrade(ctx context.Context, arg InsertTradeParams) error 
 	return err
 }
 
-const listFillsByAccount = `-- name: ListFillsByAccount :many
+const ListFillsByAccount = `-- name: ListFillsByAccount :many
 SELECT id, tenant_id, market_id, market_symbol, seq, idx, maker_order_id, taker_order_id, maker_account_id, taker_account_id, taker_side, price, qty, quote_qty, maker_fee, maker_fee_asset, taker_fee, taker_fee_asset, created_at FROM trading.trades
 WHERE tenant_id = $1
   AND (maker_account_id = $2 OR taker_account_id = $2)
@@ -341,7 +341,7 @@ type ListFillsByAccountParams struct {
 }
 
 func (q *Queries) ListFillsByAccount(ctx context.Context, arg ListFillsByAccountParams) ([]TradingTrade, error) {
-	rows, err := q.db.Query(ctx, listFillsByAccount,
+	rows, err := q.db.Query(ctx, ListFillsByAccount,
 		arg.TenantID,
 		arg.MakerAccountID,
 		arg.Limit,
@@ -387,7 +387,7 @@ func (q *Queries) ListFillsByAccount(ctx context.Context, arg ListFillsByAccount
 	return items, nil
 }
 
-const listOpenOrdersByMarket = `-- name: ListOpenOrdersByMarket :many
+const ListOpenOrdersByMarket = `-- name: ListOpenOrdersByMarket :many
 SELECT id, tenant_id, account_id, market_id, market_symbol, client_order_id, side, type, time_in_force, price, qty, quote_qty, filled_qty, filled_quote, remaining_qty, hold_asset, hold_amount, hold_remaining, status, reject_reason, cancel_reason, seq, correlation_id, created_at, updated_at FROM trading.orders
 WHERE market_id = $1 AND status IN ('open', 'partially_filled')
 ORDER BY seq
@@ -395,7 +395,7 @@ ORDER BY seq
 
 // The engine rebuilds the book from these rows on start (ADR-0002).
 func (q *Queries) ListOpenOrdersByMarket(ctx context.Context, marketID string) ([]TradingOrder, error) {
-	rows, err := q.db.Query(ctx, listOpenOrdersByMarket, marketID)
+	rows, err := q.db.Query(ctx, ListOpenOrdersByMarket, marketID)
 	if err != nil {
 		return nil, err
 	}
@@ -440,7 +440,7 @@ func (q *Queries) ListOpenOrdersByMarket(ctx context.Context, marketID string) (
 	return items, nil
 }
 
-const listOrdersByAccount = `-- name: ListOrdersByAccount :many
+const ListOrdersByAccount = `-- name: ListOrdersByAccount :many
 SELECT id, tenant_id, account_id, market_id, market_symbol, client_order_id, side, type, time_in_force, price, qty, quote_qty, filled_qty, filled_quote, remaining_qty, hold_asset, hold_amount, hold_remaining, status, reject_reason, cancel_reason, seq, correlation_id, created_at, updated_at FROM trading.orders
 WHERE tenant_id = $1 AND account_id = $2
   AND ($5::text = '' OR market_symbol = $5::text)
@@ -461,7 +461,7 @@ type ListOrdersByAccountParams struct {
 }
 
 func (q *Queries) ListOrdersByAccount(ctx context.Context, arg ListOrdersByAccountParams) ([]TradingOrder, error) {
-	rows, err := q.db.Query(ctx, listOrdersByAccount,
+	rows, err := q.db.Query(ctx, ListOrdersByAccount,
 		arg.TenantID,
 		arg.AccountID,
 		arg.Limit,
@@ -514,7 +514,7 @@ func (q *Queries) ListOrdersByAccount(ctx context.Context, arg ListOrdersByAccou
 	return items, nil
 }
 
-const listTradesByMarket = `-- name: ListTradesByMarket :many
+const ListTradesByMarket = `-- name: ListTradesByMarket :many
 SELECT id, tenant_id, market_id, market_symbol, seq, idx, maker_order_id, taker_order_id, maker_account_id, taker_account_id, taker_side, price, qty, quote_qty, maker_fee, maker_fee_asset, taker_fee, taker_fee_asset, created_at FROM trading.trades
 WHERE tenant_id = $1 AND market_symbol = $2
 ORDER BY created_at DESC, id DESC
@@ -529,7 +529,7 @@ type ListTradesByMarketParams struct {
 }
 
 func (q *Queries) ListTradesByMarket(ctx context.Context, arg ListTradesByMarketParams) ([]TradingTrade, error) {
-	rows, err := q.db.Query(ctx, listTradesByMarket,
+	rows, err := q.db.Query(ctx, ListTradesByMarket,
 		arg.TenantID,
 		arg.MarketSymbol,
 		arg.Limit,
@@ -573,14 +573,14 @@ func (q *Queries) ListTradesByMarket(ctx context.Context, arg ListTradesByMarket
 	return items, nil
 }
 
-const listTradesByOrder = `-- name: ListTradesByOrder :many
+const ListTradesByOrder = `-- name: ListTradesByOrder :many
 SELECT id, tenant_id, market_id, market_symbol, seq, idx, maker_order_id, taker_order_id, maker_account_id, taker_account_id, taker_side, price, qty, quote_qty, maker_fee, maker_fee_asset, taker_fee, taker_fee_asset, created_at FROM trading.trades
 WHERE maker_order_id = $1 OR taker_order_id = $1
 ORDER BY seq, idx
 `
 
 func (q *Queries) ListTradesByOrder(ctx context.Context, makerOrderID string) ([]TradingTrade, error) {
-	rows, err := q.db.Query(ctx, listTradesByOrder, makerOrderID)
+	rows, err := q.db.Query(ctx, ListTradesByOrder, makerOrderID)
 	if err != nil {
 		return nil, err
 	}
@@ -619,7 +619,45 @@ func (q *Queries) ListTradesByOrder(ctx context.Context, makerOrderID string) ([
 	return items, nil
 }
 
-const updateOrderProgress = `-- name: UpdateOrderProgress :one
+const LockMarketSequence = `-- name: LockMarketSequence :one
+SELECT last_seq FROM trading.market_sequences WHERE market_id = $1 FOR UPDATE
+`
+
+// The engine's per-command transaction (or group of commands) starts by
+// locking the sequence row and comparing it with what it committed last:
+// a second engine instance that advanced it is caught here, before any
+// write, and the row lock serialises the two until one of them fails.
+func (q *Queries) LockMarketSequence(ctx context.Context, marketID string) (int64, error) {
+	row := q.db.QueryRow(ctx, LockMarketSequence, marketID)
+	var last_seq int64
+	err := row.Scan(&last_seq)
+	return last_seq, err
+}
+
+const SetMarketSequence = `-- name: SetMarketSequence :execrows
+UPDATE trading.market_sequences
+   SET last_seq = $2, updated_at = now()
+ WHERE market_id = $1 AND last_seq = $3
+`
+
+type SetMarketSequenceParams struct {
+	MarketID string
+	ToSeq    int64
+	FromSeq  int64
+}
+
+// The last statement before COMMIT: guarded like AdvanceMarketSequence,
+// but from the sequence the transaction started at to the last one it
+// consumed, however many commands that was.
+func (q *Queries) SetMarketSequence(ctx context.Context, arg SetMarketSequenceParams) (int64, error) {
+	result, err := q.db.Exec(ctx, SetMarketSequence, arg.MarketID, arg.ToSeq, arg.FromSeq)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const UpdateOrderProgress = `-- name: UpdateOrderProgress :one
 UPDATE trading.orders
    SET filled_qty     = $2,
        filled_quote   = $3,
@@ -645,7 +683,7 @@ type UpdateOrderProgressParams struct {
 // A maker after a fill (or the taker's own remainder): fills, remaining,
 // what is still frozen and the resulting status.
 func (q *Queries) UpdateOrderProgress(ctx context.Context, arg UpdateOrderProgressParams) (TradingOrder, error) {
-	row := q.db.QueryRow(ctx, updateOrderProgress,
+	row := q.db.QueryRow(ctx, UpdateOrderProgress,
 		arg.ID,
 		arg.FilledQty,
 		arg.FilledQuote,

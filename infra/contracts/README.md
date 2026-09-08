@@ -20,7 +20,7 @@ Foundry project for the local test chain (docs/plan-v1.0.md §11, §12 Phase 0).
   | `HOT_WALLET_USDC_TARGET` | `1_000_000e6` | rarely; `mint` is unrestricted, so supply is never the constraint |
   | `ADDRESSES_OUT` | `/artifacts/addresses.json` | running by hand, outside the compose volume |
 
-  See `docs/runbooks/sepolia.md`.
+  See `docs/guides/sepolia.md`.
 - `script/Vm.sol` — the handful of Foundry cheatcodes we use, declared locally so the
   project builds from a plain `git clone` without a forge-std submodule. Add a
   submodule (`forge install foundry-rs/forge-std`) if the tests outgrow it.

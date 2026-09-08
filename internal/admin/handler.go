@@ -47,6 +47,8 @@ type Handler struct {
 	// person: KYC level and status. The same auth.Service the pages log in
 	// with; nil turns the user endpoints into 500s.
 	users *auth.Service
+	// backups is the gauge ObserveBackups refreshes; nil means no metrics.
+	backups *BackupMetrics
 }
 
 var _ gen.StrictServerInterface = (*Handler)(nil)

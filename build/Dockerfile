@@ -17,6 +17,14 @@ RUN --mount=type=cache,target=/go/pkg/mod \
       -o /out/ ./cmd/exchange ./cmd/exchangectl
 
 FROM gcr.io/distroless/static-debian12:nonroot
+ARG VERSION=dev
+ARG COMMIT=unknown
+ARG DATE=unknown
+LABEL org.opencontainers.image.source="https://github.com/arc119226/crypto-exchange" \
+      org.opencontainers.image.title="crypto-exchange" \
+      org.opencontainers.image.version="${VERSION}" \
+      org.opencontainers.image.revision="${COMMIT}" \
+      org.opencontainers.image.created="${DATE}"
 COPY --from=build /out/exchange /out/exchangectl /
 USER nonroot:nonroot
 EXPOSE 8080 8081 8082 9100

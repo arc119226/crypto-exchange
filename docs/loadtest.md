@@ -14,6 +14,8 @@
 
 行情與推播這半邊(Phase 6 做的東西)全部達標而且餘裕很大;沒達標的兩項都是同一個原因:**引擎每個命令一筆 Postgres 交易,而這筆交易平均要 6.9 ms**,單市場的 runner 是序列的,所以上限就是 1 / 6.9 ms ≈ 145–165 命令/s。§3.3 當初就預告了這件事(「每命令一筆 PG 交易的上限 ≈ 1 / 單筆交易延遲;達標手段為 runner 內 group commit」),Phase 3 量過單命令延遲後決定先不做 group commit;這次的數字把差距量化了,也把「6.9 ms 花在哪」弄清楚了(§5)。
 
+**Phase 7 之後**:引擎改成 pipeline + 群組提交,同一套壓測飽和點從 165 命令/s 到 355–442,`POST` p50 好 2.5×;推播延遲在飽和時變差(事件等該組 COMMIT)。數字與讀法在 §8,§4–§5 保留為 Phase 6 的對照。
+
 ## 2. 環境
 
 | 項目 | 值 |
@@ -140,3 +142,62 @@ curl -s http://127.0.0.1:9100/metrics > metrics-after.txt
 ```
 
 `make loadgen` 跑的是同一組參數(對 compose 的 stack 則用 `.env` 的 `ADMIN_API_KEY`)。四個祕密用 `openssl rand -hex 32` 產生,不要用 `.env.example` 的占位值。§4.2 的伺服器端數字是兩份 `/metrics` 的直方圖差值;`stream_push_delay_seconds` 與 `http_request_duration_seconds` 的 p99 只能給到桶界(0.005 … 2.5 s),要精確值請看 Grafana 的 `histogram_quantile`。
+
+## 8. Phase 7 之後:同一套壓測再跑一次
+
+§5 的兩件事都做了(Phase 7 的 `ledger: post an entry in two round trips`、`trading: commit commands in groups over pipelined round trips`),同一台機器、同一組參數再量。環境同 §2,只差引擎的 `ENGINE_BATCH_SIZE=50`(預設)。
+
+### 8.1 每命令的往返數(整合測試 `TestEngineRoundTripBudget` 釘住的數字)
+
+| 命令 | Phase 6 | Phase 7 |
+|---|---|---|
+| 純掛單 | ≈ 17 | **3** |
+| 一筆成交 | 45–55 | **4** |
+| 取消 | ≈ 9 | **3** |
+| 進簿後拒絕 / 餘額不足 | ≈ 5 | 3 |
+| client_order_id 重送 | 2 | 4 |
+
+一組 n 個命令的交易:`BEGIN` + 全部命令的預讀 + 序號鎖 + 第一個命令的鎖 → 每個命令的寫入跟下一個命令的鎖同一趟 → 最後一個命令的寫入 + 帳戶序號 → outbox 列 + 市場序號 + `COMMIT`。滿的一組 50 個純掛單約 53 次往返。
+
+### 8.2 產生器看到的
+
+| | A':飽和(對照 §4 A) | B':穩態 100/s(對照 §4 B) | E:只有引擎,無推播訂閱者 |
+|---|---|---|---|
+| 參數 | rate 1000、60 s、100 帳戶、20/10/1000 | rate 100、60 s、100 帳戶、20/10/1000 | rate 1000、30 s、100 帳戶、0/0/0 |
+| orders 送出 / 成功 | 15,994 / 15,994(A:7,414) | 5,900 / 5,900 | 9,954 / 9,954 |
+| 429 / 503 / 其他錯 | 0 / 0 / 0 | 0 / 0 / 0 | 0 / 0 / 0 |
+| cancels | 5,316 | 1,900 | 3,307 |
+| **orders/s** | **266.5**(A:126.0,×2.1) | 98.3 | **331.8** |
+| 命令/s(orders + cancels) | **355**(A:165) | 130 | **442** |
+| trades/s | 52.4(A:24.0) | 18.2 | 0(單邊掛單) |
+| `POST /v1/orders` p50 / p95 / p99 / max (ms) | 248 / 651 / 1,127 / 1,848(A:628 / 828 / 1,183 / 1,443) | 179 / 415 / **548** / 606(B:475 / 1,053 / 1,244 / 1,459) | 232 / 326 / 395 / 423 |
+| `DELETE /v1/orders/{id}` p50 / p99 (ms) | 234 / 1,108 | 103 / 278 | 216 / 386 |
+| depth delta 收到數 / seq gap | 401,580 / 0 | 148,060 / 0 | — |
+| depth delta 延遲 p50 / p99 (ms) | 177 / **638**(A:6.6 / 19.0) | 122 / **445**(B:6.4 / 20.6) | — |
+| 私有推播延遲 p50 / p99 (ms) | 182 / 648(A:8.1 / 24.2) | 148 / 524 | — |
+| 提前斷線 / 慢客戶端踢除 | 0 / 0 | 0 / 0 | — |
+
+### 8.3 伺服器看到的(`/metrics` 差值)
+
+| | A' | B' | E |
+|---|---|---|---|
+| `trading_batch_size` 組數 / 命令數 / 平均每組 | 403 / 20,101 / **49.9** | 219 / 7,404 / 33.8 | 255 / 12,667 / 49.7 |
+| `trading_batch_duration_seconds` 平均 | 149 ms | 80 ms | 118 ms |
+| 平均每命令(組時間 ÷ 組大小) | **3.0 ms** | 2.4 ms | **2.4 ms** |
+| `trading_batch_fallbacks_total` / `engine_rebuilds_total` | 0 / 0 | 0 / 0 | 0 / 0 |
+| `trading_apply_duration_seconds`(現在 = 出佇列到該組 COMMIT) | 149 ms 平均 | 106 ms | 118 ms |
+| exchange process CPU(整個 run,含 100 個帳戶註冊的 argon2 ≈ 13 s) | 79 s / 85 s wall | 47 s | 56 s / 40 s |
+| RSS(run 後) | 177 MB | 180 MB | 118 MB |
+
+### 8.4 讀法
+
+1. **吞吐 ×2.1–2.5,飽和點從 165 命令/s 到 355–442。** E 組沒有推播訂閱者,是引擎本身的數字;A' 多了 20 個訂閱者的 40 萬則 delta 扇出與 10 個私有連線,分掉同一台機器的 CPU。
+2. **瓶頸換了位置:從往返次數變成每句 SQL 的執行成本。** 本機的整合測試量到:單一命令 3 次往返 3.1 ms;一組 50 個純掛單 90 ms = 每命令 1.8 ms,只比逐一快 1.7×,雖然往返從 3 次變成約 1 次。也就是說每次往返裡的 8–9 句 SQL(savepoint、hold 的分錄 / 鎖 / postings / 餘額、`InsertOrder RETURNING *`、`UpdateOrderProgress RETURNING *`、兩列 outbox、release)各花 Postgres 約 0.2 ms,往返本身已經不是主角。再往上要減句數(掛單的 INSERT 與 progress UPDATE 合一、outbox 多列一句、拿掉 `RETURNING *`)或分片市場到多個 runner,不在這一期。
+3. **群組提交把延遲換成了吞吐:飽和時推播延遲 p99 從 ~20 ms 變成 ~640 ms。** 事件在該組 COMMIT 之後才進 outbox,滿的一組(50 個命令)要 120–150 ms,加上排隊。這是設計上的取捨:`ENGINE_BATCH_SIZE` 就是那個旋鈕,佇列空時每組只有一個命令、延遲與單命令相同;負載高時組變大、吞吐上去、每則事件晚一點。loadgen 是每秒整批送出的(bursty),所以 B' 在 130 命令/s 也累出平均 34 個一組。beta 的 §3.3「depth p99 < 100 ms」在飽和時不成立,在 100 命令/s 以下的真實流量(不是每秒一整批)應該成立;沒有量,寫進 beta checklist 當已知限制。
+4. **`POST` p50 好 2.5×、p99 好 2.3×(B'),但 p99 < 50 ms 仍然沒有。** 現在的 p99 幾乎全是排隊:apply 直方圖裡 ≤ 25 ms 的桶只有個位數,因為 `trading_apply_duration_seconds` 的語意變成「出佇列到該組 COMMIT」。要看服務時間本身,看 `trading_batch_duration_seconds` 除以 `trading_batch_size`。
+5. **零 fallback、零重建**:三組 run 沒有一組交易失敗,群組提交的復原路徑只在整合測試(注入故障)裡走過。
+6. **註冊很貴**:100 個帳戶的 argon2id 佔了 exchange process 13 s CPU,壓測開頭的 CPU 尖峰是它,不是引擎;profile 要避開前 15 秒。
+
+### 8.5 重現
+
+同 §7,引擎不用額外設定(`ENGINE_BATCH_SIZE` 預設 50;設 1 可以量「只有 pipeline、沒有群組」的數字)。E 組:`--rate 1000 --duration 30s --accounts 100 --ws-clients 0 --private-clients 0 --idle-connections 0`。CPU profile:`curl 'http://127.0.0.1:9100/debug/pprof/profile?seconds=15'`(dev 才開)在 run 開始 25 秒後抓。

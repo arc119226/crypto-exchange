@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"sort"
 	"sync/atomic"
 	"testing"
 
@@ -54,7 +55,7 @@ func setupLedger(t *testing.T) ledgerHarness {
 	t.Helper()
 	h := startPostgres(t)
 	ctx := context.Background()
-	require.NoError(t, app.MigrateUp(ctx, h.DSN("ex_migrate"), discard{}))
+	require.NoError(t, app.MigrateUp(ctx, h.DSN("ex_migrate"), discard{}, 0))
 	pool, err := pg.Open(ctx, pg.PoolConfig{DSN: h.DSN("ex_all"), MaxConns: 30})
 	require.NoError(t, err)
 	t.Cleanup(pool.Close)
@@ -633,4 +634,94 @@ func TestLedgerConcurrentTransfers(t *testing.T) {
 	entries, err := h.svc.Entries(ctx, ledger.EntriesFilter{RefType: "", Limit: 500})
 	require.NoError(t, err)
 	assert.Len(t, entries, 500, "Entries caps at 500")
+}
+
+// TestLedgerPostRoundTrips pins what a posting costs on the wire: two
+// round trips (locks, then writes) however many accounts and assets the
+// entry touches. The engine's order flow is built on this number; a change
+// that adds a statement fails here rather than in a load test.
+func TestLedgerPostRoundTrips(t *testing.T) {
+	h := setupLedger(t)
+	ctx := context.Background()
+	var counter pg.CountingTracer
+	pool, err := pg.Open(ctx, pg.PoolConfig{DSN: h.DSN("ex_all"), MaxConns: 2, Tracer: &counter})
+	require.NoError(t, err)
+	t.Cleanup(pool.Close)
+	svc := ledger.New(pool, "default")
+	require.NoError(t, svc.LoadHouseAccounts(ctx))
+	a := h.newSpot(t, ctx)
+	b := h.newSpot(t, ctx)
+	fees, err := svc.HouseAccount(ledger.HouseFeeRevenue)
+	require.NoError(t, err)
+
+	post := func(e ledger.Entry) (ledger.JournalEntry, bool, int64, error) {
+		tx, err := pool.Begin(ctx)
+		require.NoError(t, err)
+		counter.Reset()
+		je, replayed, perr := svc.Post(ctx, tx, e)
+		n := counter.RoundTrips()
+		if perr != nil {
+			_ = tx.Rollback(ctx)
+		} else {
+			require.NoError(t, tx.Commit(ctx))
+		}
+		return je, replayed, n, perr
+	}
+
+	// one entry, four balance rows, six postings: still two round trips
+	settle := ledger.Entry{IdempotencyKey: "rt:settle", Kind: "test", Postings: []ledger.Posting{
+		{AccountID: a, Asset: "ETH", Bucket: ledger.BucketAvailable, Direction: ledger.Credit, Amount: amt("1")},
+		{AccountID: a, Asset: "USDC", Bucket: ledger.BucketAvailable, Direction: ledger.Credit, Amount: amt("2000")},
+		{AccountID: b, Asset: "ETH", Bucket: ledger.BucketHold, Direction: ledger.Credit, Amount: amt("3")},
+		{AccountID: b, Asset: "USDC", Bucket: ledger.BucketHold, Direction: ledger.Credit, Amount: amt("5")},
+		{AccountID: fees, Asset: "ETH", Bucket: ledger.BucketHouse, Direction: ledger.Debit, Amount: amt("4")},
+		{AccountID: fees, Asset: "USDC", Bucket: ledger.BucketHouse, Direction: ledger.Debit, Amount: amt("2005")},
+	}}
+	je, replayed, n, err := post(settle)
+	require.NoError(t, err)
+	assert.False(t, replayed)
+	assert.EqualValues(t, 2, n, "locks, then writes")
+	// key order is (account_id, asset) sorted, the lock order: which of the
+	// two random account ids comes first is decided by the ids themselves
+	require.Len(t, je.Balances, 4, "one balance per (account, asset), in key order")
+	wantKeys := []string{a + "/ETH", a + "/USDC", b + "/ETH", b + "/USDC"}
+	sort.Strings(wantKeys)
+	gotKeys := make([]string, 0, len(je.Balances))
+	holds := map[string]money.Amount{}
+	for _, bal := range je.Balances {
+		gotKeys = append(gotKeys, bal.AccountID+"/"+bal.Asset)
+		holds[bal.AccountID+"/"+bal.Asset] = bal.Hold
+	}
+	assert.Equal(t, wantKeys, gotKeys)
+	eq(t, "3", holds[b+"/ETH"])
+	eq(t, "2000", h.balance(t, ctx, a, "USDC").Available)
+
+	// a replay reads the existing entry instead: the batch, then the entry
+	// and its postings
+	again, replayed, n, err := post(settle)
+	require.NoError(t, err)
+	assert.True(t, replayed)
+	assert.Equal(t, je.ID, again.ID)
+	assert.Len(t, again.Postings, 6)
+	assert.LessOrEqual(t, n, int64(3))
+	eq(t, "2000", h.balance(t, ctx, a, "USDC").Available, "nothing posted twice")
+
+	// insufficient funds is decided after the first round trip; nothing is
+	// written and the transaction is still usable for the caller's own
+	// rejection path
+	tx, err := pool.Begin(ctx)
+	require.NoError(t, err)
+	counter.Reset()
+	_, _, err = svc.Post(ctx, tx, ledger.Entry{IdempotencyKey: "rt:short", Kind: "test", Postings: []ledger.Posting{
+		{AccountID: a, Asset: "USDC", Bucket: ledger.BucketAvailable, Direction: ledger.Debit, Amount: amt("2001")},
+		{AccountID: a, Asset: "USDC", Bucket: ledger.BucketHold, Direction: ledger.Credit, Amount: amt("2001")},
+	}})
+	assert.ErrorIs(t, err, ledger.ErrInsufficient)
+	assert.EqualValues(t, 1, counter.RoundTrips())
+	_, execErr := tx.Exec(ctx, "SELECT 1")
+	assert.NoError(t, execErr, "the transaction was not aborted by the rejection")
+	require.NoError(t, tx.Rollback(ctx))
+	var entries int
+	require.NoError(t, pool.QueryRow(ctx, "SELECT count(*) FROM ledger.journal_entries WHERE idempotency_key = 'rt:short'").Scan(&entries))
+	assert.Equal(t, 0, entries)
 }

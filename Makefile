@@ -9,6 +9,11 @@ ENV_FILE      ?= .env
 COMPOSE       := docker compose -f $(COMPOSE_FILE) --env-file $(ENV_FILE)
 SEPOLIA_FILE  := deploy/compose/compose.sepolia.yaml
 COMPOSE_SEP   := docker compose -f $(COMPOSE_FILE) -f $(SEPOLIA_FILE) --env-file $(ENV_FILE)
+PROD_FILE     := deploy/compose/compose.prod.yaml
+ENV_PROD      ?= .env.prod
+COMPOSE_PROD  := docker compose -f $(COMPOSE_FILE) -f $(SEPOLIA_FILE) -f $(PROD_FILE) --env-file $(ENV_PROD)
+PROD_PROFILES := --profile infra --profile app --profile observability --profile backup
+PROD_SERVICE  ?= exchange-api
 OBS           ?= 1
 SERVICE       ?= exchange-all
 TAIL          ?= 100
@@ -18,15 +23,27 @@ COMMIT        ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
 DATE          ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 LDFLAGS       := -s -w -X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.date=$(DATE)
 IMAGE         ?= ghcr.io/arc119226/crypto-exchange:$(VERSION)
+IMAGE_EDGE    ?= ghcr.io/arc119226/crypto-exchange-edge:$(VERSION)
+IMAGE_BACKUP  ?= ghcr.io/arc119226/crypto-exchange-backup:$(VERSION)
 FUZZ_TIME     ?= 30s
 GOTOOL        := go tool -modfile=$(TOOLS_MOD)
 FOUNDRY_TAG   ?= $(shell sed -n 's/^FOUNDRY_TAG=//p' .env.example)
 FOUNDRY_IMAGE := ghcr.io/foundry-rs/foundry:$(FOUNDRY_TAG)
-ALL_PROFILES  := --profile infra --profile observability --profile app --profile single
+ALL_PROFILES  := --profile infra --profile observability --profile app --profile single --profile backup
+BACKUP        ?= 0
+BACKUP_PROFILE := $(if $(filter 1,$(BACKUP)),--profile backup,)
+LATEST_MIGRATION := $(shell ls migrations | sed -n 's/^0*\([0-9]*\)_.*\.sql$$/\1/p' | sort -n | tail -1)
+HELM          ?= helm
+HELM_CHART    := deploy/helm/exchange
+KIND          ?= kind
+KIND_CLUSTER  ?= exchange
+KIND_IMAGE    := crypto-exchange:ci
 
 .PHONY: help tools gen gen-check fmt tidy lint secrets-scan test test-fuzz test-integration e2e cover-money build image \
 	    up up-single up-sepolia down down-sepolia logs-sepolia ps-sepolia reset infra-up run migrate seed artifacts compose-config contracts-test \
-	    gen-dev-secrets demo trace loadgen web-gen web-check web-build web-e2e
+	    gen-dev-secrets demo trace loadgen web-gen web-check web-build web-e2e \
+	    helm-lint helm-template kind-up helm-e2e kind-down backup-drill \
+	    image-edge image-backup images up-prod down-prod logs-prod ps-prod gen-prod-secrets release-check
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
@@ -37,11 +54,12 @@ tools: ## Show pinned tool versions (tools/go.mod)
 	$(GOTOOL) golangci-lint version
 	@# gitleaks under `go tool` has no version stamped in, so read the pin.
 	@printf 'gitleaks %s\n' "$$(sed -n 's|.*zricethezav/gitleaks/v8 \(v[0-9.]*\).*|\1|p' $(TOOLS_MOD) | head -1)"
+	@printf 'kubeconform %s\n' "$$(sed -n 's|.*yannh/kubeconform \(v[0-9.]*\).*|\1|p' $(TOOLS_MOD) | head -1)"
 
 GEN_DIRS := internal/api/gen internal/admin/gen cmd/exchangectl/internal/apiclient cmd/exchangectl/internal/adminclient \
             internal/registry/sqlcgen internal/ledger/sqlcgen internal/audit/sqlcgen \
             internal/trading/sqlcgen internal/eventbus/sqlcgen internal/auth/sqlcgen \
-            internal/chain/sqlcgen internal/webhook/sqlcgen internal/marketdata/sqlcgen
+            internal/chain/sqlcgen internal/webhook/sqlcgen internal/marketdata/sqlcgen internal/admin/sqlcgen
 
 gen: ## Regenerate OpenAPI server/client and sqlc code (outputs are committed)
 	$(GOTOOL) oapi-codegen -config internal/api/gen/oapi-codegen.yaml api/public/v1/openapi.yaml
@@ -119,13 +137,21 @@ build: ## Build exchange and exchangectl into bin/
 image: ## Build the container image
 	docker build -f build/Dockerfile --build-arg VERSION=$(VERSION) --build-arg COMMIT=$(COMMIT) --build-arg DATE=$(DATE) -t $(IMAGE) .
 
+image-edge: ## Build the edge image (Caddy + web/trade; deploy/compose/compose.prod.yaml)
+	docker build -f build/edge/Dockerfile -t $(IMAGE_EDGE) .
+
+image-backup: ## Build the backup sidecar image (postgres client tools + mc)
+	docker build -f build/backup/Dockerfile -t $(IMAGE_BACKUP) .
+
+images: image image-edge image-backup ## Build all three images
+
 up: ## Start infra + all roles as separate containers (+observability unless OBS=0)
 	$(COMPOSE) --profile infra $(OBS_PROFILE) --profile app up -d --build --wait
 
 up-single: ## Start infra + single all-in-one container (+observability unless OBS=0)
 	$(COMPOSE) --profile infra $(OBS_PROFILE) --profile single up -d --build --wait
 
-up-sepolia: ## Start the all-in-one container against Sepolia (see docs/runbooks/sepolia.md)
+up-sepolia: ## Start the all-in-one container against Sepolia (see docs/guides/sepolia.md)
 	@test -f deploy/compose/sepolia/sepolia-addresses.json || 	  (echo "missing deploy/compose/sepolia/sepolia-addresses.json — see deploy/compose/sepolia/README.md" && exit 2)
 	@test -f deploy/compose/sepolia/seed-params.json || 	  (echo "missing deploy/compose/sepolia/seed-params.json — see deploy/compose/sepolia/README.md" && exit 2)
 	$(COMPOSE_SEP) --profile infra $(OBS_PROFILE) --profile single up -d --build --wait
@@ -143,6 +169,26 @@ logs-sepolia: ## Read the Sepolia stack's logs (SERVICE=exchange-all TAIL=100; F
 
 ps-sepolia: ## Show what is running in the Sepolia stack
 	$(COMPOSE_SEP) $(ALL_PROFILES) ps
+
+# --- the beta VM (deploy/compose/compose.prod.yaml over the Sepolia overlay; docs/runbooks/beta-deploy.md)
+up-prod: ## Pull the released images and start the beta stack (needs .env.prod and secrets/prod/)
+	@test -f $(ENV_PROD) || (echo "missing $(ENV_PROD): run sudo scripts/gen-prod-secrets.sh, then fill it in" && exit 2)
+	@test -d secrets/prod || (echo "missing secrets/prod/: run sudo scripts/gen-prod-secrets.sh" && exit 2)
+	@test -f deploy/compose/sepolia/sepolia-addresses.json || (echo "missing deploy/compose/sepolia/sepolia-addresses.json — see docs/guides/sepolia.md" && exit 2)
+	$(COMPOSE_PROD) $(PROD_PROFILES) pull --quiet
+	$(COMPOSE_PROD) $(PROD_PROFILES) up -d --wait
+
+down-prod: ## Stop the beta stack (keeps volumes)
+	$(COMPOSE_PROD) $(PROD_PROFILES) --profile backup-local down
+
+logs-prod: ## Read the beta stack's logs (PROD_SERVICE=exchange-api TAIL=100; FOLLOW=1 to keep watching; PROD_SERVICE= for all)
+	$(COMPOSE_PROD) $(PROD_PROFILES) --profile backup-local logs --tail $(TAIL) $(if $(FOLLOW),-f,) $(PROD_SERVICE)
+
+ps-prod: ## Show what is running in the beta stack
+	$(COMPOSE_PROD) $(PROD_PROFILES) --profile backup-local ps
+
+gen-prod-secrets: ## Create .env.prod and secrets/prod/ (run with sudo; idempotent, FORCE=1 to regenerate)
+	scripts/gen-prod-secrets.sh
 
 down: ## Stop everything (keeps volumes)
 	$(COMPOSE) $(ALL_PROFILES) down
@@ -179,12 +225,58 @@ artifacts: ## Copy addresses.json out of the compose artifacts volume (for make 
 e2e: ## Multi-container end-to-end test (compose app profile + exchangectl e2e; needs Docker)
 	bash scripts/e2e.sh
 
+backup-drill: ## Take a backup into the compose MinIO and restore it into a throwaway database, printing the RTO (needs a running stack; docs/runbooks/backup-restore.md)
+	$(COMPOSE) --profile infra --profile backup build backup
+	$(COMPOSE) --profile infra --profile backup up -d --wait minio
+	$(COMPOSE) --profile infra --profile backup run --rm backup once
+	$(COMPOSE) --profile infra --profile backup run --rm --entrypoint /usr/local/bin/restore-drill.sh \
+	    -e BACKUP_STORE=s3 -e EXPECTED_MIGRATION=$(LATEST_MIGRATION) \
+	    -e DRILL_ADMIN_URL="postgres://exchange:$$(sed -n 's/^POSTGRES_PASSWORD=//p' $(ENV_FILE))@postgres:5432/postgres?sslmode=disable" \
+	    -e SOURCE_DATABASE_URL="postgres://ex_backup:$$(sed -n 's/^POSTGRES_PASSWORD=//p' $(ENV_FILE))@postgres:5432/exchange?sslmode=disable" \
+	    backup
+
 compose-config: ## Validate both compose files with every profile (no daemon needed)
 	docker compose -f $(COMPOSE_FILE) --env-file .env.example $(ALL_PROFILES) config -q
 	@echo "compose.yaml OK"
 	ETH_RPC_URL=https://example.invalid ETH_SCAN_START_BLOCK=1 \
 	  docker compose -f $(COMPOSE_FILE) -f $(SEPOLIA_FILE) --env-file .env.example $(ALL_PROFILES) config -q
 	@echo "compose.sepolia.yaml OK"
+	ETH_RPC_URL=https://example.invalid ETH_SCAN_START_BLOCK=1 BACKUP_S3_ENDPOINT=https://example.invalid \
+	  docker compose -f $(COMPOSE_FILE) -f $(SEPOLIA_FILE) -f $(PROD_FILE) --env-file .env.prod.example $(ALL_PROFILES) --profile backup-local config -q
+	@echo "compose.prod.yaml OK"
+
+# --- Helm chart (deploy/helm/exchange; verified in CI on kind, docs/plan-v1.0.md §12 Phase 7)
+helm-lint: ## helm lint + render the chart with the default and the kind values through kubeconform (no cluster needed)
+	$(HELM) lint $(HELM_CHART)
+	$(HELM) template exchange $(HELM_CHART) | $(GOTOOL) kubeconform -strict -summary -ignore-missing-schemas -kubernetes-version 1.31.0
+	$(HELM) template exchange $(HELM_CHART) -f $(HELM_CHART)/values-kind.yaml | $(GOTOOL) kubeconform -strict -summary -ignore-missing-schemas -kubernetes-version 1.31.0
+
+helm-template: ## Print the rendered manifests (VALUES=path to add a values file)
+	$(HELM) template exchange $(HELM_CHART) $(if $(VALUES),-f $(VALUES),)
+
+kind-up: image ## Create the kind cluster, load the image and create the chart's secrets (needs kind + kubectl + docker)
+	$(KIND) get clusters 2>/dev/null | grep -qx $(KIND_CLUSTER) || $(KIND) create cluster --name $(KIND_CLUSTER)
+	docker tag $(IMAGE) $(KIND_IMAGE)
+	$(KIND) load docker-image $(KIND_IMAGE) --name $(KIND_CLUSTER)
+	scripts/kind-secrets.sh exchange
+
+helm-e2e: ## Install the chart into the current cluster and run the in-cluster e2e (after kind-up; KEEP=1 keeps the release)
+	bash scripts/helm-e2e.sh
+
+kind-down: ## Delete the kind cluster
+	$(KIND) delete cluster --name $(KIND_CLUSTER)
+
+release-check: ## Dry run of the release assertions for TAG=vX.Y.Z: chart packages with that appVersion and the binary reports it (docs/release.md; no Docker)
+	@test -n "$(TAG)" || (echo "usage: make release-check TAG=vX.Y.Z" && exit 2)
+	@case "$(TAG)" in v[0-9]*.[0-9]*.[0-9]*) ;; *) echo "TAG must look like vX.Y.Z"; exit 2;; esac
+	@test -z "$$(git status --porcelain)" || (echo "the working tree is not clean; a release is a commit on main" && exit 2)
+	$(HELM) lint $(HELM_CHART) >/dev/null
+	rm -rf dist/release && mkdir -p dist/release
+	$(HELM) package $(HELM_CHART) --version $(patsubst v%,%,$(TAG)) --app-version $(TAG) --destination dist/release >/dev/null
+	@test "$$($(HELM) show chart dist/release/exchange-$(patsubst v%,%,$(TAG)).tgz | sed -n 's/^appVersion: *//p')" = "$(TAG)" || (echo "chart appVersion does not equal $(TAG)" && exit 1)
+	go build -trimpath -ldflags "-s -w -X main.version=$(TAG) -X main.commit=$(COMMIT) -X main.date=$(DATE)" -o dist/release/exchange ./cmd/exchange
+	@test "$$(dist/release/exchange version --json | jq -r .version)" = "$(TAG)" || (echo "the binary does not report $(TAG)" && exit 1)
+	@echo "release-check $(TAG) OK: dist/release/exchange-$(patsubst v%,%,$(TAG)).tgz reports $(TAG), and so does the binary"
 
 contracts-test: ## forge build + test inside the pinned foundry image (no local foundry needed)
 	docker run --rm -v $(CURDIR)/infra/contracts:/contracts:ro --entrypoint sh $(FOUNDRY_IMAGE) \

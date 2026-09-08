@@ -73,5 +73,16 @@ func (h *Handler) systemStatus(ctx context.Context) (gen.SystemStatus, error) {
 		}
 		st.DeadWebhookDeliveries24H = int(n)
 	}
+	// The newest dump is what a restore starts from, so it is what the
+	// dashboard shows; the WAL archive's age is on the Grafana system board.
+	backups, err := h.LatestBackups(ctx)
+	if err != nil {
+		return gen.SystemStatus{}, fmt.Errorf("system status: %w", err)
+	}
+	for _, b := range backups {
+		if b.Kind == BackupDump {
+			st.LastBackup = &gen.BackupSummary{Kind: gen.BackupSummaryKind(b.Kind), FinishedAt: b.FinishedAt, SizeBytes: b.SizeBytes, Location: b.Location}
+		}
+	}
 	return st, nil
 }

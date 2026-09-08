@@ -3,7 +3,7 @@
 Two operator-provided files, mounted at `/config` in the `seed` job by
 `compose.sepolia.yaml`. Both are gitignored: they name a specific deployment,
 not the project. Copy the `.example` files and fill them in — where the values
-come from is `docs/runbooks/sepolia.md` §A5.
+come from is `docs/guides/sepolia.md` §A5.
 
 - **`sepolia-addresses.json`** — the same shape `exchange seed --fixtures`
   always takes (`internal/registry.Fixtures`). On anvil the contract deployer

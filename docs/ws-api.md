@@ -178,7 +178,7 @@ front end (`web/trade/src/ws/private.ts`) remembers the highest
 | `auth_failed` | the token did not verify (expired, wrong audience, wrong tenant) |
 | `not_authenticated` | `resume` before `auth` |
 | `resume_too_late` | `resume` after the connection went live |
-| `resume_failed` | the replay could not be served; reload over REST |
+| `resume_failed` | the replay could not be served, or `since_seq` is ahead of the account's sequence (the database was restored to an earlier point); reload over REST, the connection is live |
 | `not_available` | the server has no shadow book for the market yet (rebuilding) |
 
 Close codes: `1008` with reason `auth_required` (no `auth` within the

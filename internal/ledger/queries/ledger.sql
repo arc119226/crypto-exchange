@@ -139,3 +139,47 @@ SELECT * FROM ledger.accounts
 WHERE tenant_id = $1 AND owner_user_id = $2 AND kind = 'spot'
 ORDER BY created_at, id
 LIMIT 1;
+
+-- Set-based variants for the hot path ----------------------------------------
+-- One statement per step regardless of how many (account, asset) pairs an
+-- entry touches; internal/ledger/service.go queues them into pgx batches.
+
+-- name: LockBalances :many
+-- LockBalance for every (account_id, asset) pair at once. The pairs are
+-- inserted in (account_id, asset) order, which is the lock order every
+-- writer uses, so two entries touching the same rows cannot deadlock. A
+-- pair whose account does not exist is skipped rather than tripping the
+-- foreign key: that would abort the transaction, and the caller reports
+-- the missing account from the accounts it read in the same round trip.
+INSERT INTO ledger.balances (account_id, asset)
+SELECT k.account_id, k.asset
+  FROM ROWS FROM (unnest($1::uuid[]), unnest($2::text[])) AS k(account_id, asset)
+ WHERE EXISTS (SELECT 1 FROM ledger.accounts a WHERE a.id = k.account_id)
+ ORDER BY k.account_id, k.asset
+ON CONFLICT (account_id, asset) DO UPDATE SET version = ledger.balances.version
+RETURNING account_id, asset, available, hold, version;
+
+-- name: InsertPostings :exec
+-- Every posting of one entry, in the order given (postings are listed by id).
+INSERT INTO ledger.postings (entry_id, account_id, asset, bucket, direction, amount)
+SELECT $1, p.account_id, p.asset, p.bucket, p.direction, p.amount
+  FROM ROWS FROM (unnest($2::uuid[]), unnest($3::text[]), unnest($4::text[]), unnest($5::text[]), unnest($6::numeric[]))
+       WITH ORDINALITY AS p(account_id, asset, bucket, direction, amount, ord)
+ ORDER BY p.ord;
+
+-- name: ApplyBalanceDeltas :many
+-- ApplyBalanceDelta for every (account_id, asset) pair at once. Rows come
+-- back in no particular order; callers match them by key.
+UPDATE ledger.balances b
+   SET available  = b.available + d.available,
+       hold       = b.hold + d.hold,
+       version    = b.version + 1,
+       updated_at = now()
+  FROM ROWS FROM (unnest($1::uuid[]), unnest($2::text[]), unnest($3::numeric[]), unnest($4::numeric[])) AS d(account_id, asset, available, hold)
+ WHERE b.account_id = d.account_id AND b.asset = d.asset
+RETURNING b.account_id, b.asset, b.available, b.hold, b.version;
+
+-- name: BumpAccountSeqBy :one
+-- BumpAccountSeq for n events of one account in one statement; returns the
+-- last sequence taken, the first is next_seq - n + 1.
+UPDATE ledger.accounts SET next_seq = next_seq + $2 WHERE id = $1 RETURNING next_seq;

@@ -11,6 +11,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/arc119226/crypto-exchange/internal/platform/secretbox"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -130,13 +132,13 @@ func TestAPIKeySecretsAndSignatures(t *testing.T) {
 
 	secret, err := newSecret()
 	require.NoError(t, err)
-	sealed, err := encryptSecret(master, secret)
+	sealed, err := sealSecret(secretbox.Keyring{Current: master}, secret)
 	require.NoError(t, err)
-	back, err := decryptSecret(master, sealed)
+	back, err := openSecret(secretbox.Keyring{Current: master}, sealed)
 	require.NoError(t, err)
 	assert.Equal(t, secret, back)
 	sealed[len(sealed)-1] ^= 1
-	_, err = decryptSecret(master, sealed)
+	_, err = openSecret(secretbox.Keyring{Current: master}, sealed)
 	assert.Error(t, err, "tampered ciphertext")
 	kid, err := newKeyID()
 	require.NoError(t, err)

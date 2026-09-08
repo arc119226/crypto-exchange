@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -643,4 +644,17 @@ func TestScriptRoundTripAndRun(t *testing.T) {
 	regress.Commands = []matching.Command{limit(2, "a", "a", matching.Buy, "1990", "0.1"), limit(1, "b", "a", matching.Buy, "1990", "0.1")}
 	_, _, err = matching.Run(regress)
 	assert.ErrorIs(t, err, matching.ErrSeqNotIncreasing)
+}
+
+func TestAdvanceKeepsLastSeqInStep(t *testing.T) {
+	b := newBook(t, ethUSDC(matching.STPCancelNewest))
+	_, err := b.Apply(matching.Command{Seq: 1, Timestamp: time.Now(), New: &matching.NewOrder{OrderID: "a", AccountID: "x", Side: matching.Sell, Type: matching.Limit, TimeInForce: matching.GTC, Price: money.MustParse("2000"), Qty: money.MustParse("1")}})
+	require.NoError(t, err)
+	require.NoError(t, b.Advance(2), "a command the engine rejected before the book still took seq 2")
+	assert.EqualValues(t, 2, b.LastSeq())
+	assert.ErrorIs(t, b.Advance(4), matching.ErrSeqNotIncreasing, "no gaps")
+	assert.ErrorIs(t, b.Advance(2), matching.ErrSeqNotIncreasing, "no repeats")
+	_, err = b.Apply(matching.Command{Seq: 3, Timestamp: time.Now(), Cancel: &matching.Cancel{OrderID: "a"}})
+	require.NoError(t, err, "the book continues from the advanced seq")
+	assert.EqualValues(t, 3, b.LastSeq())
 }

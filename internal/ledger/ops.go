@@ -28,30 +28,64 @@ type HoldParams struct {
 // Hold freezes funds (docs/plan-v1.0.md §6.1.3). Insufficient available
 // funds return ErrInsufficient.
 func (s *Service) Hold(ctx context.Context, tx pgx.Tx, p HoldParams) (JournalEntry, bool, error) {
-	if !p.Amount.IsPositive() {
-		return JournalEntry{}, false, fmt.Errorf("%w: hold amount must be positive", ErrInvalidEntry)
+	e, err := holdEntry(p)
+	if err != nil {
+		return JournalEntry{}, false, err
 	}
-	return s.Post(ctx, tx, Entry{
+	return s.Post(ctx, tx, e)
+}
+
+// BeginHold is Hold split into its round trips (see PendingEntry).
+func (s *Service) BeginHold(p HoldParams) (*PendingEntry, error) {
+	e, err := holdEntry(p)
+	if err != nil {
+		return nil, err
+	}
+	return s.Begin(e)
+}
+
+func holdEntry(p HoldParams) (Entry, error) {
+	if !p.Amount.IsPositive() {
+		return Entry{}, fmt.Errorf("%w: hold amount must be positive", ErrInvalidEntry)
+	}
+	return Entry{
 		IdempotencyKey: p.IdempotencyKey, Kind: KindHold, RefType: p.Ref.Type, RefID: p.Ref.ID, CorrelationID: p.CorrelationID,
 		Postings: []Posting{
 			{AccountID: p.AccountID, Asset: p.Asset, Bucket: BucketAvailable, Direction: Debit, Amount: p.Amount},
 			{AccountID: p.AccountID, Asset: p.Asset, Bucket: BucketHold, Direction: Credit, Amount: p.Amount},
 		},
-	})
+	}, nil
 }
 
 // Release moves hold → available (cancel, IOC remainder, failed withdrawal).
 func (s *Service) Release(ctx context.Context, tx pgx.Tx, p HoldParams) (JournalEntry, bool, error) {
-	if !p.Amount.IsPositive() {
-		return JournalEntry{}, false, fmt.Errorf("%w: release amount must be positive", ErrInvalidEntry)
+	e, err := releaseEntry(p)
+	if err != nil {
+		return JournalEntry{}, false, err
 	}
-	return s.Post(ctx, tx, Entry{
+	return s.Post(ctx, tx, e)
+}
+
+// BeginRelease is Release split into its round trips (see PendingEntry).
+func (s *Service) BeginRelease(p HoldParams) (*PendingEntry, error) {
+	e, err := releaseEntry(p)
+	if err != nil {
+		return nil, err
+	}
+	return s.Begin(e)
+}
+
+func releaseEntry(p HoldParams) (Entry, error) {
+	if !p.Amount.IsPositive() {
+		return Entry{}, fmt.Errorf("%w: release amount must be positive", ErrInvalidEntry)
+	}
+	return Entry{
 		IdempotencyKey: p.IdempotencyKey, Kind: KindRelease, RefType: p.Ref.Type, RefID: p.Ref.ID, CorrelationID: p.CorrelationID,
 		Postings: []Posting{
 			{AccountID: p.AccountID, Asset: p.Asset, Bucket: BucketHold, Direction: Debit, Amount: p.Amount},
 			{AccountID: p.AccountID, Asset: p.Asset, Bucket: BucketAvailable, Direction: Credit, Amount: p.Amount},
 		},
-	})
+	}, nil
 }
 
 // CreditParams books funds into a user's available balance from a house
@@ -221,4 +255,23 @@ func (s *Service) Settle(ctx context.Context, tx pgx.Tx, p SettleParams) (Settle
 	}
 	res.Entry = je
 	return res, replayed, nil
+}
+
+// BeginSettle is Settle split into its round trips (see PendingEntry). The
+// fees and the release are computed here, before anything is sent; the
+// result's Entry is what PendingEntry.Entry returns after Finish.
+func (s *Service) BeginSettle(p SettleParams) (*PendingEntry, SettleResult, error) {
+	feeRevenue, err := s.HouseAccount(HouseFeeRevenue)
+	if err != nil {
+		return nil, SettleResult{}, err
+	}
+	entry, res, err := BuildSettleEntry(p, feeRevenue)
+	if err != nil {
+		return nil, SettleResult{}, err
+	}
+	pe, err := s.Begin(entry)
+	if err != nil {
+		return nil, SettleResult{}, err
+	}
+	return pe, res, nil
 }

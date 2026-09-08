@@ -50,12 +50,12 @@ func newAdminServer(cfg Config, log *slog.Logger, m *telemetry.HTTPMetrics, reg 
 	// has already checked the key, so a failure here is a wiring mistake --
 	// but swallowing it would leave admin up with every webhook endpoint
 	// returning 500, which is a worse way to find out.
-	master, err := cfg.Webhook.Master()
+	signing, err := cfg.Webhook.Keys()
 	if err != nil {
 		return nil, nil, fmt.Errorf("webhook signing key: %w", err)
 	}
 	// Run has already refused to start without it; this only decodes it.
-	totpKey, err := cfg.Admin.TOTPMaster()
+	totp, err := cfg.Admin.TOTPKeys()
 	if err != nil {
 		return nil, nil, fmt.Errorf("admin totp key: %w", err)
 	}
@@ -79,8 +79,8 @@ func newAdminServer(cfg Config, log *slog.Logger, m *telemetry.HTTPMetrics, reg 
 	// the worker could not open their secrets either -- so the endpoints say
 	// so instead of creating ones that could never be delivered to.
 	var webhooks *webhook.Store
-	if len(master) > 0 {
-		webhooks = webhook.NewStore(pool, cfg.TenantID, master).WithMetrics(webhook.NewAdminMetrics(reg))
+	if !signing.Empty() {
+		webhooks = webhook.NewStore(pool, cfg.TenantID, signing.Current).WithPreviousKey(signing.Previous).WithMetrics(webhook.NewAdminMetrics(reg))
 	} else {
 		log.Warn("WEBHOOK_SIGNING_KEY is not set: the webhook endpoints are disabled")
 	}
@@ -88,7 +88,7 @@ func newAdminServer(cfg Config, log *slog.Logger, m *telemetry.HTTPMetrics, reg 
 	// signer: this role issues no JWTs, and no master key: it opens no
 	// API-key secret (docs/plan-v1.0.md §14).
 	sessions, err := auth.New(pool, auth.Config{
-		Tenant: cfg.TenantID, Issuer: cfg.Auth.Issuer, TOTPKey: totpKey, AdminSessionTTL: cfg.Admin.SessionTTL,
+		Tenant: cfg.TenantID, Issuer: cfg.Auth.Issuer, TOTPKey: totp.Current, PreviousTOTPKey: totp.Previous, AdminSessionTTL: cfg.Admin.SessionTTL,
 	}, nil, nil, l, rec)
 	if err != nil {
 		return nil, nil, fmt.Errorf("admin sessions: %w", err)
@@ -107,7 +107,9 @@ func newAdminServer(cfg Config, log *slog.Logger, m *telemetry.HTTPMetrics, reg 
 		// Read-only: what the chain role has seen and not yet credited.
 		WithDeposits(deposit.NewReader(pool, cfg.TenantID)).
 		// People: the directory, KYC levels, freezes.
-		WithUsers(sessions)
+		WithUsers(sessions).
+		// The backup sidecar's record, as the gauge the BackupStale alert reads.
+		WithBackupMetrics(admin.NewBackupMetrics(reg))
 	// One admin replica (docs/plan-v1.0.md §5.2), so the login throttle can
 	// live in memory: a second replica would only double the allowance.
 	ui, err := admin.NewUI(h, sessions, admin.UIConfig{
@@ -137,6 +139,9 @@ func observeLedger(ctx context.Context, log *slog.Logger, l *ledger.Service, h *
 		}
 		if _, _, err := h.WatchLedgerBreaks(ctx); err != nil && ctx.Err() == nil {
 			log.Warn("ledger break check failed", slog.String("err", err.Error()))
+		}
+		if err := h.ObserveBackups(ctx); err != nil && ctx.Err() == nil {
+			log.Warn("backup record refresh failed", slog.String("err", err.Error()))
 		}
 		select {
 		case <-ctx.Done():

@@ -1,0 +1,118 @@
+{{- if .Values.dev.enabled }}
+{{- $dir := include "exchange.secretsDir" . -}}
+# After the migrate hook (weight 0): deploy MockUSDC to anvil, seed the
+# registry from the addresses it wrote, create the first administrator.
+# The contract sources arrive as a ConfigMap (values.dev.contracts.configMap,
+# scripts/kind-secrets.sh makes it from infra/contracts) so the chart carries
+# no copy of them.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "exchange.fullname" . }}-bootstrap
+  labels:
+    {{- include "exchange.labels" . | nindent 4 }}
+    app.kubernetes.io/component: dev-bootstrap
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "5"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: {{ .Values.dev.bootstrap.backoffLimit }}
+  template:
+    metadata:
+      labels:
+        {{- include "exchange.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: dev-bootstrap
+    spec:
+      restartPolicy: OnFailure
+      initContainers:
+        - name: deploy-contracts
+          image: {{ .Values.dev.anvil.image }}
+          command: ["sh", "-ec"]
+          args:
+            - |
+              until cast block-number --rpc-url "$RPC" >/dev/null 2>&1; do echo "waiting for anvil"; sleep 2; done
+              cp -r /contracts /tmp/work && cd /tmp/work
+              forge script script/Deploy.s.sol --rpc-url "$RPC" --broadcast
+              cat /artifacts/addresses.json
+          env:
+            - name: RPC
+              value: http://{{ include "exchange.fullname" . }}-anvil:8545
+            - name: CONTRACT_DEPLOYER_KEY
+              value: {{ .Values.dev.contracts.deployerKey | quote }}
+            - name: HOT_WALLET_ADDRESS
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.app }}
+                  key: HOT_WALLET_ADDRESS
+            - name: ADDRESSES_OUT
+              value: /artifacts/addresses.json
+          volumeMounts:
+            - name: contracts
+              mountPath: /contracts
+              readOnly: true
+            - name: artifacts
+              mountPath: /artifacts
+        - name: seed
+          image: {{ include "exchange.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args: ["seed", "--fixtures", "/artifacts/addresses.json"]
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          env:
+            - name: DATABASE_URL_FILE
+              value: {{ $dir }}/db/DATABASE_URL_ADMIN
+          volumeMounts:
+            - name: db
+              mountPath: {{ $dir }}/db
+              readOnly: true
+            - name: artifacts
+              mountPath: /artifacts
+              readOnly: true
+      containers:
+        - name: bootstrap
+          image: {{ include "exchange.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args: ["admin", "bootstrap"]
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          # The ConfigMap's variables inline: this Job is a hook, and the
+          # ConfigMap is a regular resource that does not exist yet.
+          env:
+            {{- range $k, $v := (include "exchange.configData" . | fromYaml) }}
+            - name: {{ $k }}
+              value: {{ $v | quote }}
+            {{- end }}
+            - name: DATABASE_URL_FILE
+              value: {{ $dir }}/db/DATABASE_URL_ADMIN
+            - name: ADMIN_BOOTSTRAP_PASSWORD_FILE
+              value: {{ $dir }}/app/ADMIN_BOOTSTRAP_PASSWORD
+            - name: ADMIN_API_KEY_FILE
+              value: {{ $dir }}/app/ADMIN_API_KEY
+            - name: ADMIN_TOTP_KEY_FILE
+              value: {{ $dir }}/app/ADMIN_TOTP_KEY
+          volumeMounts:
+            - name: db
+              mountPath: {{ $dir }}/db
+              readOnly: true
+            - name: app
+              mountPath: {{ $dir }}/app
+              readOnly: true
+      volumes:
+        - name: contracts
+          configMap:
+            name: {{ .Values.dev.contracts.configMap | default (printf "%s-contracts" (include "exchange.fullname" .)) }}
+            items:
+              - { key: foundry.toml, path: foundry.toml }
+              - { key: MockUSDC.sol, path: src/MockUSDC.sol }
+              - { key: Deploy.s.sol, path: script/Deploy.s.sol }
+              - { key: Vm.sol, path: script/Vm.sol }
+        - name: artifacts
+          emptyDir: {}
+        - name: db
+          secret:
+            secretName: {{ .Values.secrets.db }}
+        - name: app
+          secret:
+            secretName: {{ .Values.secrets.app }}
+{{- end }}

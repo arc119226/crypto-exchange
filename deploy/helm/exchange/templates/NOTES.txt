@@ -1,0 +1,22 @@
+{{ .Chart.Name }} {{ .Chart.Version }} (app {{ .Values.image.tag | default .Chart.AppVersion }}) is installed as {{ .Release.Name }}.
+
+Roles:
+{{- range $role, $spec := .Values.roles }}
+{{- if $spec.enabled }}
+  {{ $role }}: {{ $spec.replicas }} replica(s), service {{ include "exchange.fullname" $ }}-{{ $role }}
+{{- end }}
+{{- end }}
+
+Check readiness:
+  kubectl --namespace {{ .Release.Namespace }} get pods -l app.kubernetes.io/instance={{ .Release.Name }}
+  kubectl --namespace {{ .Release.Namespace }} exec deploy/{{ include "exchange.fullname" . }}-api -- /exchange version --json
+
+{{- if .Values.dev.enabled }}
+
+dev.enabled: the throwaway Postgres, NATS, Redis and anvil are Helm hooks
+and are recreated on every upgrade. `helm uninstall` does not remove them:
+  kubectl --namespace {{ .Release.Namespace }} delete all,configmap -l app.kubernetes.io/instance={{ .Release.Name }}
+{{- end }}
+
+Secrets are yours: {{ .Values.secrets.db }}, {{ .Values.secrets.jwt }}, {{ .Values.secrets.keystore }}, {{ .Values.secrets.app }}
+(docs/runbooks/key-rotation.md describes rotating each of them).

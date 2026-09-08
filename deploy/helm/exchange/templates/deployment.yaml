@@ -1,0 +1,170 @@
+{{- /*
+One Deployment per enabled role. The roles differ only in their command,
+their port, and which secrets they may see (docs/plan-v1.0.md §14): the
+signer alone mounts the keystore, the api alone the JWT signing key.
+*/ -}}
+{{- $root := . -}}
+{{- $dir := include "exchange.secretsDir" . -}}
+{{- range $role, $spec := .Values.roles }}
+{{- if $spec.enabled }}
+{{- $singleton := eq (include "exchange.isSingleton" $role) "true" -}}
+{{- if and $singleton (gt (int $spec.replicas) 1) }}
+{{- fail (printf "roles.%s.replicas must be 1: the %s role holds state that one process at a time may own" $role $role) }}
+{{- end }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "exchange.fullname" $root }}-{{ $role }}
+  labels:
+    {{- include "exchange.labels" $root | nindent 4 }}
+    app.kubernetes.io/component: {{ $role }}
+spec:
+  replicas: {{ $spec.replicas }}
+  {{- if $singleton }}
+  strategy:
+    type: Recreate
+  {{- else }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "exchange.selectorLabels" $root | nindent 6 }}
+      app.kubernetes.io/component: {{ $role }}
+  template:
+    metadata:
+      labels:
+        {{- include "exchange.selectorLabels" $root | nindent 8 }}
+        app.kubernetes.io/component: {{ $role }}
+      annotations:
+        checksum/config: {{ include (print $root.Template.BasePath "/configmap.yaml") $root | sha256sum }}
+    spec:
+      serviceAccountName: {{ include "exchange.serviceAccountName" $root }}
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: {{ include "exchange.terminationGrace" $root }}
+      {{- with $root.Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml $root.Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: {{ $role }}
+          image: {{ include "exchange.image" $root }}
+          imagePullPolicy: {{ $root.Values.image.pullPolicy }}
+          args: ["serve", "--role={{ $role }}"]
+          securityContext:
+            {{- toYaml $root.Values.containerSecurityContext | nindent 12 }}
+          envFrom:
+            - configMapRef:
+                name: {{ include "exchange.fullname" $root }}
+          env:
+            - name: DATABASE_URL_FILE
+              value: {{ $dir }}/db/DATABASE_URL_{{ upper $role }}
+            - name: NATS_URL_FILE
+              value: {{ $dir }}/app/NATS_URL
+            {{- if $root.Values.redis.password }}
+            - name: REDIS_PASSWORD_FILE
+              value: {{ $dir }}/app/REDIS_PASSWORD
+            {{- end }}
+            {{- if eq $role "api" }}
+            - name: HTTP_ADDR
+              value: ":8080"
+            - name: JWT_PRIVATE_KEY_FILE
+              value: {{ $dir }}/jwt/ed25519.pem
+            {{- if $root.Values.jwt.previous }}
+            - name: JWT_PREVIOUS_KEY_FILE
+              value: {{ $dir }}/jwt/previous.pem
+            {{- end }}
+            - name: API_KEY_MASTER_KEY_FILE
+              value: {{ $dir }}/app/API_KEY_MASTER_KEY
+            {{- else if eq $role "stream" }}
+            - name: WS_ADDR
+              value: ":8081"
+            {{- else if eq $role "admin" }}
+            - name: ADMIN_ADDR
+              value: ":8082"
+            - name: ADMIN_API_KEY_FILE
+              value: {{ $dir }}/app/ADMIN_API_KEY
+            - name: ADMIN_BOOTSTRAP_PASSWORD_FILE
+              value: {{ $dir }}/app/ADMIN_BOOTSTRAP_PASSWORD
+            - name: ADMIN_TOTP_KEY_FILE
+              value: {{ $dir }}/app/ADMIN_TOTP_KEY
+            - name: WEBHOOK_SIGNING_KEY_FILE
+              value: {{ $dir }}/app/WEBHOOK_SIGNING_KEY
+            {{- else if eq $role "worker" }}
+            - name: WEBHOOK_SIGNING_KEY_FILE
+              value: {{ $dir }}/app/WEBHOOK_SIGNING_KEY
+            {{- else if eq $role "signer" }}
+            - name: WALLET_KEYSTORE_DIR
+              value: {{ $dir }}/keystore
+            - name: WALLET_KEYSTORE_PASSPHRASE_FILE
+              value: {{ $dir }}/keystore/passphrase
+            {{- end }}
+          ports:
+            - name: ops
+              containerPort: 9100
+            {{- if eq $role "api" }}
+            - name: http
+              containerPort: 8080
+            {{- else if eq $role "stream" }}
+            - name: ws
+              containerPort: 8081
+            {{- else if eq $role "admin" }}
+            - name: admin
+              containerPort: 8082
+            {{- end }}
+          {{- if or $singleton (eq $role "stream") (eq $role "worker") }}
+          startupProbe:
+            httpGet: { path: /readyz, port: ops }
+            periodSeconds: 5
+            failureThreshold: {{ $root.Values.probes.startupFailureThreshold }}
+          {{- end }}
+          readinessProbe:
+            httpGet: { path: /readyz, port: ops }
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            httpGet: { path: /healthz, port: ops }
+            periodSeconds: 15
+            failureThreshold: 3
+          resources:
+            {{- toYaml $spec.resources | nindent 12 }}
+          volumeMounts:
+            - name: db
+              mountPath: {{ $dir }}/db
+              readOnly: true
+            - name: app
+              mountPath: {{ $dir }}/app
+              readOnly: true
+            {{- if eq $role "api" }}
+            - name: jwt
+              mountPath: {{ $dir }}/jwt
+              readOnly: true
+            {{- else if eq $role "signer" }}
+            - name: keystore
+              mountPath: {{ $dir }}/keystore
+              readOnly: true
+            {{- end }}
+      volumes:
+        - name: db
+          secret:
+            secretName: {{ $root.Values.secrets.db }}
+        - name: app
+          secret:
+            secretName: {{ $root.Values.secrets.app }}
+        {{- if eq $role "api" }}
+        - name: jwt
+          secret:
+            secretName: {{ $root.Values.secrets.jwt }}
+        {{- else if eq $role "signer" }}
+        - name: keystore
+          secret:
+            secretName: {{ $root.Values.secrets.keystore }}
+        {{- end }}
+{{- end }}
+{{- end }}

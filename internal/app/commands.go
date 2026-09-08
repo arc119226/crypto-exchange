@@ -55,11 +55,30 @@ func newGooseProvider(db *sql.DB) (*goose.Provider, error) {
 	return p, nil
 }
 
+// openSQLWaiting is openSQL that keeps retrying a refused or unreachable
+// database until wait has passed (0: one attempt), for a migrate Job that
+// starts together with its database.
+func openSQLWaiting(ctx context.Context, dsn string, wait time.Duration, out io.Writer) (*sql.DB, error) {
+	deadline := time.Now().Add(wait)
+	for attempt := 1; ; attempt++ {
+		db, err := openSQL(ctx, dsn)
+		if err == nil || time.Now().After(deadline) {
+			return db, err
+		}
+		_, _ = fmt.Fprintf(out, "migrate: database not reachable (attempt %d): %v; retrying\n", attempt, err)
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(2 * time.Second):
+		}
+	}
+}
+
 // MigrateUp applies every pending migration (idempotent). Run it with the
 // ex_migrate role. Missing login roles surface as a hint instead of a raw
 // 42704 error.
-func MigrateUp(ctx context.Context, dsn string, out io.Writer) error {
-	db, err := openSQL(ctx, dsn)
+func MigrateUp(ctx context.Context, dsn string, out io.Writer, wait time.Duration) error {
+	db, err := openSQLWaiting(ctx, dsn, wait, out)
 	if err != nil {
 		return err
 	}
@@ -188,11 +207,11 @@ func BootstrapAdmin(ctx context.Context, cfg Config, out io.Writer) error {
 // otherwise finish enrolling as them. If qrPath is set the QR is written
 // there as a PNG (0600) for scanning; the terminal gets the URL and secret.
 func EnrollTOTP(ctx context.Context, cfg Config, email, qrPath string, out io.Writer) error {
-	master, err := cfg.Admin.TOTPMaster()
+	totp, err := cfg.Admin.TOTPKeys()
 	if err != nil {
 		return err
 	}
-	if len(master) == 0 {
+	if totp.Empty() {
 		return fmt.Errorf("admin totp enroll: ADMIN_TOTP_KEY is required")
 	}
 	pool, err := pg.Open(ctx, pg.PoolConfig{DSN: cfg.DB.URL.Reveal(), MaxConns: 2, ApplicationName: "exchange-totp-enroll"})
@@ -201,7 +220,7 @@ func EnrollTOTP(ctx context.Context, cfg Config, email, qrPath string, out io.Wr
 	}
 	defer pool.Close()
 	l := ledger.New(pool, cfg.TenantID)
-	svc, err := auth.New(pool, auth.Config{Tenant: cfg.TenantID, Issuer: cfg.Auth.Issuer, TOTPKey: master}, nil, nil, l, audit.NewRecorder(cfg.TenantID))
+	svc, err := auth.New(pool, auth.Config{Tenant: cfg.TenantID, Issuer: cfg.Auth.Issuer, TOTPKey: totp.Current, PreviousTOTPKey: totp.Previous}, nil, nil, l, audit.NewRecorder(cfg.TenantID))
 	if err != nil {
 		return err
 	}

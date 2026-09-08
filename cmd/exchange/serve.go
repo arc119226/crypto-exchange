@@ -21,6 +21,9 @@ func newServeCmd() *cobra.Command {
 			if err != nil {
 				return runtimeErr(err)
 			}
+			if err := cfg.ValidateFor(roles); err != nil {
+				return runtimeErr(err)
+			}
 			return runtimeErr(app.Run(cmd.Context(), cfg, roles, buildInfo()))
 		},
 	}

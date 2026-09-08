@@ -1,0 +1,16 @@
+apiVersion: v2
+name: exchange
+description: >-
+  White-label spot exchange engine: one Deployment per role (api, engine,
+  chain, signer, stream, admin, worker), a migrate Job as a pre-install and
+  pre-upgrade hook, and optional throwaway dependencies for a test cluster.
+type: application
+# version is the chart's; appVersion is the release tag the image carries.
+# CI packages the chart with --app-version $TAG --version ${TAG#v} and checks
+# that `exchange version` inside the running api pod agrees (docs/release.md).
+version: 0.1.0
+appVersion: "0.0.0-dev"
+kubeVersion: ">=1.28.0-0"
+home: https://github.com/arc119226/crypto-exchange
+sources:
+  - https://github.com/arc119226/crypto-exchange

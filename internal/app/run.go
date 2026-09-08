@@ -230,6 +230,7 @@ func Run(ctx context.Context, cfg Config, roles []Role, bi BuildInfo) error {
 		g.Go(func() error { return workerRole.start(gctx) })
 		g.Go(func() error { return workerRole.runDelivering(gctx, log) })
 		g.Go(func() error { return workerRole.runKlines(gctx, log) })
+		g.Go(func() error { return workerRole.runRetention(gctx, log) })
 	}
 	if streamRole != nil {
 		g.Go(func() error { return streamRole.start(gctx) })
@@ -249,26 +250,59 @@ func Run(ctx context.Context, cfg Config, roles []Role, bi BuildInfo) error {
 	if apiRefresh != nil {
 		g.Go(func() error { return apiRefresh.run(gctx) })
 	}
+	// the relay outlives the engine by one shutdown step (see shutdownPlan),
+	// so it runs on a context the plan cancels rather than on gctx
+	relayCtx, stopRelay := context.WithCancel(context.WithoutCancel(gctx))
+	defer stopRelay()
+	relayDone := make(chan struct{})
+	close(relayDone)
 	if eng.engine != nil {
 		// Start blocks while another instance holds the lock and while books
 		// are rebuilt; the ops server is already up so /readyz reports it.
+		// Stopping is a shutdown step, after the servers have drained.
 		g.Go(func() error {
-			if err := retryUntil(gctx, log, "engine start", func(ctx context.Context) error {
+			return retryUntil(gctx, log, "engine start", func(ctx context.Context) error {
 				return eng.engine.Start(ctx)
-			}); err != nil {
-				return err
-			}
-			<-gctx.Done()
-			eng.engine.Stop()
-			return nil
+			})
 		})
 		if eng.relay != nil {
-			g.Go(func() error { return eng.relay.Run(gctx) })
+			relayDone = make(chan struct{})
+			g.Go(func() error {
+				defer close(relayDone)
+				return eng.relay.Run(relayCtx)
+			})
 		}
 	}
 	g.Go(func() error {
 		<-gctx.Done()
-		return shutdown(cfg, log, checker, servers, ops, d)
+		plan := shutdownPlan{drain: checker.SetDraining, delay: cfg.Shutdown.DrainDelay, timeout: cfg.Shutdown.Timeout}
+		for i := len(servers) - 1; i >= 0; i-- {
+			srv := servers[i]
+			plan.steps = append(plan.steps, shutdownStep{name: "server " + srv.Addr, stop: srv.Shutdown})
+		}
+		if eng.bus != nil {
+			plan.steps = append(plan.steps, shutdownStep{name: "command bus", stop: func(context.Context) error { return eng.bus.Close() }})
+		}
+		if eng.engine != nil {
+			plan.steps = append(plan.steps, shutdownStep{name: "engine", stop: func(context.Context) error { eng.engine.Stop(); return nil }})
+		}
+		plan.steps = append(plan.steps, shutdownStep{name: "outbox relay", stop: func(ctx context.Context) error {
+			stopRelay()
+			select {
+			case <-relayDone:
+				return nil
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}})
+		if streamRole != nil {
+			plan.steps = append(plan.steps, shutdownStep{name: "stream connections", stop: func(ctx context.Context) error {
+				streamRole.closeWithin(ctx)
+				return nil
+			}})
+		}
+		plan.steps = append(plan.steps, shutdownStep{name: "ops server", stop: ops.Shutdown})
+		return plan.run(log)
 	})
 	log.Info("ready", slog.String("ops_addr", cfg.OpsAddr))
 	if err := g.Wait(); err != nil && !errors.Is(err, context.Canceled) {
@@ -346,22 +380,4 @@ func listenAndServe(s *http.Server, log *slog.Logger) func() error {
 		}
 		return nil
 	}
-}
-
-func shutdown(cfg Config, log *slog.Logger, checker *Checker, servers []*http.Server, ops *http.Server, _ *deps) error {
-	log.Info("shutting down", slog.Duration("drain_delay", cfg.Shutdown.DrainDelay))
-	checker.SetDraining()
-	time.Sleep(cfg.Shutdown.DrainDelay)
-	ctx, cancel := context.WithTimeout(context.Background(), cfg.Shutdown.Timeout)
-	defer cancel()
-	var firstErr error
-	for i := len(servers) - 1; i >= 0; i-- {
-		if err := servers[i].Shutdown(ctx); err != nil && firstErr == nil {
-			firstErr = fmt.Errorf("shutdown %s: %w", servers[i].Addr, err)
-		}
-	}
-	if err := ops.Shutdown(ctx); err != nil && firstErr == nil {
-		firstErr = fmt.Errorf("shutdown ops: %w", err)
-	}
-	return firstErr
 }

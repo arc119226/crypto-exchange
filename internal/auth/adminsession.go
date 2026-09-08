@@ -206,7 +206,7 @@ func (s *Service) checkCode(ctx context.Context, token, code, ip string, enrolli
 	if urow.TotpLockedUntil.Valid && urow.TotpLockedUntil.Time.After(now) {
 		return AdminSession{}, ErrTOTPLocked
 	}
-	secret, err := decryptSecret(s.cfg.TOTPKey, urow.TotpSecretEnc)
+	secret, err := openSecret(s.totp, urow.TotpSecretEnc)
 	if err != nil {
 		return AdminSession{}, err
 	}
@@ -331,7 +331,7 @@ func (s *Service) EnrollTOTP(ctx context.Context, email string) (TOTPEnrolment, 
 	if err != nil {
 		return TOTPEnrolment{}, err
 	}
-	sealed, err := encryptSecret(s.cfg.TOTPKey, key.Secret())
+	sealed, err := sealSecret(s.totp, key.Secret())
 	if err != nil {
 		return TOTPEnrolment{}, err
 	}

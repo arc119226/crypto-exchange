@@ -461,6 +461,39 @@ func (q *Queries) ListDeliveries(ctx context.Context, arg ListDeliveriesParams) 
 	return items, nil
 }
 
+const listEndpointSecretsForUpdate = `-- name: ListEndpointSecretsForUpdate :many
+
+SELECT id, secret_enc, previous_secret_enc FROM webhook.endpoints WHERE tenant_id = $1 ORDER BY created_at, id FOR UPDATE
+`
+
+type ListEndpointSecretsForUpdateRow struct {
+	ID                string
+	SecretEnc         []byte
+	PreviousSecretEnc []byte
+}
+
+// Rewrap under a rotated master key (exchange keys rewrap): both the live
+// secret and, while a grace period holds one, the previous secret.
+func (q *Queries) ListEndpointSecretsForUpdate(ctx context.Context, tenantID string) ([]ListEndpointSecretsForUpdateRow, error) {
+	rows, err := q.db.Query(ctx, listEndpointSecretsForUpdate, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListEndpointSecretsForUpdateRow{}
+	for rows.Next() {
+		var i ListEndpointSecretsForUpdateRow
+		if err := rows.Scan(&i.ID, &i.SecretEnc, &i.PreviousSecretEnc); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listEndpoints = `-- name: ListEndpoints :many
 SELECT id, url, events, label, status, created_at, updated_at
 FROM webhook.endpoints
@@ -507,6 +540,53 @@ func (q *Queries) ListEndpoints(ctx context.Context, tenantID string) ([]ListEnd
 		return nil, err
 	}
 	return items, nil
+}
+
+const pruneDeliveries = `-- name: PruneDeliveries :execrows
+
+DELETE FROM webhook.deliveries d
+ WHERE d.id IN (SELECT i.id FROM webhook.deliveries i WHERE i.created_at < $1 LIMIT $2)
+`
+
+type PruneDeliveriesParams struct {
+	CreatedAt time.Time
+	Limit     int32
+}
+
+// Retention (docs/plan-v1.0.md §12 Phase 7) --------------------------------
+// Attempt records older than the cutoff. Evidence has a shelf life too;
+// ninety days is the default (RETENTION_WEBHOOK).
+func (q *Queries) PruneDeliveries(ctx context.Context, arg PruneDeliveriesParams) (int64, error) {
+	result, err := q.db.Exec(ctx, pruneDeliveries, arg.CreatedAt, arg.Limit)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const pruneEvents = `-- name: PruneEvents :execrows
+DELETE FROM webhook.events w
+ WHERE (w.tenant_id, w.event_id) IN (
+   SELECT e.tenant_id, e.event_id FROM webhook.events e
+    WHERE e.created_at < $1
+      AND NOT EXISTS (SELECT 1 FROM webhook.queue q WHERE q.tenant_id = e.tenant_id AND q.event_id = e.event_id)
+    LIMIT $2)
+`
+
+type PruneEventsParams struct {
+	CreatedAt time.Time
+	Limit     int32
+}
+
+// Stored event bodies older than the cutoff that no queue row references
+// any more (queue_event_fk): a body still queued for an endpoint that is
+// retrying or paused stays until that row is gone.
+func (q *Queries) PruneEvents(ctx context.Context, arg PruneEventsParams) (int64, error) {
+	result, err := q.db.Exec(ctx, pruneEvents, arg.CreatedAt, arg.Limit)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const recordAttempt = `-- name: RecordAttempt :exec
@@ -652,6 +732,21 @@ func (q *Queries) RotateEndpointSecret(ctx context.Context, arg RotateEndpointSe
 		&i.PreviousSecretUntil,
 	)
 	return i, err
+}
+
+const setEndpointSecretEnc = `-- name: SetEndpointSecretEnc :exec
+UPDATE webhook.endpoints SET secret_enc = $2, previous_secret_enc = $3 WHERE id = $1
+`
+
+type SetEndpointSecretEncParams struct {
+	ID                string
+	SecretEnc         []byte
+	PreviousSecretEnc []byte
+}
+
+func (q *Queries) SetEndpointSecretEnc(ctx context.Context, arg SetEndpointSecretEncParams) error {
+	_, err := q.db.Exec(ctx, setEndpointSecretEnc, arg.ID, arg.SecretEnc, arg.PreviousSecretEnc)
+	return err
 }
 
 const setEndpointStatus = `-- name: SetEndpointStatus :one

@@ -58,6 +58,18 @@ func (b *Book) Config() MarketConfig { return b.cfg }
 // LastSeq is the seq of the last applied (or restored) command.
 func (b *Book) LastSeq() uint64 { return b.lastSeq }
 
+// Advance records a command that consumed the next sequence without
+// reaching the book: the engine rejects an order for insufficient funds
+// after assigning its seq, and the book's LastSeq must still equal the
+// market's, or the depth it reports lags the event stream by one.
+func (b *Book) Advance(seq uint64) error {
+	if seq != b.lastSeq+1 {
+		return fmt.Errorf("%w: advance to %d after %d", ErrSeqNotIncreasing, seq, b.lastSeq)
+	}
+	b.lastSeq = seq
+	return nil
+}
+
 // Len is the number of resting orders.
 func (b *Book) Len() int { return len(b.byID) }
 

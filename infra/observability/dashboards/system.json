@@ -1,7 +1,7 @@
 {
   "uid": "exchange-system",
   "title": "Exchange / System",
-  "description": "Process CPU, memory, goroutines, file descriptors and the Postgres pool per scraped process (docs/plan-v1.0.md §15).",
+  "description": "Process CPU, memory, goroutines, file descriptors and the Postgres pool per scraped process (docs/plan-v1.0.md \u00a715).",
   "tags": [
     "exchange"
   ],
@@ -691,6 +691,153 @@
           "expr": "db_pool_connections{instance=~\"$instance\", state=\"acquired\"} / on (instance) db_pool_max{instance=~\"$instance\"}",
           "legendFormat": "{{instance}}",
           "range": true
+        }
+      ]
+    },
+    {
+      "type": "row",
+      "title": "Backups",
+      "id": 13,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 30
+      },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "type": "stat",
+      "title": "Age of the newest successful pg_dump",
+      "id": 14,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 12,
+        "x": 0,
+        "y": 31
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 90000
+              },
+              {
+                "color": "red",
+                "value": 93600
+              }
+            ]
+          },
+          "noValue": "never"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "value_and_name",
+        "justifyMode": "center"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "time() - max(backup_last_success_timestamp_seconds{kind=\"dump\"})",
+          "legendFormat": "dump",
+          "instant": true
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Age of the newest shipped WAL segment",
+      "id": 15,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 12,
+        "x": 12,
+        "y": 31
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 900
+              },
+              {
+                "color": "red",
+                "value": 1800
+              }
+            ]
+          },
+          "noValue": "never"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "value_and_name",
+        "justifyMode": "center"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "time() - max(backup_last_success_timestamp_seconds{kind=\"wal\"})",
+          "legendFormat": "wal",
+          "instant": true
         }
       ]
     }

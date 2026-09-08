@@ -76,3 +76,50 @@ groups:
         annotations:
           summary: "On-chain vs ledger reconciliation for {{ $labels.asset }} differs by {{ $value }}"
           description: "reconciliation.break_detected carries the numbers; see the Breaks page and docs/runbooks."
+
+      # Backups (docs/runbooks/backup-restore.md). The admin role reads
+      # admin.backups every 30 s and exports the newest successful dump and
+      # WAL shipment as backup_last_success_timestamp_seconds{kind}; the
+      # sidecar (scripts/backup.sh) writes those rows. A daily dump that is
+      # more than 26 hours old has missed a day; a WAL archive more than 30
+      # minutes old is stale on any system that writes, and archive_timeout
+      # = 900 s bounds it on one that does not.
+      - alert: BackupStale
+        expr: time() - backup_last_success_timestamp_seconds{kind="dump"} > 26 * 3600
+        for: 0m
+        labels: { severity: critical }
+        annotations:
+          summary: "The newest successful pg_dump is {{ $value | humanizeDuration }} old"
+          description: "Check the backup sidecar's log and the failed rows in admin.backups; the store may be unreachable or full."
+
+      - alert: WalArchiveStale
+        expr: time() - backup_last_success_timestamp_seconds{kind="wal"} > 1800
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "No WAL segment has been shipped for {{ $value | humanizeDuration }}"
+          description: "The recovery point is drifting. Check /wal-archive on the Postgres host (segments piling up mean the sidecar cannot upload) and the sidecar's log."
+
+      - alert: BackupNeverTaken
+        # A stack that has run for a day without a single successful dump.
+        # Development stacks without --profile backup fire this too, after a
+        # day, which is the point at which that is worth noticing.
+        expr: absent(backup_last_success_timestamp_seconds{kind="dump"})
+        for: 24h
+        labels: { severity: warning }
+        annotations:
+          summary: "No backup has ever succeeded on this stack"
+          description: "Start the backup profile (docs/runbooks/backup-restore.md) or fix the sidecar."
+
+      # The host's disk, from node-exporter (deploy/compose/compose.prod.yaml
+      # runs it; a development stack has no such target and this never
+      # evaluates). A full disk stops Postgres, and the WAL archive piling up
+      # because the backup sidecar cannot upload is the likeliest way to get
+      # there (docs/runbooks/backup-restore.md).
+      - alert: DiskAlmostFull
+        expr: node_filesystem_avail_bytes{mountpoint="/", fstype!~"tmpfs|overlay|squashfs"} / node_filesystem_size_bytes{mountpoint="/", fstype!~"tmpfs|overlay|squashfs"} < 0.15
+        for: 10m
+        labels: { severity: critical }
+        annotations:
+          summary: "The root filesystem has {{ $value | humanizePercentage }} left"
+          description: "Check /wal-archive and docker system df first; then grow the disk. Postgres stops when it is full."

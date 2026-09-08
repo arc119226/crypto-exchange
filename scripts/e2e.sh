@@ -75,7 +75,11 @@ log "starting infra + one container per role"
 "${COMPOSE[@]}" ps
 
 log "the engine serves the command bus"
-"${COMPOSE[@]}" logs --no-color exchange-engine | grep -q "command bus listening" \
+# Read the log into a variable before testing it: under pipefail, a pipeline
+# whose reader exits early (grep -q, head) fails with 141 when the writer is
+# still writing, and `docker compose logs` writes line by line.
+engine_logs=$("${COMPOSE[@]}" logs --no-color exchange-engine)
+grep -q "command bus listening" <<<"$engine_logs" \
   || { echo "engine did not start the command bus"; exit 1; }
 
 # Two independent BIP-44 implementations must agree on m/44'/60'/1'/0/0: the
@@ -207,7 +211,7 @@ usdc_contract=$("$CTL" assets list --output json \
 [ -n "$usdc_contract" ] && [ "$usdc_contract" != "null" ] \
   || { echo "the registry has no USDC contract address"; exit 1; }
 
-balance_of() { "$CTL" balances --output json | jq -r --arg a "$1" '.balances[] | select(.asset==$a) | .available' | head -1; }
+balance_of() { "$CTL" balances --output json | jq -r --arg a "$1" '[.balances[] | select(.asset==$a) | .available][0] // empty'; }
 
 # wait_for_credit ASSET BEFORE — polls until the balance moves
 wait_for_credit() {
@@ -437,6 +441,36 @@ if [ "$before" != "$after" ]; then
   exit 1
 fi
 
+log "kill -9 in the middle of a burst leaves the book equal to the database"
+# The engine commits commands in groups (docs/plan-v1.0.md §5.2 group commit);
+# a group cut off mid-transaction must roll back as a whole, and the restarted
+# book must be exactly what the database says. Ten seconds of load, the
+# engine killed a few seconds in: the generator sees 503s for a moment
+# (callers waiting on the killed transaction) and carries on.
+burst_dir=$(mktemp -d)
+EXCHANGE_API_URL="$API_URL" EXCHANGE_WS_URL="${WS_URL:-ws://localhost:8081}" EXCHANGE_ADMIN_URL="$ADMIN_URL" EXCHANGE_ADMIN_API_KEY="$ADMIN_API_KEY" \
+  "$CTL" loadgen --market ETH-USDC --rate 200 --duration 10s --accounts 10 --ws-clients 0 --private-clients 0 \
+  --output json > "$burst_dir/burst.json" 2> "$burst_dir/burst.err" &
+burst=$!
+sleep 4
+docker kill -s KILL "$("${COMPOSE[@]}" ps -q exchange-engine)"
+"${COMPOSE[@]}" up -d --wait exchange-engine
+wait "$burst" || { echo "loadgen failed during the burst"; cat "$burst_dir/burst.err"; exit 1; }
+jq '{orders_sent, orders_ok, unavailable_503, errors}' "$burst_dir/burst.json"
+psql_check() {
+  "${COMPOSE[@]}" exec -T postgres psql -U exchange -d exchange -Atc "$1"
+}
+seq_db=$(psql_check "SELECT s.last_seq || ' ' || COALESCE(max(o.seq), 0) FROM trading.market_sequences s JOIN registry.markets m ON m.id = s.market_id LEFT JOIN trading.orders o ON o.market_id = s.market_id WHERE m.symbol = 'ETH-USDC' GROUP BY s.last_seq")
+[ "${seq_db% *}" = "${seq_db#* }" ] || { echo "market sequence and orders disagree after the burst: $seq_db"; exit 1; }
+book_seq=$("$CTL" book ETH-USDC --output json | jq -r .last_seq)
+[ "$book_seq" = "${seq_db% *}" ] || { echo "the restarted book is at seq $book_seq, the database at ${seq_db% *}"; exit 1; }
+holds=$(psql_check "SELECT count(*) FROM (SELECT b.account_id, b.asset, b.hold, COALESCE(sum(o.hold_remaining), 0) AS held FROM ledger.balances b LEFT JOIN trading.orders o ON o.account_id = b.account_id AND o.hold_asset = b.asset AND o.status IN ('open', 'partially_filled') GROUP BY 1, 2, 3) x WHERE hold <> held")
+[ "$holds" = "0" ] || { echo "$holds balances disagree with the open orders' holds after the burst"; exit 1; }
+"$CTL" admin trial-balance --output json | jq -e '.balanced == true' >/dev/null || { echo "trial balance broke during the burst"; exit 1; }
+for id in $("$CTL" orders list --open --output json | jq -r '.orders[].id'); do
+  "$CTL" orders cancel "$id" >/dev/null
+done
+
 log "halting the market reaches the engine as market.updated"
 "$CTL" admin markets set-status ETH-USDC halted --reason "e2e halt"
 halted=0
@@ -463,7 +497,10 @@ all_logs=$("${COMPOSE[@]}" logs --no-color)
 leaked=0
 check_absent() { # name value
   [ -n "$2" ] || return 0
-  if printf '%s' "$all_logs" | grep -qF -- "$2"; then echo "LEAK: $1 appears in a container log"; leaked=1; fi
+  # a here-string, not a pipeline: `printf | grep -q` has the same shape as
+  # the race above (a found leak could read as "no leak" if printf were
+  # still writing when grep exits), so it is written the safe way too
+  if grep -qF -- "$2" <<<"$all_logs"; then echo "LEAK: $1 appears in a container log"; leaked=1; fi
 }
 check_absent WALLET_KEYSTORE_PASSPHRASE "$WALLET_KEYSTORE_PASSPHRASE"
 check_absent API_KEY_MASTER_KEY "$API_KEY_MASTER_KEY"

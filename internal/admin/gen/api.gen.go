@@ -143,6 +143,24 @@ func (e AuditEventActorType) Valid() bool {
 	}
 }
 
+// Defines values for BackupSummaryKind.
+const (
+	BackupSummaryKindDump BackupSummaryKind = "dump"
+	BackupSummaryKindWal  BackupSummaryKind = "wal"
+)
+
+// Valid indicates whether the value is a known member of the BackupSummaryKind enum.
+func (e BackupSummaryKind) Valid() bool {
+	switch e {
+	case BackupSummaryKindDump:
+		return true
+	case BackupSummaryKindWal:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for HouseAdjustmentRequestCode.
 const (
 	HouseAdjustmentRequestCodeCustodyDepositAddresses HouseAdjustmentRequestCode = "custody_deposit_addresses"
@@ -715,6 +733,19 @@ type AuditEventList struct {
 	Events []AuditEvent `json:"events"`
 }
 
+// BackupSummary The newest successful pg_dump (admin.backups, written by the backup sidecar); null until one has been taken.
+type BackupSummary struct {
+	FinishedAt time.Time         `json:"finished_at"`
+	Kind       BackupSummaryKind `json:"kind"`
+
+	// Location The object key inside the backup bucket.
+	Location  string `json:"location"`
+	SizeBytes int64  `json:"size_bytes"`
+}
+
+// BackupSummaryKind defines model for BackupSummary.Kind.
+type BackupSummaryKind string
+
 // Balance defines model for Balance.
 type Balance struct {
 	Asset string `json:"asset"`
@@ -1266,10 +1297,13 @@ type SweepList struct {
 // SystemStatus defines model for SystemStatus.
 type SystemStatus struct {
 	// ConfirmingDeposits Deposits seen on chain and not yet credited.
-	ConfirmingDeposits       int                    `json:"confirming_deposits"`
-	Database                 SystemStatusDatabase   `json:"database"`
-	DeadWebhookDeliveries24H int                    `json:"dead_webhook_deliveries_24h"`
-	LastReconciliation       *ReconciliationSummary `json:"last_reconciliation,omitempty"`
+	ConfirmingDeposits       int                  `json:"confirming_deposits"`
+	Database                 SystemStatusDatabase `json:"database"`
+	DeadWebhookDeliveries24H int                  `json:"dead_webhook_deliveries_24h"`
+
+	// LastBackup The newest successful pg_dump (admin.backups, written by the backup sidecar); null until one has been taken.
+	LastBackup         *BackupSummary         `json:"last_backup,omitempty"`
+	LastReconciliation *ReconciliationSummary `json:"last_reconciliation,omitempty"`
 
 	// LedgerBalanced Every asset's debits equal its credits right now.
 	LedgerBalanced bool      `json:"ledger_balanced"`

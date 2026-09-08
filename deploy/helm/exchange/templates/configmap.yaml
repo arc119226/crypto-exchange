@@ -1,0 +1,11 @@
+# Non-secret environment for every role (exchange.configData in
+# _helpers.tpl). Secrets never go here: the roles read them from mounted files
+# through the *_FILE variables (deployment.yaml).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "exchange.fullname" . }}
+  labels:
+    {{- include "exchange.labels" . | nindent 4 }}
+data:
+  {{- include "exchange.configData" . | nindent 2 }}

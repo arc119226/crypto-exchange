@@ -11,7 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-const accountBucketSums = `-- name: AccountBucketSums :many
+const AccountBucketSums = `-- name: AccountBucketSums :many
 SELECT p.asset, p.bucket,
        (SUM(CASE p.direction WHEN 'credit' THEN p.amount ELSE 0 END)
       - SUM(CASE p.direction WHEN 'debit'  THEN p.amount ELSE 0 END))::numeric(36,18) AS credit_minus_debit
@@ -30,7 +30,7 @@ type AccountBucketSumsRow struct {
 // credit − debit per (asset, bucket): for spot accounts this must equal the
 // balances cache (docs/plan-v1.0.md §6.1.5 invariant 2).
 func (q *Queries) AccountBucketSums(ctx context.Context, accountID string) ([]AccountBucketSumsRow, error) {
-	rows, err := q.db.Query(ctx, accountBucketSums, accountID)
+	rows, err := q.db.Query(ctx, AccountBucketSums, accountID)
 	if err != nil {
 		return nil, err
 	}
@@ -49,7 +49,7 @@ func (q *Queries) AccountBucketSums(ctx context.Context, accountID string) ([]Ac
 	return items, nil
 }
 
-const applyBalanceDelta = `-- name: ApplyBalanceDelta :one
+const ApplyBalanceDelta = `-- name: ApplyBalanceDelta :one
 UPDATE ledger.balances
    SET available = available + $3,
        hold      = hold + $4,
@@ -75,7 +75,7 @@ type ApplyBalanceDeltaRow struct {
 }
 
 func (q *Queries) ApplyBalanceDelta(ctx context.Context, arg ApplyBalanceDeltaParams) (ApplyBalanceDeltaRow, error) {
-	row := q.db.QueryRow(ctx, applyBalanceDelta,
+	row := q.db.QueryRow(ctx, ApplyBalanceDelta,
 		arg.AccountID,
 		arg.Asset,
 		arg.Available,
@@ -92,20 +92,97 @@ func (q *Queries) ApplyBalanceDelta(ctx context.Context, arg ApplyBalanceDeltaPa
 	return i, err
 }
 
-const bumpAccountSeq = `-- name: BumpAccountSeq :one
+const ApplyBalanceDeltas = `-- name: ApplyBalanceDeltas :many
+UPDATE ledger.balances b
+   SET available  = b.available + d.available,
+       hold       = b.hold + d.hold,
+       version    = b.version + 1,
+       updated_at = now()
+  FROM ROWS FROM (unnest($1::uuid[]), unnest($2::text[]), unnest($3::numeric[]), unnest($4::numeric[])) AS d(account_id, asset, available, hold)
+ WHERE b.account_id = d.account_id AND b.asset = d.asset
+RETURNING b.account_id, b.asset, b.available, b.hold, b.version
+`
+
+type ApplyBalanceDeltasParams struct {
+	Column1 []string
+	Column2 []string
+	Column3 []pgtype.Numeric
+	Column4 []pgtype.Numeric
+}
+
+type ApplyBalanceDeltasRow struct {
+	AccountID string
+	Asset     string
+	Available pgtype.Numeric
+	Hold      pgtype.Numeric
+	Version   int64
+}
+
+// ApplyBalanceDelta for every (account_id, asset) pair at once. Rows come
+// back in no particular order; callers match them by key.
+func (q *Queries) ApplyBalanceDeltas(ctx context.Context, arg ApplyBalanceDeltasParams) ([]ApplyBalanceDeltasRow, error) {
+	rows, err := q.db.Query(ctx, ApplyBalanceDeltas,
+		arg.Column1,
+		arg.Column2,
+		arg.Column3,
+		arg.Column4,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ApplyBalanceDeltasRow{}
+	for rows.Next() {
+		var i ApplyBalanceDeltasRow
+		if err := rows.Scan(
+			&i.AccountID,
+			&i.Asset,
+			&i.Available,
+			&i.Hold,
+			&i.Version,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const BumpAccountSeq = `-- name: BumpAccountSeq :one
 UPDATE ledger.accounts SET next_seq = next_seq + 1 WHERE id = $1 RETURNING next_seq
 `
 
 // Per-account event sequence for the private stream (docs/plan-v1.0.md §7.1);
 // called inside the transaction that writes the outbox rows.
 func (q *Queries) BumpAccountSeq(ctx context.Context, id string) (int64, error) {
-	row := q.db.QueryRow(ctx, bumpAccountSeq, id)
+	row := q.db.QueryRow(ctx, BumpAccountSeq, id)
 	var next_seq int64
 	err := row.Scan(&next_seq)
 	return next_seq, err
 }
 
-const createSpotAccount = `-- name: CreateSpotAccount :one
+const BumpAccountSeqBy = `-- name: BumpAccountSeqBy :one
+UPDATE ledger.accounts SET next_seq = next_seq + $2 WHERE id = $1 RETURNING next_seq
+`
+
+type BumpAccountSeqByParams struct {
+	ID      string
+	NextSeq int64
+}
+
+// BumpAccountSeq for n events of one account in one statement; returns the
+// last sequence taken, the first is next_seq - n + 1.
+func (q *Queries) BumpAccountSeqBy(ctx context.Context, arg BumpAccountSeqByParams) (int64, error) {
+	row := q.db.QueryRow(ctx, BumpAccountSeqBy, arg.ID, arg.NextSeq)
+	var next_seq int64
+	err := row.Scan(&next_seq)
+	return next_seq, err
+}
+
+const CreateSpotAccount = `-- name: CreateSpotAccount :one
 INSERT INTO ledger.accounts (tenant_id, kind, owner_user_id)
 VALUES ($1, 'spot', $2)
 RETURNING id, tenant_id, kind, house_code, owner_user_id, status, next_seq, version, created_at, updated_at
@@ -117,7 +194,7 @@ type CreateSpotAccountParams struct {
 }
 
 func (q *Queries) CreateSpotAccount(ctx context.Context, arg CreateSpotAccountParams) (LedgerAccount, error) {
-	row := q.db.QueryRow(ctx, createSpotAccount, arg.TenantID, arg.OwnerUserID)
+	row := q.db.QueryRow(ctx, CreateSpotAccount, arg.TenantID, arg.OwnerUserID)
 	var i LedgerAccount
 	err := row.Scan(
 		&i.ID,
@@ -134,7 +211,7 @@ func (q *Queries) CreateSpotAccount(ctx context.Context, arg CreateSpotAccountPa
 	return i, err
 }
 
-const ensureHouseAccount = `-- name: EnsureHouseAccount :one
+const EnsureHouseAccount = `-- name: EnsureHouseAccount :one
 INSERT INTO ledger.accounts (tenant_id, kind, house_code)
 VALUES ($1, 'house', $2)
 ON CONFLICT (tenant_id, house_code) WHERE house_code IS NOT NULL
@@ -148,7 +225,7 @@ type EnsureHouseAccountParams struct {
 }
 
 func (q *Queries) EnsureHouseAccount(ctx context.Context, arg EnsureHouseAccountParams) (LedgerAccount, error) {
-	row := q.db.QueryRow(ctx, ensureHouseAccount, arg.TenantID, arg.HouseCode)
+	row := q.db.QueryRow(ctx, EnsureHouseAccount, arg.TenantID, arg.HouseCode)
 	var i LedgerAccount
 	err := row.Scan(
 		&i.ID,
@@ -165,14 +242,14 @@ func (q *Queries) EnsureHouseAccount(ctx context.Context, arg EnsureHouseAccount
 	return i, err
 }
 
-const getAccount = `-- name: GetAccount :one
+const GetAccount = `-- name: GetAccount :one
 
 SELECT id, tenant_id, kind, house_code, owner_user_id, status, next_seq, version, created_at, updated_at FROM ledger.accounts WHERE id = $1
 `
 
 // Accounts --------------------------------------------------------------
 func (q *Queries) GetAccount(ctx context.Context, id string) (LedgerAccount, error) {
-	row := q.db.QueryRow(ctx, getAccount, id)
+	row := q.db.QueryRow(ctx, GetAccount, id)
 	var i LedgerAccount
 	err := row.Scan(
 		&i.ID,
@@ -189,12 +266,12 @@ func (q *Queries) GetAccount(ctx context.Context, id string) (LedgerAccount, err
 	return i, err
 }
 
-const getAccounts = `-- name: GetAccounts :many
+const GetAccounts = `-- name: GetAccounts :many
 SELECT id, tenant_id, kind, house_code, owner_user_id, status, next_seq, version, created_at, updated_at FROM ledger.accounts WHERE id = ANY($1::uuid[]) ORDER BY id
 `
 
 func (q *Queries) GetAccounts(ctx context.Context, dollar_1 []string) ([]LedgerAccount, error) {
-	rows, err := q.db.Query(ctx, getAccounts, dollar_1)
+	rows, err := q.db.Query(ctx, GetAccounts, dollar_1)
 	if err != nil {
 		return nil, err
 	}
@@ -224,7 +301,7 @@ func (q *Queries) GetAccounts(ctx context.Context, dollar_1 []string) ([]LedgerA
 	return items, nil
 }
 
-const getBalance = `-- name: GetBalance :one
+const GetBalance = `-- name: GetBalance :one
 SELECT account_id, asset, available, hold, version, updated_at FROM ledger.balances WHERE account_id = $1 AND asset = $2
 `
 
@@ -234,7 +311,7 @@ type GetBalanceParams struct {
 }
 
 func (q *Queries) GetBalance(ctx context.Context, arg GetBalanceParams) (LedgerBalance, error) {
-	row := q.db.QueryRow(ctx, getBalance, arg.AccountID, arg.Asset)
+	row := q.db.QueryRow(ctx, GetBalance, arg.AccountID, arg.Asset)
 	var i LedgerBalance
 	err := row.Scan(
 		&i.AccountID,
@@ -247,12 +324,12 @@ func (q *Queries) GetBalance(ctx context.Context, arg GetBalanceParams) (LedgerB
 	return i, err
 }
 
-const getBalances = `-- name: GetBalances :many
+const GetBalances = `-- name: GetBalances :many
 SELECT account_id, asset, available, hold, version, updated_at FROM ledger.balances WHERE account_id = $1 ORDER BY asset
 `
 
 func (q *Queries) GetBalances(ctx context.Context, accountID string) ([]LedgerBalance, error) {
-	rows, err := q.db.Query(ctx, getBalances, accountID)
+	rows, err := q.db.Query(ctx, GetBalances, accountID)
 	if err != nil {
 		return nil, err
 	}
@@ -278,12 +355,12 @@ func (q *Queries) GetBalances(ctx context.Context, accountID string) ([]LedgerBa
 	return items, nil
 }
 
-const getJournalEntry = `-- name: GetJournalEntry :one
+const GetJournalEntry = `-- name: GetJournalEntry :one
 SELECT id, tenant_id, idempotency_key, kind, ref_type, ref_id, reason, correlation_id, created_at FROM ledger.journal_entries WHERE id = $1
 `
 
 func (q *Queries) GetJournalEntry(ctx context.Context, id int64) (LedgerJournalEntry, error) {
-	row := q.db.QueryRow(ctx, getJournalEntry, id)
+	row := q.db.QueryRow(ctx, GetJournalEntry, id)
 	var i LedgerJournalEntry
 	err := row.Scan(
 		&i.ID,
@@ -299,7 +376,7 @@ func (q *Queries) GetJournalEntry(ctx context.Context, id int64) (LedgerJournalE
 	return i, err
 }
 
-const getJournalEntryByKey = `-- name: GetJournalEntryByKey :one
+const GetJournalEntryByKey = `-- name: GetJournalEntryByKey :one
 SELECT id, tenant_id, idempotency_key, kind, ref_type, ref_id, reason, correlation_id, created_at FROM ledger.journal_entries WHERE tenant_id = $1 AND idempotency_key = $2
 `
 
@@ -309,7 +386,7 @@ type GetJournalEntryByKeyParams struct {
 }
 
 func (q *Queries) GetJournalEntryByKey(ctx context.Context, arg GetJournalEntryByKeyParams) (LedgerJournalEntry, error) {
-	row := q.db.QueryRow(ctx, getJournalEntryByKey, arg.TenantID, arg.IdempotencyKey)
+	row := q.db.QueryRow(ctx, GetJournalEntryByKey, arg.TenantID, arg.IdempotencyKey)
 	var i LedgerJournalEntry
 	err := row.Scan(
 		&i.ID,
@@ -325,7 +402,7 @@ func (q *Queries) GetJournalEntryByKey(ctx context.Context, arg GetJournalEntryB
 	return i, err
 }
 
-const getSpotAccountByOwner = `-- name: GetSpotAccountByOwner :one
+const GetSpotAccountByOwner = `-- name: GetSpotAccountByOwner :one
 SELECT id, tenant_id, kind, house_code, owner_user_id, status, next_seq, version, created_at, updated_at FROM ledger.accounts
 WHERE tenant_id = $1 AND owner_user_id = $2 AND kind = 'spot'
 ORDER BY created_at, id
@@ -339,7 +416,7 @@ type GetSpotAccountByOwnerParams struct {
 
 // Registration opens exactly one spot account per user (docs/plan-v1.0.md §6.7).
 func (q *Queries) GetSpotAccountByOwner(ctx context.Context, arg GetSpotAccountByOwnerParams) (LedgerAccount, error) {
-	row := q.db.QueryRow(ctx, getSpotAccountByOwner, arg.TenantID, arg.OwnerUserID)
+	row := q.db.QueryRow(ctx, GetSpotAccountByOwner, arg.TenantID, arg.OwnerUserID)
 	var i LedgerAccount
 	err := row.Scan(
 		&i.ID,
@@ -356,7 +433,7 @@ func (q *Queries) GetSpotAccountByOwner(ctx context.Context, arg GetSpotAccountB
 	return i, err
 }
 
-const houseBalances = `-- name: HouseBalances :many
+const HouseBalances = `-- name: HouseBalances :many
 SELECT a.house_code, p.asset,
        (SUM(CASE p.direction WHEN 'debit'  THEN p.amount ELSE 0 END)
       - SUM(CASE p.direction WHEN 'credit' THEN p.amount ELSE 0 END))::numeric(36,18) AS debit_minus_credit
@@ -375,7 +452,7 @@ type HouseBalancesRow struct {
 
 // debit − credit per (house_code, asset); sign interpretation per account type is in Go.
 func (q *Queries) HouseBalances(ctx context.Context, tenantID string) ([]HouseBalancesRow, error) {
-	rows, err := q.db.Query(ctx, houseBalances, tenantID)
+	rows, err := q.db.Query(ctx, HouseBalances, tenantID)
 	if err != nil {
 		return nil, err
 	}
@@ -394,7 +471,7 @@ func (q *Queries) HouseBalances(ctx context.Context, tenantID string) ([]HouseBa
 	return items, nil
 }
 
-const insertJournalEntry = `-- name: InsertJournalEntry :one
+const InsertJournalEntry = `-- name: InsertJournalEntry :one
 
 INSERT INTO ledger.journal_entries (tenant_id, idempotency_key, kind, ref_type, ref_id, reason, correlation_id)
 VALUES ($1, $2, $3, $4, $5, $6, $7)
@@ -414,7 +491,7 @@ type InsertJournalEntryParams struct {
 
 // Journal ---------------------------------------------------------------
 func (q *Queries) InsertJournalEntry(ctx context.Context, arg InsertJournalEntryParams) (LedgerJournalEntry, error) {
-	row := q.db.QueryRow(ctx, insertJournalEntry,
+	row := q.db.QueryRow(ctx, InsertJournalEntry,
 		arg.TenantID,
 		arg.IdempotencyKey,
 		arg.Kind,
@@ -438,7 +515,7 @@ func (q *Queries) InsertJournalEntry(ctx context.Context, arg InsertJournalEntry
 	return i, err
 }
 
-const insertPosting = `-- name: InsertPosting :exec
+const InsertPosting = `-- name: InsertPosting :exec
 INSERT INTO ledger.postings (entry_id, account_id, asset, bucket, direction, amount)
 VALUES ($1, $2, $3, $4, $5, $6)
 `
@@ -453,7 +530,7 @@ type InsertPostingParams struct {
 }
 
 func (q *Queries) InsertPosting(ctx context.Context, arg InsertPostingParams) error {
-	_, err := q.db.Exec(ctx, insertPosting,
+	_, err := q.db.Exec(ctx, InsertPosting,
 		arg.EntryID,
 		arg.AccountID,
 		arg.Asset,
@@ -464,7 +541,37 @@ func (q *Queries) InsertPosting(ctx context.Context, arg InsertPostingParams) er
 	return err
 }
 
-const listAccounts = `-- name: ListAccounts :many
+const InsertPostings = `-- name: InsertPostings :exec
+INSERT INTO ledger.postings (entry_id, account_id, asset, bucket, direction, amount)
+SELECT $1, p.account_id, p.asset, p.bucket, p.direction, p.amount
+  FROM ROWS FROM (unnest($2::uuid[]), unnest($3::text[]), unnest($4::text[]), unnest($5::text[]), unnest($6::numeric[]))
+       WITH ORDINALITY AS p(account_id, asset, bucket, direction, amount, ord)
+ ORDER BY p.ord
+`
+
+type InsertPostingsParams struct {
+	EntryID int64
+	Column2 []string
+	Column3 []string
+	Column4 []string
+	Column5 []string
+	Column6 []pgtype.Numeric
+}
+
+// Every posting of one entry, in the order given (postings are listed by id).
+func (q *Queries) InsertPostings(ctx context.Context, arg InsertPostingsParams) error {
+	_, err := q.db.Exec(ctx, InsertPostings,
+		arg.EntryID,
+		arg.Column2,
+		arg.Column3,
+		arg.Column4,
+		arg.Column5,
+		arg.Column6,
+	)
+	return err
+}
+
+const ListAccounts = `-- name: ListAccounts :many
 SELECT id, tenant_id, kind, house_code, owner_user_id, status, next_seq, version, created_at, updated_at FROM ledger.accounts
 WHERE tenant_id = $1 AND ($4::text = '' OR kind = $4::text)
 ORDER BY created_at, id
@@ -479,7 +586,7 @@ type ListAccountsParams struct {
 }
 
 func (q *Queries) ListAccounts(ctx context.Context, arg ListAccountsParams) ([]LedgerAccount, error) {
-	rows, err := q.db.Query(ctx, listAccounts,
+	rows, err := q.db.Query(ctx, ListAccounts,
 		arg.TenantID,
 		arg.Limit,
 		arg.Offset,
@@ -514,7 +621,7 @@ func (q *Queries) ListAccounts(ctx context.Context, arg ListAccountsParams) ([]L
 	return items, nil
 }
 
-const listEntries = `-- name: ListEntries :many
+const ListEntries = `-- name: ListEntries :many
 SELECT id, tenant_id, idempotency_key, kind, ref_type, ref_id, reason, correlation_id, created_at FROM ledger.journal_entries
 WHERE tenant_id = $1
   AND ($4::text = '' OR ref_type = $4::text)
@@ -532,7 +639,7 @@ type ListEntriesParams struct {
 }
 
 func (q *Queries) ListEntries(ctx context.Context, arg ListEntriesParams) ([]LedgerJournalEntry, error) {
-	rows, err := q.db.Query(ctx, listEntries,
+	rows, err := q.db.Query(ctx, ListEntries,
 		arg.TenantID,
 		arg.Limit,
 		arg.Offset,
@@ -567,7 +674,7 @@ func (q *Queries) ListEntries(ctx context.Context, arg ListEntriesParams) ([]Led
 	return items, nil
 }
 
-const listEntriesByAccount = `-- name: ListEntriesByAccount :many
+const ListEntriesByAccount = `-- name: ListEntriesByAccount :many
 SELECT e.id, e.tenant_id, e.idempotency_key, e.kind, e.ref_type, e.ref_id, e.reason, e.correlation_id, e.created_at FROM ledger.journal_entries e
 WHERE e.tenant_id = $1
   AND EXISTS (SELECT 1 FROM ledger.postings p WHERE p.entry_id = e.id AND p.account_id = $2)
@@ -583,7 +690,7 @@ type ListEntriesByAccountParams struct {
 }
 
 func (q *Queries) ListEntriesByAccount(ctx context.Context, arg ListEntriesByAccountParams) ([]LedgerJournalEntry, error) {
-	rows, err := q.db.Query(ctx, listEntriesByAccount,
+	rows, err := q.db.Query(ctx, ListEntriesByAccount,
 		arg.TenantID,
 		arg.AccountID,
 		arg.Limit,
@@ -617,12 +724,12 @@ func (q *Queries) ListEntriesByAccount(ctx context.Context, arg ListEntriesByAcc
 	return items, nil
 }
 
-const listHouseAccounts = `-- name: ListHouseAccounts :many
+const ListHouseAccounts = `-- name: ListHouseAccounts :many
 SELECT id, tenant_id, kind, house_code, owner_user_id, status, next_seq, version, created_at, updated_at FROM ledger.accounts WHERE tenant_id = $1 AND kind = 'house' ORDER BY house_code
 `
 
 func (q *Queries) ListHouseAccounts(ctx context.Context, tenantID string) ([]LedgerAccount, error) {
-	rows, err := q.db.Query(ctx, listHouseAccounts, tenantID)
+	rows, err := q.db.Query(ctx, ListHouseAccounts, tenantID)
 	if err != nil {
 		return nil, err
 	}
@@ -652,12 +759,12 @@ func (q *Queries) ListHouseAccounts(ctx context.Context, tenantID string) ([]Led
 	return items, nil
 }
 
-const listPostingsByEntry = `-- name: ListPostingsByEntry :many
+const ListPostingsByEntry = `-- name: ListPostingsByEntry :many
 SELECT id, entry_id, account_id, asset, bucket, direction, amount FROM ledger.postings WHERE entry_id = $1 ORDER BY id
 `
 
 func (q *Queries) ListPostingsByEntry(ctx context.Context, entryID int64) ([]LedgerPosting, error) {
-	rows, err := q.db.Query(ctx, listPostingsByEntry, entryID)
+	rows, err := q.db.Query(ctx, ListPostingsByEntry, entryID)
 	if err != nil {
 		return nil, err
 	}
@@ -684,7 +791,7 @@ func (q *Queries) ListPostingsByEntry(ctx context.Context, entryID int64) ([]Led
 	return items, nil
 }
 
-const lockBalance = `-- name: LockBalance :one
+const LockBalance = `-- name: LockBalance :one
 
 INSERT INTO ledger.balances (account_id, asset)
 VALUES ($1, $2)
@@ -709,7 +816,7 @@ type LockBalanceRow struct {
 // Creates the row if missing and takes the row lock (the no-op UPDATE locks);
 // callers lock rows in (account_id, asset) order to avoid deadlocks.
 func (q *Queries) LockBalance(ctx context.Context, arg LockBalanceParams) (LockBalanceRow, error) {
-	row := q.db.QueryRow(ctx, lockBalance, arg.AccountID, arg.Asset)
+	row := q.db.QueryRow(ctx, LockBalance, arg.AccountID, arg.Asset)
 	var i LockBalanceRow
 	err := row.Scan(
 		&i.AccountID,
@@ -721,7 +828,66 @@ func (q *Queries) LockBalance(ctx context.Context, arg LockBalanceParams) (LockB
 	return i, err
 }
 
-const trialBalance = `-- name: TrialBalance :many
+const LockBalances = `-- name: LockBalances :many
+
+INSERT INTO ledger.balances (account_id, asset)
+SELECT k.account_id, k.asset
+  FROM ROWS FROM (unnest($1::uuid[]), unnest($2::text[])) AS k(account_id, asset)
+ WHERE EXISTS (SELECT 1 FROM ledger.accounts a WHERE a.id = k.account_id)
+ ORDER BY k.account_id, k.asset
+ON CONFLICT (account_id, asset) DO UPDATE SET version = ledger.balances.version
+RETURNING account_id, asset, available, hold, version
+`
+
+type LockBalancesParams struct {
+	Column1 []string
+	Column2 []string
+}
+
+type LockBalancesRow struct {
+	AccountID string
+	Asset     string
+	Available pgtype.Numeric
+	Hold      pgtype.Numeric
+	Version   int64
+}
+
+// Set-based variants for the hot path ----------------------------------------
+// One statement per step regardless of how many (account, asset) pairs an
+// entry touches; internal/ledger/service.go queues them into pgx batches.
+// LockBalance for every (account_id, asset) pair at once. The pairs are
+// inserted in (account_id, asset) order, which is the lock order every
+// writer uses, so two entries touching the same rows cannot deadlock. A
+// pair whose account does not exist is skipped rather than tripping the
+// foreign key: that would abort the transaction, and the caller reports
+// the missing account from the accounts it read in the same round trip.
+func (q *Queries) LockBalances(ctx context.Context, arg LockBalancesParams) ([]LockBalancesRow, error) {
+	rows, err := q.db.Query(ctx, LockBalances, arg.Column1, arg.Column2)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []LockBalancesRow{}
+	for rows.Next() {
+		var i LockBalancesRow
+		if err := rows.Scan(
+			&i.AccountID,
+			&i.Asset,
+			&i.Available,
+			&i.Hold,
+			&i.Version,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const TrialBalance = `-- name: TrialBalance :many
 
 SELECT p.asset,
        SUM(CASE p.direction WHEN 'debit'  THEN p.amount ELSE 0 END)::numeric(36,18) AS debits,
@@ -741,7 +907,7 @@ type TrialBalanceRow struct {
 
 // Derived views -----------------------------------------------------------
 func (q *Queries) TrialBalance(ctx context.Context, tenantID string) ([]TrialBalanceRow, error) {
-	rows, err := q.db.Query(ctx, trialBalance, tenantID)
+	rows, err := q.db.Query(ctx, TrialBalance, tenantID)
 	if err != nil {
 		return nil, err
 	}
@@ -760,7 +926,7 @@ func (q *Queries) TrialBalance(ctx context.Context, tenantID string) ([]TrialBal
 	return items, nil
 }
 
-const updateAccountStatus = `-- name: UpdateAccountStatus :one
+const UpdateAccountStatus = `-- name: UpdateAccountStatus :one
 UPDATE ledger.accounts
    SET status = $2, version = version + 1, updated_at = now()
  WHERE id = $1
@@ -773,7 +939,7 @@ type UpdateAccountStatusParams struct {
 }
 
 func (q *Queries) UpdateAccountStatus(ctx context.Context, arg UpdateAccountStatusParams) (LedgerAccount, error) {
-	row := q.db.QueryRow(ctx, updateAccountStatus, arg.ID, arg.Status)
+	row := q.db.QueryRow(ctx, UpdateAccountStatus, arg.ID, arg.Status)
 	var i LedgerAccount
 	err := row.Scan(
 		&i.ID,

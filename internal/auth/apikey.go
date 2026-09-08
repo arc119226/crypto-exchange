@@ -60,22 +60,24 @@ func newSecret() (string, error) {
 	return hex.EncodeToString(b[:]), nil
 }
 
-// encryptSecret seals the secret under the master key: nonce || ciphertext.
+// sealSecret seals the secret under the current master key: nonce ||
+// ciphertext.
 //
 // The envelope moved to internal/platform/secretbox when webhook endpoints
 // needed the identical one. The format is unchanged, so rows written before
 // the move still open.
-func encryptSecret(master []byte, secret string) ([]byte, error) {
-	sealed, err := secretbox.Seal(master, secret)
+func sealSecret(keys secretbox.Keyring, secret string) ([]byte, error) {
+	sealed, err := keys.Seal(secret)
 	if err != nil {
 		return nil, fmt.Errorf("auth: %w", err)
 	}
 	return sealed, nil
 }
 
-// decryptSecret is the inverse of encryptSecret.
-func decryptSecret(master, sealed []byte) (string, error) {
-	secret, err := secretbox.Open(master, sealed)
+// openSecret is the inverse of sealSecret, under the current key or, during
+// a rotation, the previous one.
+func openSecret(keys secretbox.Keyring, sealed []byte) (string, error) {
+	secret, err := keys.Open(sealed)
 	if err != nil {
 		return "", fmt.Errorf("auth: %w", err)
 	}

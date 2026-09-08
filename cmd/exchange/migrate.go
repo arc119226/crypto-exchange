@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"os"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -31,7 +32,8 @@ func newMigrateCmd() *cobra.Command {
 		Use:   "migrate",
 		Short: "Run or inspect database migrations (uses DATABASE_URL, normally the ex_migrate role)",
 	}
-	cmd.AddCommand(&cobra.Command{
+	var wait time.Duration
+	up := &cobra.Command{
 		Use:   "up",
 		Short: "Apply all pending migrations (idempotent)",
 		Args:  cobra.NoArgs,
@@ -40,9 +42,15 @@ func newMigrateCmd() *cobra.Command {
 			if err != nil {
 				return runtimeErr(err)
 			}
-			return runtimeErr(app.MigrateUp(cmd.Context(), dsn, cmd.OutOrStdout()))
+			return runtimeErr(app.MigrateUp(cmd.Context(), dsn, cmd.OutOrStdout(), wait))
 		},
-	}, &cobra.Command{
+	}
+	// A migrate Job that starts with its database (a Helm pre-install hook
+	// on a fresh cluster, compose without depends_on) would otherwise fail
+	// and restart with the Job's backoff; retrying the connection here is
+	// cheaper and reads better in the logs.
+	up.Flags().DurationVar(&wait, "wait", 0, "keep retrying the connection for this long before giving up (e.g. 5m)")
+	cmd.AddCommand(up, &cobra.Command{
 		Use:   "status",
 		Short: "Show applied and pending migrations",
 		Args:  cobra.NoArgs,

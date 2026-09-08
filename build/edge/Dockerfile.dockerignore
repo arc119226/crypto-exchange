@@ -1,0 +1,10 @@
+# Only the front end and the Caddyfile reach this build; the repository's
+# .dockerignore excludes web/ for the Go image, and BuildKit prefers this
+# file, named after the Dockerfile, for builds that name it with -f.
+*
+!web/trade
+web/trade/node_modules
+web/trade/dist
+web/trade/test-results
+web/trade/playwright-report
+!build/edge

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -25,13 +26,14 @@ import (
 // between the acknowledgement and the resume would otherwise be either a
 // duplicate of the replay or a gap in it.
 type privateState struct {
-	authed    bool
-	account   string
-	holding   bool
-	live      bool
-	held      []privateFrame
-	holdTimer *time.Timer
-	authTimer *time.Timer
+	authed     bool
+	account    string
+	accountSeq int64 // where the account stood at auth, for the resume bound
+	holding    bool
+	live       bool
+	held       []privateFrame
+	holdTimer  *time.Timer
+	authTimer  *time.Timer
 }
 
 func (s *Server) servePrivate(w http.ResponseWriter, r *http.Request) {
@@ -124,7 +126,7 @@ func (s *Server) authenticate(c *conn, m clientMessage) {
 		return
 	}
 	c.mu.Lock()
-	c.pv.authed, c.pv.account, c.pv.holding = true, claims.AccountID, true
+	c.pv.authed, c.pv.account, c.pv.accountSeq, c.pv.holding = true, claims.AccountID, seq, true
 	c.pv.holdTimer = time.AfterFunc(s.cfg.ResumeWindow, func() { s.goLive(c, nil) })
 	c.mu.Unlock()
 	c.sendJSON(authAck{Type: "auth", AccountID: claims.AccountID, AccountSeq: seq})
@@ -166,6 +168,7 @@ func (s *Server) resume(c *conn, m clientMessage) {
 	c.mu.Lock()
 	holding := c.pv.holding
 	account := c.pv.account
+	current := c.pv.accountSeq
 	if holding && c.pv.holdTimer != nil {
 		c.pv.holdTimer.Stop() // the replay may take longer than the window
 	}
@@ -176,6 +179,15 @@ func (s *Server) resume(c *conn, m clientMessage) {
 	}
 	if s.d.Outbox == nil {
 		c.sendError(CodeResumeFailed, "resume is not available")
+		s.goLive(c, nil)
+		return
+	}
+	if *m.SinceSeq > current {
+		// A client ahead of the account: the database was restored to an
+		// earlier point (docs/runbooks/backup-restore.md). Replaying nothing
+		// and going live would have the client discard every frame below
+		// its since_seq for good; failing the resume makes it reload.
+		c.sendError(CodeResumeFailed, fmt.Sprintf("since_seq %d is ahead of the account's sequence %d; reload and reconnect", *m.SinceSeq, current))
 		s.goLive(c, nil)
 		return
 	}
