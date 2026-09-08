@@ -46,7 +46,21 @@ type Config struct {
 	Registry        RegistryConfig   `envPrefix:"REGISTRY_"`
 	Outbox          OutboxConfig     `envPrefix:"OUTBOX_"`
 	Webhook         WebhookConfig    `envPrefix:"WEBHOOK_"`
+	MarketData      MarketDataConfig `envPrefix:"MARKETDATA_"`
 	Shutdown        ShutdownConfig   `envPrefix:"SHUTDOWN_"`
+}
+
+// MarketDataConfig tunes the candle writer (worker role) and the shadow
+// book (stream role), docs/plan-v1.0.md §12 Phase 6.
+type MarketDataConfig struct {
+	// KlinePollInterval is how often the worker looks for trades to fold
+	// once it has caught up; while behind it folds back to back.
+	KlinePollInterval time.Duration `env:"KLINE_POLL_INTERVAL" envDefault:"1s"`
+	// KlineBatchSeqs caps the engine commands one fold covers per market.
+	KlineBatchSeqs int64 `env:"KLINE_BATCH_SEQS" envDefault:"500"`
+	// RebuildBuffer caps the events the stream holds while it reads a
+	// book snapshot; overflowing it restarts the rebuild.
+	RebuildBuffer int `env:"REBUILD_BUFFER" envDefault:"10000"`
 }
 
 // EngineConfig tunes the trading engine (engine role) and the command bus
@@ -439,6 +453,9 @@ func (c Config) Validate() error {
 	if c.Webhook.BatchSize <= 0 {
 		return fmt.Errorf("config: WEBHOOK_BATCH_SIZE must be positive")
 	}
+	if c.MarketData.KlinePollInterval <= 0 || c.MarketData.KlineBatchSeqs <= 0 || c.MarketData.RebuildBuffer <= 0 {
+		return fmt.Errorf("config: MARKETDATA_KLINE_POLL_INTERVAL, MARKETDATA_KLINE_BATCH_SEQS and MARKETDATA_REBUILD_BUFFER must be positive")
+	}
 	if _, err := c.Webhook.Master(); err != nil {
 		return err
 	}
@@ -504,6 +521,9 @@ func (c Config) LogValue() slog.Value {
 		slog.Bool("admin_cookie_secure", c.SecureCookies()),
 		slog.Bool("webhook_signing_key_set", c.Webhook.SigningKey.IsSet()),
 		slog.Int("webhook_attempts", len(c.Webhook.Backoff)),
+		slog.Duration("marketdata_kline_poll_interval", c.MarketData.KlinePollInterval),
+		slog.Int64("marketdata_kline_batch_seqs", c.MarketData.KlineBatchSeqs),
+		slog.Int("marketdata_rebuild_buffer", c.MarketData.RebuildBuffer),
 		slog.String("ratelimit_login_per_ip", c.RateLimit.LoginPerIP),
 		slog.String("ratelimit_login_per_account", c.RateLimit.LoginPerAccount),
 		slog.String("ratelimit_orders_per_account", c.RateLimit.OrdersPerAccount),

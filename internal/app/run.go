@@ -196,6 +196,7 @@ func Run(ctx context.Context, cfg Config, roles []Role, bi BuildInfo) error {
 		// the ops server is already listening so /readyz reports why.
 		g.Go(func() error { return workerRole.start(gctx) })
 		g.Go(func() error { return workerRole.runDelivering(gctx, log) })
+		g.Go(func() error { return workerRole.runKlines(gctx, log) })
 	}
 	if chainRole != nil {
 		// start blocks while the node is verified and the signer answers; the

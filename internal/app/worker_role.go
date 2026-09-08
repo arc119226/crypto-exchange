@@ -14,6 +14,8 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/arc119226/crypto-exchange/internal/eventbus"
+	"github.com/arc119226/crypto-exchange/internal/marketdata"
+	"github.com/arc119226/crypto-exchange/internal/registry"
 	"github.com/arc119226/crypto-exchange/internal/webhook"
 )
 
@@ -22,7 +24,8 @@ import (
 const webhookDurable = "worker-webhook"
 
 // workerComponents is the worker role: the event consumers nobody is waiting
-// on (docs/plan-v1.0.md §5.2). Today that is webhook delivery.
+// on (docs/plan-v1.0.md §5.2): webhook delivery, and since Phase 6 the
+// candle writer that folds trading.trades into marketdata.klines.
 //
 // This role has existed in AllRoles since Phase 3 and never had a case in
 // run.go -- it fell through to "role not implemented yet". This is the first
@@ -32,6 +35,8 @@ type workerComponents struct {
 	interval   time.Duration
 	subs       webhookSubs
 	metrics    *eventbus.Metrics
+	klines     *marketdata.KlineWriter
+	klineEvery time.Duration
 
 	// The start-state shape is copied from chainComponents, deliberately and
 	// exactly: newWorker only builds, bringUp does the waiting, and start runs
@@ -63,8 +68,11 @@ func newWorker(cfg Config, log *slog.Logger, db *pgxpool.Pool, reg prometheus.Re
 
 	w := &workerComponents{
 		dispatcher: d, interval: cfg.Webhook.Interval, metrics: ebm,
-		started:  make(chan struct{}),
-		startErr: errors.New("the worker role has not finished starting"),
+		klines: marketdata.NewKlineWriter(marketdata.NewStore(db, cfg.TenantID), registry.NewStore(db), cfg.TenantID, cfg.MarketData.KlineBatchSeqs, log).
+			WithMetrics(marketdata.NewMetrics(reg)),
+		klineEvery: cfg.MarketData.KlinePollInterval,
+		started:    make(chan struct{}),
+		startErr:   errors.New("the worker role has not finished starting"),
 	}
 	w.bringUp = func(ctx context.Context) error { return w.up(ctx, cfg, log, nc) }
 	if len(master) == 0 {
@@ -162,6 +170,17 @@ func (w *workerComponents) runDelivering(ctx context.Context, log *slog.Logger) 
 		case <-tick.C:
 		}
 	}
+}
+
+// runKlines folds trades into candles on its own clock. It needs neither
+// NATS nor the webhook consumers, but it waits for start like the delivery
+// loop so /readyz reports one reason for the whole role.
+func (w *workerComponents) runKlines(ctx context.Context, log *slog.Logger) error {
+	if !w.awaitStart(ctx) {
+		return nil
+	}
+	log.Info("folding trades into candles", slog.Duration("poll_interval", w.klineEvery))
+	return w.klines.Run(ctx, w.klineEvery)
 }
 
 // ready reports the role is up. The start check comes first for the same
