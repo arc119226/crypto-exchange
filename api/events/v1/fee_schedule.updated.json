@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/arc119226/crypto-exchange/api/events/v1/fee_schedule.updated.json",
+  "title": "fee_schedule.updated",
+  "description": "A registry change to a fee schedule. Every market on it pays the new rates from the next trade; no market.updated is sent for them, so a consumer that caches per-market fees should reload on this event.",
+  "type": "object",
+  "required": [
+    "fee_schedule_id",
+    "name",
+    "maker_bps",
+    "taker_bps",
+    "changed_fields",
+    "version"
+  ],
+  "properties": {
+    "fee_schedule_id": {
+      "type": "string"
+    },
+    "name": {
+      "type": "string"
+    },
+    "maker_bps": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 10000
+    },
+    "taker_bps": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 10000
+    },
+    "changed_fields": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Which fields the write touched; [\"created\"] for a new schedule."
+    },
+    "version": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Registry row version after the change; increases on every real change."
+    },
+    "reason": {
+      "type": "string",
+      "description": "Operator's reason, recorded in the audit trail."
+    }
+  }
+}

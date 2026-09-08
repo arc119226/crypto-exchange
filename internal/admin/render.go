@@ -15,6 +15,7 @@ import (
 
 	"github.com/arc119226/crypto-exchange/internal/auth"
 	"github.com/arc119226/crypto-exchange/internal/money"
+	"github.com/arc119226/crypto-exchange/internal/registry"
 	"github.com/arc119226/crypto-exchange/internal/telemetry"
 )
 
@@ -75,6 +76,20 @@ var funcs = template.FuncMap{
 			return "bad"
 		}
 		return "warn"
+	},
+	// The registry pages reuse one form block for the edit and the new
+	// entry; these build what that block reads.
+	"newAsset": func() registry.Asset {
+		return registry.Asset{Status: registry.AssetActive, DepositEnabled: true, WithdrawEnabled: true, Scale: 18, DisplayScale: 6, RequiredConfirmations: 12}
+	},
+	"newMarket": func() registry.Market {
+		return registry.Market{Status: registry.MarketActive, SelfTradePolicy: registry.STPCancelNewest}
+	},
+	"assetWithStatuses": func(a registry.Asset, statuses []string) assetFormData {
+		return assetFormData{Asset: a, Statuses: statuses}
+	},
+	"marketForm": func(m registry.Market, d marketsData) marketFormData {
+		return marketFormData{Market: m, FeeSchedules: d.FeeSchedules, Statuses: d.Statuses, Policies: d.Policies}
 	},
 	"active": func(path, prefix string) string {
 		if prefix == HomePath && path == HomePath || prefix != HomePath && strings.HasPrefix(path, prefix) {
@@ -213,4 +228,19 @@ func newPager(path string, keep url.Values, limit, offset int32, got int) pager 
 		p.Next = link(offset + limit)
 	}
 	return p
+}
+
+// assetFormData is what the asset form block reads: the row (zero for a
+// new one) plus the statuses to offer.
+type assetFormData struct {
+	registry.Asset
+	Statuses []string
+}
+
+// marketFormData is the same for a market.
+type marketFormData struct {
+	Market       registry.Market
+	FeeSchedules []registry.FeeSchedule
+	Statuses     []string
+	Policies     []string
 }

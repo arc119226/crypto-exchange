@@ -16,7 +16,9 @@ import (
 	"github.com/arc119226/crypto-exchange/internal/admin/gen"
 	"github.com/arc119226/crypto-exchange/internal/auth"
 	"github.com/arc119226/crypto-exchange/internal/ledger"
+	"github.com/arc119226/crypto-exchange/internal/money"
 	"github.com/arc119226/crypto-exchange/internal/ratelimit"
+	"github.com/arc119226/crypto-exchange/internal/registry"
 )
 
 // fakeAuth is auth.Service as the login pages see it. One password, one
@@ -391,4 +393,90 @@ func TestPager(t *testing.T) {
 	p = newPager("/admin/x", url.Values{"status": {"frozen"}}, 20, 30, 20)
 	assert.Equal(t, "/admin/x?limit=20&offset=10&status=frozen", p.Prev)
 	assert.Equal(t, "/admin/x?limit=20&offset=50&status=frozen", p.Next)
+}
+
+func TestRegistryTemplatesRender(t *testing.T) {
+	tpl, err := loadTemplates()
+	require.NoError(t, err)
+	verified := &auth.AdminSession{Email: "ops@example.com", TOTPEnabled: true, TOTPVerified: true}
+	render := func(name string, data any) string {
+		rec := httptest.NewRecorder()
+		tpl.render(rec, httptest.NewRequest(http.MethodGet, "/admin/"+name, nil), http.StatusOK, name, view{Title: name, Session: verified, Data: data})
+		body := rec.Body.String()
+		require.Contains(t, body, "</html>", "%s rendered to the end", name)
+		return body
+	}
+	addr := "0x1234567890abcdef1234567890abcdef12345678"
+	eth := registry.Asset{Symbol: "ETH", Name: "Ether", ChainID: 31337, IsNative: true, Scale: 18, DisplayScale: 6, RequiredConfirmations: 12,
+		MinWithdrawal: money.MustParse("0.01"), SweepThreshold: money.MustParse("0.05"), DepositEnabled: true, WithdrawEnabled: true, Status: "active", Version: 1}
+	usdc := registry.Asset{Symbol: "USDC", Name: "USD Coin", ChainID: 31337, ContractAddress: &addr, Scale: 6, DisplayScale: 2, RequiredConfirmations: 12,
+		MinWithdrawal: money.MustParse("5"), DepositEnabled: true, WithdrawEnabled: false, Status: "disabled", Version: 3}
+	fee := registry.FeeSchedule{Name: "default", MakerBps: 10, TakerBps: 20, Version: 1}
+	slip := int32(500)
+	market := registry.Market{Symbol: "ETH-USDC", BaseSymbol: "ETH", QuoteSymbol: "USDC", PriceTick: money.MustParse("0.01"), QtyStep: money.MustParse("0.0001"),
+		MinNotional: money.MustParse("5"), MaxSlippageBps: &slip, FeeScheduleName: "default", MakerBps: 10, TakerBps: 20, SelfTradePolicy: "cancel_newest", Status: "halted", Version: 2}
+
+	body := render("assets", assetsData{Assets: []registry.Asset{eth, usdc}, Statuses: assetStatuses})
+	assert.Contains(t, body, `action="/admin/assets/USDC"`)
+	assert.Contains(t, body, `value="`+addr+`"`)
+	assert.Contains(t, body, `<option value="disabled" selected>`)
+	assert.Contains(t, body, `name="is_native" checked`)
+	assert.Contains(t, body, `class="badge bad">off<`, "USDC withdrawals are off")
+	assert.Contains(t, body, `action="/admin/assets"`, "the new-asset form")
+	assert.Contains(t, body, `name="symbol"`)
+
+	body = render("markets", marketsData{Markets: []registry.Market{market}, Assets: []registry.Asset{eth, usdc}, FeeSchedules: []registry.FeeSchedule{fee}, Statuses: marketStatuses, Policies: stpPolicies})
+	assert.Contains(t, body, `action="/admin/markets/ETH-USDC/status"`)
+	assert.Contains(t, body, `action="/admin/markets/ETH-USDC"`)
+	assert.Contains(t, body, `<option value="halted" selected>`)
+	assert.Contains(t, body, `name="max_slippage_bps" value="500"`)
+	assert.Contains(t, body, `<option value="default" selected>default (10/20 bps)</option>`)
+	assert.Contains(t, body, `action="/admin/engine/reload"`)
+	assert.Contains(t, body, `<option value="USDC">USDC</option>`, "assets to pick a pair from")
+
+	body = render("fee-schedules", feeSchedulesData{FeeSchedules: []registry.FeeSchedule{fee}})
+	assert.Contains(t, body, `action="/admin/fee-schedules/default"`)
+	assert.Contains(t, body, `name="taker_bps" value="20"`)
+	assert.Contains(t, body, `action="/admin/fee-schedules"`)
+
+	body = render("withdrawal-limits", withdrawalLimitsData{Limits: []registry.WithdrawalLimit{
+		{Asset: "ETH", KYCLevel: 0, AutoApproveLimit: money.MustParse("0.1"), DailyLimit: money.MustParse("1"), Version: 1},
+		{Asset: "ETH", KYCLevel: 2, AutoApproveLimit: money.MustParse("10"), DailyLimit: money.MustParse("100"), RequireManualReview: true, Version: 4},
+	}, Assets: []registry.Asset{eth, usdc}, Levels: kycLevels})
+	assert.Contains(t, body, `action="/admin/withdrawal-limits/ETH"`)
+	assert.Contains(t, body, `name="kyc_level" value="2"`)
+	assert.Contains(t, body, `name="require_manual_review" checked`)
+	assert.Contains(t, body, `class="badge warn">always<`)
+	assert.Contains(t, body, `<option value="2">2</option>`)
+
+	// empty tables say so instead of rendering nothing
+	assert.Contains(t, render("assets", assetsData{Statuses: assetStatuses}), "No assets.")
+	assert.Contains(t, render("markets", marketsData{Statuses: marketStatuses, Policies: stpPolicies}), "No markets.")
+	assert.Contains(t, render("fee-schedules", feeSchedulesData{}), "No fee schedules.")
+	assert.Contains(t, render("withdrawal-limits", withdrawalLimitsData{Levels: kycLevels}), "every withdrawal waits for a person")
+}
+
+func TestFormReadsFieldsAndKeepsTheFirstComplaint(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "/x", strings.NewReader("name=Ether&chain_id=31337&scale=18&min_deposit=0.5&is_native=on&max_qty=&reason=because"))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	f := newForm(req)
+	assert.Equal(t, "Ether", f.str("name"))
+	assert.Equal(t, int64(31337), f.i64("chain_id"))
+	assert.Equal(t, int32(18), f.i32("scale"))
+	assert.Equal(t, "0.5", f.amount("min_deposit").String())
+	assert.True(t, f.boolean("is_native"))
+	assert.False(t, f.boolean("deposit_enabled"), "an unchecked box is absent")
+	assert.Nil(t, f.optAmount("max_qty"))
+	assert.Nil(t, f.optI32("max_slippage_bps"))
+	assert.Equal(t, "because", f.reason())
+	assert.Empty(t, f.problem)
+
+	f.i32("name")
+	f.amount("scale")
+	assert.Equal(t, "name must be a whole number.", f.problem, "the first complaint wins")
+
+	f = newForm(httptest.NewRequest(http.MethodPost, "/x", strings.NewReader("")))
+	f.r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	f.reason()
+	assert.Contains(t, f.problem, "A reason is required")
 }

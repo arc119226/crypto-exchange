@@ -248,6 +248,40 @@ func (q *Queries) ListAssets(ctx context.Context, tenantID string) ([]RegistryAs
 	return items, nil
 }
 
+const listFeeSchedules = `-- name: ListFeeSchedules :many
+SELECT id, tenant_id, name, maker_bps, taker_bps, effective_from, version, created_at, updated_at FROM registry.fee_schedules WHERE tenant_id = $1 ORDER BY name
+`
+
+func (q *Queries) ListFeeSchedules(ctx context.Context, tenantID string) ([]RegistryFeeSchedule, error) {
+	rows, err := q.db.Query(ctx, listFeeSchedules, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []RegistryFeeSchedule{}
+	for rows.Next() {
+		var i RegistryFeeSchedule
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.Name,
+			&i.MakerBps,
+			&i.TakerBps,
+			&i.EffectiveFrom,
+			&i.Version,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listMarkets = `-- name: ListMarkets :many
 SELECT m.id, m.tenant_id, m.symbol, m.base_asset_id, m.quote_asset_id, m.price_tick, m.qty_step, m.min_notional, m.max_qty, m.max_slippage_bps, m.fee_schedule_id, m.self_trade_policy, m.status, m.version, m.created_at, m.updated_at,
        b.symbol AS base_symbol,

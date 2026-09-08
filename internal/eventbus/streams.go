@@ -39,7 +39,7 @@ func StreamConfigs() []jetstream.StreamConfig {
 	return []jetstream.StreamConfig{
 		base(StreamTrading, 30*24*time.Hour, subjects("order", "trade", "ledger", "balance")),
 		base(StreamChain, 30*24*time.Hour, subjects("deposit", "withdrawal", "sweep", "alert")),
-		base(StreamRegistry, 90*24*time.Hour, subjects("market", "asset", "fee_schedule", "user", "reconciliation")),
+		base(StreamRegistry, 90*24*time.Hour, subjects("market", "asset", "fee_schedule", "registry", "user", "reconciliation")),
 	}
 }
 

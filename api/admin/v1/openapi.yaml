@@ -277,6 +277,260 @@ paths:
         "500":
           $ref: "#/components/responses/InternalError"
 
+  /admin/v1/assets:
+    get:
+      tags: [registry]
+      operationId: listAssets
+      summary: Assets of the tenant
+      responses:
+        "200":
+          description: Assets
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AssetList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    post:
+      tags: [registry]
+      operationId: createAsset
+      summary: List a new asset
+      description: >
+        Publishes asset.updated with changed_fields ["created"]. A market can
+        reference the asset from then on; deposits and withdrawals follow the
+        two enabled flags.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateAssetRequest"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Asset"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /admin/v1/assets/{symbol}:
+    get:
+      tags: [registry]
+      operationId: getAsset
+      summary: Get one asset
+      parameters:
+        - $ref: "#/components/parameters/AssetSymbol"
+      responses:
+        "200":
+          description: Asset
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Asset"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    put:
+      tags: [registry]
+      operationId: updateAsset
+      summary: Edit an asset
+      description: >
+        Replaces every writable field. Publishes asset.updated naming the
+        fields that changed; a body equal to the current row changes nothing
+        and emits no event. The scale cannot shrink below what any market on
+        the asset needs.
+      parameters:
+        - $ref: "#/components/parameters/AssetSymbol"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AssetRequest"
+      responses:
+        "200":
+          description: Updated asset
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Asset"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /admin/v1/fee-schedules:
+    get:
+      tags: [registry]
+      operationId: listFeeSchedules
+      summary: Fee schedules of the tenant
+      responses:
+        "200":
+          description: Fee schedules
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FeeScheduleList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    post:
+      tags: [registry]
+      operationId: createFeeSchedule
+      summary: Add a fee schedule
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateFeeScheduleRequest"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FeeSchedule"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /admin/v1/fee-schedules/{name}:
+    put:
+      tags: [registry]
+      operationId: updateFeeSchedule
+      summary: Change a fee schedule's rates
+      description: >
+        Every market on the schedule pays the new rates from the next trade.
+        Publishes fee_schedule.updated (and no market.updated for the markets
+        on it; the engine reloads its whole cache on either).
+      parameters:
+        - $ref: "#/components/parameters/FeeScheduleName"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FeeScheduleRequest"
+      responses:
+        "200":
+          description: Updated fee schedule
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FeeSchedule"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /admin/v1/withdrawal-limits:
+    get:
+      tags: [registry]
+      operationId: listWithdrawalLimits
+      summary: Withdrawal limits per asset and KYC level
+      responses:
+        "200":
+          description: Withdrawal limits
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WithdrawalLimitList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /admin/v1/withdrawal-limits/{asset}/{kyc_level}:
+    put:
+      tags: [registry]
+      operationId: setWithdrawalLimit
+      summary: Set the limits of one asset at one KYC level
+      description: >
+        Creates the row when there is none. The withdrawal policy reads the
+        limits on each request, so the next withdrawal is decided under the
+        new ones. No event: nothing caches these.
+      parameters:
+        - $ref: "#/components/parameters/AssetPath"
+        - $ref: "#/components/parameters/KycLevelPath"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WithdrawalLimitRequest"
+      responses:
+        "200":
+          description: The limits now in force
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WithdrawalLimit"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /admin/v1/engine/reload:
+    post:
+      tags: [registry]
+      operationId: requestReload
+      summary: Ask every engine to reload its registry cache
+      description: >
+        Publishes registry.reload with no row changed: after a seed, or when in
+        doubt. 202: the request is in the outbox; the engine's reload consumer
+        acts on it.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReloadRequest"
+      responses:
+        "202":
+          description: Accepted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReloadAccepted"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
   /admin/v1/markets:
     get:
       tags: [registry]
@@ -291,6 +545,91 @@ paths:
                 $ref: "#/components/schemas/MarketList"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    post:
+      tags: [registry]
+      operationId: createMarket
+      summary: List a new market
+      description: >
+        Assets and the fee schedule are referenced by symbol and name, and
+        must exist. Publishes market.updated with changed_fields ["created"];
+        the engine opens the book on reload.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateMarketRequest"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Market"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /admin/v1/markets/{symbol}:
+    get:
+      tags: [registry]
+      operationId: getMarket
+      summary: Get one market
+      parameters:
+        - $ref: "#/components/parameters/MarketSymbol"
+      responses:
+        "200":
+          description: Market
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Market"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    put:
+      tags: [registry]
+      operationId: updateMarket
+      summary: Edit a market
+      description: >
+        Replaces every writable field, status included. Publishes
+        market.updated naming the fields that changed; a body equal to the
+        current row changes nothing and emits no event. Precision must still
+        fit the assets (price_tick within the quote scale, qty_step within the
+        base scale).
+      parameters:
+        - $ref: "#/components/parameters/MarketSymbol"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MarketRequest"
+      responses:
+        "200":
+          description: Updated market
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Market"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
         "500":
           $ref: "#/components/responses/InternalError"
 
@@ -917,6 +1256,35 @@ components:
       required: true
       schema:
         type: string
+    AssetSymbol:
+      name: symbol
+      in: path
+      required: true
+      schema:
+        type: string
+        example: USDC
+    AssetPath:
+      name: asset
+      in: path
+      required: true
+      schema:
+        type: string
+        example: ETH
+    KycLevelPath:
+      name: kyc_level
+      in: path
+      required: true
+      schema:
+        type: integer
+        minimum: 0
+        maximum: 2
+    FeeScheduleName:
+      name: name
+      in: path
+      required: true
+      schema:
+        type: string
+        example: default
     MarketSymbol:
       name: symbol
       in: path
@@ -1278,11 +1646,306 @@ components:
           format: int32
         self_trade_policy:
           type: string
+        fee_schedule:
+          type: string
+          description: Name of the fee schedule the bps come from.
+        max_qty:
+          allOf:
+            - $ref: "#/components/schemas/Amount"
+          description: Largest single order; absent means no cap.
+        max_slippage_bps:
+          type: integer
+          format: int32
+          description: Market-order price protection band; absent means none.
         status:
           $ref: "#/components/schemas/MarketStatus"
         version:
           type: integer
           format: int32
+
+    MarketRequest:
+      type: object
+      required: [base_asset, quote_asset, price_tick, qty_step, min_notional, fee_schedule, self_trade_policy, status, reason]
+      properties:
+        base_asset:
+          type: string
+        quote_asset:
+          type: string
+        price_tick:
+          $ref: "#/components/schemas/Amount"
+        qty_step:
+          $ref: "#/components/schemas/Amount"
+        min_notional:
+          $ref: "#/components/schemas/Amount"
+        max_qty:
+          allOf:
+            - $ref: "#/components/schemas/Amount"
+        max_slippage_bps:
+          type: integer
+          format: int32
+        fee_schedule:
+          type: string
+        self_trade_policy:
+          type: string
+        status:
+          $ref: "#/components/schemas/MarketStatus"
+        reason:
+          type: string
+          minLength: 1
+
+    CreateMarketRequest:
+      allOf:
+        - $ref: "#/components/schemas/MarketRequest"
+        - type: object
+          required: [symbol]
+          properties:
+            symbol:
+              type: string
+              example: ETH-USDC
+
+    AssetStatus:
+      type: string
+      enum: [active, disabled]
+
+    Asset:
+      type: object
+      required: [id, symbol, name, chain_id, is_native, scale, display_scale, required_confirmations, min_deposit, min_withdrawal, withdrawal_fee, sweep_threshold, deposit_enabled, withdraw_enabled, status, version, created_at, updated_at]
+      properties:
+        id:
+          type: string
+        symbol:
+          type: string
+        name:
+          type: string
+        chain_id:
+          type: integer
+          format: int64
+        contract_address:
+          type: string
+          nullable: true
+          description: Absent for the native coin.
+        is_native:
+          type: boolean
+        scale:
+          type: integer
+          format: int32
+        display_scale:
+          type: integer
+          format: int32
+        required_confirmations:
+          type: integer
+          format: int32
+        min_deposit:
+          $ref: "#/components/schemas/Amount"
+        min_withdrawal:
+          $ref: "#/components/schemas/Amount"
+        withdrawal_fee:
+          $ref: "#/components/schemas/Amount"
+        sweep_threshold:
+          $ref: "#/components/schemas/Amount"
+        deposit_enabled:
+          type: boolean
+        withdraw_enabled:
+          type: boolean
+        status:
+          $ref: "#/components/schemas/AssetStatus"
+        version:
+          type: integer
+          format: int32
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    AssetList:
+      type: object
+      required: [assets]
+      properties:
+        assets:
+          type: array
+          items:
+            $ref: "#/components/schemas/Asset"
+
+    AssetRequest:
+      type: object
+      required: [name, chain_id, is_native, scale, display_scale, required_confirmations, min_deposit, min_withdrawal, withdrawal_fee, sweep_threshold, deposit_enabled, withdraw_enabled, status, reason]
+      properties:
+        name:
+          type: string
+        chain_id:
+          type: integer
+          format: int64
+        contract_address:
+          type: string
+          nullable: true
+        is_native:
+          type: boolean
+        scale:
+          type: integer
+          format: int32
+        display_scale:
+          type: integer
+          format: int32
+        required_confirmations:
+          type: integer
+          format: int32
+        min_deposit:
+          $ref: "#/components/schemas/Amount"
+        min_withdrawal:
+          $ref: "#/components/schemas/Amount"
+        withdrawal_fee:
+          $ref: "#/components/schemas/Amount"
+        sweep_threshold:
+          $ref: "#/components/schemas/Amount"
+        deposit_enabled:
+          type: boolean
+        withdraw_enabled:
+          type: boolean
+        status:
+          $ref: "#/components/schemas/AssetStatus"
+        reason:
+          type: string
+          minLength: 1
+
+    CreateAssetRequest:
+      allOf:
+        - $ref: "#/components/schemas/AssetRequest"
+        - type: object
+          required: [symbol]
+          properties:
+            symbol:
+              type: string
+              example: USDC
+
+    FeeSchedule:
+      type: object
+      required: [id, name, maker_bps, taker_bps, effective_from, version, created_at, updated_at]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        maker_bps:
+          type: integer
+          format: int32
+        taker_bps:
+          type: integer
+          format: int32
+        effective_from:
+          type: string
+          format: date-time
+        version:
+          type: integer
+          format: int32
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    FeeScheduleList:
+      type: object
+      required: [fee_schedules]
+      properties:
+        fee_schedules:
+          type: array
+          items:
+            $ref: "#/components/schemas/FeeSchedule"
+
+    FeeScheduleRequest:
+      type: object
+      required: [maker_bps, taker_bps, reason]
+      properties:
+        maker_bps:
+          type: integer
+          format: int32
+          minimum: 0
+          maximum: 10000
+        taker_bps:
+          type: integer
+          format: int32
+          minimum: 0
+          maximum: 10000
+        reason:
+          type: string
+          minLength: 1
+
+    CreateFeeScheduleRequest:
+      allOf:
+        - $ref: "#/components/schemas/FeeScheduleRequest"
+        - type: object
+          required: [name]
+          properties:
+            name:
+              type: string
+              example: vip
+
+    WithdrawalLimit:
+      type: object
+      required: [asset, kyc_level, auto_approve_limit, daily_limit, require_manual_review, version, updated_at]
+      properties:
+        asset:
+          type: string
+        kyc_level:
+          type: integer
+          minimum: 0
+          maximum: 2
+        auto_approve_limit:
+          $ref: "#/components/schemas/Amount"
+        daily_limit:
+          $ref: "#/components/schemas/Amount"
+        require_manual_review:
+          type: boolean
+        version:
+          type: integer
+          format: int32
+        updated_at:
+          type: string
+          format: date-time
+
+    WithdrawalLimitList:
+      type: object
+      required: [withdrawal_limits]
+      properties:
+        withdrawal_limits:
+          type: array
+          items:
+            $ref: "#/components/schemas/WithdrawalLimit"
+
+    WithdrawalLimitRequest:
+      type: object
+      required: [auto_approve_limit, daily_limit, require_manual_review, reason]
+      properties:
+        auto_approve_limit:
+          $ref: "#/components/schemas/Amount"
+        daily_limit:
+          $ref: "#/components/schemas/Amount"
+        require_manual_review:
+          type: boolean
+        reason:
+          type: string
+          minLength: 1
+
+    ReloadRequest:
+      type: object
+      required: [reason]
+      properties:
+        reason:
+          type: string
+          minLength: 1
+
+    ReloadAccepted:
+      type: object
+      required: [event_id, occurred_at]
+      properties:
+        event_id:
+          type: string
+        occurred_at:
+          type: string
+          format: date-time
 
     MarketList:
       type: object

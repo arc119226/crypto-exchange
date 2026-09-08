@@ -13,6 +13,7 @@ func toMarket(m registry.Market) gen.Market {
 		ID: m.ID, Symbol: m.Symbol, BaseAsset: m.BaseSymbol, QuoteAsset: m.QuoteSymbol,
 		PriceTick: m.PriceTick, QtyStep: m.QtyStep, MinNotional: m.MinNotional,
 		MakerBps: m.MakerBps, TakerBps: m.TakerBps, SelfTradePolicy: m.SelfTradePolicy,
+		FeeSchedule: &m.FeeScheduleName, MaxQty: m.MaxQty, MaxSlippageBps: m.MaxSlippageBps,
 		Status: gen.MarketStatus(m.Status), Version: m.Version,
 	}
 }

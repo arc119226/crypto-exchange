@@ -1,0 +1,47 @@
+{{define "content"}}
+<h1>Withdrawal limits</h1>
+<p class="muted">Per asset and KYC level. A single withdrawal up to the auto-approve limit goes out on its own; larger ones wait for a person; over the daily limit they are refused. The next withdrawal reads the new numbers.</p>
+{{with .Data}}
+<section id="list">
+<table>
+  <thead><tr><th>Asset</th><th class="num">KYC</th><th class="num">Auto-approve up to</th><th class="num">Daily</th><th>Review</th><th class="num">v</th><th>Change</th></tr></thead>
+  <tbody>
+  {{range .Limits}}
+  <tr>
+    <td><strong>{{.Asset}}</strong></td>
+    <td class="num">{{.KYCLevel}}</td>
+    <td class="num">{{amount .AutoApproveLimit}}</td>
+    <td class="num">{{amount .DailyLimit}}</td>
+    <td>{{if .RequireManualReview}}<span class="badge warn">always</span>{{else}}<span class="muted">by amount</span>{{end}}</td>
+    <td class="num">{{.Version}}</td>
+    <td>
+      <form method="post" action="/admin/withdrawal-limits/{{.Asset}}" class="inline">
+        <input type="hidden" name="kyc_level" value="{{.KYCLevel}}">
+        <input type="text" name="auto_approve_limit" value="{{amount .AutoApproveLimit}}" required aria-label="auto-approve limit">
+        <input type="text" name="daily_limit" value="{{amount .DailyLimit}}" required aria-label="daily limit">
+        <label class="inline"><input type="checkbox" name="require_manual_review"{{if .RequireManualReview}} checked{{end}}> review all</label>
+        <input type="text" name="reason" required placeholder="reason">
+        <button type="submit" class="quiet">Save</button>
+      </form>
+    </td>
+  </tr>
+  {{else}}
+  <tr><td colspan="7" class="muted">No limits: every withdrawal waits for a person.</td></tr>
+  {{end}}
+  </tbody>
+</table>
+</section>
+<section class="card">
+  <h2>Set limits for another asset or level</h2>
+  <form method="post" action="/admin/withdrawal-limits" class="row">
+    <label>Asset <select name="asset">{{range .Assets}}<option value="{{.Symbol}}">{{.Symbol}}</option>{{end}}</select></label>
+    <label>KYC level <select name="kyc_level">{{range .Levels}}<option value="{{.}}">{{.}}</option>{{end}}</select></label>
+    <label>Auto-approve up to <input type="text" name="auto_approve_limit" required></label>
+    <label>Daily <input type="text" name="daily_limit" required></label>
+    <label class="inline"><input type="checkbox" name="require_manual_review"> review all</label>
+    <label>Reason <input type="text" name="reason" required placeholder="recorded in the audit trail"></label>
+    <button type="submit">Save</button>
+  </form>
+</section>
+{{end}}
+{{end}}

@@ -12,6 +12,7 @@ import (
 
 	"github.com/arc119226/crypto-exchange/internal/auth"
 	"github.com/arc119226/crypto-exchange/internal/ledger"
+	"github.com/arc119226/crypto-exchange/internal/registry"
 	"github.com/arc119226/crypto-exchange/internal/telemetry"
 )
 
@@ -150,6 +151,12 @@ func (u *UI) done(w http.ResponseWriter, r *http.Request, back string, err error
 		setFlash(w, "err", "This is the last active administrator; freezing them would lock everyone out.")
 	case errors.Is(err, auth.ErrInvalidInput):
 		setFlash(w, "err", strings.TrimPrefix(err.Error(), "auth: invalid input: "))
+	case errors.Is(err, errAlreadyExists):
+		setFlash(w, "err", "That one already exists; edit it below.")
+	case errors.Is(err, registry.ErrNotFound):
+		setFlash(w, "err", strings.TrimPrefix(err.Error(), "registry: not found: ")+" does not exist.")
+	case errors.Is(err, registry.ErrInvalid):
+		setFlash(w, "err", strings.TrimPrefix(err.Error(), "registry: invalid input: ")+".")
 	default:
 		telemetry.Logger(r.Context()).Error("admin: write failed", "path", r.URL.Path, "err", err.Error())
 		setFlash(w, "err", "Something went wrong; nothing was changed.")

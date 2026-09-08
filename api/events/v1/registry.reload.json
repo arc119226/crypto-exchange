@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/arc119226/crypto-exchange/api/events/v1/registry.reload.json",
+  "title": "registry.reload",
+  "description": "An operator asked every engine to reload its registry cache now, with no row changed: after a seed, or when in doubt. The audit trail has who asked.",
+  "type": "object",
+  "properties": {
+    "reason": {
+      "type": "string",
+      "description": "Operator's reason, recorded in the audit trail."
+    }
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "event_id": "01J8Z2K3M4N5P6Q7R8S9T0V1Y4",
+  "event_type": "fee_schedule.updated",
+  "schema_version": 1,
+  "tenant_id": "default",
+  "market_id": null,
+  "account_id": null,
+  "seq": null,
+  "occurred_at": "2026-09-05T08:15:23.412Z",
+  "correlation_id": "req_01J8Z2K2000000000000000000",
+  "payload": {
+    "fee_schedule_id": "01J8Z2K3M4N5P6Q7R8S9T0F100",
+    "name": "default",
+    "maker_bps": 8,
+    "taker_bps": 18,
+    "changed_fields": [
+      "maker_bps",
+      "taker_bps"
+    ],
+    "version": 2,
+    "reason": "Q4 pricing"
+  }
+}

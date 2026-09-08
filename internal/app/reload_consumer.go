@@ -69,6 +69,8 @@ func newReloadConsumer(ctx context.Context, cfg Config, log *slog.Logger, js jet
 			eventbus.SubjectPrefix + ".market.*." + cfg.TenantID + ".*",
 			eventbus.SubjectPrefix + ".asset.*." + cfg.TenantID + ".*",
 			eventbus.SubjectPrefix + ".fee_schedule.*." + cfg.TenantID + ".*",
+			// registry.reload: an operator asking for a reload with no row changed
+			eventbus.SubjectPrefix + ".registry.*." + cfg.TenantID + ".*",
 		},
 	}, log, r.handle)
 }

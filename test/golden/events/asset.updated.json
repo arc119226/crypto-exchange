@@ -1,0 +1,23 @@
+{
+  "event_id": "01J8Z2K3M4N5P6Q7R8S9T0V1Y3",
+  "event_type": "asset.updated",
+  "schema_version": 1,
+  "tenant_id": "default",
+  "market_id": null,
+  "account_id": null,
+  "seq": null,
+  "occurred_at": "2026-09-05T08:15:23.412Z",
+  "correlation_id": "req_01J8Z2K2000000000000000000",
+  "payload": {
+    "asset_id": "01J8Z2K3M4N5P6Q7R8S9T0A100",
+    "symbol": "USDC",
+    "status": "active",
+    "deposit_enabled": true,
+    "withdraw_enabled": false,
+    "changed_fields": [
+      "withdraw_enabled"
+    ],
+    "version": 3,
+    "reason": "issuer maintenance window"
+  }
+}

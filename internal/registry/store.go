@@ -276,3 +276,16 @@ func (s *Store) UpsertWithdrawalLimit(ctx context.Context, tx pgx.Tx, tenantID s
 	}
 	return withdrawalLimitFromRow(sqlcgen.ListWithdrawalLimitsRow(r))
 }
+
+// ListFeeSchedules returns every fee schedule of the tenant, by name.
+func (s *Store) ListFeeSchedules(ctx context.Context, tenantID string) ([]FeeSchedule, error) {
+	rows, err := s.q.ListFeeSchedules(ctx, tenantID)
+	if err != nil {
+		return nil, fmt.Errorf("registry: list fee schedules: %w", err)
+	}
+	out := make([]FeeSchedule, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, feeScheduleFromRow(r))
+	}
+	return out, nil
+}

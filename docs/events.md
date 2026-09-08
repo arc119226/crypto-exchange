@@ -108,7 +108,8 @@ schema; `planned` means the phase that adds it will add the schema with it.
 | `balance.updated` | engine, chain, admin | stream (private), webhook | shipped |
 | `market.updated` | admin | **engine (reload)**, stream, webhook | shipped |
 | `ledger.posted` | engine, chain, admin | stream (balances), back-office projection | planned (Phase 6, with the private stream) |
-| `asset.updated`, `fee_schedule.updated` | admin | engine (reload), webhook | planned (Phase 5) |
+| `asset.updated`, `fee_schedule.updated` | admin | engine (reload), webhook | shipped |
+| `registry.reload` | admin | engine (reload), webhook | shipped |
 | `deposit.detected`, `deposit.credited`, `deposit.orphaned`, `deposit.dropped`, `deposit.reversed` | chain | stream, webhook, admin | shipped |
 | `withdrawal.requested` | api | stream, webhook, admin | shipped |
 | `withdrawal.state_changed` | api, chain, admin | stream, webhook, admin | shipped |
@@ -181,6 +182,16 @@ The chain role writes these to the outbox; the **relay that publishes them
 runs in the engine role**, so a deployment without an engine leaves deposit,
 withdrawal, sweep, reconciliation and alert events sitting in
 `eventbus.outbox`.
+
+`asset.updated` and `fee_schedule.updated` complete the registry set, and
+`market.updated` is now also sent when a market is created or edited (with
+`changed_fields` naming what), not only when its status moves. A fee schedule
+change sends **no** `market.updated` for the markets on it: the engine reloads
+its whole cache on any registry event, so one event is enough for it, and a
+consumer that shows per-market fees should reload on `fee_schedule.updated`
+rather than expect one event per market. `registry.reload` is an operator
+asking every engine to reload with no row changed -- after a seed, or when in
+doubt -- and carries only the reason; the audit trail has who asked.
 
 `user.*` is what an operator does to a person from the back office, and is
 the other pair with **no `account_id` and no sequence**: a user is not an

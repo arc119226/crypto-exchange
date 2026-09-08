@@ -55,6 +55,10 @@ var (
 		"trade.executed":  "01J8Z2K3M4N5P6Q7R8S9T0V1W7",
 		"balance.updated": "01J8Z2K3M4N5P6Q7R8S9T0V1W8",
 		"market.updated":  "01J8Z2K3M4N5P6Q7R8S9T0V1W9",
+		// the rest of the registry, editable from the back office (§12)
+		"asset.updated":        "01J8Z2K3M4N5P6Q7R8S9T0V1Y3",
+		"fee_schedule.updated": "01J8Z2K3M4N5P6Q7R8S9T0V1Y4",
+		"registry.reload":      "01J8Z2K3M4N5P6Q7R8S9T0V1Y5",
 		// the deposit story of docs/plan-v1.0.md §6.4.1, one id per state
 		"deposit.detected": "01J8Z2K3M4N5P6Q7R8S9T0V1X0",
 		"deposit.credited": "01J8Z2K3M4N5P6Q7R8S9T0V1X1",
@@ -216,6 +220,18 @@ func sample(t *testing.T, eventType string) eventbus.Envelope {
 			UserID: "01J8Z2K3M4N5P6Q7R8S9T0U100", KYCLevel: 2, PreviousKYCLevel: 0, Version: 4,
 			Reason: "documents verified",
 		}
+	case registry.EventAssetUpdated:
+		payload = registry.AssetUpdatedPayload{
+			AssetID: "01J8Z2K3M4N5P6Q7R8S9T0A100", Symbol: "USDC", Status: "active", DepositEnabled: true, WithdrawEnabled: false,
+			ChangedFields: []string{"withdraw_enabled"}, Version: 3, Reason: "issuer maintenance window",
+		}
+	case registry.EventFeeScheduleUpdated:
+		payload = registry.FeeScheduleUpdatedPayload{
+			FeeScheduleID: "01J8Z2K3M4N5P6Q7R8S9T0F100", Name: "default", MakerBps: 8, TakerBps: 18,
+			ChangedFields: []string{"maker_bps", "taker_bps"}, Version: 2, Reason: "Q4 pricing",
+		}
+	case registry.EventRegistryReload:
+		payload = registry.RegistryReloadPayload{Reason: "seeded ARB-USDC by hand"}
 	case registry.EventMarketUpdated:
 		env.MarketID = str(market)
 		payload = registry.MarketUpdatedPayload{

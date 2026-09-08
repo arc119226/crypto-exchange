@@ -1,0 +1,42 @@
+{{define "content"}}
+<h1>Fee schedules</h1>
+<p class="muted">Basis points on the notional of every fill. Markets on a schedule pay the new rates from the next trade.</p>
+{{with .Data}}
+<section id="list">
+<table>
+  <thead><tr><th>Name</th><th class="num">Maker bps</th><th class="num">Taker bps</th><th>Effective from</th><th class="num">v</th><th>Change</th></tr></thead>
+  <tbody>
+  {{range .FeeSchedules}}
+  <tr>
+    <td><strong>{{.Name}}</strong></td>
+    <td class="num">{{.MakerBps}}</td>
+    <td class="num">{{.TakerBps}}</td>
+    <td>{{when .EffectiveFrom}}</td>
+    <td class="num">{{.Version}}</td>
+    <td>
+      <form method="post" action="/admin/fee-schedules/{{.Name}}" class="inline">
+        <input type="number" name="maker_bps" value="{{.MakerBps}}" min="0" max="10000" required aria-label="maker bps">
+        <input type="number" name="taker_bps" value="{{.TakerBps}}" min="0" max="10000" required aria-label="taker bps">
+        <input type="text" name="reason" required placeholder="reason">
+        <button type="submit" class="quiet">Save</button>
+      </form>
+    </td>
+  </tr>
+  {{else}}
+  <tr><td colspan="6" class="muted">No fee schedules.</td></tr>
+  {{end}}
+  </tbody>
+</table>
+</section>
+<section class="card">
+  <h2>New fee schedule</h2>
+  <form method="post" action="/admin/fee-schedules" class="row">
+    <label>Name <input type="text" name="name" required placeholder="vip"></label>
+    <label>Maker bps <input type="number" name="maker_bps" value="0" min="0" max="10000" required></label>
+    <label>Taker bps <input type="number" name="taker_bps" value="0" min="0" max="10000" required></label>
+    <label>Reason <input type="text" name="reason" required placeholder="recorded in the audit trail"></label>
+    <button type="submit">Add</button>
+  </form>
+</section>
+{{end}}
+{{end}}
