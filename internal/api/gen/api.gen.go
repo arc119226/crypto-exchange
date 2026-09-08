@@ -1000,7 +1000,7 @@ type SessionRole string
 // Side defines model for Side.
 type Side string
 
-// Ticker Rolling 24-hour summary. Price fields are null when the window holds no trade.
+// Ticker Rolling 24-hour summary. The price fields are omitted when the window holds no trade.
 type Ticker struct {
 	// At When the summary was computed
 	At time.Time `json:"at"`

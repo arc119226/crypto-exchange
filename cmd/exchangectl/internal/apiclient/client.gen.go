@@ -1001,7 +1001,7 @@ type SessionRole string
 // Side defines model for Side.
 type Side string
 
-// Ticker Rolling 24-hour summary. Price fields are null when the window holds no trade.
+// Ticker Rolling 24-hour summary. The price fields are omitted when the window holds no trade.
 type Ticker struct {
 	// At When the summary was computed
 	At time.Time `json:"at"`
@@ -1529,8 +1529,8 @@ type ClientInterface interface {
 	//
 	// Rolling 24-hour summary folded from the market's 1-minute candles:
 	// last price, the open 24 hours ago, high, low, base and quote volume,
-	// trade count and the change. Price fields are `null` when the window
-	// holds no trade. Served from persisted candles, so it lags the last
+	// trade count and the change. The price fields are omitted when the
+	// window holds no trade. Served from persisted candles, so it lags the last
 	// trade by up to the worker's poll interval (about a second).
 	//
 	// Corresponds with GET /v1/markets/{symbol}/ticker (the `GetTicker` operationId).
@@ -2052,8 +2052,8 @@ func (c *Client) ListKlines(ctx context.Context, symbol MarketSymbol, params *Li
 //
 // Rolling 24-hour summary folded from the market's 1-minute candles:
 // last price, the open 24 hours ago, high, low, base and quote volume,
-// trade count and the change. Price fields are `null` when the window
-// holds no trade. Served from persisted candles, so it lags the last
+// trade count and the change. The price fields are omitted when the
+// window holds no trade. Served from persisted candles, so it lags the last
 // trade by up to the worker's poll interval (about a second).
 //
 // Corresponds with GET /v1/markets/{symbol}/ticker (the `GetTicker` operationId).
@@ -3786,8 +3786,8 @@ type ClientWithResponsesInterface interface {
 	//
 	// Rolling 24-hour summary folded from the market's 1-minute candles:
 	// last price, the open 24 hours ago, high, low, base and quote volume,
-	// trade count and the change. Price fields are `null` when the window
-	// holds no trade. Served from persisted candles, so it lags the last
+	// trade count and the change. The price fields are omitted when the
+	// window holds no trade. Served from persisted candles, so it lags the last
 	// trade by up to the worker's poll interval (about a second).
 	//
 	// Returns a wrapper object for the known response body format(s).
@@ -5997,8 +5997,8 @@ func (c *ClientWithResponses) ListKlinesWithResponse(ctx context.Context, symbol
 //
 // Rolling 24-hour summary folded from the market's 1-minute candles:
 // last price, the open 24 hours ago, high, low, base and quote volume,
-// trade count and the change. Price fields are `null` when the window
-// holds no trade. Served from persisted candles, so it lags the last
+// trade count and the change. The price fields are omitted when the
+// window holds no trade. Served from persisted candles, so it lags the last
 // trade by up to the worker's poll interval (about a second).
 //
 // Returns a wrapper object for the known response body format(s).
