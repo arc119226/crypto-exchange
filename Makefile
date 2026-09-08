@@ -26,7 +26,7 @@ ALL_PROFILES  := --profile infra --profile observability --profile app --profile
 
 .PHONY: help tools gen gen-check fmt tidy lint secrets-scan test test-fuzz test-integration e2e cover-money build image \
 	    up up-single up-sepolia down down-sepolia logs-sepolia ps-sepolia reset infra-up run migrate seed artifacts compose-config contracts-test \
-	    gen-dev-secrets demo trace loadgen
+	    gen-dev-secrets demo trace loadgen web-gen web-check web-build web-e2e
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
@@ -202,6 +202,21 @@ demo: ## Run the Phase demo script
 trace: ## Grep all container logs for a correlation id (make trace ID=...)
 	@test -n "$(ID)" || (echo "usage: make trace ID=<correlation_id>" && exit 2)
 	$(COMPOSE) logs --no-color 2>/dev/null | grep -- "$(ID)"
+
+# --- web/trade (the reference front end; Node 22, docs/plan-v1.0.md §12 Phase 6)
+WEB_DIR := web/trade
+
+web-gen: ## Regenerate web/trade/src/api/schema.d.ts from the public OpenAPI
+	cd $(WEB_DIR) && npm ci --no-fund --no-audit && npm run gen
+
+web-check: ## Front-end fast checks: schema.d.ts fresh, tsc, vite build
+	cd $(WEB_DIR) && npm ci --no-fund --no-audit && npm run gen && git diff --exit-code -- src/api/schema.d.ts && npm run build
+
+web-build: ## Build web/trade/dist
+	cd $(WEB_DIR) && npm ci --no-fund --no-audit && npm run build
+
+web-e2e: ## Playwright smoke against a running stack (API_URL / WS_URL / ADMIN_URL / ADMIN_API_KEY; after `KEEP=1 make e2e` in CI)
+	bash scripts/e2e-web.sh
 
 loadgen: ## Run the load generator against a running stack (docs/loadtest.md)
 	go run ./cmd/exchangectl loadgen --market ETH-USDC --rate 1000 --duration 60s --accounts 100 \

@@ -191,11 +191,22 @@ jobs:
 
       - name: compose file renders with every profile
         run: make compose-config
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/trade/package-lock.json
+      # the committed TypeScript client must match the OpenAPI document, and
+      # the SPA must type-check and build; the browser smoke runs in e2e
+      - name: web/trade — schema.d.ts fresh, tsc, vite build
+        env:
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
+        run: make web-check
       - name: dev scripts parse
         # e2e.sh is checked here rather than only by the e2e job: this job
         # finishes in seconds, and a syntax error found twelve minutes into a
         # container run is twelve minutes wasted.
-        run: bash -n scripts/gen-dev-secrets.sh && bash -n scripts/e2e.sh
+        run: bash -n scripts/gen-dev-secrets.sh && bash -n scripts/e2e.sh && bash -n scripts/e2e-web.sh
       - name: generated code is in sync (oapi-codegen, sqlc)
         run: make gen-check
       - name: sqlc vet
@@ -251,6 +262,23 @@ jobs:
         env:
           KEEP: "1" # tear down in the step below, so the logs survive a failure
         run: make e2e
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/trade/package-lock.json
+      # the stack from `make e2e` is still up (KEEP=1): register in the
+      # browser, fund through the admin faucet, trade, watch both streams
+      - name: web/trade — Playwright smoke against the compose stack
+        run: make web-e2e
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: web-e2e-report
+          path: |
+            web/trade/playwright-report
+            web/trade/test-results
+          if-no-files-found: ignore
       - name: collect container logs
         if: always()
         run: docker compose -f deploy/compose/compose.yaml --env-file .env --profile infra --profile app logs --no-color > compose-logs.txt || true

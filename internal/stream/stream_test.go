@@ -561,11 +561,13 @@ func TestCloseAll(t *testing.T) {
 	ws := h.dial(t, "/ws/v1/public")
 	send(t, ws, map[string]any{"op": "ping"})
 	recv(t, ws)
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	h.server.CloseAll(ctx)
 	code, reason := recvClose(t, ws)
 	assert.Equal(t, websocket.StatusGoingAway, code)
 	assert.Equal(t, "shutdown", reason)
-	assert.Equal(t, 0, h.server.Connections())
+	// the hub forgets the connection when its goroutines have all exited,
+	// which can trail the close frame by a scheduler tick on a loaded box
+	assert.Eventually(t, func() bool { return h.server.Connections() == 0 }, 5*time.Second, 10*time.Millisecond)
 }

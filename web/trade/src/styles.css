@@ -1,0 +1,95 @@
+:root {
+  color-scheme: dark;
+  --bg: #0f1419;
+  --panel: #171d25;
+  --border: #262e3a;
+  --text: #e6e9ef;
+  --muted: #8b95a7;
+  --buy: #2ecc71;
+  --sell: #e74c3c;
+  --accent: #4c8dff;
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-size: 14px;
+}
+
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); }
+a { color: var(--accent); text-decoration: none; }
+button, input, select {
+  font: inherit;
+  color: inherit;
+  background: #0b0f14;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 6px 8px;
+}
+button { cursor: pointer; }
+button:disabled { opacity: 0.5; cursor: default; }
+button.primary { background: var(--accent); border-color: var(--accent); }
+button.buy { background: var(--buy); border-color: var(--buy); color: #04170b; }
+button.sell { background: var(--sell); border-color: var(--sell); color: #1a0704; }
+button.link { background: none; border: none; color: var(--accent); padding: 0; }
+table { border-collapse: collapse; width: 100%; }
+th, td { padding: 3px 6px; text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+th { color: var(--muted); font-weight: 500; }
+td:first-child, th:first-child { text-align: left; }
+.num { font-variant-numeric: tabular-nums; }
+.buy { color: var(--buy); }
+.sell { color: var(--sell); }
+.muted { color: var(--muted); }
+.error { color: var(--sell); }
+.ok { color: var(--buy); }
+
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel);
+}
+.topbar .brand { font-weight: 600; letter-spacing: 0.02em; }
+.topbar .spacer { flex: 1; }
+.topbar nav a { margin-right: 12px; }
+
+.page { padding: 16px; max-width: 1400px; margin: 0 auto; }
+.narrow { max-width: 420px; margin: 48px auto; }
+.card { background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 12px; }
+.card h2, .card h3 { margin: 0 0 8px; font-size: 14px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; }
+.stack { display: flex; flex-direction: column; gap: 8px; }
+.row { display: flex; gap: 8px; align-items: center; }
+.field { display: flex; flex-direction: column; gap: 4px; }
+.field label { color: var(--muted); font-size: 12px; }
+.scroll { max-height: 320px; overflow: auto; }
+
+.trade-grid {
+  display: grid;
+  grid-template-columns: 300px 1fr 300px;
+  grid-template-rows: auto auto;
+  gap: 12px;
+}
+.trade-grid .book { grid-row: span 2; }
+.trade-grid .chart { min-height: 360px; }
+.trade-grid .side { grid-row: span 2; display: flex; flex-direction: column; gap: 12px; }
+.trade-grid .lists { grid-column: 2; }
+@media (max-width: 1100px) {
+  .trade-grid { grid-template-columns: 1fr 1fr; }
+  .trade-grid .book, .trade-grid .side { grid-row: auto; }
+  .trade-grid .lists { grid-column: span 2; }
+}
+
+.book table td { padding: 1px 6px; }
+.book .spread { text-align: center; color: var(--muted); padding: 4px 0; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+.ticker { display: flex; gap: 24px; align-items: baseline; flex-wrap: wrap; }
+.ticker .last { font-size: 22px; font-weight: 600; }
+.ticker .item { display: flex; flex-direction: column; }
+.ticker .item span:first-child { color: var(--muted); font-size: 11px; }
+.tabs { display: flex; gap: 12px; margin-bottom: 8px; }
+.tabs button { background: none; border: none; color: var(--muted); padding: 4px 0; border-bottom: 2px solid transparent; }
+.tabs button.active { color: var(--text); border-bottom-color: var(--accent); }
+.status-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--muted); margin-right: 6px; }
+.status-dot.live, .status-dot.open { background: var(--buy); }
+.status-dot.connecting, .status-dot.authenticating { background: #f1c40f; }
+.markets-table tr { cursor: pointer; }
+.markets-table tr:hover td { background: #1c2430; }
+code { background: #0b0f14; padding: 1px 4px; border-radius: 3px; word-break: break-all; }

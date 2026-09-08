@@ -1,0 +1,35 @@
+{
+  "name": "exchange-trade",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Reference trading front end for the exchange engine (docs/plan-v1.0.md §12 Phase 6).",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "gen": "openapi-typescript ../../api/public/v1/openapi.yaml -o src/api/schema.d.ts",
+    "e2e": "playwright test"
+  },
+  "dependencies": {
+    "lightweight-charts": "5.2.1",
+    "openapi-fetch": "0.17.0",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "react-router-dom": "7.18.3"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.56.1",
+    "@types/node": "22.20.1",
+    "@types/react": "19.2.18",
+    "@types/react-dom": "19.2.7",
+    "@vitejs/plugin-react": "6.1.1",
+    "openapi-typescript": "7.13.0",
+    "typescript": "5.9.3",
+    "vite": "8.2.2"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}
