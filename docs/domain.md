@@ -1018,7 +1018,7 @@ Phase 6 把事件第一次真的扇出給人看:影子訂單簿與 depth delta�
 | loadgen + 壓測(§3.3、§12) | `exchangectl loadgen`:註冊 + faucet N 帳戶、每帳戶一個 closed-loop goroutine 掛限價單 / 穿價 / 取消,`--ws-clients` / `--private-clients` / `--idle-connections` 量推播延遲與 1,000 連線;報表 nearest-rank 百分位;`docs/loadtest.md` | 行情側全部達標(1,030 連線、depth p99 19 ms、500 訂閱者 46,000 則/s 下 44 ms、私有 p99 24 ms、0 gap);引擎單市場飽和 ≈ 165 命令/s,`synchronous_commit=off` 只值 10%,瓶頸是每命令約 17 次 DB 往返;`POST p99 < 50 ms` 與 1,000 orders/s 未達,補法(`pgx.Batch`、group commit)記錄給 Phase 7 |
 | dashboards + alerts(§15) | `infra/observability/dashboards/{overview,ledger,chain,stream,system}.json`(Grafana 11.2、schemaVersion 39、datasource uid `prometheus`、`deployment` / `instance` 變數)、`alerts.yml` 七條、`prometheus.yml` `rule_files`、compose 掛載;新指標 `exchange_ready`(自己的 `/readyz` 每 10 s 取樣)、`db_pool_connections{state}` / `db_pool_max`(`pg.NewPoolCollector`,scrape 時讀 `pgxpool.Stat`)| 沒有 Alertmanager(告警在 Prometheus UI)、沒有 cAdvisor(System 板用 `process_*`,板上寫明);`observability_test.go` 是 promtool 的替身:每個 dashboard 可解析、uid 與 panel id 唯一、每條規則有 expr / severity / summary,**每個被讀的指標名都要在 `internal/**/*.go` 以字串常值出現** |
 | OTel trace 最小版(§15) | `telemetry.SetupTracing`(`OTEL_EXPORTER_OTLP_ENDPOINT` 空即關、無 provider 時每個呼叫只剩一次 context 查表);`TracingMiddleware`(handler 跑完後用 chi `RoutePattern()` `SetName`,sampled 時 request logger 加 `trace_id`);cmdbus client / server 注入 / 抽取 NATS header;runner 以 `WithSpanOf` 把呼叫者的 span 帶過命令佇列(不帶 cancellation);pgx `QueryTracer` 只在 sampled span 下開 span、名字取 sqlc 的 `-- name:`;`Outbox.Append` 把 `traceparent` 與 `Correlation-Id` 寫進 headers,relay 全部搬上 NATS header,兩種 consumer 在其下開 consumer span;webhook client 用 otelhttp transport;compose observability profile 加 Jaeger v2 | 只有 `telemetry` 與 `platform/pg` import OTel,其他 package 只看 `StartSpan` / `InjectTrace` / `ExtractTrace`(depguard);`OTEL_EXPORTER_OTLP_ENDPOINT` 依規範是 base URL,但 `WithEndpointURL` 當完整 URL 用,`http://jaeger:4318` 會 POST 到 `/`,所以沒有 path 時補 `/v1/traces`(單元測試對假 collector 驗);stream router **不掛** tracing middleware:WS 路由的 span 會活到連線結束,batch processor 永遠送不出去 |
-| 未做(刻意) | 多副本 stream 的 sticky(單副本);TradingView;`fill.executed`;API key HMAC 上 WS;`ledger.posted`;Alertmanager;cAdvisor;depth delta 合併(契約要 seq 連續;量出來的上限記錄在 loadtest.md);SPA 的 i18n / 深色模式以外的裝飾 | 都寫在 §12 的勾選註記與各文件 |
+| 未做(刻意) | 多副本 stream 的 sticky(單副本);TradingView;`fill.executed`;API key HMAC 上 WS;`ledger.posted`;Alertmanager;cAdvisor;depth delta 合併(契約要 seq 連續;量出來的上限記錄在 loadtest.md);深色模式以外的裝飾(SPA 的 i18n 原列於此,後於 ADR-0010 做了) | 都寫在 §12 的勾選註記與各文件 |
 
 ### 25.1 設計審查抓到的三個 High
 
@@ -1089,6 +1089,7 @@ Phase 7 是把系統交給營運方:一份在 kind 上每個 PR 都裝一次的 
 - **runbook 九本不是五本**;`sepolia.md` 不是 runbook,搬到 `docs/guides/`。
 - **group commit 的批次上限 50、失敗退回逐筆**:不往上開,一批失敗就是一次重建。
 - **不做**:上面表格最後一列。
+- **介面雙語(zh-TW / en)**(§12 Phase 5「不做多語系」、§25 表格「SPA 的 i18n」):在第一個 release tag 之前反轉,前台與後台各有繁體中文與英文;CLI、API、事件、log 維持英文。機制、邊界(flash 的語言、`Problem.detail`、`Problem.code` 延後)與新手 README 的拆法在 ADR-0010。
 
 ### 26.3 這一輪學到的事
 

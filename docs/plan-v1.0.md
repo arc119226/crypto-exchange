@@ -1009,7 +1009,7 @@ Makefile 目標:
 
 | 目標 | 說明 |
 |---|---|
-| `make up` / `make up-single` | `--profile infra --profile observability --profile app`(或 `single`)`up -d --build --wait`;`OBS=0` 略過 observability |
+| `make up` / `make up-single` | `--profile infra --profile observability --profile web --profile app`(或 `single`)`up -d --build --wait`;`OBS=0` 略過 observability,`WEB=0` 略過前台的 `web` 服務(edge image 的 `Caddyfile.dev`,:8088) |
 | `make down` / `make reset` | 停止;`reset` = `down -v` + 刪 `artifacts` + 重新 `up` |
 | `make infra-up` | 只起 infra profile,讓本機 `go run` 連進去 |
 | `make run ROLE=engine` | `go run ./cmd/exchange serve --role=$(ROLE)`(讀 `.env`,`*_URL` 改 localhost) |
@@ -1022,7 +1022,8 @@ Makefile 目標:
 | `make e2e` | `up --wait` + `exchangectl e2e` + `down -v` |
 | `make build` / `make image` | 本機 binary / `docker build` |
 | `make gen-dev-secrets` | 產生 `.env`(從 `.env.example`)、`secrets/jwt/ed25519.pem`;以 foundry 映像執行 `cast wallet new-mnemonic --json` 寫入 `secrets/dev-mnemonic.txt`(gitignored),並以 `cast wallet address --mnemonic "$(cat secrets/dev-mnemonic.txt)" --mnemonic-derivation-path "m/44'/60'/1'/0/0"` 寫入 `.env` 的 `HOT_WALLET_ADDRESS`。**Phase 0 不需要任何 Go 鏈上程式**;`secrets/keystore/hd-seed.json` 由 Phase 4a 的 `exchange keys import-mnemonic` 產生 |
-| `make demo` | `exchangectl demo`(第 12 節各 Phase 的展示腳本) |
+| `make faucet ACCOUNT=… [ASSET=USDC] [AMOUNT=10000]` / `make totp-enroll EMAIL=…` | 在容器內跑 `exchangectl admin fund` / `exchange admin totp enroll`,給新手 README 用;原本規劃的 `make demo`(`exchangectl demo`)沒有做,以 README 的十步取代 |
+| `make ps` / `make logs SERVICE=… TAIL=… FOLLOW=1` | dev stack 的狀態與 log(帶齊所有 profile,否則 compose 看不到服務) |
 | `make trace ID=...` | 以 `correlation_id` grep 所有容器 log |
 | `make loadgen` | `exchangectl loadgen --market ETH-USDC --rate 1000 --duration 60s --accounts 100`(命令平均分配到 N 個帳戶以避開 per-account 限流;`--bypass-ratelimit` 僅限 `EXCHANGE_ENV=dev`) |
 | `make kind-up` / `make helm-lint` / `make helm-e2e` | Phase 7:kind 叢集、chart lint、chart 安裝 + E2E |
