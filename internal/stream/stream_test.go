@@ -464,7 +464,15 @@ func (h *harness) token(t *testing.T, account, tenant string, ttl time.Duration)
 }
 
 func TestPrivateAuthHoldAndResume(t *testing.T) {
-	h := newHarness(t, testConfig())
+	// The resume below enqueues five frames in one burst (two replayed,
+	// two held, the resumed marker); against the four-slot queue of
+	// testConfig that races the writer goroutine for the first pop, and on
+	// a loaded runner under -race the burst wins and the connection is
+	// closed as a slow consumer. Sixteen slots: the same reason the
+	// bad-frame test above runs with a wider queue.
+	cfg := testConfig()
+	cfg.WriteBuffer = 16
+	h := newHarness(t, cfg)
 
 	t.Run("no auth in time", func(t *testing.T) {
 		ws := h.dial(t, "/ws/v1/private")
