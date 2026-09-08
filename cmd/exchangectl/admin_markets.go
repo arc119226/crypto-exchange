@@ -13,7 +13,7 @@ import (
 // Phase 5 ships the back office (docs/plan-v1.0.md §12 Phase 3).
 func newAdminMarketsCmd() *cobra.Command {
 	c := &cobra.Command{Use: "markets", Short: "Inspect markets and change their trading status (/admin/v1/markets)"}
-	c.AddCommand(newAdminMarketsListCmd(), newAdminMarketsSetStatusCmd())
+	c.AddCommand(newAdminMarketsListCmd(), newAdminMarketsSetStatusCmd(), newAdminMarketsCreateCmd(), newAdminMarketsSetCmd())
 	return c
 }
 
