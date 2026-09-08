@@ -41,7 +41,7 @@ func (e *engineComponents) close(log *slog.Logger) {
 // attachNATS wires the three things the engine role gets from NATS: the
 // outbox relay, the command-bus server that lets an api role in another
 // container trade, and the registry reload consumer.
-func (e *engineComponents) attachNATS(ctx context.Context, cfg Config, log *slog.Logger, d *deps, reg prometheus.Registerer) error {
+func (e *engineComponents) attachNATS(ctx context.Context, cfg Config, log *slog.Logger, d *deps, reg prometheus.Registerer, ebm *eventbus.Metrics) error {
 	js, err := jetstream.New(d.nc)
 	if err != nil {
 		return fmt.Errorf("jetstream: %w", err)
@@ -53,7 +53,7 @@ func (e *engineComponents) attachNATS(ctx context.Context, cfg Config, log *slog
 	}
 	e.relay = eventbus.NewRelay(d.pool, eventbus.NewJetStreamPublisher(js), eventbus.RelayConfig{
 		PollInterval: cfg.Outbox.PollInterval, BatchSize: cfg.Outbox.BatchSize,
-	}, log).WithMetrics(eventbus.NewMetrics(reg))
+	}, log).WithMetrics(ebm)
 
 	verifier, err := engineVerifier(cfg, log)
 	if err != nil {
@@ -65,7 +65,7 @@ func (e *engineComponents) attachNATS(ctx context.Context, cfg Config, log *slog
 	}); err != nil {
 		return err
 	}
-	e.reload, err = newReloadConsumer(ctx, cfg, log, js, e.engine)
+	e.reload, err = newReloadConsumer(ctx, cfg, log, js, e.engine, ebm)
 	return err
 }
 

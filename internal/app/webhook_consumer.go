@@ -44,7 +44,7 @@ var webhookStreamDomains = map[string][]string{
 // turn is what lets the retry schedule be ours rather than JetStream's --
 // §7.6 wants waits of up to 24 hours, and a nak delay is one flat value
 // inside a 30-second ack window.
-func consumeForWebhooks(ctx context.Context, js jetstream.JetStream, d *webhook.Dispatcher, tenant, durablePrefix string, log *slog.Logger) (webhookSubs, error) {
+func consumeForWebhooks(ctx context.Context, js jetstream.JetStream, d *webhook.Dispatcher, tenant, durablePrefix string, log *slog.Logger, m *eventbus.Metrics) (webhookSubs, error) {
 	var subs webhookSubs
 	for _, stream := range []string{eventbus.StreamTrading, eventbus.StreamChain, eventbus.StreamRegistry} {
 		filters := make([]string, 0, len(webhookStreamDomains[stream]))
@@ -52,7 +52,7 @@ func consumeForWebhooks(ctx context.Context, js jetstream.JetStream, d *webhook.
 			filters = append(filters, eventbus.SubjectPrefix+"."+domain+".*."+tenant+".*")
 		}
 		sub, err := eventbus.Subscribe(ctx, js, eventbus.ConsumerConfig{
-			Durable: durablePrefix + "-" + webhookStreamSuffix(stream), Stream: stream, FilterSubjects: filters,
+			Durable: durablePrefix + "-" + webhookStreamSuffix(stream), Stream: stream, FilterSubjects: filters, Metrics: m,
 		}, log, d.Enqueue)
 		if err != nil {
 			subs.Stop()

@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/arc119226/crypto-exchange/internal/eventbus/sqlcgen"
 )
@@ -80,4 +81,36 @@ func envelopeFromRow(r sqlcgen.EventbusOutbox) Envelope {
 		e.CausationID = *r.CausationID
 	}
 	return e
+}
+
+// OutboxReader reads events back out of the outbox. It exists for the
+// private stream's resume (docs/plan-v1.0.md §7.5): a client that says
+// which account_seq it last saw gets everything after it, from the table
+// rather than from JetStream, because the outbox is the record that is
+// kept for 30 days and indexed by account.
+type OutboxReader struct {
+	pool *pgxpool.Pool
+}
+
+// NewOutboxReader reads through pool, which needs SELECT on eventbus.outbox.
+func NewOutboxReader(pool *pgxpool.Pool) *OutboxReader { return &OutboxReader{pool: pool} }
+
+// ByAccountSince returns up to limit events of one account with
+// account_seq greater than sinceSeq, ascending by account_seq. A page
+// shorter than limit is the last one.
+func (r *OutboxReader) ByAccountSince(ctx context.Context, tenant, accountID string, sinceSeq int64, limit int32) ([]Envelope, error) {
+	if limit <= 0 {
+		limit = 500
+	}
+	rows, err := sqlcgen.New(r.pool).ListOutboxByAccountSince(ctx, sqlcgen.ListOutboxByAccountSinceParams{
+		TenantID: tenant, AccountID: Str(accountID), AccountSeq: I64(sinceSeq), Limit: limit,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("eventbus: outbox by account: %w", err)
+	}
+	out := make([]Envelope, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, envelopeFromRow(row))
+	}
+	return out, nil
 }

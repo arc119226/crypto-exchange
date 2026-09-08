@@ -15,6 +15,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/arc119226/crypto-exchange/internal/admin"
+	"github.com/arc119226/crypto-exchange/internal/eventbus"
 	"github.com/arc119226/crypto-exchange/internal/ledger"
 	"github.com/arc119226/crypto-exchange/internal/platform/natsx"
 	"github.com/arc119226/crypto-exchange/internal/platform/pg"
@@ -59,6 +60,9 @@ func Run(ctx context.Context, cfg Config, roles []Role, bi BuildInfo) error {
 	defer cleanup()
 
 	httpMetrics := telemetry.NewHTTPMetrics(reg)
+	// one set of outbox / consumer instruments per process: the engine's
+	// relay, the worker's and the stream's consumers all report through it
+	ebMetrics := eventbus.NewMetrics(reg)
 	var (
 		servers      []*http.Server
 		adminLedger  *ledger.Service
@@ -91,7 +95,7 @@ func Run(ctx context.Context, cfg Config, roles []Role, bi BuildInfo) error {
 		}
 		eng.engine = newEngine(cfg, log, d.pool, l, reg)
 		if d.nc != nil {
-			if err := eng.attachNATS(ctx, cfg, log, d, reg); err != nil {
+			if err := eng.attachNATS(ctx, cfg, log, d, reg, ebMetrics); err != nil {
 				return err
 			}
 			defer eng.close(log)
@@ -162,7 +166,7 @@ func Run(ctx context.Context, cfg Config, roles []Role, bi BuildInfo) error {
 			defer chainRole.close()
 			checker.Register("chain", true, chainRole.ready)
 		case RoleWorker:
-			w, err := newWorker(cfg, log, d.pool, reg, d.nc)
+			w, err := newWorker(cfg, log, d.pool, reg, d.nc, ebMetrics)
 			if err != nil {
 				return err
 			}

@@ -31,6 +31,7 @@ type workerComponents struct {
 	dispatcher *webhook.Dispatcher
 	interval   time.Duration
 	subs       webhookSubs
+	metrics    *eventbus.Metrics
 
 	// The start-state shape is copied from chainComponents, deliberately and
 	// exactly: newWorker only builds, bringUp does the waiting, and start runs
@@ -44,7 +45,7 @@ type workerComponents struct {
 }
 
 // newWorker builds the role. It touches neither NATS nor the database.
-func newWorker(cfg Config, log *slog.Logger, db *pgxpool.Pool, reg prometheus.Registerer, nc *nats.Conn) (*workerComponents, error) {
+func newWorker(cfg Config, log *slog.Logger, db *pgxpool.Pool, reg prometheus.Registerer, nc *nats.Conn, ebm *eventbus.Metrics) (*workerComponents, error) {
 	if nc == nil {
 		// Deliveries arrive over JetStream, so without NATS there is nothing
 		// for this role to consume. Refusing to start is honest; pretending
@@ -61,7 +62,7 @@ func newWorker(cfg Config, log *slog.Logger, db *pgxpool.Pool, reg prometheus.Re
 	}, log).WithMetrics(webhook.NewMetrics(reg))
 
 	w := &workerComponents{
-		dispatcher: d, interval: cfg.Webhook.Interval,
+		dispatcher: d, interval: cfg.Webhook.Interval, metrics: ebm,
 		started:  make(chan struct{}),
 		startErr: errors.New("the worker role has not finished starting"),
 	}
@@ -93,7 +94,7 @@ func (w *workerComponents) up(ctx context.Context, cfg Config, log *slog.Logger,
 		return err
 	}
 	w.setStartErr(errors.New("subscribing to the event streams"))
-	subs, err := consumeForWebhooks(ctx, js, w.dispatcher, cfg.TenantID, webhookDurable, log)
+	subs, err := consumeForWebhooks(ctx, js, w.dispatcher, cfg.TenantID, webhookDurable, log, w.metrics)
 	if err != nil {
 		return fmt.Errorf("webhook consumers: %w", err)
 	}

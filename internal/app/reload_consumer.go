@@ -60,11 +60,12 @@ func (r *reloader) handle(ctx context.Context, e eventbus.Envelope) error {
 // restart (docs/plan-v1.0.md §6.6). Runners read the market from the
 // registry cache per command, so reloading the cache is all it takes for a
 // status change to apply to the very next order.
-func newReloadConsumer(ctx context.Context, cfg Config, log *slog.Logger, js jetstream.JetStream, engine *trading.Engine) (*eventbus.Subscription, error) {
+func newReloadConsumer(ctx context.Context, cfg Config, log *slog.Logger, js jetstream.JetStream, engine *trading.Engine, m *eventbus.Metrics) (*eventbus.Subscription, error) {
 	r := &reloader{engine: engine, log: log}
 	return eventbus.Subscribe(ctx, js, eventbus.ConsumerConfig{
 		Durable: reloadConsumer,
 		Stream:  eventbus.StreamRegistry,
+		Metrics: m,
 		FilterSubjects: []string{
 			eventbus.SubjectPrefix + ".market.*." + cfg.TenantID + ".*",
 			eventbus.SubjectPrefix + ".asset.*." + cfg.TenantID + ".*",
