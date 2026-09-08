@@ -1,73 +1,73 @@
 {{define "asset_fields"}}{{/* . is a registry.Asset (zero value for a new one) */}}
   <div class="row">
-    <label>Name <input type="text" name="name" value="{{.Name}}" required></label>
-    <label>Chain id <input type="number" name="chain_id" value="{{.ChainID}}" required></label>
-    <label>Contract address <input type="text" name="contract_address" value="{{if .ContractAddress}}{{.ContractAddress}}{{end}}" placeholder="empty for the native coin" class="mono"></label>
-    <label class="inline"><input type="checkbox" name="is_native"{{if .IsNative}} checked{{end}}> native coin</label>
+    <label>{{T "col.name"}} <input type="text" name="name" value="{{.Name}}" required></label>
+    <label>{{T "assets.chain_id"}} <input type="number" name="chain_id" value="{{.ChainID}}" required></label>
+    <label>{{T "assets.contract_address"}} <input type="text" name="contract_address" value="{{if .ContractAddress}}{{.ContractAddress}}{{end}}" placeholder="{{T "assets.contract_address.placeholder"}}" class="mono"></label>
+    <label class="inline"><input type="checkbox" name="is_native"{{if .IsNative}} checked{{end}}> {{T "assets.native_coin"}}</label>
   </div>
   <div class="row">
-    <label>Scale <input type="number" name="scale" value="{{.Scale}}" min="0" max="18" required></label>
-    <label>Display scale <input type="number" name="display_scale" value="{{.DisplayScale}}" min="0" max="18" required></label>
-    <label>Confirmations <input type="number" name="required_confirmations" value="{{.RequiredConfirmations}}" min="1" required></label>
-    <label>Status
-      <select name="status">{{$s := .Status}}{{range $.Statuses}}<option value="{{.}}"{{if eq . $s}} selected{{end}}>{{.}}</option>{{end}}</select>
+    <label>{{T "assets.scale"}} <input type="number" name="scale" value="{{.Scale}}" min="0" max="18" required></label>
+    <label>{{T "assets.display_scale"}} <input type="number" name="display_scale" value="{{.DisplayScale}}" min="0" max="18" required></label>
+    <label>{{T "assets.confirmations"}} <input type="number" name="required_confirmations" value="{{.RequiredConfirmations}}" min="1" required></label>
+    <label>{{T "col.status"}}
+      <select name="status">{{$s := .Status}}{{range $.Statuses}}<option value="{{.}}"{{if eq . $s}} selected{{end}}>{{status .}}</option>{{end}}</select>
     </label>
   </div>
   <div class="row">
-    <label>Min deposit <input type="text" name="min_deposit" value="{{amount .MinDeposit}}" required></label>
-    <label>Min withdrawal <input type="text" name="min_withdrawal" value="{{amount .MinWithdrawal}}" required></label>
-    <label>Withdrawal fee <input type="text" name="withdrawal_fee" value="{{amount .WithdrawalFee}}" required></label>
-    <label>Sweep threshold <input type="text" name="sweep_threshold" value="{{amount .SweepThreshold}}" required></label>
+    <label>{{T "assets.min_deposit"}} <input type="text" name="min_deposit" value="{{amount .MinDeposit}}" required></label>
+    <label>{{T "assets.min_withdrawal"}} <input type="text" name="min_withdrawal" value="{{amount .MinWithdrawal}}" required></label>
+    <label>{{T "assets.withdrawal_fee"}} <input type="text" name="withdrawal_fee" value="{{amount .WithdrawalFee}}" required></label>
+    <label>{{T "assets.sweep_threshold"}} <input type="text" name="sweep_threshold" value="{{amount .SweepThreshold}}" required></label>
   </div>
   <div class="row">
-    <label class="inline"><input type="checkbox" name="deposit_enabled"{{if .DepositEnabled}} checked{{end}}> deposits</label>
-    <label class="inline"><input type="checkbox" name="withdraw_enabled"{{if .WithdrawEnabled}} checked{{end}}> withdrawals</label>
-    <label>Reason <input type="text" name="reason" required placeholder="recorded in the audit trail"></label>
+    <label class="inline"><input type="checkbox" name="deposit_enabled"{{if .DepositEnabled}} checked{{end}}> {{T "assets.deposits"}}</label>
+    <label class="inline"><input type="checkbox" name="withdraw_enabled"{{if .WithdrawEnabled}} checked{{end}}> {{T "assets.withdrawals"}}</label>
+    <label>{{T "form.reason"}} <input type="text" name="reason" required placeholder="{{T "form.reason.placeholder"}}"></label>
   </div>
 {{end}}
 {{define "content"}}
-<h1>Assets</h1>
+<h1>{{T "assets.title"}}</h1>
 {{with .Data}}
 <section id="list">
 <table>
-  <thead><tr><th>Symbol</th><th>Name</th><th>Chain</th><th class="num">Scale</th><th class="num">Confs</th><th class="num">Min withdrawal</th><th class="num">Fee</th><th class="num">Sweep at</th><th>Deposits</th><th>Withdrawals</th><th>Status</th><th class="num">v</th></tr></thead>
+  <thead><tr><th>{{T "col.symbol"}}</th><th>{{T "col.name"}}</th><th>{{T "col.chain"}}</th><th class="num">{{T "assets.scale"}}</th><th class="num">{{T "col.confs"}}</th><th class="num">{{T "assets.min_withdrawal"}}</th><th class="num">{{T "col.fee"}}</th><th class="num">{{T "assets.sweep_at"}}</th><th>{{T "assets.deposits_col"}}</th><th>{{T "assets.withdrawals_col"}}</th><th>{{T "col.status"}}</th><th class="num">v</th></tr></thead>
   <tbody>
   {{$statuses := .Statuses}}
   {{range .Assets}}
   <tr>
     <td><strong>{{.Symbol}}</strong></td>
     <td>{{.Name}}</td>
-    <td>{{.ChainID}}{{if .ContractAddress}} <span class="mono muted">{{.ContractAddress}}</span>{{else}} <span class="muted">native</span>{{end}}</td>
+    <td>{{.ChainID}}{{if .ContractAddress}} <span class="mono muted">{{.ContractAddress}}</span>{{else}} <span class="muted">{{T "assets.native"}}</span>{{end}}</td>
     <td class="num">{{.Scale}}/{{.DisplayScale}}</td>
     <td class="num">{{.RequiredConfirmations}}</td>
     <td class="num">{{amount .MinWithdrawal}}</td>
     <td class="num">{{amount .WithdrawalFee}}</td>
     <td class="num">{{amount .SweepThreshold}}</td>
-    <td><span class="badge {{if .DepositEnabled}}ok{{else}}bad{{end}}">{{if .DepositEnabled}}on{{else}}off{{end}}</span></td>
-    <td><span class="badge {{if .WithdrawEnabled}}ok{{else}}bad{{end}}">{{if .WithdrawEnabled}}on{{else}}off{{end}}</span></td>
-    <td><span class="badge {{badge .Status}}">{{.Status}}</span></td>
+    <td><span class="badge {{if .DepositEnabled}}ok{{else}}bad{{end}}">{{if .DepositEnabled}}{{status "on"}}{{else}}{{status "off"}}{{end}}</span></td>
+    <td><span class="badge {{if .WithdrawEnabled}}ok{{else}}bad{{end}}">{{if .WithdrawEnabled}}{{status "on"}}{{else}}{{status "off"}}{{end}}</span></td>
+    <td><span title="{{.Status}}" class="badge {{badge .Status}}">{{status .Status}}</span></td>
     <td class="num">{{.Version}}</td>
   </tr>
   <tr><td colspan="12">
-    <details><summary>Edit {{.Symbol}}</summary>
+    <details><summary>{{T "common.edit"}} {{.Symbol}}</summary>
       <form method="post" action="/admin/assets/{{.Symbol}}">
         {{template "asset_fields" (assetWithStatuses . $statuses)}}
-        <div class="actions"><button type="submit">Save {{.Symbol}}</button></div>
+        <div class="actions"><button type="submit">{{T "common.save"}} {{.Symbol}}</button></div>
       </form>
     </details>
   </td></tr>
   {{else}}
-  <tr><td colspan="12" class="muted">No assets. Seed one, or add one below.</td></tr>
+  <tr><td colspan="12" class="muted">{{T "assets.empty"}}</td></tr>
   {{end}}
   </tbody>
 </table>
 </section>
 <section class="card">
-  <details><summary>New asset</summary>
+  <details><summary>{{T "assets.new"}}</summary>
     <form method="post" action="/admin/assets">
-      <div class="row"><label>Symbol <input type="text" name="symbol" required pattern="[A-Z0-9]{2,10}" placeholder="ARB"></label></div>
+      <div class="row"><label>{{T "col.symbol"}} <input type="text" name="symbol" required pattern="[A-Z0-9]{2,10}" placeholder="ARB"></label></div>
       {{template "asset_fields" (assetWithStatuses newAsset $statuses)}}
-      <div class="actions"><button type="submit">List asset</button></div>
+      <div class="actions"><button type="submit">{{T "assets.list"}}</button></div>
     </form>
   </details>
 </section>

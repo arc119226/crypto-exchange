@@ -2,7 +2,6 @@ package admin
 
 import (
 	"context"
-	"fmt"
 	"net/http"
 	"strconv"
 
@@ -87,9 +86,10 @@ func (u *UI) mount(r chi.Router) {
 	r.Handle("/admin/static/*", http.StripPrefix("/admin/static/", staticHandler()))
 
 	r.Group(func(pages chi.Router) {
-		pages.Use(secureHeaders)
+		pages.Use(secureHeaders, withLang)
 		pages.Get(LoginPath, u.loginForm)
 		pages.With(u.throttleLogin).Post(LoginPath, u.login)
+		pages.Post(LangPath, u.setLang) // outside the session middleware: the login page switches too
 
 		pages.Group(func(pending chi.Router) {
 			pending.Use(RequirePending(u.sessions, u.cfg.Cookies))
@@ -162,8 +162,9 @@ func (u *UI) throttleLogin(next http.Handler) http.Handler {
 		if !d.Allowed {
 			u.metrics.logins.WithLabelValues("throttled").Inc()
 			w.Header().Set("Retry-After", strconv.Itoa(int(d.RetryAfter.Seconds())+1))
+			l := langFrom(r.Context())
 			u.tpl.render(w, r, http.StatusTooManyRequests, "login", view{
-				Title: "Sign in", Flash: &flash{Kind: "err", Text: fmt.Sprintf("Too many attempts; try again in %s.", d.RetryAfter.Round(1e9))},
+				Title: l.T("page.sign_in"), Flash: &flash{Kind: "err", Text: l.T("login.throttled", d.RetryAfter.Round(1e9))},
 			})
 			return
 		}

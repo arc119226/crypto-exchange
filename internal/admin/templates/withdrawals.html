@@ -1,10 +1,10 @@
 {{define "content"}}
-<h1>Withdrawals</h1>
+<h1>{{T "withdrawals.title"}}</h1>
 {{with .Data}}
 <section id="list">
-<h2>Waiting for review</h2>
+<h2>{{T "withdrawals.waiting"}}</h2>
 <table>
-  <thead><tr><th>Requested</th><th>Account</th><th class="num">Amount</th><th>To</th><th>Decision</th></tr></thead>
+  <thead><tr><th>{{T "col.requested"}}</th><th>{{T "col.account"}}</th><th class="num">{{T "col.amount"}}</th><th>{{T "col.to"}}</th><th>{{T "withdrawals.decision"}}</th></tr></thead>
   <tbody>
   {{range .Pending}}
   <tr>
@@ -14,41 +14,41 @@
     <td class="mono">{{.ToAddress}}</td>
     <td>
       <form method="post" action="/admin/withdrawals/{{.ID}}/review" class="inline">
-        <input type="text" name="note" placeholder="note (required to reject)">
-        <button type="submit" name="decision" value="approve">Approve</button>
-        <button type="submit" name="decision" value="reject" class="danger">Reject</button>
+        <input type="text" name="note" placeholder="{{T "withdrawals.note.placeholder"}}">
+        <button type="submit" name="decision" value="approve">{{T "withdrawals.approve"}}</button>
+        <button type="submit" name="decision" value="reject" class="danger">{{T "withdrawals.reject"}}</button>
       </form>
     </td>
   </tr>
   {{else}}
-  <tr><td colspan="5" class="muted">Nothing waiting. Withdrawals within the auto-approve limit never come here.</td></tr>
+  <tr><td colspan="5" class="muted">{{T "withdrawals.empty"}}</td></tr>
   {{end}}
   </tbody>
 </table>
 </section>
 <section class="card">
-  <h2>One withdrawal</h2>
+  <h2>{{T "withdrawals.one"}}</h2>
   <form method="get" action="/admin/withdrawals" class="row">
-    <label>Withdrawal id <input type="text" name="id" value="{{.Lookup}}" class="mono" placeholder="uuid"></label>
-    <button type="submit" class="quiet">Show</button>
+    <label>{{T "withdrawals.id"}} <input type="text" name="id" value="{{.Lookup}}" class="mono" placeholder="uuid"></label>
+    <button type="submit" class="quiet">{{T "common.show"}}</button>
   </form>
   {{with .Selected}}
   <dl class="kv">
     <dt>ID</dt><dd class="mono">{{.ID}}</dd>
-    <dt>Status</dt><dd><span class="badge {{badge .Status}}">{{.Status}}</span>{{if .FailureReason}} <span class="muted">{{.FailureReason}}</span>{{end}}</dd>
-    <dt>Account</dt><dd><a class="mono" href="/admin/ledger?account_id={{.AccountID}}">{{.AccountID}}</a></dd>
-    <dt>Amount</dt><dd>{{amount .Amount}} {{.Asset}} to <span class="mono">{{.ToAddress}}</span> on chain {{.ChainID}}</dd>
-    <dt>Review</dt><dd>{{if .ReviewedAt}}{{whenp .ReviewedAt}}{{if .ReviewedBy}} by <span class="mono">{{.ReviewedBy}}</span>{{end}}{{if .ReviewNote}}: {{.ReviewNote}}{{end}}{{else}}<span class="muted">none</span>{{end}}</dd>
-    <dt>Transaction</dt><dd>{{if .TxHash}}<span class="mono">{{.TxHash}}</span>{{else}}<span class="muted">none yet</span>{{end}}</dd>
-    <dt>Resolution</dt><dd>{{if .ResolveAction}}<span class="badge warn">{{.ResolveAction}} requested</span>{{if .ResolveError}} <span class="muted">last attempt: {{.ResolveError}}</span>{{end}}{{else}}<span class="muted">none requested</span>{{end}}</dd>
-    <dt>Updated</dt><dd>{{when .UpdatedAt}}</dd>
+    <dt>{{T "col.status"}}</dt><dd><span title="{{.Status}}" class="badge {{badge .Status}}">{{status .Status}}</span>{{if .FailureReason}} <span class="muted">{{.FailureReason}}</span>{{end}}</dd>
+    <dt>{{T "col.account"}}</dt><dd><a class="mono" href="/admin/ledger?account_id={{.AccountID}}">{{.AccountID}}</a></dd>
+    <dt>{{T "col.amount"}}</dt><dd>{{amount .Amount}} {{.Asset}} {{T "withdrawals.to"}} <span class="mono">{{.ToAddress}}</span> {{T "withdrawals.on_chain"}} {{.ChainID}}</dd>
+    <dt>{{T "withdrawals.review"}}</dt><dd>{{if .ReviewedAt}}{{whenp .ReviewedAt}}{{if .ReviewedBy}} {{T "withdrawals.review.by"}} <span class="mono">{{.ReviewedBy}}</span>{{end}}{{if .ReviewNote}}: {{.ReviewNote}}{{end}}{{else}}<span class="muted">{{T "common.none"}}</span>{{end}}</dd>
+    <dt>{{T "col.transaction"}}</dt><dd>{{if .TxHash}}<span class="mono">{{.TxHash}}</span>{{else}}<span class="muted">{{T "common.none_yet"}}</span>{{end}}</dd>
+    <dt>{{T "withdrawals.resolution"}}</dt><dd>{{if .ResolveAction}}<span class="badge warn">{{T "withdrawals.resolve.requested" (status .ResolveAction)}}</span>{{if .ResolveError}} <span class="muted">{{T "withdrawals.last_attempt"}} {{.ResolveError}}</span>{{end}}{{else}}<span class="muted">{{T "withdrawals.none_requested"}}</span>{{end}}</dd>
+    <dt>{{T "col.updated"}}</dt><dd>{{when .UpdatedAt}}</dd>
   </dl>
-  <h3>Resolve</h3>
-  <p class="muted">Records what the chain role should do on its next tick; nothing is signed here. Bump and cancel apply to a transaction in flight, refund and retry to one that reverted.</p>
+  <h3>{{T "withdrawals.resolve"}}</h3>
+  <p class="muted">{{T "withdrawals.resolve.hint"}}</p>
   <form method="post" action="/admin/withdrawals/{{.ID}}/resolve" class="row">
-    <label>Action <select name="action">{{range $.Data.Actions}}<option value="{{.}}">{{.}}</option>{{end}}</select></label>
-    <label>Note <input type="text" name="note" required placeholder="why; recorded in the audit trail"></label>
-    <button type="submit" class="danger">Request</button>
+    <label>{{T "col.action"}} <select name="action">{{range $.Data.Actions}}<option value="{{.}}">{{status .}}</option>{{end}}</select></label>
+    <label>{{T "withdrawals.note"}} <input type="text" name="note" required placeholder="{{T "withdrawals.resolve.note.placeholder"}}"></label>
+    <button type="submit" class="danger">{{T "withdrawals.request"}}</button>
   </form>
   {{end}}
 </section>

@@ -55,5 +55,5 @@ func (u *UI) reconciliation(w http.ResponseWriter, r *http.Request) {
 		u.fail(w, r, "reconciliation", "assets", err)
 		return
 	}
-	u.tpl.render(w, r, http.StatusOK, "reconciliation", view{Title: "Reconciliation", Data: d})
+	u.tpl.render(w, r, http.StatusOK, "reconciliation", view{Title: langFrom(ctx).T("page.reconciliation"), Data: d})
 }

@@ -33,7 +33,7 @@ func (u *UI) audit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	keep := keepQuery(q, "action", "target_type", "target_id", "actor_type", "actor_id")
-	u.tpl.render(w, r, http.StatusOK, "audit", view{Title: "Audit", Data: auditData{
+	u.tpl.render(w, r, http.StatusOK, "audit", view{Title: langFrom(r.Context()).T("page.audit"), Data: auditData{
 		Filter: f, Events: events, Pager: newPager("/admin/audit", keep, limit, offset, len(events)), ActorTypes: actorTypes,
 	}})
 }

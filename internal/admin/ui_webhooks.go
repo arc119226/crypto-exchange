@@ -80,9 +80,10 @@ type webhooksData struct {
 
 func (u *UI) webhooks(w http.ResponseWriter, r *http.Request) {
 	ctx, q := r.Context(), r.URL.Query()
+	l := langFrom(ctx)
 	var d webhooksData
 	if u.h.webhooks == nil {
-		u.tpl.render(w, r, http.StatusOK, "webhooks", view{Title: "Webhooks", Flash: &flash{Kind: "err", Text: "Webhooks are disabled: WEBHOOK_SIGNING_KEY is not set."}, Data: d})
+		u.tpl.render(w, r, http.StatusOK, "webhooks", view{Title: l.T("page.webhooks"), Flash: &flash{Kind: "err", Text: l.T("flash.webhooks_disabled")}, Data: d})
 		return
 	}
 	var (
@@ -101,7 +102,7 @@ func (u *UI) webhooks(w http.ResponseWriter, r *http.Request) {
 	if id := q.Get("endpoint"); id != "" {
 		switch ep, err := u.h.webhooks.Get(ctx, id); {
 		case errors.Is(err, webhook.ErrNotFound):
-			notice = &flash{Kind: "err", Text: "No webhook endpoint " + id + "."}
+			notice = &flash{Kind: "err", Text: l.T("flash.no_endpoint", id)}
 		case err != nil:
 			u.fail(w, r, "webhooks", "endpoint", err)
 			return
@@ -115,7 +116,7 @@ func (u *UI) webhooks(w http.ResponseWriter, r *http.Request) {
 			d.Pager = newPager("/admin/webhooks", keepQuery(q, "endpoint"), limit, offset, len(d.Deliveries))
 		}
 	}
-	u.tpl.render(w, r, http.StatusOK, "webhooks", view{Title: "Webhooks", Flash: notice, Data: d})
+	u.tpl.render(w, r, http.StatusOK, "webhooks", view{Title: l.T("page.webhooks"), Flash: notice, Data: d})
 }
 
 func eventsField(s string) []string {
@@ -153,7 +154,7 @@ func (u *UI) updateWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ep, err := u.h.updateWebhookEndpoint(r.Context(), id, url, events, label, reason)
-	u.done(w, r, "/admin/webhooks", err, "Endpoint "+ep.ID+" saved.")
+	u.done(w, r, "/admin/webhooks", err, f.l.T("flash.endpoint_saved", ep.ID))
 }
 
 func (u *UI) setWebhookStatus(w http.ResponseWriter, r *http.Request) {
@@ -165,9 +166,9 @@ func (u *UI) setWebhookStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ep, err := u.h.setWebhookEndpointStatus(r.Context(), id, status, reason)
-	msg := "Endpoint " + ep.ID + " is now " + ep.Status + "."
+	msg := f.l.T("flash.endpoint_status", ep.ID, f.l.Status(ep.Status))
 	if ep.Status == webhook.StatusDisabled {
-		msg += " Whatever was queued for it was dropped."
+		msg += " " + f.l.T("flash.endpoint_dropped")
 	}
 	u.done(w, r, "/admin/webhooks", err, msg)
 }
@@ -198,5 +199,5 @@ func (u *UI) replayWebhookPage(w http.ResponseWriter, r *http.Request) {
 		u.done(w, r, back, err, "")
 		return
 	}
-	u.done(w, r, back, nil, "Queued event "+rep.EventID+" again; the first attempt is due "+rep.NextAttemptAt.UTC().Format("15:04:05Z")+".")
+	u.done(w, r, back, nil, langFrom(r.Context()).T("flash.replayed", rep.EventID, rep.NextAttemptAt.UTC().Format("15:04:05Z")))
 }

@@ -1,22 +1,22 @@
 {{define "content"}}
-<h1>Audit trail</h1>
+<h1>{{T "audit.title"}}</h1>
 {{with .Data}}
 <form method="get" action="/admin/audit" class="row">
-  <label>Actor <select name="actor_type"><option value="">any</option>{{$a := .Filter.ActorType}}{{range .ActorTypes}}<option value="{{.}}"{{if eq (print .) $a}} selected{{end}}>{{.}}</option>{{end}}</select></label>
-  <label>Actor id <input type="text" name="actor_id" value="{{.Filter.ActorID}}" class="mono"></label>
-  <label>Action <input type="text" name="action" value="{{.Filter.Action}}" placeholder="user.status.update"></label>
-  <label>Target type <input type="text" name="target_type" value="{{.Filter.TargetType}}"></label>
-  <label>Target id <input type="text" name="target_id" value="{{.Filter.TargetID}}" class="mono"></label>
-  <button type="submit" class="quiet">Filter</button>
+  <label>{{T "col.actor"}} <select name="actor_type"><option value="">{{T "filter.any"}}</option>{{$a := .Filter.ActorType}}{{range .ActorTypes}}<option value="{{.}}"{{if eq (print .) $a}} selected{{end}}>{{status .}}</option>{{end}}</select></label>
+  <label>{{T "audit.actor_id"}} <input type="text" name="actor_id" value="{{.Filter.ActorID}}" class="mono"></label>
+  <label>{{T "col.action"}} <input type="text" name="action" value="{{.Filter.Action}}" placeholder="user.status.update"></label>
+  <label>{{T "audit.target_type"}} <input type="text" name="target_type" value="{{.Filter.TargetType}}"></label>
+  <label>{{T "audit.target_id"}} <input type="text" name="target_id" value="{{.Filter.TargetID}}" class="mono"></label>
+  <button type="submit" class="quiet">{{T "filter.apply"}}</button>
 </form>
 <section id="list">
 <table>
-  <thead><tr><th>When</th><th>Actor</th><th>Action</th><th>Target</th><th>Before</th><th>After</th><th>IP</th></tr></thead>
+  <thead><tr><th>{{T "col.when"}}</th><th>{{T "col.actor"}}</th><th>{{T "col.action"}}</th><th>{{T "col.target"}}</th><th>{{T "col.before"}}</th><th>{{T "col.after"}}</th><th>IP</th></tr></thead>
   <tbody>
   {{range .Events}}
   <tr>
     <td>{{when .CreatedAt}}<br><span class="muted">#{{.ID}}</span></td>
-    <td>{{.ActorType}}<br><a class="mono muted" href="/admin/audit?actor_type={{.ActorType}}&amp;actor_id={{.ActorID}}">{{.ActorID}}</a></td>
+    <td>{{status .ActorType}}<br><a class="mono muted" href="/admin/audit?actor_type={{.ActorType}}&amp;actor_id={{.ActorID}}">{{.ActorID}}</a></td>
     <td>{{.Action}}</td>
     <td>{{.TargetType}}<br><span class="mono muted">{{.TargetID}}</span></td>
     <td><code>{{jsonc .Before}}</code></td>
@@ -24,7 +24,7 @@
     <td class="mono">{{.IP}}</td>
   </tr>
   {{else}}
-  <tr><td colspan="7" class="muted">Nothing matches.</td></tr>
+  <tr><td colspan="7" class="muted">{{T "audit.empty"}}</td></tr>
   {{end}}
   </tbody>
 </table>

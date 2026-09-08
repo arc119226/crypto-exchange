@@ -24,9 +24,10 @@ type withdrawalsData struct {
 
 func (u *UI) withdrawals(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
+	l := langFrom(ctx)
 	d := withdrawalsData{Actions: resolveActions, Lookup: strings.TrimSpace(r.URL.Query().Get("id"))}
 	if u.h.withdrawals == nil {
-		u.tpl.render(w, r, http.StatusOK, "withdrawals", view{Title: "Withdrawals", Flash: &flash{Kind: "err", Text: "Withdrawals are not enabled on this deployment."}, Data: d})
+		u.tpl.render(w, r, http.StatusOK, "withdrawals", view{Title: l.T("page.withdrawals"), Flash: &flash{Kind: "err", Text: l.T("flash.withdrawals_disabled")}, Data: d})
 		return
 	}
 	var (
@@ -40,7 +41,7 @@ func (u *UI) withdrawals(w http.ResponseWriter, r *http.Request) {
 	if d.Lookup != "" {
 		switch rec, err := u.h.withdrawals.Get(ctx, d.Lookup); {
 		case errors.Is(err, withdrawal.ErrNotFound):
-			notice = &flash{Kind: "err", Text: "No withdrawal " + d.Lookup + "."}
+			notice = &flash{Kind: "err", Text: l.T("flash.no_withdrawal", d.Lookup)}
 		case err != nil:
 			u.fail(w, r, "withdrawals", "withdrawal", err)
 			return
@@ -48,7 +49,7 @@ func (u *UI) withdrawals(w http.ResponseWriter, r *http.Request) {
 			d.Selected = &rec
 		}
 	}
-	u.tpl.render(w, r, http.StatusOK, "withdrawals", view{Title: "Withdrawals", Flash: notice, Data: d})
+	u.tpl.render(w, r, http.StatusOK, "withdrawals", view{Title: l.T("page.withdrawals"), Flash: notice, Data: d})
 }
 
 func (u *UI) reviewWithdrawalPage(w http.ResponseWriter, r *http.Request) {
@@ -61,15 +62,15 @@ func (u *UI) reviewWithdrawalPage(w http.ResponseWriter, r *http.Request) {
 	}
 	approve := decision == "approve"
 	if !approve && decision != "reject" {
-		u.bounce(w, r, "/admin/withdrawals", "The decision must be approve or reject.")
+		u.bounce(w, r, "/admin/withdrawals", f.l.T("flash.decision"))
 		return
 	}
 	if !approve && note == "" {
-		u.bounce(w, r, "/admin/withdrawals", "A rejection must carry a note saying why.")
+		u.bounce(w, r, "/admin/withdrawals", f.l.T("flash.reject_note"))
 		return
 	}
 	rec, err := u.h.reviewWithdrawal(r.Context(), id, approve, note)
-	u.done(w, r, "/admin/withdrawals", err, "Withdrawal "+rec.ID+" is now "+rec.Status+".")
+	u.done(w, r, "/admin/withdrawals", err, f.l.T("flash.withdrawal_status", rec.ID, f.l.Status(rec.Status)))
 }
 
 func (u *UI) resolveWithdrawalPage(w http.ResponseWriter, r *http.Request) {
@@ -81,7 +82,7 @@ func (u *UI) resolveWithdrawalPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if note == "" {
-		u.bounce(w, r, "/admin/withdrawals", "A resolution must carry a note saying why.")
+		u.bounce(w, r, "/admin/withdrawals", f.l.T("flash.resolve_note"))
 		return
 	}
 	rec, err := u.h.resolveWithdrawal(r.Context(), id, action, note)
@@ -89,5 +90,5 @@ func (u *UI) resolveWithdrawalPage(w http.ResponseWriter, r *http.Request) {
 	if rec.ID != "" {
 		back += "?id=" + rec.ID
 	}
-	u.done(w, r, back, err, "Requested "+string(action)+" on "+rec.ID+"; the chain role applies it on its next tick.")
+	u.done(w, r, back, err, f.l.T("flash.resolve_requested", f.l.Status(action), rec.ID))
 }

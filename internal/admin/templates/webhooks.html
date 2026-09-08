@@ -1,59 +1,59 @@
 {{define "content"}}
-<h1>Webhooks</h1>
+<h1>{{T "webhooks.title"}}</h1>
 {{with .Data}}
 {{with .Reveal}}
 <section class="card reveal">
-  <h2>Signing secret for <span class="mono">{{.EndpointID}}</span></h2>
-  <p>This is the only time it is shown. Give it to the receiver now.</p>
+  <h2>{{T "webhooks.reveal.title"}} <span class="mono">{{.EndpointID}}</span></h2>
+  <p>{{T "webhooks.reveal.once"}}</p>
   <pre class="mono">{{.Secret}}</pre>
-  {{if .Until}}<p class="muted">Deliveries carry both signatures until {{whenp .Until}}; after that, only this one.</p>{{end}}
+  {{if .Until}}<p class="muted">{{T "webhooks.reveal.until.before"}} {{whenp .Until}}{{T "webhooks.reveal.until.after"}}</p>{{end}}
 </section>
 {{end}}
 <section id="list">
 <table>
-  <thead><tr><th>Endpoint</th><th>Events</th><th>Status</th><th>Controls</th></tr></thead>
+  <thead><tr><th>{{T "col.endpoint"}}</th><th>{{T "col.events"}}</th><th>{{T "col.status"}}</th><th>{{T "col.controls"}}</th></tr></thead>
   <tbody>
   {{range .Endpoints}}
   <tr>
     <td><a href="/admin/webhooks?endpoint={{.ID}}">{{if .Label}}{{.Label}}{{else}}{{.ID}}{{end}}</a><br><span class="mono muted">{{.URL}}</span></td>
     <td>{{join .Events ", "}}</td>
-    <td><span class="badge {{badge .Status}}">{{.Status}}</span><br><span class="muted">since {{when .UpdatedAt}}</span></td>
+    <td><span title="{{.Status}}" class="badge {{badge .Status}}">{{status .Status}}</span><br><span class="muted">{{T "webhooks.since"}} {{when .UpdatedAt}}</span></td>
     <td>
       <form method="post" action="/admin/webhooks/{{.ID}}/status" class="inline">
         {{if eq .Status "active"}}<input type="hidden" name="status" value="disabled">{{else}}<input type="hidden" name="status" value="active">{{end}}
-        <input type="text" name="reason" required placeholder="reason">
-        <button type="submit" class="quiet">{{if eq .Status "active"}}Disable{{else}}Enable{{end}}</button>
+        <input type="text" name="reason" required placeholder="{{T "form.reason.short"}}">
+        <button type="submit" class="quiet">{{if eq .Status "active"}}{{T "webhooks.disable"}}{{else}}{{T "webhooks.enable"}}{{end}}</button>
       </form>
       <form method="post" action="/admin/webhooks/{{.ID}}/rotate-secret" class="inline">
-        <input type="number" name="grace_hours" value="24" min="1" max="168" aria-label="grace hours">h
-        <input type="text" name="reason" required placeholder="reason">
-        <button type="submit" class="quiet">Rotate secret</button>
+        <input type="number" name="grace_hours" value="24" min="1" max="168" aria-label="{{T "webhooks.grace_hours"}}">h
+        <input type="text" name="reason" required placeholder="{{T "form.reason.short"}}">
+        <button type="submit" class="quiet">{{T "webhooks.rotate"}}</button>
       </form>
     </td>
   </tr>
   <tr><td colspan="4">
-    <details><summary>Edit</summary>
+    <details><summary>{{T "common.edit"}}</summary>
       <form method="post" action="/admin/webhooks/{{.ID}}" class="row">
         <label>URL <input type="url" name="url" value="{{.URL}}" required></label>
-        <label>Events <input type="text" name="events" value="{{join .Events ","}}" required placeholder="trade.executed,withdrawal.state_changed"></label>
-        <label>Label <input type="text" name="label" value="{{.Label}}"></label>
-        <label>Reason <input type="text" name="reason" required placeholder="recorded in the audit trail"></label>
-        <button type="submit">Save</button>
+        <label>{{T "col.events"}} <input type="text" name="events" value="{{join .Events ","}}" required placeholder="trade.executed,withdrawal.state_changed"></label>
+        <label>{{T "col.label"}} <input type="text" name="label" value="{{.Label}}"></label>
+        <label>{{T "form.reason"}} <input type="text" name="reason" required placeholder="{{T "form.reason.placeholder"}}"></label>
+        <button type="submit">{{T "common.save"}}</button>
       </form>
     </details>
   </td></tr>
   {{else}}
-  <tr><td colspan="4" class="muted">No endpoints. Add one below.</td></tr>
+  <tr><td colspan="4" class="muted">{{T "webhooks.empty"}}</td></tr>
   {{end}}
   </tbody>
 </table>
 </section>
 {{with .Selected}}
 <section class="card" id="deliveries">
-  <h2>Deliveries to {{if .Label}}{{.Label}}{{else}}{{.ID}}{{end}}</h2>
-  <p class="muted"><span class="mono">{{.URL}}</span> · newest first · a replay queues the event again under a new run</p>
+  <h2>{{T "webhooks.deliveries_to"}} {{if .Label}}{{.Label}}{{else}}{{.ID}}{{end}}</h2>
+  <p class="muted"><span class="mono">{{.URL}}</span> · {{T "webhooks.deliveries.hint"}}</p>
   <table>
-    <thead><tr><th>When</th><th>Event</th><th class="num">Attempt</th><th>Status</th><th class="num">HTTP</th><th>Error</th><th class="num">ms</th><th></th></tr></thead>
+    <thead><tr><th>{{T "col.when"}}</th><th>{{T "col.event"}}</th><th class="num">{{T "col.attempt"}}</th><th>{{T "col.status"}}</th><th class="num">HTTP</th><th>{{T "col.error"}}</th><th class="num">ms</th><th></th></tr></thead>
     <tbody>
     {{$ep := .ID}}
     {{range $.Data.Deliveries}}
@@ -61,14 +61,14 @@
       <td>{{when .CreatedAt}}</td>
       <td>{{.EventType}}<br><span class="mono muted">{{.EventID}}</span></td>
       <td class="num">{{.Attempt}}</td>
-      <td><span class="badge {{badge .Status}}">{{.Status}}</span></td>
+      <td><span title="{{.Status}}" class="badge {{badge .Status}}">{{status .Status}}</span></td>
       <td class="num">{{if .ResponseStatus}}{{.ResponseStatus}}{{end}}</td>
       <td>{{.Error}}</td>
       <td class="num">{{.Duration.Milliseconds}}</td>
-      <td><form method="post" action="/admin/webhooks/{{$ep}}/deliveries/{{.ID}}/replay" class="inline"><button type="submit" class="quiet">Replay</button></form></td>
+      <td><form method="post" action="/admin/webhooks/{{$ep}}/deliveries/{{.ID}}/replay" class="inline"><button type="submit" class="quiet">{{T "webhooks.replay"}}</button></form></td>
     </tr>
     {{else}}
-    <tr><td colspan="8" class="muted">Nothing delivered yet.</td></tr>
+    <tr><td colspan="8" class="muted">{{T "webhooks.no_deliveries"}}</td></tr>
     {{end}}
     </tbody>
   </table>
@@ -76,13 +76,13 @@
 </section>
 {{end}}
 <section class="card">
-  <h2>New endpoint</h2>
-  <p class="muted">The secret is shown once, on the next page.</p>
+  <h2>{{T "webhooks.new"}}</h2>
+  <p class="muted">{{T "webhooks.new.hint"}}</p>
   <form method="post" action="/admin/webhooks" class="row">
     <label>URL <input type="url" name="url" required placeholder="https://example.com/hooks"></label>
-    <label>Events <input type="text" name="events" required placeholder="trade.executed,withdrawal.state_changed"></label>
-    <label>Label <input type="text" name="label" placeholder="acme prod"></label>
-    <button type="submit">Create</button>
+    <label>{{T "col.events"}} <input type="text" name="events" required placeholder="trade.executed,withdrawal.state_changed"></label>
+    <label>{{T "col.label"}} <input type="text" name="label" placeholder="acme prod"></label>
+    <button type="submit">{{T "common.create"}}</button>
   </form>
 </section>
 {{end}}

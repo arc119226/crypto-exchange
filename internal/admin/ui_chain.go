@@ -51,5 +51,5 @@ func (u *UI) chain(w http.ResponseWriter, r *http.Request) {
 		u.fail(w, r, "chain", "sweeps", err)
 		return
 	}
-	u.tpl.render(w, r, http.StatusOK, "chain", view{Title: "Chain", Data: d})
+	u.tpl.render(w, r, http.StatusOK, "chain", view{Title: langFrom(ctx).T("page.chain"), Data: d})
 }

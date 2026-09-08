@@ -1,12 +1,12 @@
 {{define "content"}}
-<h1>Reconciliation</h1>
+<h1>{{T "recon.title"}}</h1>
 {{with .Data}}
 <section class="card">
-  <h2>Latest pass {{with .Latest}}<span class="badge {{if .Balanced}}ok{{else}}bad{{end}}">{{if .Balanced}}balanced{{else}}BREAK{{end}}</span>{{end}}</h2>
+  <h2>{{T "recon.latest"}} {{with .Latest}}<span class="badge {{if .Balanced}}ok{{else}}bad{{end}}">{{if .Balanced}}{{T "recon.balanced"}}{{else}}{{T "recon.break"}}{{end}}</span>{{end}}</h2>
   {{with .Latest}}
-  <p class="muted">{{when .FinishedAt}} · chain {{.ChainID}} · <span class="mono">{{.ID}}</span></p>
+  <p class="muted">{{when .FinishedAt}} · {{T "recon.chain"}} {{.ChainID}} · <span class="mono">{{.ID}}</span></p>
   <table>
-    <thead><tr><th>Asset</th><th class="num">Block</th><th class="num">Ledger</th><th class="num">Chain</th><th class="num">Uncredited</th><th class="num">Above frontier</th><th class="num">In flight</th><th class="num">Diff</th></tr></thead>
+    <thead><tr><th>{{T "col.asset"}}</th><th class="num">{{T "col.block"}}</th><th class="num">{{T "recon.col.ledger"}}</th><th class="num">{{T "recon.col.chain"}}</th><th class="num">{{T "recon.col.uncredited"}}</th><th class="num">{{T "recon.col.above_frontier"}}</th><th class="num">{{T "recon.col.in_flight"}}</th><th class="num">{{T "col.diff"}}</th></tr></thead>
     <tbody>
     {{range .Lines}}
     <tr class="{{if .Broken}}bad{{end}}">
@@ -19,68 +19,68 @@
     </tbody>
   </table>
   {{else}}
-  <p class="muted">No pass has been recorded yet. The chain role writes one every ETH_RECONCILE_INTERVAL.</p>
+  <p class="muted">{{T "recon.no_pass"}}</p>
   {{end}}
 </section>
 <section class="card">
-  <h2>Chain breaks</h2>
-  <p class="muted">On-chain custody against the ledger, per asset and pass. A break is answered by the next balanced pass, or by a house adjustment below.</p>
+  <h2>{{T "recon.chain_breaks"}}</h2>
+  <p class="muted">{{T "recon.chain_breaks.hint"}}</p>
   <table>
-    <thead><tr><th>Detected</th><th>Asset</th><th class="num">Block</th><th class="num">Ledger</th><th class="num">Chain</th><th class="num">Diff</th><th>Report</th></tr></thead>
+    <thead><tr><th>{{T "col.detected"}}</th><th>{{T "col.asset"}}</th><th class="num">{{T "col.block"}}</th><th class="num">{{T "recon.col.ledger"}}</th><th class="num">{{T "recon.col.chain"}}</th><th class="num">{{T "col.diff"}}</th><th>{{T "col.report"}}</th></tr></thead>
     <tbody>
     {{range .ChainBreaks}}
     <tr><td>{{when .DetectedAt}}</td><td>{{.Line.Asset}}</td><td class="num">{{.Line.BlockHeight}}</td><td class="num">{{amount .Line.LedgerTotal}}</td><td class="num">{{amount .Line.ChainTotal}}</td><td class="num"><strong>{{amount .Line.Diff}}</strong></td><td class="mono muted">{{.ReportID}}</td></tr>
     {{else}}
-    <tr><td colspan="7" class="muted">None on record.</td></tr>
+    <tr><td colspan="7" class="muted">{{T "recon.none_on_record"}}</td></tr>
     {{end}}
     </tbody>
   </table>
 </section>
 <section class="card">
-  <h2>Ledger breaks</h2>
-  <p class="muted">The ledger against itself: an asset whose debits and credits disagree. Checked by this role every thirty seconds; closes on its own when the books agree again.</p>
+  <h2>{{T "recon.ledger_breaks"}}</h2>
+  <p class="muted">{{T "recon.ledger_breaks.hint"}}</p>
   <table>
-    <thead><tr><th>Detected</th><th>Asset</th><th class="num">Debits</th><th class="num">Credits</th><th class="num">Diff</th><th>Resolved</th></tr></thead>
+    <thead><tr><th>{{T "col.detected"}}</th><th>{{T "col.asset"}}</th><th class="num">{{T "col.debits"}}</th><th class="num">{{T "col.credits"}}</th><th class="num">{{T "col.diff"}}</th><th>{{T "col.resolved"}}</th></tr></thead>
     <tbody>
     {{range .LedgerBreaks}}
-    <tr><td>{{when .DetectedAt}}</td><td>{{.Asset}}</td><td class="num">{{amount .Debits}}</td><td class="num">{{amount .Credits}}</td><td class="num"><strong>{{amount .Diff}}</strong></td><td>{{if .ResolvedAt}}{{whenp .ResolvedAt}}{{else}}<span class="badge bad">open</span>{{end}}</td></tr>
+    <tr><td>{{when .DetectedAt}}</td><td>{{.Asset}}</td><td class="num">{{amount .Debits}}</td><td class="num">{{amount .Credits}}</td><td class="num"><strong>{{amount .Diff}}</strong></td><td>{{if .ResolvedAt}}{{whenp .ResolvedAt}}{{else}}<span class="badge bad">{{status "open"}}</span>{{end}}</td></tr>
     {{else}}
-    <tr><td colspan="6" class="muted">None on record.</td></tr>
+    <tr><td colspan="6" class="muted">{{T "recon.none_on_record"}}</td></tr>
     {{end}}
     </tbody>
   </table>
 </section>
 <section class="card">
-  <h2>House adjustments</h2>
-  <p class="muted">How a break gets answered once someone has established where it came from. Deliberately not automatic.</p>
+  <h2>{{T "recon.house_adjustments"}}</h2>
+  <p class="muted">{{T "recon.house_adjustments.hint"}}</p>
   <table>
-    <thead><tr><th>#</th><th>When</th><th>Reason</th><th>Postings</th></tr></thead>
+    <thead><tr><th>#</th><th>{{T "col.when"}}</th><th>{{T "col.reason"}}</th><th>{{T "col.postings"}}</th></tr></thead>
     <tbody>
     {{range .HouseAdjustments}}
-    <tr><td class="num">{{.ID}}</td><td>{{when .CreatedAt}}</td><td>{{.Reason}}</td><td>{{range .Postings}}<div><span class="mono">{{.AccountID}}</span> {{.Direction}} {{amount .Amount}} {{.Asset}}</div>{{end}}</td></tr>
+    <tr><td class="num">{{.ID}}</td><td>{{when .CreatedAt}}</td><td>{{.Reason}}</td><td>{{range .Postings}}<div><span class="mono">{{.AccountID}}</span> {{status .Direction}} {{amount .Amount}} {{.Asset}}</div>{{end}}</td></tr>
     {{else}}
-    <tr><td colspan="4" class="muted">None yet.</td></tr>
+    <tr><td colspan="4" class="muted">{{T "common.none_yet_sentence"}}</td></tr>
     {{end}}
     </tbody>
   </table>
   <form method="post" action="/admin/ledger/house-adjustments" class="row">
-    <label>House account <select name="code">{{range .HouseCodes}}<option value="{{.}}">{{.}}</option>{{end}}</select></label>
-    <label>Asset <select name="asset">{{range .Assets}}<option value="{{.Symbol}}">{{.Symbol}}</option>{{end}}</select></label>
-    <label>Amount <input type="text" name="amount" required></label>
-    <label>Direction <select name="direction"><option value="debit">debit</option><option value="credit">credit</option></select></label>
-    <label>Reason <input type="text" name="reason" required placeholder="where the difference came from"></label>
-    <button type="submit" class="danger">Post</button>
+    <label>{{T "recon.house_account"}} <select name="code">{{range .HouseCodes}}<option value="{{.}}">{{.}}</option>{{end}}</select></label>
+    <label>{{T "col.asset"}} <select name="asset">{{range .Assets}}<option value="{{.Symbol}}">{{.Symbol}}</option>{{end}}</select></label>
+    <label>{{T "col.amount"}} <input type="text" name="amount" required></label>
+    <label>{{T "col.direction"}} <select name="direction"><option value="debit">{{status "debit"}}</option><option value="credit">{{status "credit"}}</option></select></label>
+    <label>{{T "form.reason"}} <input type="text" name="reason" required placeholder="{{T "recon.reason.placeholder"}}"></label>
+    <button type="submit" class="danger">{{T "common.post"}}</button>
   </form>
 </section>
 <section class="card">
-  <h2>Passes</h2>
+  <h2>{{T "recon.passes"}}</h2>
   <table>
-    <thead><tr><th>Finished</th><th>Result</th><th class="num">Assets</th><th>Report</th></tr></thead>
+    <thead><tr><th>{{T "col.finished"}}</th><th>{{T "col.result"}}</th><th class="num">{{T "col.assets"}}</th><th>{{T "col.report"}}</th></tr></thead>
     <tbody>
     {{range .Reports}}
-    <tr><td>{{when .FinishedAt}}</td><td><span class="badge {{if .Balanced}}ok{{else}}bad{{end}}">{{if .Balanced}}balanced{{else}}break{{end}}</span></td><td class="num">{{len .Lines}}</td><td class="mono muted">{{.ID}}</td></tr>
+    <tr><td>{{when .FinishedAt}}</td><td><span class="badge {{if .Balanced}}ok{{else}}bad{{end}}">{{if .Balanced}}{{T "recon.balanced"}}{{else}}{{T "recon.break_lower"}}{{end}}</span></td><td class="num">{{len .Lines}}</td><td class="mono muted">{{.ID}}</td></tr>
     {{else}}
-    <tr><td colspan="4" class="muted">None yet.</td></tr>
+    <tr><td colspan="4" class="muted">{{T "common.none_yet_sentence"}}</td></tr>
     {{end}}
     </tbody>
   </table>

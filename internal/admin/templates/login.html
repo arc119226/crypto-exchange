@@ -1,15 +1,15 @@
 {{define "content"}}
 <section class="card narrow">
-  <h1>Sign in</h1>
+  <h1>{{T "login.title"}}</h1>
   <form method="post" action="/admin/login">
-    <label>Email
+    <label>{{T "login.email"}}
       <input type="email" name="email" value="{{if .Data}}{{.Data.Email}}{{end}}" autocomplete="username" required autofocus>
     </label>
-    <label>Password
+    <label>{{T "login.password"}}
       <input type="password" name="password" autocomplete="current-password" required>
     </label>
-    <button type="submit">Continue</button>
+    <button type="submit">{{T "login.continue"}}</button>
   </form>
-  <p class="muted">A code from your authenticator is asked for next.</p>
+  <p class="muted">{{T "login.next_step"}}</p>
 </section>
 {{end}}

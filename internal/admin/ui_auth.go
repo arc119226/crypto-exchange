@@ -29,24 +29,26 @@ func (u *UI) loginForm(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	u.tpl.render(w, r, http.StatusOK, "login", view{Title: "Sign in"})
+	l := langFrom(r.Context())
+	u.tpl.render(w, r, http.StatusOK, "login", view{Title: l.T("page.sign_in")})
 }
 
 func (u *UI) login(w http.ResponseWriter, r *http.Request) {
+	l := langFrom(r.Context())
 	if err := r.ParseForm(); err != nil {
-		u.tpl.render(w, r, http.StatusBadRequest, "login", view{Title: "Sign in", Flash: &flash{Kind: "err", Text: "Bad form."}})
+		u.tpl.render(w, r, http.StatusBadRequest, "login", view{Title: l.T("page.sign_in"), Flash: &flash{Kind: "err", Text: l.T("form.bad")}})
 		return
 	}
 	email := strings.TrimSpace(r.PostFormValue("email"))
 	sess, err := u.sessions.AdminLogin(r.Context(), email, r.PostFormValue("password"), clientIPFrom(r.Context()))
 	if err != nil {
 		outcome := "password_failed"
-		msg := "Wrong email or password."
+		msg := l.T("login.wrong")
 		if !errors.Is(err, auth.ErrInvalidCredentials) {
-			outcome, msg = "error", "Something went wrong; try again."
+			outcome, msg = "error", l.T("login.error")
 		}
 		u.metrics.logins.WithLabelValues(outcome).Inc()
-		u.tpl.render(w, r, http.StatusUnauthorized, "login", view{Title: "Sign in", Flash: &flash{Kind: "err", Text: msg}, Data: loginData{Email: email}})
+		u.tpl.render(w, r, http.StatusUnauthorized, "login", view{Title: l.T("page.sign_in"), Flash: &flash{Kind: "err", Text: msg}, Data: loginData{Email: email}})
 		return
 	}
 	u.metrics.logins.WithLabelValues("password_ok").Inc()
@@ -67,13 +69,14 @@ func (u *UI) totpForm(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, HomePath, http.StatusSeeOther)
 		return
 	}
-	u.tpl.render(w, r, http.StatusOK, "totp", view{Title: "Verify", Data: totpData{Enrolled: s.TOTPEnabled, Pending: s.TOTPPending}})
+	u.tpl.render(w, r, http.StatusOK, "totp", view{Title: langFrom(r.Context()).T("page.verify"), Data: totpData{Enrolled: s.TOTPEnabled, Pending: s.TOTPPending}})
 }
 
 func (u *UI) totp(w http.ResponseWriter, r *http.Request) {
 	s, _ := SessionFrom(r.Context())
+	l := langFrom(r.Context())
 	if err := r.ParseForm(); err != nil {
-		u.tpl.render(w, r, http.StatusBadRequest, "totp", view{Title: "Verify", Flash: &flash{Kind: "err", Text: "Bad form."}})
+		u.tpl.render(w, r, http.StatusBadRequest, "totp", view{Title: l.T("page.verify"), Flash: &flash{Kind: "err", Text: l.T("form.bad")}})
 		return
 	}
 	c, err := r.Cookie(SessionCookie)
@@ -90,20 +93,20 @@ func (u *UI) totp(w http.ResponseWriter, r *http.Request) {
 		next, err = u.sessions.TOTPConfirm(r.Context(), c.Value, code, ip)
 	}
 	if err != nil {
-		outcome, msg, status := "totp_failed", "That code is not right.", http.StatusUnauthorized
+		outcome, msg, status := "totp_failed", l.T("totp.wrong"), http.StatusUnauthorized
 		switch {
 		case errors.Is(err, auth.ErrTOTPLocked):
-			outcome, msg = "locked", "Too many wrong codes. Locked for fifteen minutes."
+			outcome, msg = "locked", l.T("totp.locked")
 		case errors.Is(err, auth.ErrTOTPNotEnrolled):
-			outcome, msg = "not_enrolled", "No authenticator has been set up for this account. Run `exchange admin totp enroll` first."
+			outcome, msg = "not_enrolled", l.T("totp.not_enrolled")
 		case errors.Is(err, auth.ErrInvalidToken):
 			http.Redirect(w, r, LoginPath, http.StatusSeeOther)
 			return
 		case !errors.Is(err, auth.ErrInvalidTOTP) && !errors.Is(err, auth.ErrTOTPAlreadyEnabled):
-			outcome, msg, status = "error", "Something went wrong; try again.", http.StatusInternalServerError
+			outcome, msg, status = "error", l.T("login.error"), http.StatusInternalServerError
 		}
 		u.metrics.logins.WithLabelValues(outcome).Inc()
-		u.tpl.render(w, r, status, "totp", view{Title: "Verify", Flash: &flash{Kind: "err", Text: msg}, Data: totpData{Enrolled: s.TOTPEnabled, Pending: s.TOTPPending}})
+		u.tpl.render(w, r, status, "totp", view{Title: l.T("page.verify"), Flash: &flash{Kind: "err", Text: msg}, Data: totpData{Enrolled: s.TOTPEnabled, Pending: s.TOTPPending}})
 		return
 	}
 	u.metrics.logins.WithLabelValues("totp_ok").Inc()
@@ -111,7 +114,7 @@ func (u *UI) totp(w http.ResponseWriter, r *http.Request) {
 	// with the verified one.
 	u.cfg.Cookies.Set(w, next.Token, next.ExpiresAt)
 	if !s.TOTPEnabled {
-		setFlash(w, "ok", "Authenticator confirmed. You are signed in.")
+		setFlash(w, "ok", l.T("totp.confirmed"))
 	}
 	http.Redirect(w, r, HomePath, http.StatusSeeOther)
 }

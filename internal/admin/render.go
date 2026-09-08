@@ -37,6 +37,8 @@ type view struct {
 	Session *auth.AdminSession // nil on the login page
 	Flash   *flash
 	Data    any
+	Lang    string // the language the page is rendered in, for <html lang>
+	Back    string // the request URI, where the language switcher returns to
 }
 
 // flash is a one-shot message carried across a redirect in a cookie.
@@ -47,9 +49,11 @@ type flash struct {
 
 const flashCookie = "admin_flash"
 
-// templates is the parsed page set: layout + partials + one page each.
+// templates is the parsed page set: layout + partials + one page each, once
+// per language, because the translating functions are bound into the
+// FuncMap (see lang.funcs).
 type templates struct {
-	pages map[string]*template.Template
+	pages map[lang]map[string]*template.Template
 }
 
 var funcs = template.FuncMap{
@@ -124,17 +128,20 @@ func loadTemplates() (*templates, error) {
 	if err != nil {
 		return nil, err
 	}
-	t := &templates{pages: map[string]*template.Template{}}
-	for _, f := range pageFiles {
-		name := strings.TrimSuffix(strings.TrimPrefix(f, "templates/"), ".html")
-		if name == "layout" {
-			continue
+	t := &templates{pages: map[lang]map[string]*template.Template{}}
+	for _, l := range langs {
+		t.pages[l] = map[string]*template.Template{}
+		for _, f := range pageFiles {
+			name := strings.TrimSuffix(strings.TrimPrefix(f, "templates/"), ".html")
+			if name == "layout" {
+				continue
+			}
+			tpl, err := template.New("layout").Funcs(funcs).Funcs(l.funcs()).ParseFS(templateFS, "templates/layout.html", "templates/partials/*.html", f)
+			if err != nil {
+				return nil, fmt.Errorf("admin: template %s (%s): %w", name, l, err)
+			}
+			t.pages[l][name] = tpl
 		}
-		tpl, err := template.New("layout").Funcs(funcs).ParseFS(templateFS, "templates/layout.html", "templates/partials/*.html", f)
-		if err != nil {
-			return nil, fmt.Errorf("admin: template %s: %w", name, err)
-		}
-		t.pages[name] = tpl
 	}
 	return t, nil
 }
@@ -142,12 +149,15 @@ func loadTemplates() (*templates, error) {
 // render writes a page. The flash cookie is consumed here: read once, then
 // cleared, so a message shows on the page after the redirect and no other.
 func (t *templates) render(w http.ResponseWriter, r *http.Request, status int, name string, p view) {
-	tpl, ok := t.pages[name]
+	l := langFrom(r.Context())
+	tpl, ok := t.pages[l][name]
 	if !ok {
 		telemetry.Logger(r.Context()).Error("admin: no such template", slog.String("name", name))
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
+	p.Lang = string(l)
+	p.Back = r.URL.RequestURI()
 	if p.Path == "" {
 		p.Path = r.URL.Path
 	}

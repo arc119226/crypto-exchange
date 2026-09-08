@@ -46,6 +46,7 @@ type ctxKey int
 const (
 	clientIPKey ctxKey = iota
 	sessionKey
+	langKey
 )
 
 // clientIPFrom returns the address WithClientIP recorded, or "".

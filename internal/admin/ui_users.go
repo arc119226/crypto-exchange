@@ -49,7 +49,7 @@ func (u *UI) users(w http.ResponseWriter, r *http.Request) {
 			keep.Set(k, q.Get(k))
 		}
 	}
-	u.tpl.render(w, r, http.StatusOK, "users", view{Title: "Users", Data: usersData{
+	u.tpl.render(w, r, http.StatusOK, "users", view{Title: langFrom(r.Context()).T("page.users"), Data: usersData{
 		Filter: f, Users: users, Pager: newPager("/admin/users", keep, limit, offset, len(users)),
 	}})
 }
@@ -58,7 +58,7 @@ func (u *UI) user(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	usr, err := u.h.users.User(r.Context(), id)
 	if errors.Is(err, auth.ErrNotFound) {
-		setFlash(w, "err", "No user "+id+".")
+		setFlash(w, "err", langFrom(r.Context()).T("flash.no_user", id))
 		http.Redirect(w, r, "/admin/users", http.StatusSeeOther)
 		return
 	}
@@ -84,40 +84,42 @@ func (u *UI) user(w http.ResponseWriter, r *http.Request) {
 func (u *UI) setUserKYC(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	back := userPath(id)
+	l := langFrom(r.Context())
 	if err := r.ParseForm(); err != nil {
-		u.bounce(w, r, back, "Bad form.")
+		u.bounce(w, r, back, l.T("form.bad"))
 		return
 	}
 	level, err := strconv.Atoi(r.PostFormValue("kyc_level"))
 	if err != nil {
-		u.bounce(w, r, back, "KYC level must be a number.")
+		u.bounce(w, r, back, l.T("form.kyc_number"))
 		return
 	}
 	reason := strings.TrimSpace(r.PostFormValue("reason"))
 	if reason == "" {
-		u.bounce(w, r, back, "A reason is required; it goes in the audit trail.")
+		u.bounce(w, r, back, l.T("form.reason_required"))
 		return
 	}
 	usr, err := u.h.setUserKYCLevel(r.Context(), id, level, reason)
-	u.done(w, r, back, err, "KYC level is now "+strconv.Itoa(usr.KYCLevel)+".")
+	u.done(w, r, back, err, l.T("flash.kyc_level", usr.KYCLevel))
 }
 
 func (u *UI) setUserStatus(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	back := userPath(id)
+	l := langFrom(r.Context())
 	if err := r.ParseForm(); err != nil {
-		u.bounce(w, r, back, "Bad form.")
+		u.bounce(w, r, back, l.T("form.bad"))
 		return
 	}
 	reason := strings.TrimSpace(r.PostFormValue("reason"))
 	if reason == "" {
-		u.bounce(w, r, back, "A reason is required; it goes in the audit trail.")
+		u.bounce(w, r, back, l.T("form.reason_required"))
 		return
 	}
 	usr, err := u.h.setUserStatus(r.Context(), id, r.PostFormValue("status"), reason)
-	msg := "User is now " + usr.Status + "."
+	msg := l.T("flash.user_status", l.Status(usr.Status))
 	if usr.Status == auth.StatusFrozen {
-		msg = "User is frozen: no login, no orders, no withdrawals."
+		msg = l.T("flash.user_frozen")
 	}
 	u.done(w, r, back, err, msg)
 }
@@ -141,46 +143,52 @@ func (u *UI) bounce(w http.ResponseWriter, r *http.Request, back, text string) {
 }
 
 // done turns a write's outcome into a flash and a redirect. The domain
-// errors are the same ones the REST endpoints map to 400/404/409.
+// errors are the same ones the REST endpoints map to 400/404/409. The
+// flash is worded in the request's language; a domain validation detail
+// (an invalid input the domain package explains itself) stays in English,
+// the same words the CLI prints (ADR-0010).
 func (u *UI) done(w http.ResponseWriter, r *http.Request, back string, err error, ok string) {
+	l := langFrom(r.Context())
 	switch {
 	case err == nil:
 		if ok != "" {
 			setFlash(w, "ok", ok)
 		}
 	case errors.Is(err, auth.ErrNotFound):
-		setFlash(w, "err", "That user no longer exists.")
+		setFlash(w, "err", l.T("flash.user_gone"))
 		back = "/admin/users"
 	case errors.Is(err, auth.ErrLastAdmin):
-		setFlash(w, "err", "This is the last active administrator; freezing them would lock everyone out.")
+		setFlash(w, "err", l.T("flash.last_admin"))
 	case errors.Is(err, auth.ErrInvalidInput):
 		setFlash(w, "err", strings.TrimPrefix(err.Error(), "auth: invalid input: "))
 	case errors.Is(err, errAlreadyExists):
-		setFlash(w, "err", "That one already exists; edit it below.")
+		setFlash(w, "err", l.T("flash.exists"))
 	case errors.Is(err, registry.ErrNotFound):
-		setFlash(w, "err", strings.TrimPrefix(err.Error(), "registry: not found: ")+" does not exist.")
+		setFlash(w, "err", l.T("flash.registry_missing", strings.TrimPrefix(err.Error(), "registry: not found: ")))
 	case errors.Is(err, registry.ErrInvalid):
 		setFlash(w, "err", strings.TrimPrefix(err.Error(), "registry: invalid input: ")+".")
 	case errors.Is(err, ledger.ErrAccountNotFound):
-		setFlash(w, "err", "That account does not exist.")
+		setFlash(w, "err", l.T("flash.account_missing"))
 	case errors.Is(err, ledger.ErrInvalidEntry), errors.Is(err, withdrawal.ErrInvalid), errors.Is(err, webhook.ErrInvalid),
 		errors.Is(err, withdrawal.ErrNotReviewable), errors.Is(err, withdrawal.ErrNotResolvable),
 		errors.Is(err, webhook.ErrDisabled), errors.Is(err, webhook.ErrQueued):
 		setFlash(w, "err", sentence(err))
 	case errors.Is(err, withdrawal.ErrNotFound):
-		setFlash(w, "err", "That withdrawal does not exist.")
+		setFlash(w, "err", l.T("flash.withdrawal_missing"))
 	case errors.Is(err, webhook.ErrNotFound):
-		setFlash(w, "err", "That webhook endpoint or delivery does not exist.")
+		setFlash(w, "err", l.T("flash.webhook_missing"))
 	default:
 		telemetry.Logger(r.Context()).Error("admin: write failed", "path", r.URL.Path, "err", err.Error())
-		setFlash(w, "err", "Something went wrong; nothing was changed.")
+		setFlash(w, "err", l.T("flash.failed"))
 	}
 	http.Redirect(w, r, back, http.StatusSeeOther) //nolint:gosec // G710: back came from userPath, which admits only an id
 }
 
 // fail is a read that could not be served: log it, show the page with an
-// error and no data.
+// error and no data. what is the diagnostic phrase the log carries and stays
+// English inside the translated sentence.
 func (u *UI) fail(w http.ResponseWriter, r *http.Request, page, what string, err error) {
 	telemetry.Logger(r.Context()).Error("admin: "+what, "err", err.Error())
-	u.tpl.render(w, r, http.StatusInternalServerError, page, view{Title: "Error", Flash: &flash{Kind: "err", Text: "Could not read " + what + "."}})
+	l := langFrom(r.Context())
+	u.tpl.render(w, r, http.StatusInternalServerError, page, view{Title: l.T("page.error"), Flash: &flash{Kind: "err", Text: l.T("fail.read", what)}})
 }
