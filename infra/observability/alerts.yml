@@ -110,3 +110,16 @@ groups:
         annotations:
           summary: "No backup has ever succeeded on this stack"
           description: "Start the backup profile (docs/runbooks/backup-restore.md) or fix the sidecar."
+
+      # The host's disk, from node-exporter (deploy/compose/compose.prod.yaml
+      # runs it; a development stack has no such target and this never
+      # evaluates). A full disk stops Postgres, and the WAL archive piling up
+      # because the backup sidecar cannot upload is the likeliest way to get
+      # there (docs/runbooks/backup-restore.md).
+      - alert: DiskAlmostFull
+        expr: node_filesystem_avail_bytes{mountpoint="/", fstype!~"tmpfs|overlay|squashfs"} / node_filesystem_size_bytes{mountpoint="/", fstype!~"tmpfs|overlay|squashfs"} < 0.15
+        for: 10m
+        labels: { severity: critical }
+        annotations:
+          summary: "The root filesystem has {{ $value | humanizePercentage }} left"
+          description: "Check /wal-archive and docker system df first; then grow the disk. Postgres stops when it is full."

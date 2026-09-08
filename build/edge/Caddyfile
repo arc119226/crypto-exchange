@@ -1,0 +1,39 @@
+# The edge of the beta VM (deploy/compose/compose.prod.yaml): TLS, the
+# trade front end as static files, and the three paths the front end talks
+# to proxied to the roles on the compose network. Same origin for all of
+# them, so no CORS anywhere (docs/domain.md §25).
+#
+# EDGE_DOMAIN is the site: a real name gets an ACME certificate (80 and 443
+# must reach this container), the default "localhost" gets Caddy's internal
+# CA, which is what a VM without DNS yet runs on.
+{
+	admin off
+}
+
+{$EDGE_DOMAIN:localhost} {
+	encode zstd gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options nosniff
+		X-Frame-Options DENY
+		Referrer-Policy strict-origin-when-cross-origin
+		-Server
+	}
+
+	handle /v1/* {
+		reverse_proxy exchange-api:8080
+	}
+	handle /.well-known/* {
+		reverse_proxy exchange-api:8080
+	}
+	# /ws/v1/public and /ws/v1/private; WebSocket upgrades pass through
+	handle /ws/* {
+		reverse_proxy exchange-stream:8081
+	}
+	handle {
+		root * /srv
+		try_files {path} /index.html
+		file_server
+	}
+}

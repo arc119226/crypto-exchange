@@ -451,6 +451,9 @@ func (c Config) ValidateFor(roles []Role) error {
 // secretsWithFileVariant lists variables that may be supplied as NAME_FILE.
 var secretsWithFileVariant = []string{
 	"DATABASE_URL",
+	// NATS_URL is here because a production URL carries the login in its
+	// userinfo (nats://user:password@host), which nats.go reads.
+	"NATS_URL",
 	"REDIS_PASSWORD",
 	"WALLET_KEYSTORE_PASSPHRASE",
 	"WALLET_KEYSTORE_NEW_PASSPHRASE",
@@ -650,7 +653,7 @@ func (c Config) LogValue() slog.Value {
 		slog.String("admin_addr", c.AdminAddr),
 		slog.String("database_url", telemetry.RedactURL(c.DB.URL.Reveal())),
 		slog.Int("database_max_conns", int(c.DB.MaxConns)),
-		slog.String("nats_url", c.NATS.URL),
+		slog.String("nats_url", telemetry.RedactURL(c.NATS.URL)),
 		slog.String("redis_addr", c.Redis.Addr),
 		slog.String("eth_rpc_url", telemetry.RedactEndpoint(c.Chain.RPCURL)),
 		slog.Int64("eth_chain_id", c.Chain.ChainID),

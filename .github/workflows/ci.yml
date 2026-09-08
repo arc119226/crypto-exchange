@@ -221,7 +221,7 @@ jobs:
         # finishes in seconds, and a syntax error found twelve minutes into a
         # container run is twelve minutes wasted.
         run: |
-          for f in scripts/gen-dev-secrets.sh scripts/e2e.sh scripts/e2e-web.sh scripts/kind-secrets.sh scripts/helm-e2e.sh scripts/backup.sh scripts/restore-drill.sh; do
+          for f in scripts/gen-dev-secrets.sh scripts/e2e.sh scripts/e2e-web.sh scripts/kind-secrets.sh scripts/helm-e2e.sh scripts/backup.sh scripts/restore-drill.sh scripts/gen-prod-secrets.sh deploy/vm/bootstrap.sh; do
             bash -n "$f"
           done
       - name: generated code is in sync (oapi-codegen, sqlc)
@@ -455,6 +455,55 @@ jobs:
         run: |
           docker run --rm crypto-exchange:ci version
           docker run --rm --entrypoint /exchangectl crypto-exchange:ci version
+      # The two images the production overlay adds (deploy/compose/compose.prod.yaml):
+      # Caddy with the built front end, and the backup sidecar. Same tags,
+      # their own cache scopes.
+      - name: edge image metadata
+        id: meta-edge
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}-edge
+          tags: |
+            type=raw,value=dev,enable=${{ github.ref == 'refs/heads/main' }}
+            type=semver,pattern={{version}}
+            type=sha,format=short
+      - name: build the edge image (load locally)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: build/edge/Dockerfile
+          load: true
+          tags: crypto-exchange-edge:ci
+          cache-from: type=gha,scope=edge
+          cache-to: type=gha,scope=edge,mode=max
+      - name: edge image smoke
+        run: |
+          docker run --rm crypto-exchange-edge:ci caddy version
+          docker run --rm crypto-exchange-edge:ci caddy validate --config /etc/caddy/Caddyfile
+          docker run --rm --entrypoint sh crypto-exchange-edge:ci -c 'test -s /srv/index.html && ls /srv/assets | grep -q "\.js$"'
+      - name: backup image metadata
+        id: meta-backup
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}-backup
+          tags: |
+            type=raw,value=dev,enable=${{ github.ref == 'refs/heads/main' }}
+            type=semver,pattern={{version}}
+            type=sha,format=short
+      - name: build the backup image (load locally)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: build/backup/Dockerfile
+          load: true
+          tags: crypto-exchange-backup:ci
+          cache-from: type=gha,scope=backup
+          cache-to: type=gha,scope=backup,mode=max
+      - name: backup image smoke
+        run: |
+          docker run --rm --entrypoint mc crypto-exchange-backup:ci --version
+          docker run --rm --entrypoint pg_dump crypto-exchange-backup:ci --version
+          docker run --rm --entrypoint bash crypto-exchange-backup:ci -n /usr/local/bin/backup.sh
       - name: login to ghcr
         if: github.event_name == 'push'
         uses: docker/login-action@v3
@@ -476,3 +525,23 @@ jobs:
             COMMIT=${{ github.sha }}
             DATE=${{ github.event.head_commit.timestamp }}
           cache-from: type=gha
+      - name: push the edge image
+        if: github.event_name == 'push'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: build/edge/Dockerfile
+          push: true
+          tags: ${{ steps.meta-edge.outputs.tags }}
+          labels: ${{ steps.meta-edge.outputs.labels }}
+          cache-from: type=gha,scope=edge
+      - name: push the backup image
+        if: github.event_name == 'push'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: build/backup/Dockerfile
+          push: true
+          tags: ${{ steps.meta-backup.outputs.tags }}
+          labels: ${{ steps.meta-backup.outputs.labels }}
+          cache-from: type=gha,scope=backup

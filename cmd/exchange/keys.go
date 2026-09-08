@@ -40,6 +40,9 @@ func newKeysCmd() *cobra.Command {
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if importOpts.Passphrase == "" {
+				if err := app.ExpandSecretEnv(); err != nil {
+					return runtimeErr(err)
+				}
 				importOpts.Passphrase = os.Getenv("WALLET_KEYSTORE_PASSPHRASE")
 			}
 			path, hot, err := app.ImportMnemonic(importOpts)

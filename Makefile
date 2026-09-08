@@ -9,6 +9,11 @@ ENV_FILE      ?= .env
 COMPOSE       := docker compose -f $(COMPOSE_FILE) --env-file $(ENV_FILE)
 SEPOLIA_FILE  := deploy/compose/compose.sepolia.yaml
 COMPOSE_SEP   := docker compose -f $(COMPOSE_FILE) -f $(SEPOLIA_FILE) --env-file $(ENV_FILE)
+PROD_FILE     := deploy/compose/compose.prod.yaml
+ENV_PROD      ?= .env.prod
+COMPOSE_PROD  := docker compose -f $(COMPOSE_FILE) -f $(SEPOLIA_FILE) -f $(PROD_FILE) --env-file $(ENV_PROD)
+PROD_PROFILES := --profile infra --profile app --profile observability --profile backup
+PROD_SERVICE  ?= exchange-api
 OBS           ?= 1
 SERVICE       ?= exchange-all
 TAIL          ?= 100
@@ -18,6 +23,8 @@ COMMIT        ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
 DATE          ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 LDFLAGS       := -s -w -X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.date=$(DATE)
 IMAGE         ?= ghcr.io/arc119226/crypto-exchange:$(VERSION)
+IMAGE_EDGE    ?= ghcr.io/arc119226/crypto-exchange-edge:$(VERSION)
+IMAGE_BACKUP  ?= ghcr.io/arc119226/crypto-exchange-backup:$(VERSION)
 FUZZ_TIME     ?= 30s
 GOTOOL        := go tool -modfile=$(TOOLS_MOD)
 FOUNDRY_TAG   ?= $(shell sed -n 's/^FOUNDRY_TAG=//p' .env.example)
@@ -35,7 +42,8 @@ KIND_IMAGE    := crypto-exchange:ci
 .PHONY: help tools gen gen-check fmt tidy lint secrets-scan test test-fuzz test-integration e2e cover-money build image \
 	    up up-single up-sepolia down down-sepolia logs-sepolia ps-sepolia reset infra-up run migrate seed artifacts compose-config contracts-test \
 	    gen-dev-secrets demo trace loadgen web-gen web-check web-build web-e2e \
-	    helm-lint helm-template kind-up helm-e2e kind-down backup-drill
+	    helm-lint helm-template kind-up helm-e2e kind-down backup-drill \
+	    image-edge image-backup images up-prod down-prod logs-prod ps-prod gen-prod-secrets
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
@@ -129,6 +137,14 @@ build: ## Build exchange and exchangectl into bin/
 image: ## Build the container image
 	docker build -f build/Dockerfile --build-arg VERSION=$(VERSION) --build-arg COMMIT=$(COMMIT) --build-arg DATE=$(DATE) -t $(IMAGE) .
 
+image-edge: ## Build the edge image (Caddy + web/trade; deploy/compose/compose.prod.yaml)
+	docker build -f build/edge/Dockerfile -t $(IMAGE_EDGE) .
+
+image-backup: ## Build the backup sidecar image (postgres client tools + mc)
+	docker build -f build/backup/Dockerfile -t $(IMAGE_BACKUP) .
+
+images: image image-edge image-backup ## Build all three images
+
 up: ## Start infra + all roles as separate containers (+observability unless OBS=0)
 	$(COMPOSE) --profile infra $(OBS_PROFILE) --profile app up -d --build --wait
 
@@ -153,6 +169,26 @@ logs-sepolia: ## Read the Sepolia stack's logs (SERVICE=exchange-all TAIL=100; F
 
 ps-sepolia: ## Show what is running in the Sepolia stack
 	$(COMPOSE_SEP) $(ALL_PROFILES) ps
+
+# --- the beta VM (deploy/compose/compose.prod.yaml over the Sepolia overlay; docs/runbooks/beta-deploy.md)
+up-prod: ## Pull the released images and start the beta stack (needs .env.prod and secrets/prod/)
+	@test -f $(ENV_PROD) || (echo "missing $(ENV_PROD): run sudo scripts/gen-prod-secrets.sh, then fill it in" && exit 2)
+	@test -d secrets/prod || (echo "missing secrets/prod/: run sudo scripts/gen-prod-secrets.sh" && exit 2)
+	@test -f deploy/compose/sepolia/sepolia-addresses.json || (echo "missing deploy/compose/sepolia/sepolia-addresses.json — see docs/guides/sepolia.md" && exit 2)
+	$(COMPOSE_PROD) $(PROD_PROFILES) pull --quiet
+	$(COMPOSE_PROD) $(PROD_PROFILES) up -d --wait
+
+down-prod: ## Stop the beta stack (keeps volumes)
+	$(COMPOSE_PROD) $(PROD_PROFILES) --profile backup-local down
+
+logs-prod: ## Read the beta stack's logs (PROD_SERVICE=exchange-api TAIL=100; FOLLOW=1 to keep watching; PROD_SERVICE= for all)
+	$(COMPOSE_PROD) $(PROD_PROFILES) --profile backup-local logs --tail $(TAIL) $(if $(FOLLOW),-f,) $(PROD_SERVICE)
+
+ps-prod: ## Show what is running in the beta stack
+	$(COMPOSE_PROD) $(PROD_PROFILES) --profile backup-local ps
+
+gen-prod-secrets: ## Create .env.prod and secrets/prod/ (run with sudo; idempotent, FORCE=1 to regenerate)
+	scripts/gen-prod-secrets.sh
 
 down: ## Stop everything (keeps volumes)
 	$(COMPOSE) $(ALL_PROFILES) down
@@ -205,6 +241,9 @@ compose-config: ## Validate both compose files with every profile (no daemon nee
 	ETH_RPC_URL=https://example.invalid ETH_SCAN_START_BLOCK=1 \
 	  docker compose -f $(COMPOSE_FILE) -f $(SEPOLIA_FILE) --env-file .env.example $(ALL_PROFILES) config -q
 	@echo "compose.sepolia.yaml OK"
+	ETH_RPC_URL=https://example.invalid ETH_SCAN_START_BLOCK=1 BACKUP_S3_ENDPOINT=https://example.invalid \
+	  docker compose -f $(COMPOSE_FILE) -f $(SEPOLIA_FILE) -f $(PROD_FILE) --env-file .env.prod.example $(ALL_PROFILES) --profile backup-local config -q
+	@echo "compose.prod.yaml OK"
 
 # --- Helm chart (deploy/helm/exchange; verified in CI on kind, docs/plan-v1.0.md §12 Phase 7)
 helm-lint: ## helm lint + render the chart with the default and the kind values through kubeconform (no cluster needed)

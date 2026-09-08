@@ -1,0 +1,374 @@
+# Production overlay for the beta VM (docs/plan-v1.0.md §12 Phase 7, §16;
+# docs/runbooks/beta-deploy.md). Applied on top of compose.yaml and the
+# Sepolia overlay -- beta trades on Sepolia, never on a mainnet -- so the
+# chain settings come from compose.sepolia.yaml and this file only changes
+# what production changes:
+#
+#   docker compose -f deploy/compose/compose.yaml -f deploy/compose/compose.sepolia.yaml \
+#     -f deploy/compose/compose.prod.yaml --env-file .env.prod \
+#     --profile infra --profile app --profile observability --profile backup up -d   # or: make up-prod
+#
+#   - released images from ghcr.io instead of local builds (EXCHANGE_IMAGE,
+#     EXCHANGE_EDGE_IMAGE, EXCHANGE_BACKUP_IMAGE in .env.prod);
+#   - every secret as a file under secrets/prod/ (scripts/gen-prod-secrets.sh),
+#     bind-mounted by compose into /run/secrets and read through the *_FILE
+#     variants, one database login per role with its own password, NATS and
+#     Redis behind passwords;
+#   - no host port on anything but the edge (80/443), the back office
+#     (127.0.0.1:8082, reach it over an SSH tunnel) and Grafana / Prometheus
+#     on 127.0.0.1. compose.yaml binds 127.0.0.1 too, which is fine on a
+#     laptop; on a VM Docker's iptables chains bypass ufw, so every port a
+#     container publishes to 0.0.0.0 is open to the internet;
+#   - restart policies, log rotation, and a stop grace period that covers
+#     the engine's last command group (SHUTDOWN_* in internal/app/shutdown.go);
+#   - the edge: Caddy serving the trade front end and proxying /v1, the
+#     JWKS and /ws, with an ACME certificate for EDGE_DOMAIN;
+#   - node-exporter for the disk alert; no Jaeger, no anvil, no MinIO unless
+#     --profile backup-local is added (a backup on the database's own disk
+#     is not a backup).
+name: crypto-exchange-prod
+
+x-logging: &logging
+  logging:
+    driver: json-file
+    options: { max-size: "50m", max-file: "5" }
+
+# What every role gets on top of compose.yaml's x-exchange-env. An empty
+# value for a variable the base file sets is deliberate: the *_FILE variant
+# is only read when the plain one is empty (internal/app/config.go).
+x-prod-env: &prod-env
+  EXCHANGE_ENV: prod
+  NATS_URL: ""
+  NATS_URL_FILE: /run/secrets/nats_url
+  REDIS_PASSWORD_FILE: /run/secrets/redis_password
+  OTEL_EXPORTER_OTLP_ENDPOINT: ""
+
+x-prod: &prod
+  image: ${EXCHANGE_IMAGE:?set EXCHANGE_IMAGE to a released image, e.g. ghcr.io/arc119226/crypto-exchange:v0.1.0}
+  build: !reset null
+  restart: unless-stopped
+  # drain 2 s + one command group (10 s) + SHUTDOWN_TIMEOUT 20 s + a margin
+  stop_grace_period: 40s
+  <<: *logging
+
+services:
+  # --- infrastructure
+  postgres:
+    <<: *logging
+    # postgresql.prod.conf carries the memory settings for the VM and the
+    # WAL archiving compose.yaml passes as flags; PGDATA and pg_hba.conf stay
+    # where the image put them.
+    command: !override ["postgres", "-c", "config_file=/etc/postgresql/postgresql.conf"]
+    environment:
+      POSTGRES_PASSWORD: ""
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+      # 01-roles.sh gives every role its own password on first start
+      DB_PASSWORD_MIGRATE_FILE: /run/secrets/db_password_migrate
+      DB_PASSWORD_API_FILE: /run/secrets/db_password_api
+      DB_PASSWORD_ENGINE_FILE: /run/secrets/db_password_engine
+      DB_PASSWORD_CHAIN_FILE: /run/secrets/db_password_chain
+      DB_PASSWORD_SIGNER_FILE: /run/secrets/db_password_signer
+      DB_PASSWORD_STREAM_FILE: /run/secrets/db_password_stream
+      DB_PASSWORD_ADMIN_FILE: /run/secrets/db_password_admin
+      DB_PASSWORD_WORKER_FILE: /run/secrets/db_password_worker
+      DB_PASSWORD_ALL_FILE: /run/secrets/db_password_all
+      DB_PASSWORD_BACKUP_FILE: /run/secrets/db_password_backup
+    secrets:
+      - postgres_password
+      - db_password_migrate
+      - db_password_api
+      - db_password_engine
+      - db_password_chain
+      - db_password_signer
+      - db_password_stream
+      - db_password_admin
+      - db_password_worker
+      - db_password_all
+      - db_password_backup
+    volumes:
+      - ../../infra/postgres/postgresql.prod.conf:/etc/postgresql/postgresql.conf:ro
+    ports: !override []
+
+  redis:
+    <<: *logging
+    command: !override ["sh", "-c", "exec redis-server --save '' --appendonly no --requirepass \"$$(cat /run/secrets/redis_password)\""]
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$$(cat /run/secrets/redis_password)\" --no-auth-warning ping | grep -q PONG"]
+    secrets: [redis_password]
+    ports: !override []
+
+  nats:
+    <<: *logging
+    # infra/nats/nats.prod.conf reads the password from the environment;
+    # the alpine image has a shell to put it there.
+    entrypoint: !override ["sh", "-c", "export NATS_PASSWORD=\"$$(cat /run/secrets/nats_password)\" && exec nats-server \"$$@\"", "--"]
+    command: !override ["-c", "/etc/nats/nats.conf", "-js", "-sd", "/data", "-m", "8222"]
+    volumes:
+      - ../../infra/nats/nats.prod.conf:/etc/nats/nats.conf:ro
+    secrets: [nats_password]
+    ports: !override []
+
+  # --- one-shot jobs
+  migrate:
+    <<: *prod
+    restart: "no"
+    environment:
+      <<: *prod-env
+      DATABASE_URL: ""
+      DATABASE_URL_FILE: /run/secrets/db_url_migrate
+    secrets: [db_url_migrate, nats_url, redis_password]
+
+  seed:
+    <<: *prod
+    restart: "no"
+    environment:
+      <<: *prod-env
+      DATABASE_URL: ""
+      DATABASE_URL_FILE: /run/secrets/db_url_admin
+    secrets: [db_url_admin, nats_url, redis_password]
+
+  # --- roles
+  exchange-api:
+    <<: *prod
+    environment:
+      <<: *prod-env
+      DATABASE_URL: ""
+      DATABASE_URL_FILE: /run/secrets/db_url_api
+      JWT_PRIVATE_KEY_FILE: /run/secrets/jwt_private_key
+      # during a rotation: add the file to secrets/prod/, list it under
+      # secrets below and set this (docs/runbooks/key-rotation.md)
+      JWT_PREVIOUS_KEY_FILE: ${JWT_PREVIOUS_KEY_FILE:-}
+      API_KEY_MASTER_KEY: ""
+      API_KEY_MASTER_KEY_FILE: /run/secrets/api_key_master_key
+      API_KEY_MASTER_KEY_PREVIOUS: ""
+      API_KEY_MASTER_KEY_PREVIOUS_FILE: ${API_KEY_MASTER_KEY_PREVIOUS_FILE:-}
+      ADMIN_API_KEY: ""
+      ADMIN_API_KEY_FILE: /run/secrets/admin_api_key
+    secrets: [db_url_api, nats_url, redis_password, jwt_private_key, api_key_master_key, admin_api_key]
+    volumes: !override
+      - artifacts:/artifacts:ro
+    ports: !override []
+
+  exchange-engine:
+    <<: *prod
+    environment:
+      <<: *prod-env
+      DATABASE_URL: ""
+      DATABASE_URL_FILE: /run/secrets/db_url_engine
+    secrets: [db_url_engine, nats_url, redis_password]
+
+  exchange-chain:
+    <<: *prod
+    environment:
+      <<: *prod-env
+      DATABASE_URL: ""
+      DATABASE_URL_FILE: /run/secrets/db_url_chain
+    secrets: [db_url_chain, nats_url, redis_password]
+    depends_on: !override
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      nats: { condition: service_healthy }
+      migrate: { condition: service_completed_successfully }
+      seed: { condition: service_completed_successfully }
+      exchange-signer: { condition: service_healthy }
+
+  exchange-signer:
+    <<: *prod
+    environment:
+      <<: *prod-env
+      DATABASE_URL: ""
+      DATABASE_URL_FILE: /run/secrets/db_url_signer
+      WALLET_KEYSTORE_PASSPHRASE: ""
+      WALLET_KEYSTORE_PASSPHRASE_FILE: /run/secrets/wallet_keystore_passphrase
+    secrets: [db_url_signer, nats_url, redis_password, wallet_keystore_passphrase]
+    volumes: !override
+      - artifacts:/artifacts:ro
+      - ../../secrets/prod/keystore:/secrets/keystore:ro
+
+  exchange-stream:
+    <<: *prod
+    environment:
+      <<: *prod-env
+      DATABASE_URL: ""
+      DATABASE_URL_FILE: /run/secrets/db_url_stream
+      # the front end is served by the edge on the same origin; "*" is
+      # refused outside dev
+      STREAM_ALLOWED_ORIGINS: https://${EDGE_DOMAIN:-localhost}
+    secrets: [db_url_stream, nats_url, redis_password]
+    ports: !override []
+
+  exchange-admin:
+    <<: *prod
+    environment:
+      <<: *prod-env
+      DATABASE_URL: ""
+      DATABASE_URL_FILE: /run/secrets/db_url_admin
+      ADMIN_API_KEY: ""
+      ADMIN_API_KEY_FILE: /run/secrets/admin_api_key
+      ADMIN_BOOTSTRAP_PASSWORD: ""
+      ADMIN_BOOTSTRAP_PASSWORD_FILE: /run/secrets/admin_bootstrap_password
+      ADMIN_TOTP_KEY: ""
+      ADMIN_TOTP_KEY_FILE: /run/secrets/admin_totp_key
+      ADMIN_TOTP_KEY_PREVIOUS: ""
+      ADMIN_TOTP_KEY_PREVIOUS_FILE: ${ADMIN_TOTP_KEY_PREVIOUS_FILE:-}
+      WEBHOOK_SIGNING_KEY: ""
+      WEBHOOK_SIGNING_KEY_FILE: /run/secrets/webhook_signing_key
+      WEBHOOK_SIGNING_KEY_PREVIOUS: ""
+      WEBHOOK_SIGNING_KEY_PREVIOUS_FILE: ${WEBHOOK_SIGNING_KEY_PREVIOUS_FILE:-}
+      # reached through an SSH tunnel as http://localhost:8082, which
+      # browsers treat as a secure context, so the Secure cookie flag holds
+      ADMIN_COOKIE_SECURE: "true"
+    secrets: [db_url_admin, nats_url, redis_password, admin_api_key, admin_bootstrap_password, admin_totp_key, webhook_signing_key]
+    ports: !override ["127.0.0.1:8082:8082"]
+
+  exchange-worker:
+    <<: *prod
+    environment:
+      <<: *prod-env
+      DATABASE_URL: ""
+      DATABASE_URL_FILE: /run/secrets/db_url_worker
+      WEBHOOK_SIGNING_KEY: ""
+      WEBHOOK_SIGNING_KEY_FILE: /run/secrets/webhook_signing_key
+      WEBHOOK_SIGNING_KEY_PREVIOUS: ""
+      WEBHOOK_SIGNING_KEY_PREVIOUS_FILE: ${WEBHOOK_SIGNING_KEY_PREVIOUS_FILE:-}
+    secrets: [db_url_worker, nats_url, redis_password, webhook_signing_key]
+
+  # The all-in-one container, for a beta that wants one process; the split
+  # roles above are the shape the plan describes.
+  exchange-all:
+    <<: *prod
+    environment:
+      <<: *prod-env
+      DATABASE_URL: ""
+      DATABASE_URL_FILE: /run/secrets/db_url_all
+      JWT_PRIVATE_KEY_FILE: /run/secrets/jwt_private_key
+      JWT_PREVIOUS_KEY_FILE: ${JWT_PREVIOUS_KEY_FILE:-}
+      API_KEY_MASTER_KEY: ""
+      API_KEY_MASTER_KEY_FILE: /run/secrets/api_key_master_key
+      WALLET_KEYSTORE_PASSPHRASE: ""
+      WALLET_KEYSTORE_PASSPHRASE_FILE: /run/secrets/wallet_keystore_passphrase
+      WEBHOOK_SIGNING_KEY: ""
+      WEBHOOK_SIGNING_KEY_FILE: /run/secrets/webhook_signing_key
+      ADMIN_API_KEY: ""
+      ADMIN_API_KEY_FILE: /run/secrets/admin_api_key
+      ADMIN_BOOTSTRAP_PASSWORD: ""
+      ADMIN_BOOTSTRAP_PASSWORD_FILE: /run/secrets/admin_bootstrap_password
+      ADMIN_TOTP_KEY: ""
+      ADMIN_TOTP_KEY_FILE: /run/secrets/admin_totp_key
+      ADMIN_COOKIE_SECURE: "true"
+      STREAM_ALLOWED_ORIGINS: https://${EDGE_DOMAIN:-localhost}
+    secrets: [db_url_all, nats_url, redis_password, jwt_private_key, api_key_master_key, wallet_keystore_passphrase, webhook_signing_key, admin_api_key, admin_bootstrap_password, admin_totp_key]
+    volumes: !override
+      - artifacts:/artifacts:ro
+      - ../../secrets/prod/keystore:/secrets/keystore:ro
+    ports: !override ["127.0.0.1:8082:8082"]
+
+  # --- the edge: TLS, the front end, and the only public ports
+  edge:
+    image: ${EXCHANGE_EDGE_IMAGE:?set EXCHANGE_EDGE_IMAGE, e.g. ghcr.io/arc119226/crypto-exchange-edge:v0.1.0}
+    profiles: [app]
+    <<: *logging
+    environment:
+      # a real name gets an ACME certificate on 80/443; "localhost" (the
+      # default) gets Caddy's internal CA, for a VM without DNS yet
+      EDGE_DOMAIN: ${EDGE_DOMAIN:-localhost}
+    ports: ["80:80", "443:443", "443:443/udp"]
+    volumes:
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      exchange-api: { condition: service_healthy }
+      exchange-stream: { condition: service_healthy }
+    restart: unless-stopped
+    networks: [exchange-net]
+
+  # --- observability: keep, minus tracing; plus the host's disk
+  prometheus:
+    <<: *logging
+  grafana:
+    <<: *logging
+    ports: !override ["127.0.0.1:3000:3000"]
+  jaeger:
+    profiles: !override ["never"]
+  node-exporter:
+    image: prom/node-exporter:v1.9.1
+    profiles: [observability]
+    <<: *logging
+    command:
+      - --path.rootfs=/host
+      - --collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)
+    pid: host
+    volumes: ["/:/host:ro,rslave"]
+    restart: unless-stopped
+    networks: [exchange-net]
+
+  # --- backups: an external S3-compatible store; MinIO only on request
+  backup:
+    image: ${EXCHANGE_BACKUP_IMAGE:?set EXCHANGE_BACKUP_IMAGE, e.g. ghcr.io/arc119226/crypto-exchange-backup:v0.1.0}
+    build: !reset null
+    <<: *logging
+    environment:
+      PGPASSWORD: ""
+      PGPASSWORD_FILE: /run/secrets/db_password_backup
+      BACKUP_S3_ENDPOINT: ${BACKUP_S3_ENDPOINT:?set BACKUP_S3_ENDPOINT to a store on another machine}
+      BACKUP_S3_BUCKET: ${BACKUP_S3_BUCKET:-exchange-backups}
+      BACKUP_S3_PREFIX: ${BACKUP_S3_PREFIX:-}
+      BACKUP_S3_ACCESS_KEY: ""
+      BACKUP_S3_ACCESS_KEY_FILE: /run/secrets/backup_s3_access_key
+      BACKUP_S3_SECRET_KEY: ""
+      BACKUP_S3_SECRET_KEY_FILE: /run/secrets/backup_s3_secret_key
+    secrets: [db_password_backup, backup_s3_access_key, backup_s3_secret_key]
+    depends_on: !override
+      postgres: { condition: service_healthy }
+  minio:
+    profiles: !override ["backup-local"]
+    <<: *logging
+    environment:
+      MINIO_ROOT_USER: ""
+      MINIO_ROOT_USER_FILE: /run/secrets/backup_s3_access_key
+      MINIO_ROOT_PASSWORD: ""
+      MINIO_ROOT_PASSWORD_FILE: /run/secrets/backup_s3_secret_key
+    secrets: [backup_s3_access_key, backup_s3_secret_key]
+    ports: !override []
+
+# Every credential is a file under secrets/prod/ (scripts/gen-prod-secrets.sh
+# writes them root-owned, group-readable by the uid that needs each one).
+# Compose bind-mounts each into /run/secrets/<name> with the host file's
+# owner and mode, which is why the mode on the host matters.
+secrets:
+  postgres_password: { file: ../../secrets/prod/postgres_password }
+  db_password_migrate: { file: ../../secrets/prod/db_password_migrate }
+  db_password_api: { file: ../../secrets/prod/db_password_api }
+  db_password_engine: { file: ../../secrets/prod/db_password_engine }
+  db_password_chain: { file: ../../secrets/prod/db_password_chain }
+  db_password_signer: { file: ../../secrets/prod/db_password_signer }
+  db_password_stream: { file: ../../secrets/prod/db_password_stream }
+  db_password_admin: { file: ../../secrets/prod/db_password_admin }
+  db_password_worker: { file: ../../secrets/prod/db_password_worker }
+  db_password_all: { file: ../../secrets/prod/db_password_all }
+  db_password_backup: { file: ../../secrets/prod/db_password_backup }
+  db_url_migrate: { file: ../../secrets/prod/db_url_migrate }
+  db_url_api: { file: ../../secrets/prod/db_url_api }
+  db_url_engine: { file: ../../secrets/prod/db_url_engine }
+  db_url_chain: { file: ../../secrets/prod/db_url_chain }
+  db_url_signer: { file: ../../secrets/prod/db_url_signer }
+  db_url_stream: { file: ../../secrets/prod/db_url_stream }
+  db_url_admin: { file: ../../secrets/prod/db_url_admin }
+  db_url_worker: { file: ../../secrets/prod/db_url_worker }
+  db_url_all: { file: ../../secrets/prod/db_url_all }
+  nats_password: { file: ../../secrets/prod/nats_password }
+  nats_url: { file: ../../secrets/prod/nats_url }
+  redis_password: { file: ../../secrets/prod/redis_password }
+  jwt_private_key: { file: ../../secrets/prod/jwt_private_key }
+  api_key_master_key: { file: ../../secrets/prod/api_key_master_key }
+  webhook_signing_key: { file: ../../secrets/prod/webhook_signing_key }
+  admin_totp_key: { file: ../../secrets/prod/admin_totp_key }
+  admin_api_key: { file: ../../secrets/prod/admin_api_key }
+  admin_bootstrap_password: { file: ../../secrets/prod/admin_bootstrap_password }
+  wallet_keystore_passphrase: { file: ../../secrets/prod/wallet_keystore_passphrase }
+  backup_s3_access_key: { file: ../../secrets/prod/backup_s3_access_key }
+  backup_s3_secret_key: { file: ../../secrets/prod/backup_s3_secret_key }
+
+volumes:
+  caddy-data: {}
+  caddy-config: {}

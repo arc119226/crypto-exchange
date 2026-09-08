@@ -35,7 +35,9 @@ const datasourceUID = "prometheus"
 
 // Metrics the Go runtime, the Prometheus client and Prometheus itself
 // expose without any code in this repository naming them.
-var builtinPrefixes = []string{"up", "process_", "go_", "scrape_", "promhttp_"}
+// node_ is prom/node-exporter, which the production overlay runs for the
+// disk alert.
+var builtinPrefixes = []string{"up", "process_", "go_", "scrape_", "promhttp_", "node_"}
 
 // PromQL words that look like metric names once selectors and ranges are
 // stripped. Functions are recognised by the "(" that follows them, so
@@ -274,7 +276,7 @@ func TestAlertRules(t *testing.T) {
 	// the seven of docs/plan-v1.0.md §15, plus what Phase 7 added for the
 	// backups (docs/runbooks/backup-restore.md)
 	want := []string{"ExchangeNotReady", "LedgerTrialBalanceBroken", "ChainScannerLagging", "OutboxBacklog", "HotWalletLow", "WithdrawalsPendingReview", "ReconciliationBreak",
-		"BackupStale", "WalArchiveStale", "BackupNeverTaken"}
+		"BackupStale", "WalArchiveStale", "BackupNeverTaken", "DiskAlmostFull"}
 	assert.Equal(t, len(want), n, "every alert is listed here so a new one is a deliberate addition")
 	for _, w := range want {
 		assert.True(t, seen[w], "missing alert %s", w)

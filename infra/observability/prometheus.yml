@@ -27,3 +27,9 @@ scrape_configs:
           - exchange-admin:9100
           - exchange-worker:9100
         labels: { deployment: app }
+
+  # The host, from node-exporter: only the production overlay runs it, so a
+  # development stack shows this target as down.
+  - job_name: node
+    static_configs:
+      - targets: ["node-exporter:9100"]
