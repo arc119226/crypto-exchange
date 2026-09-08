@@ -7,6 +7,8 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"errors"
+	"fmt"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -37,6 +39,13 @@ type busHarness struct {
 
 func setupBus(t *testing.T) *busHarness {
 	t.Helper()
+	return setupBusWith(t, cmdbus.ServerConfig{}, func(eng trading.CommandBus) trading.CommandBus { return eng })
+}
+
+// setupBusWith is setupBus with a server configuration and a wrapper around
+// the engine the server dispatches to (tests observe the dispatch through it).
+func setupBusWith(t *testing.T, cfg cmdbus.ServerConfig, wrap func(trading.CommandBus) trading.CommandBus) *busHarness {
+	t.Helper()
 	h := setupTrading(t)
 	url := startNATS(t)
 	nc, err := nats.Connect(url)
@@ -50,9 +59,8 @@ func setupBus(t *testing.T) *busHarness {
 	verifier, err := signer.VerifierFor()
 	require.NoError(t, err)
 
-	server, err := cmdbus.Serve(nc, h.engine, cmdbus.ServerConfig{
-		Tenant: "default", Verifier: verifier, Logger: h.log, Timeout: 10 * time.Second,
-	})
+	cfg.Tenant, cfg.Verifier, cfg.Logger, cfg.Timeout = "default", verifier, h.log, 10*time.Second
+	server, err := cmdbus.Serve(nc, wrap(h.engine), cfg)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = server.Close() })
 
@@ -202,6 +210,64 @@ func TestCommandBusErrorMapping(t *testing.T) {
 		assert.ErrorIs(t, err, trading.ErrEngineUnavailable)
 	})
 
+}
+
+// countingBus wraps the engine and records how many commands the bus server
+// has handed to it at the same time.
+type countingBus struct {
+	trading.CommandBus
+	hold    time.Duration
+	current atomic.Int32
+	peak    atomic.Int32
+}
+
+func (c *countingBus) PlaceOrder(ctx context.Context, req trading.PlaceOrderRequest) (trading.PlaceOrderResult, error) {
+	n := c.current.Add(1)
+	defer c.current.Add(-1)
+	for {
+		p := c.peak.Load()
+		if n <= p || c.peak.CompareAndSwap(p, n) {
+			break
+		}
+	}
+	time.Sleep(c.hold) // long enough for the other callers to arrive
+	return c.CommandBus.PlaceOrder(ctx, req)
+}
+
+// TestCommandBusConcurrentDispatch: nats.go runs a subscription's callbacks
+// one at a time, so the server must hand commands to the engine from
+// goroutines or a market's queue never holds more than one bus command and
+// the engine's group commit has nothing to group. MaxInFlight is the lid.
+func TestCommandBusConcurrentDispatch(t *testing.T) {
+	const maxInFlight = 4
+	var counter *countingBus
+	h := setupBusWith(t, cmdbus.ServerConfig{MaxInFlight: maxInFlight}, func(eng trading.CommandBus) trading.CommandBus {
+		counter = &countingBus{CommandBus: eng, hold: 30 * time.Millisecond}
+		return counter
+	})
+	ctx := context.Background()
+	buyer := h.account(t, ctx, map[string]string{"USDC": "100000"})
+
+	const n = 24
+	errs := make(chan error, n)
+	for i := 0; i < n; i++ {
+		go func(i int) {
+			_, err := h.remote.PlaceOrder(as(buyer), limit(buyer, fmt.Sprintf("c%d", i), matching.Buy, "1000", "0.1"))
+			errs <- err
+		}(i)
+	}
+	for i := 0; i < n; i++ {
+		require.NoError(t, <-errs)
+	}
+	peak := int(counter.peak.Load())
+	assert.Greater(t, peak, 1, "commands must reach the engine concurrently")
+	assert.LessOrEqual(t, peak, maxInFlight, "MaxInFlight caps the concurrency")
+
+	book, err := h.client.Depth(ctx, market, 5)
+	require.NoError(t, err)
+	require.Len(t, book.Bids, 1)
+	eq(t, "2.4", book.Bids[0].Qty, "every order landed once")
+	h.assertHoldInvariant(t, ctx)
 }
 
 // TestCommandBusRejectsBadCredentials: the engine trusts the token, never

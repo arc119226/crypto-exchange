@@ -1,6 +1,7 @@
 package app
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"log/slog"
@@ -61,7 +62,8 @@ func (e *engineComponents) attachNATS(ctx context.Context, cfg Config, log *slog
 	}
 	if e.bus, err = cmdbus.Serve(d.nc, e.engine, cmdbus.ServerConfig{
 		Tenant: cfg.TenantID, SubjectPrefix: cfg.Engine.CommandSubjectPrefix, Timeout: cfg.Engine.CommandTimeout,
-		Verifier: verifier, Metrics: cmdbus.NewMetrics(reg), Logger: log,
+		MaxInFlight: cmp.Or(cfg.Engine.CommandMaxInFlight, cfg.Engine.QueueSize),
+		Verifier:    verifier, Metrics: cmdbus.NewMetrics(reg), Logger: log,
 	}); err != nil {
 		return err
 	}

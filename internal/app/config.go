@@ -123,6 +123,10 @@ type EngineConfig struct {
 	CommandSubjectPrefix string `env:"COMMAND_SUBJECT_PREFIX" envDefault:"cmd.trading"`
 	// CommandTimeout bounds one request-reply round trip; exceeding it is a 503.
 	CommandTimeout time.Duration `env:"COMMAND_TIMEOUT" envDefault:"5s"`
+	// CommandMaxInFlight caps the bus commands handed to the engine at once
+	// (cmdbus.ServerConfig.MaxInFlight). 0 means QueueSize: as many as one
+	// market's queue can hold.
+	CommandMaxInFlight int `env:"COMMAND_MAX_INFLIGHT" envDefault:"0"`
 	// InternalTokenTTL is the lifetime of the aud=internal JWT the api role
 	// mints per command (docs/plan-v1.0.md §14).
 	InternalTokenTTL time.Duration `env:"INTERNAL_TOKEN_TTL" envDefault:"5m"`
@@ -480,6 +484,9 @@ func (c Config) Validate() error {
 	if c.Engine.QueueSize <= 0 {
 		return fmt.Errorf("config: ENGINE_QUEUE_SIZE must be positive")
 	}
+	if c.Engine.CommandMaxInFlight < 0 {
+		return fmt.Errorf("config: ENGINE_COMMAND_MAX_INFLIGHT must not be negative")
+	}
 	if c.Outbox.PollInterval <= 0 || c.Outbox.BatchSize <= 0 {
 		return fmt.Errorf("config: OUTBOX_POLL_INTERVAL and OUTBOX_BATCH_SIZE must be positive")
 	}
@@ -606,6 +613,7 @@ func (c Config) LogValue() slog.Value {
 		slog.String("ratelimit_login_per_account", c.RateLimit.LoginPerAccount),
 		slog.String("ratelimit_orders_per_account", c.RateLimit.OrdersPerAccount),
 		slog.Int("engine_queue_size", c.Engine.QueueSize),
+		slog.Int("engine_command_max_inflight", c.Engine.CommandMaxInFlight),
 		slog.Duration("outbox_poll_interval", c.Outbox.PollInterval),
 		slog.Duration("shutdown_drain_delay", c.Shutdown.DrainDelay),
 		slog.Duration("shutdown_timeout", c.Shutdown.Timeout),

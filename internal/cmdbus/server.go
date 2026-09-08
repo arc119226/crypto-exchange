@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"slices"
+	"sync"
 	"time"
 
 	"github.com/nats-io/nats.go"
@@ -22,11 +23,22 @@ type Verifier interface {
 	Verify(token string, audience string, now time.Time) (auth.Claims, error)
 }
 
+// DefaultMaxInFlight bounds the commands one Server hands to the engine at
+// the same time (see ServerConfig.MaxInFlight).
+const DefaultMaxInFlight = 1024
+
 // ServerConfig configures the engine side of the bus.
 type ServerConfig struct {
 	Tenant        string
 	SubjectPrefix string
 	Timeout       time.Duration
+	// MaxInFlight caps the commands dispatched concurrently. nats.go runs a
+	// subscription's callbacks one at a time, so without a goroutine per
+	// command at most one command from the bus would ever be waiting in a
+	// market's queue and the engine's group commit would never see a batch.
+	// The cap keeps a flood on the bus from becoming an unbounded number of
+	// goroutines; commands past it wait in the subscription's buffer.
+	MaxInFlight int
 	// Verifier checks the api role's internal token. Nil accepts unsigned
 	// commands, which is only safe on a trusted local bus (dev); Serve logs
 	// a warning so it is never silent.
@@ -46,6 +58,9 @@ func (c ServerConfig) withDefaults() ServerConfig {
 	if c.Timeout <= 0 {
 		c.Timeout = DefaultTimeout
 	}
+	if c.MaxInFlight <= 0 {
+		c.MaxInFlight = DefaultMaxInFlight
+	}
 	if c.Logger == nil {
 		c.Logger = slog.Default()
 	}
@@ -60,6 +75,9 @@ type Server struct {
 	cfg ServerConfig
 	eng trading.CommandBus
 	sub *nats.Subscription
+
+	inflight chan struct{} // one token per command being handled
+	wg       sync.WaitGroup
 }
 
 // Serve subscribes to the tenant's command subjects and answers them from
@@ -77,7 +95,7 @@ func Serve(nc *nats.Conn, eng trading.CommandBus, cfg ServerConfig) (*Server, er
 		return nil, errors.New("cmdbus: engine required")
 	}
 	cfg = cfg.withDefaults()
-	s := &Server{cfg: cfg, eng: eng}
+	s := &Server{cfg: cfg, eng: eng, inflight: make(chan struct{}, cfg.MaxInFlight)}
 	subject := cfg.SubjectPrefix + "." + cfg.Tenant + ".*"
 	sub, err := nc.QueueSubscribe(subject, queueGroup, s.handle)
 	if err != nil {
@@ -91,7 +109,8 @@ func Serve(nc *nats.Conn, eng trading.CommandBus, cfg ServerConfig) (*Server, er
 	return s, nil
 }
 
-// Close drains the subscription; in-flight commands still answer.
+// Close drains the subscription and waits for the commands already handed
+// to the engine to answer.
 func (s *Server) Close() error {
 	if s.sub == nil {
 		return nil
@@ -99,12 +118,15 @@ func (s *Server) Close() error {
 	if err := s.sub.Drain(); err != nil {
 		return fmt.Errorf("cmdbus: drain: %w", err)
 	}
+	s.wg.Wait()
 	return nil
 }
 
-// handle answers one command. It always replies — a caller waiting on a
-// request must never be left to time out because of a decode error or a
-// panic in the engine.
+// handle is the subscription callback: it decodes the command and hands it
+// to a goroutine, blocking only while MaxInFlight commands are already
+// being handled (back-pressure into the subscription's buffer). Blocking
+// here rather than replying "busy" keeps the bus a queue, which is what the
+// engine's per-market queue and group commit expect.
 func (s *Server) handle(msg *nats.Msg) {
 	start := s.cfg.Now()
 	var req Request
@@ -112,6 +134,19 @@ func (s *Server) handle(msg *nats.Msg) {
 		s.reply(msg, Response{Error: &Error{Kind: KindInvalidRequest, Message: "cmdbus: decode request: " + err.Error()}}, "", start)
 		return
 	}
+	s.inflight <- struct{}{}
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		defer func() { <-s.inflight }()
+		s.serve(msg, req, start)
+	}()
+}
+
+// serve answers one decoded command. It always replies — a caller waiting
+// on a request must never be left to time out because of a panic in the
+// engine.
+func (s *Server) serve(msg *nats.Msg, req Request, start time.Time) {
 	ctx, cancel := context.WithTimeout(context.Background(), s.cfg.Timeout)
 	defer cancel()
 	log := s.cfg.Logger.With(slog.String("op", string(req.Op)), slog.String("market", req.Market))
