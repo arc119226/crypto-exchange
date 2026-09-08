@@ -207,11 +207,11 @@ func BootstrapAdmin(ctx context.Context, cfg Config, out io.Writer) error {
 // otherwise finish enrolling as them. If qrPath is set the QR is written
 // there as a PNG (0600) for scanning; the terminal gets the URL and secret.
 func EnrollTOTP(ctx context.Context, cfg Config, email, qrPath string, out io.Writer) error {
-	master, err := cfg.Admin.TOTPMaster()
+	totp, err := cfg.Admin.TOTPKeys()
 	if err != nil {
 		return err
 	}
-	if len(master) == 0 {
+	if totp.Empty() {
 		return fmt.Errorf("admin totp enroll: ADMIN_TOTP_KEY is required")
 	}
 	pool, err := pg.Open(ctx, pg.PoolConfig{DSN: cfg.DB.URL.Reveal(), MaxConns: 2, ApplicationName: "exchange-totp-enroll"})
@@ -220,7 +220,7 @@ func EnrollTOTP(ctx context.Context, cfg Config, email, qrPath string, out io.Wr
 	}
 	defer pool.Close()
 	l := ledger.New(pool, cfg.TenantID)
-	svc, err := auth.New(pool, auth.Config{Tenant: cfg.TenantID, Issuer: cfg.Auth.Issuer, TOTPKey: master}, nil, nil, l, audit.NewRecorder(cfg.TenantID))
+	svc, err := auth.New(pool, auth.Config{Tenant: cfg.TenantID, Issuer: cfg.Auth.Issuer, TOTPKey: totp.Current, PreviousTOTPKey: totp.Previous}, nil, nil, l, audit.NewRecorder(cfg.TenantID))
 	if err != nil {
 		return err
 	}

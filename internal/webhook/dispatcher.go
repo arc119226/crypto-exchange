@@ -39,6 +39,15 @@ type Config struct {
 	Batch int32
 	// MasterKey opens endpoints' sealed signing secrets (WEBHOOK_SIGNING_KEY).
 	MasterKey []byte
+	// PreviousMasterKey is the key MasterKey replaced, tried second, kept
+	// only until `exchange keys rewrap --domain webhook` has re-sealed every
+	// row (WEBHOOK_SIGNING_KEY_PREVIOUS).
+	PreviousMasterKey []byte
+}
+
+// keys is the dispatcher's keyring.
+func (c Config) keys() secretbox.Keyring {
+	return secretbox.Keyring{Current: c.MasterKey, Previous: c.PreviousMasterKey}
 }
 
 // Dispatcher delivers events to customer endpoints.
@@ -200,7 +209,7 @@ func (d *Dispatcher) deliverOne(ctx context.Context, row sqlcgen.ClaimDueRow) er
 	// redacting wrapper type would look like more, but nothing here logs an
 	// endpoint, so it would be an unused type claiming to defend something --
 	// the shape of guard docs/domain.md §22.8 is about.
-	secret, err := secretbox.Open(d.cfg.MasterKey, row.SecretEnc)
+	secret, err := d.cfg.keys().Open(row.SecretEnc)
 	if err != nil {
 		// The key is wrong or the row is corrupt. Neither is fixed by trying
 		// again in a minute, so this counts as an attempt and burns budget
@@ -212,7 +221,7 @@ func (d *Dispatcher) deliverOne(ctx context.Context, row sqlcgen.ClaimDueRow) er
 	// receiver that has not switched yet keeps verifying. The clock is ours,
 	// not the database's: the row says when, and a test can move it.
 	if row.PreviousSecretUntil.Valid && d.now().Before(row.PreviousSecretUntil.Time) && len(row.PreviousSecretEnc) > 0 {
-		if previous, err := secretbox.Open(d.cfg.MasterKey, row.PreviousSecretEnc); err == nil {
+		if previous, err := d.cfg.keys().Open(row.PreviousSecretEnc); err == nil {
 			secrets = append(secrets, previous)
 		}
 	}

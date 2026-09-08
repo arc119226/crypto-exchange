@@ -80,7 +80,7 @@ var (
 type Store struct {
 	db      *pgxpool.Pool
 	tenant  string
-	master  []byte
+	keys    secretbox.Keyring
 	metrics *AdminMetrics
 }
 
@@ -90,7 +90,16 @@ func NewStore(db *pgxpool.Pool, tenant string, master []byte) *Store {
 	if tenant == "" {
 		tenant = "default"
 	}
-	return &Store{db: db, tenant: tenant, master: master, metrics: NewAdminMetrics(nil)}
+	return &Store{db: db, tenant: tenant, keys: secretbox.Keyring{Current: master}, metrics: NewAdminMetrics(nil)}
+}
+
+// WithPreviousKey sets the key WEBHOOK_SIGNING_KEY replaced
+// (WEBHOOK_SIGNING_KEY_PREVIOUS). The store only ever seals, and sealing
+// uses the current key alone; the previous one is carried so the store's
+// keyring matches the dispatcher's while a rotation is under way.
+func (s *Store) WithPreviousKey(previous []byte) *Store {
+	s.keys.Previous = previous
+	return s
 }
 
 // WithMetrics attaches the Prometheus collector.
@@ -112,7 +121,7 @@ func (s *Store) Create(ctx context.Context, tx pgx.Tx, u string, events []string
 	if err != nil {
 		return Endpoint{}, "", err
 	}
-	sealed, err := secretbox.Seal(s.master, secret)
+	sealed, err := s.keys.Seal(secret)
 	if err != nil {
 		return Endpoint{}, "", fmt.Errorf("webhook: seal secret: %w", err)
 	}
@@ -422,7 +431,7 @@ func (s *Store) RotateSecret(ctx context.Context, tx pgx.Tx, id string, grace ti
 	if err != nil {
 		return Rotated{}, err
 	}
-	sealed, err := secretbox.Seal(s.master, secret)
+	sealed, err := s.keys.Seal(secret)
 	if err != nil {
 		return Rotated{}, fmt.Errorf("webhook: seal secret: %w", err)
 	}

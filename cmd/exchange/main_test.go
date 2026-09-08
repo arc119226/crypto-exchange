@@ -105,6 +105,41 @@ func TestKeysGenJWT(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func TestKeysJWTPublic(t *testing.T) {
+	dir := t.TempDir()
+	priv := filepath.Join(dir, "ed25519.pem")
+	_, err := run(t, "keys", "gen-jwt", "--out", priv)
+	require.NoError(t, err)
+	out, err := run(t, "keys", "jwt-public", "--in", priv)
+	require.NoError(t, err)
+	assert.Contains(t, out, "BEGIN PUBLIC KEY")
+	assert.Contains(t, out, "kid: ")
+	assert.NotContains(t, out, "PRIVATE")
+
+	pub := filepath.Join(dir, "ed25519.pub")
+	_, err = run(t, "keys", "jwt-public", "--in", priv, "--out", pub)
+	require.NoError(t, err)
+	b, err := os.ReadFile(pub) //nolint:gosec // test path
+	require.NoError(t, err)
+	assert.Contains(t, string(b), "BEGIN PUBLIC KEY")
+}
+
+// The rekey happy path is internal/app.TestRekeyKeystore (test-cost scrypt);
+// here only the refusals, none of which reach the KDF.
+func TestKeysRekeyNeedsBothPassphrases(t *testing.T) {
+	t.Setenv("WALLET_KEYSTORE_PASSPHRASE", "old")
+	t.Setenv("WALLET_KEYSTORE_NEW_PASSPHRASE", "")
+	t.Setenv("WALLET_KEYSTORE_NEW_PASSPHRASE_FILE", "")
+	_, err := run(t, "keys", "rekey", "--keystore-dir", t.TempDir())
+	require.Error(t, err)
+	assert.Equal(t, exitRuntime, exitCode(err))
+	assert.Contains(t, err.Error(), "WALLET_KEYSTORE_NEW_PASSPHRASE")
+
+	_, err = run(t, "keys", "rewrap", "--domain", "nope")
+	require.Error(t, err)
+	assert.Equal(t, exitUsage, exitCode(err))
+}
+
 func TestHealthcheckUnreachable(t *testing.T) {
 	_, err := run(t, "healthcheck", "--url", "http://127.0.0.1:1/readyz", "--timeout", "500ms")
 	require.Error(t, err)

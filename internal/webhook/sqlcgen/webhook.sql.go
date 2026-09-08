@@ -461,6 +461,39 @@ func (q *Queries) ListDeliveries(ctx context.Context, arg ListDeliveriesParams) 
 	return items, nil
 }
 
+const listEndpointSecretsForUpdate = `-- name: ListEndpointSecretsForUpdate :many
+
+SELECT id, secret_enc, previous_secret_enc FROM webhook.endpoints WHERE tenant_id = $1 ORDER BY created_at, id FOR UPDATE
+`
+
+type ListEndpointSecretsForUpdateRow struct {
+	ID                string
+	SecretEnc         []byte
+	PreviousSecretEnc []byte
+}
+
+// Rewrap under a rotated master key (exchange keys rewrap): both the live
+// secret and, while a grace period holds one, the previous secret.
+func (q *Queries) ListEndpointSecretsForUpdate(ctx context.Context, tenantID string) ([]ListEndpointSecretsForUpdateRow, error) {
+	rows, err := q.db.Query(ctx, listEndpointSecretsForUpdate, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListEndpointSecretsForUpdateRow{}
+	for rows.Next() {
+		var i ListEndpointSecretsForUpdateRow
+		if err := rows.Scan(&i.ID, &i.SecretEnc, &i.PreviousSecretEnc); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listEndpoints = `-- name: ListEndpoints :many
 SELECT id, url, events, label, status, created_at, updated_at
 FROM webhook.endpoints
@@ -699,6 +732,21 @@ func (q *Queries) RotateEndpointSecret(ctx context.Context, arg RotateEndpointSe
 		&i.PreviousSecretUntil,
 	)
 	return i, err
+}
+
+const setEndpointSecretEnc = `-- name: SetEndpointSecretEnc :exec
+UPDATE webhook.endpoints SET secret_enc = $2, previous_secret_enc = $3 WHERE id = $1
+`
+
+type SetEndpointSecretEncParams struct {
+	ID                string
+	SecretEnc         []byte
+	PreviousSecretEnc []byte
+}
+
+func (q *Queries) SetEndpointSecretEnc(ctx context.Context, arg SetEndpointSecretEncParams) error {
+	_, err := q.db.Exec(ctx, setEndpointSecretEnc, arg.ID, arg.SecretEnc, arg.PreviousSecretEnc)
+	return err
 }
 
 const setEndpointStatus = `-- name: SetEndpointStatus :one

@@ -180,3 +180,12 @@ DELETE FROM webhook.events w
     WHERE e.created_at < $1
       AND NOT EXISTS (SELECT 1 FROM webhook.queue q WHERE q.tenant_id = e.tenant_id AND q.event_id = e.event_id)
     LIMIT $2);
+
+-- Rewrap under a rotated master key (exchange keys rewrap): both the live
+-- secret and, while a grace period holds one, the previous secret.
+
+-- name: ListEndpointSecretsForUpdate :many
+SELECT id, secret_enc, previous_secret_enc FROM webhook.endpoints WHERE tenant_id = $1 ORDER BY created_at, id FOR UPDATE;
+
+-- name: SetEndpointSecretEnc :exec
+UPDATE webhook.endpoints SET secret_enc = $2, previous_secret_enc = $3 WHERE id = $1;

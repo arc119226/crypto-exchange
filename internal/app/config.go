@@ -41,16 +41,21 @@ type Config struct {
 	// APIKeyMasterKey (API_KEY_MASTER_KEY, 32 bytes hex) encrypts API key
 	// secrets at rest; the api role needs it (ADR-0006).
 	APIKeyMasterKey telemetry.Secret `env:"API_KEY_MASTER_KEY"`
-	RateLimit       RateLimitConfig  `envPrefix:"RATELIMIT_"`
-	Admin           AdminConfig      `envPrefix:"ADMIN_"`
-	Engine          EngineConfig     `envPrefix:"ENGINE_"`
-	Registry        RegistryConfig   `envPrefix:"REGISTRY_"`
-	Outbox          OutboxConfig     `envPrefix:"OUTBOX_"`
-	Webhook         WebhookConfig    `envPrefix:"WEBHOOK_"`
-	MarketData      MarketDataConfig `envPrefix:"MARKETDATA_"`
-	Stream          StreamConfig     `envPrefix:"STREAM_"`
-	Retention       RetentionConfig  `envPrefix:"RETENTION_"`
-	Shutdown        ShutdownConfig   `envPrefix:"SHUTDOWN_"`
+	// APIKeyMasterKeyPrevious (API_KEY_MASTER_KEY_PREVIOUS) is the key the
+	// current one replaced, set for the length of a rotation: rows sealed
+	// under it still open until `exchange keys rewrap --domain api-keys`
+	// has rewritten them (docs/runbooks/key-rotation.md).
+	APIKeyMasterKeyPrevious telemetry.Secret `env:"API_KEY_MASTER_KEY_PREVIOUS"`
+	RateLimit               RateLimitConfig  `envPrefix:"RATELIMIT_"`
+	Admin                   AdminConfig      `envPrefix:"ADMIN_"`
+	Engine                  EngineConfig     `envPrefix:"ENGINE_"`
+	Registry                RegistryConfig   `envPrefix:"REGISTRY_"`
+	Outbox                  OutboxConfig     `envPrefix:"OUTBOX_"`
+	Webhook                 WebhookConfig    `envPrefix:"WEBHOOK_"`
+	MarketData              MarketDataConfig `envPrefix:"MARKETDATA_"`
+	Stream                  StreamConfig     `envPrefix:"STREAM_"`
+	Retention               RetentionConfig  `envPrefix:"RETENTION_"`
+	Shutdown                ShutdownConfig   `envPrefix:"SHUTDOWN_"`
 	// OTLPEndpoint enables tracing (docs/plan-v1.0.md §15): the OTLP/HTTP
 	// base URL spans are exported to, e.g. http://jaeger:4318. It keeps the
 	// OpenTelemetry SDK's own variable name, unprefixed, because the SDK
@@ -180,6 +185,9 @@ type AdminConfig struct {
 	// secrets at rest. Deliberately not API_KEY_MASTER_KEY: that key opens
 	// every API-key secret, and the admin role has no reason to hold it.
 	TOTPKey telemetry.Secret `env:"TOTP_KEY"`
+	// TOTPKeyPrevious (ADMIN_TOTP_KEY_PREVIOUS) is TOTPKey's predecessor
+	// during a rotation, until `exchange keys rewrap --domain totp`.
+	TOTPKeyPrevious telemetry.Secret `env:"TOTP_KEY_PREVIOUS"`
 	// SessionTTL is the life of a verified back-office session.
 	SessionTTL time.Duration `env:"SESSION_TTL" envDefault:"8h"`
 	// CookieSecure is "true", "false", or "" for "everywhere but dev". The
@@ -206,15 +214,45 @@ func (s StreamConfig) validate(env string) error {
 	return nil
 }
 
-// TOTPMaster decodes TOTPKey. Empty is not an error here: only the admin role
-// needs it, and Run refuses to start that role without one.
-func (a AdminConfig) TOTPMaster() ([]byte, error) {
-	if !a.TOTPKey.IsSet() {
-		return nil, nil
+// TOTPKeys decodes TOTPKey and its predecessor. Empty is not an error here:
+// only the admin role needs it, and Run refuses to start that role without
+// one.
+func (a AdminConfig) TOTPKeys() (secretbox.Keyring, error) {
+	return keyring("ADMIN_TOTP_KEY", a.TOTPKey, a.TOTPKeyPrevious)
+}
+
+// APIKeyKeys decodes API_KEY_MASTER_KEY and its predecessor.
+func (c Config) APIKeyKeys() (secretbox.Keyring, error) {
+	return keyring("API_KEY_MASTER_KEY", c.APIKeyMasterKey, c.APIKeyMasterKeyPrevious)
+}
+
+// keyring decodes a 32-byte hex master key and, when set, the one it
+// replaced. The pair is validated as one: a previous key without a current
+// one, or equal to it, is a rotation that has gone wrong in the
+// configuration and is refused before any row is sealed under it.
+func keyring(name string, current, previous telemetry.Secret) (secretbox.Keyring, error) {
+	var k secretbox.Keyring
+	var err error
+	if current.IsSet() {
+		if k.Current, err = hexKey(name, current); err != nil {
+			return secretbox.Keyring{}, err
+		}
 	}
-	k, err := hex.DecodeString(strings.TrimSpace(a.TOTPKey.Reveal()))
+	if previous.IsSet() {
+		if k.Previous, err = hexKey(name+"_PREVIOUS", previous); err != nil {
+			return secretbox.Keyring{}, err
+		}
+	}
+	if err := k.Validate(); err != nil {
+		return secretbox.Keyring{}, fmt.Errorf("config: %s_PREVIOUS: %w", name, err)
+	}
+	return k, nil
+}
+
+func hexKey(name string, v telemetry.Secret) ([]byte, error) {
+	k, err := hex.DecodeString(strings.TrimSpace(v.Reveal()))
 	if err != nil || len(k) != secretbox.KeySize {
-		return nil, fmt.Errorf("config: ADMIN_TOTP_KEY must be %d bytes hex-encoded", secretbox.KeySize)
+		return nil, fmt.Errorf("config: %s must be %d bytes hex-encoded", name, secretbox.KeySize)
 	}
 	return k, nil
 }
@@ -380,7 +418,12 @@ type WalletConfig struct {
 // JWTConfig locates the signing key (api role only) and the JWKS URL.
 type JWTConfig struct {
 	PrivateKeyFile string `env:"PRIVATE_KEY_FILE"`
-	JWKSURL        string `env:"JWKS_URL"`
+	// PreviousKeyFile (JWT_PREVIOUS_KEY_FILE) names a second key whose
+	// public half is published in the JWKS but never signs: the key just
+	// rotated out, or the one about to rotate in (a PKCS#8 private key or
+	// a SPKI public key PEM; docs/runbooks/key-rotation.md).
+	PreviousKeyFile string `env:"PREVIOUS_KEY_FILE"`
+	JWKSURL         string `env:"JWKS_URL"`
 }
 
 // ShutdownConfig controls graceful shutdown.
@@ -410,12 +453,21 @@ var secretsWithFileVariant = []string{
 	"DATABASE_URL",
 	"REDIS_PASSWORD",
 	"WALLET_KEYSTORE_PASSPHRASE",
+	"WALLET_KEYSTORE_NEW_PASSPHRASE",
 	"WEBHOOK_SIGNING_KEY",
+	"WEBHOOK_SIGNING_KEY_PREVIOUS",
 	"ADMIN_BOOTSTRAP_PASSWORD",
 	"ADMIN_API_KEY",
 	"ADMIN_TOTP_KEY",
+	"ADMIN_TOTP_KEY_PREVIOUS",
 	"API_KEY_MASTER_KEY",
+	"API_KEY_MASTER_KEY_PREVIOUS",
 }
+
+// ExpandSecretEnv resolves every NAME_FILE variant into NAME, for commands
+// that read a secret from the environment without loading the whole
+// configuration (`exchange keys rekey`).
+func ExpandSecretEnv() error { return expandFileEnv(secretsWithFileVariant) }
 
 // LoadConfig reads the environment (after expanding *_FILE secrets) and
 // validates it.
@@ -467,6 +519,10 @@ type WebhookConfig struct {
 	// purpose: one master key per secret domain, so rotating webhook secrets
 	// never touches API keys.
 	SigningKey telemetry.Secret `env:"SIGNING_KEY"`
+	// SigningKeyPrevious (WEBHOOK_SIGNING_KEY_PREVIOUS) is SigningKey's
+	// predecessor during a rotation, until `exchange keys rewrap --domain
+	// webhook`.
+	SigningKeyPrevious telemetry.Secret `env:"SIGNING_KEY_PREVIOUS"`
 	// Timeout bounds one POST to a customer.
 	Timeout time.Duration `env:"TIMEOUT" envDefault:"10s"`
 	// Interval is how often the queue is drained. It is not the retry
@@ -476,18 +532,11 @@ type WebhookConfig struct {
 	BatchSize int32         `env:"BATCH_SIZE" envDefault:"50"`
 }
 
-// Master decodes SigningKey. An empty key is not an error here: a deployment
-// with no webhook endpoints has no use for one, so the worker warns rather
-// than refusing to start.
-func (w WebhookConfig) Master() ([]byte, error) {
-	if !w.SigningKey.IsSet() {
-		return nil, nil
-	}
-	k, err := hex.DecodeString(strings.TrimSpace(w.SigningKey.Reveal()))
-	if err != nil || len(k) != secretbox.KeySize {
-		return nil, fmt.Errorf("config: WEBHOOK_SIGNING_KEY must be %d bytes hex-encoded", secretbox.KeySize)
-	}
-	return k, nil
+// Keys decodes SigningKey and its predecessor. An empty key is not an error
+// here: a deployment with no webhook endpoints has no use for one, so the
+// worker warns rather than refusing to start.
+func (w WebhookConfig) Keys() (secretbox.Keyring, error) {
+	return keyring("WEBHOOK_SIGNING_KEY", w.SigningKey, w.SigningKeyPrevious)
 }
 
 // Validate checks cross-field constraints that struct tags cannot express.
@@ -518,6 +567,11 @@ func (c Config) Validate() error {
 	}
 	if c.Shutdown.Timeout <= 0 || c.Shutdown.DrainDelay < 0 {
 		return fmt.Errorf("config: SHUTDOWN_TIMEOUT must be positive and SHUTDOWN_DRAIN_DELAY non-negative")
+	}
+	// A previous key only means something next to the current one it
+	// replaced; keyring() refuses one without the other or equal to it.
+	if c.JWT.PreviousKeyFile != "" && c.JWT.PrivateKeyFile == "" {
+		return fmt.Errorf("config: JWT_PREVIOUS_KEY_FILE is set without JWT_PRIVATE_KEY_FILE")
 	}
 	if c.Wallet.AddressPoolMin <= 0 {
 		return fmt.Errorf("config: WALLET_ADDRESS_POOL_MIN must be positive")
@@ -565,11 +619,10 @@ func (c Config) Validate() error {
 	if err := c.Stream.validate(c.Env); err != nil {
 		return err
 	}
-	if _, err := c.Webhook.Master(); err != nil {
-		return err
-	}
-	if _, err := c.Admin.TOTPMaster(); err != nil {
-		return err
+	for _, decode := range []func() (secretbox.Keyring, error){c.Webhook.Keys, c.Admin.TOTPKeys, c.APIKeyKeys} {
+		if _, err := decode(); err != nil {
+			return err
+		}
 	}
 	if c.Admin.SessionTTL <= 0 {
 		return fmt.Errorf("config: ADMIN_SESSION_TTL must be positive")
@@ -620,15 +673,19 @@ func (c Config) LogValue() slog.Value {
 		slog.Int("wallet_address_pool_min", c.Wallet.AddressPoolMin),
 		slog.Duration("wallet_address_pool_interval", c.Wallet.AddressPoolInterval),
 		slog.String("jwt_private_key_file", c.JWT.PrivateKeyFile),
+		slog.String("jwt_previous_key_file", c.JWT.PreviousKeyFile),
 		slog.String("jwt_jwks_url", c.JWT.JWKSURL),
 		slog.String("auth_issuer", c.Auth.Issuer),
 		slog.Duration("auth_access_ttl", c.Auth.AccessTTL),
 		slog.Duration("auth_refresh_ttl", c.Auth.RefreshTTL),
 		slog.Bool("api_key_master_key_set", c.APIKeyMasterKey.IsSet()),
+		slog.Bool("api_key_master_key_previous_set", c.APIKeyMasterKeyPrevious.IsSet()),
 		slog.Bool("admin_totp_key_set", c.Admin.TOTPKey.IsSet()),
+		slog.Bool("admin_totp_key_previous_set", c.Admin.TOTPKeyPrevious.IsSet()),
 		slog.Duration("admin_session_ttl", c.Admin.SessionTTL),
 		slog.Bool("admin_cookie_secure", c.SecureCookies()),
 		slog.Bool("webhook_signing_key_set", c.Webhook.SigningKey.IsSet()),
+		slog.Bool("webhook_signing_key_previous_set", c.Webhook.SigningKeyPrevious.IsSet()),
 		slog.Int("webhook_attempts", len(c.Webhook.Backoff)),
 		slog.Duration("marketdata_kline_poll_interval", c.MarketData.KlinePollInterval),
 		slog.Int64("marketdata_kline_batch_seqs", c.MarketData.KlineBatchSeqs),

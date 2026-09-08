@@ -58,13 +58,13 @@ func newWorker(cfg Config, log *slog.Logger, db *pgxpool.Pool, reg prometheus.Re
 		// to run would leave events silently undelivered.
 		return nil, errors.New("config: NATS_URL is required for the worker role")
 	}
-	master, err := cfg.Webhook.Master()
+	signing, err := cfg.Webhook.Keys()
 	if err != nil {
 		return nil, err
 	}
 	d := webhook.New(db, webhook.Config{
 		Tenant: cfg.TenantID, Backoff: cfg.Webhook.Backoff, Timeout: cfg.Webhook.Timeout,
-		Batch: cfg.Webhook.BatchSize, MasterKey: master,
+		Batch: cfg.Webhook.BatchSize, MasterKey: signing.Current, PreviousMasterKey: signing.Previous,
 	}, log).WithMetrics(webhook.NewMetrics(reg))
 
 	w := &workerComponents{
@@ -77,7 +77,7 @@ func newWorker(cfg Config, log *slog.Logger, db *pgxpool.Pool, reg prometheus.Re
 		startErr:   errors.New("the worker role has not finished starting"),
 	}
 	w.bringUp = func(ctx context.Context) error { return w.up(ctx, cfg, log, nc) }
-	if len(master) == 0 {
+	if signing.Empty() {
 		log.Warn("WEBHOOK_SIGNING_KEY is empty: endpoints cannot be signed for, so nothing will be delivered")
 	}
 	log.Info("delivering webhooks",

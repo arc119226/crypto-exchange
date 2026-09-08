@@ -1433,10 +1433,12 @@ lint ──► unit ──► fuzz-smoke ──► integration ──► e2e ─
 | 變數 | 用途 | 持有角色 |
 |---|---|---|
 | `POSTGRES_PASSWORD`(prod:`DB_PASSWORD_<ROLE>`) | DB | 各 role |
-| `JWT_PRIVATE_KEY_FILE` | Ed25519 簽章 | api |
-| `WALLET_KEYSTORE_PASSPHRASE` + `WALLET_KEYSTORE_DIR`(`hd-seed.json`) | 熱錢包與 HD 種子 | signer(`role=all` 時為 all) |
+| `JWT_PRIVATE_KEY_FILE`(輪替中另設 `JWT_PREVIOUS_KEY_FILE`:只發布、不簽) | Ed25519 簽章;JWKS 以 kid 發布一或兩把公鑰 | api |
+| `WALLET_KEYSTORE_PASSPHRASE` + `WALLET_KEYSTORE_DIR`(`hd-seed.json`;換 passphrase 用 `exchange keys rekey` + `WALLET_KEYSTORE_NEW_PASSPHRASE`) | 熱錢包與 HD 種子 | signer(`role=all` 時為 all) |
 | `ADMIN_BOOTSTRAP_EMAIL/PASSWORD` | 首個 admin(啟動時建立,之後可刪) | admin |
-| `WEBHOOK_SIGNING_KEY` | 加密儲存各 endpoint secret 的主金鑰 | worker、admin |
+| `WEBHOOK_SIGNING_KEY`(輪替中另設 `_PREVIOUS`,`exchange keys rewrap --domain webhook` 後移除) | 加密儲存各 endpoint secret 的主金鑰 | worker、admin |
+| `API_KEY_MASTER_KEY`(輪替中另設 `_PREVIOUS`,`rewrap --domain api-keys`) | 加密儲存 API key secret 的主金鑰 | api |
+| `ADMIN_TOTP_KEY`(輪替中另設 `_PREVIOUS`,`rewrap --domain totp`) | 加密儲存管理員 TOTP secret 的主金鑰 | admin |
 | `ADMIN_API_KEY`(Phase 2 過渡)/ admin API key(Phase 3 起由系統簽發) | 客戶系統寫 kyc_level | api、admin |
 | `CONTRACT_DEPLOYER_KEY`、`HOT_WALLET_ADDRESS` | 開發鏈部署與注資 | contracts-deployer |
 | `REDIS_PASSWORD`、`NATS_USER/PASSWORD`(beta 起) | 基礎設施 | 各 role |

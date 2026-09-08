@@ -2,14 +2,18 @@ package app
 
 import (
 	"bytes"
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/arc119226/crypto-exchange/internal/platform/secretbox"
 )
 
 func clearEnv(t *testing.T) {
@@ -187,4 +191,51 @@ func TestValidateForKeepsTheKeystoreSecretWithTheSigner(t *testing.T) {
 	cfg, err = LoadConfig()
 	require.NoError(t, err)
 	assert.NoError(t, cfg.ValidateFor([]Role{RoleAPI}), "no secret, nothing to refuse")
+}
+
+// A previous master key only means something next to the current one it
+// replaced: alone it is a typo, equal to it a rotation that never happened.
+func TestLoadConfigRefusesAMeaninglessPreviousKey(t *testing.T) {
+	key := strings.Repeat("ab", 32)
+	other := strings.Repeat("cd", 32)
+	for _, tc := range []struct {
+		name string
+		env  map[string]string
+		want string
+	}{
+		{"previous api key without current", map[string]string{"API_KEY_MASTER_KEY_PREVIOUS": key}, "without a current"},
+		{"previous api key equal to current", map[string]string{"API_KEY_MASTER_KEY": key, "API_KEY_MASTER_KEY_PREVIOUS": key}, "is the current key"},
+		{"previous webhook key not hex", map[string]string{"WEBHOOK_SIGNING_KEY": key, "WEBHOOK_SIGNING_KEY_PREVIOUS": "zz"}, "WEBHOOK_SIGNING_KEY_PREVIOUS must be 32 bytes"},
+		{"previous totp key equal to current", map[string]string{"ADMIN_TOTP_KEY": key, "ADMIN_TOTP_KEY_PREVIOUS": key}, "is the current key"},
+		{"jwt previous file without a signing key", map[string]string{"JWT_PREVIOUS_KEY_FILE": "/x.pem"}, "without JWT_PRIVATE_KEY_FILE"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("DATABASE_URL", "postgres://x")
+			for k, v := range tc.env {
+				t.Setenv(k, v)
+			}
+			_, err := LoadConfig()
+			require.ErrorContains(t, err, tc.want)
+		})
+	}
+	t.Run("a real rotation loads", func(t *testing.T) {
+		t.Setenv("DATABASE_URL", "postgres://x")
+		t.Setenv("API_KEY_MASTER_KEY", key)
+		t.Setenv("API_KEY_MASTER_KEY_PREVIOUS", other)
+		t.Setenv("WEBHOOK_SIGNING_KEY", key)
+		t.Setenv("WEBHOOK_SIGNING_KEY_PREVIOUS", other)
+		t.Setenv("ADMIN_TOTP_KEY", key)
+		t.Setenv("ADMIN_TOTP_KEY_PREVIOUS", other)
+		cfg, err := LoadConfig()
+		require.NoError(t, err)
+		for _, decode := range []func() (secretbox.Keyring, error){cfg.APIKeyKeys, cfg.Webhook.Keys, cfg.Admin.TOTPKeys} {
+			k, err := decode()
+			require.NoError(t, err)
+			assert.Len(t, k.Current, secretbox.KeySize)
+			assert.Len(t, k.Previous, secretbox.KeySize)
+			assert.NotEqual(t, k.Current, k.Previous)
+		}
+		assert.Contains(t, fmt.Sprint(cfg.LogValue()), "api_key_master_key_previous_set=true")
+		assert.NotContains(t, fmt.Sprint(cfg.LogValue()), other)
+	})
 }
