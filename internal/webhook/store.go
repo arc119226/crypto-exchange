@@ -331,6 +331,17 @@ func (s *Store) QueuedAt(ctx context.Context, endpointID, deliveryID string) (ti
 	return row.NextAttemptAt, nil
 }
 
+// DeadSince counts deliveries the schedule gave up on after since.
+func (s *Store) DeadSince(ctx context.Context, since time.Time) (int64, error) {
+	n, err := sqlcgen.New(s.db).CountDeadDeliveriesSince(ctx, sqlcgen.CountDeadDeliveriesSinceParams{
+		TenantID: s.tenant, CreatedAt: since,
+	})
+	if err != nil {
+		return 0, fmt.Errorf("webhook: count dead deliveries: %w", err)
+	}
+	return n, nil
+}
+
 // validate refuses what migration 0016's CHECKs would refuse anyway, so the
 // caller gets a 400 that says which field rather than a constraint name.
 func validate(u string, events []string) error {

@@ -146,3 +146,9 @@ WHERE tenant_id = $1 AND endpoint_id = $2 AND event_id = $3;
 -- every other delete path is inside settle.
 DELETE FROM webhook.queue
 WHERE tenant_id = $1 AND endpoint_id = $2;
+
+-- name: CountDeadDeliveriesSince :one
+-- Deliveries the schedule gave up on. The dashboard shows the last day's
+-- worth: past that a customer has already noticed, or never will.
+SELECT count(*) FROM webhook.deliveries
+WHERE tenant_id = $1 AND status = 'dead' AND created_at >= $2;

@@ -1,0 +1,156 @@
+package admin
+
+import (
+	"context"
+	"fmt"
+	"net/http"
+	"strconv"
+
+	"github.com/go-chi/chi/v5"
+	"github.com/prometheus/client_golang/prometheus"
+
+	"github.com/arc119226/crypto-exchange/internal/auth"
+	"github.com/arc119226/crypto-exchange/internal/ratelimit"
+)
+
+// Sessions is the part of auth.Service the pages use.
+type Sessions interface {
+	SessionResolver
+	AdminLogin(ctx context.Context, email, password, ip string) (auth.AdminSession, error)
+	TOTPConfirm(ctx context.Context, token, code, ip string) (auth.AdminSession, error)
+	TOTPVerify(ctx context.Context, token, code, ip string) (auth.AdminSession, error)
+	AdminLogout(ctx context.Context, token, ip string) error
+}
+
+// UIConfig is what a deployment decides about the pages.
+type UIConfig struct {
+	Cookies Cookies
+	// LoginLimit throttles the password step per source address. The TOTP
+	// step has its own per-user lock; this keeps a password guesser from
+	// spending argon2 on this process at full speed.
+	LoginLimit ratelimit.Limit
+	Limiter    ratelimit.Limiter
+	Registerer prometheus.Registerer
+}
+
+// UI is the back office: the pages under /admin.
+type UI struct {
+	h        *Handler
+	sessions Sessions
+	cfg      UIConfig
+	tpl      *templates
+	metrics  *uiMetrics
+}
+
+// NewUI parses the templates and wires the pages to the handler whose writes
+// they share.
+func NewUI(h *Handler, sessions Sessions, cfg UIConfig) (*UI, error) {
+	tpl, err := loadTemplates()
+	if err != nil {
+		return nil, err
+	}
+	if cfg.Limiter == nil {
+		cfg.Limiter = ratelimit.NewMemory()
+	}
+	if cfg.LoginLimit.N == 0 {
+		cfg.LoginLimit = ratelimit.Limit{N: 10, Window: 60e9}
+	}
+	return &UI{h: h, sessions: sessions, cfg: cfg, tpl: tpl, metrics: newUIMetrics(cfg.Registerer)}, nil
+}
+
+// Routes registers everything the admin listener serves on r: the OpenAPI
+// routes behind the API key, and -- when ui is set -- the pages behind a
+// session. Both groups sit behind CrossOriginProtection (see admin_role.go).
+// Call it on a router that has its base middleware and nothing else.
+func Routes(r chi.Router, h *Handler, ui *UI, apiKey string) {
+	r.Use(WithClientIP)
+	// Cross-site request forgery, for the whole listener. Browsers announce
+	// where an unsafe request came from (Sec-Fetch-Site, Origin) and this
+	// refuses anything but this origin; a client that sends neither header --
+	// exchangectl, curl -- is not a browser and passes. The session cookie is
+	// SameSite=Lax as well, so this is the second line.
+	r.Use(http.NewCrossOriginProtection().Handler)
+
+	r.Group(func(api chi.Router) {
+		api.Use(RequireAPIKey(apiKey))
+		Mount(api, h)
+	})
+	if ui != nil {
+		ui.mount(r)
+	}
+}
+
+func (u *UI) mount(r chi.Router) {
+	r.Get("/", func(w http.ResponseWriter, r *http.Request) { http.Redirect(w, r, HomePath, http.StatusSeeOther) })
+	r.Get("/admin", func(w http.ResponseWriter, r *http.Request) { http.Redirect(w, r, HomePath, http.StatusSeeOther) })
+	r.Handle("/admin/static/*", http.StripPrefix("/admin/static/", staticHandler()))
+
+	r.Group(func(pages chi.Router) {
+		pages.Use(secureHeaders)
+		pages.Get(LoginPath, u.loginForm)
+		pages.With(u.throttleLogin).Post(LoginPath, u.login)
+
+		pages.Group(func(pending chi.Router) {
+			pending.Use(RequirePending(u.sessions, u.cfg.Cookies))
+			pending.Get(TOTPPath, u.totpForm)
+			pending.Post(TOTPPath, u.totp)
+			pending.Post(LogoutPath, u.logout)
+		})
+		pages.Group(func(admin chi.Router) {
+			admin.Use(RequireAdmin(u.sessions, u.cfg.Cookies))
+			admin.Get(HomePath, u.dashboard)
+		})
+	})
+}
+
+// secureHeaders is the browser-side hardening every page carries. The CSP
+// allows only this origin: htmx is served from here, and there is no inline
+// script anywhere in the templates.
+func secureHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		h := w.Header()
+		h.Set("Content-Security-Policy", "default-src 'self'; frame-ancestors 'none'; form-action 'self'; base-uri 'none'")
+		h.Set("X-Content-Type-Options", "nosniff")
+		h.Set("Referrer-Policy", "same-origin")
+		h.Set("Cache-Control", "no-store")
+		next.ServeHTTP(w, r)
+	})
+}
+
+// throttleLogin bounds password attempts per source address.
+func (u *UI) throttleLogin(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		d, err := u.cfg.Limiter.Allow(r.Context(), "admin-login:"+clientIPFrom(r.Context()), u.cfg.LoginLimit)
+		if err != nil {
+			WriteProblem(w, r, http.StatusInternalServerError, "Internal Server Error", "")
+			return
+		}
+		if !d.Allowed {
+			u.metrics.logins.WithLabelValues("throttled").Inc()
+			w.Header().Set("Retry-After", strconv.Itoa(int(d.RetryAfter.Seconds())+1))
+			u.tpl.render(w, r, http.StatusTooManyRequests, "login", view{
+				Title: "Sign in", Flash: &flash{Kind: "err", Text: fmt.Sprintf("Too many attempts; try again in %s.", d.RetryAfter.Round(1e9))},
+			})
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// uiMetrics is what the pages export.
+type uiMetrics struct {
+	logins *prometheus.CounterVec
+}
+
+func newUIMetrics(reg prometheus.Registerer) *uiMetrics {
+	m := &uiMetrics{
+		logins: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "admin_login_attempts_total",
+			Help: "Back-office login attempts by outcome: password_ok, password_failed, totp_ok, totp_failed, locked, throttled.",
+		}, []string{"outcome"}),
+	}
+	if reg != nil {
+		reg.MustRegister(m.logins)
+	}
+	return m
+}

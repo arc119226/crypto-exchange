@@ -76,6 +76,25 @@ func (q *Queries) ClaimDue(ctx context.Context, arg ClaimDueParams) ([]ClaimDueR
 	return items, nil
 }
 
+const countDeadDeliveriesSince = `-- name: CountDeadDeliveriesSince :one
+SELECT count(*) FROM webhook.deliveries
+WHERE tenant_id = $1 AND status = 'dead' AND created_at >= $2
+`
+
+type CountDeadDeliveriesSinceParams struct {
+	TenantID  string
+	CreatedAt time.Time
+}
+
+// Deliveries the schedule gave up on. The dashboard shows the last day's
+// worth: past that a customer has already noticed, or never will.
+func (q *Queries) CountDeadDeliveriesSince(ctx context.Context, arg CountDeadDeliveriesSinceParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countDeadDeliveriesSince, arg.TenantID, arg.CreatedAt)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const createEndpoint = `-- name: CreateEndpoint :one
 
 INSERT INTO webhook.endpoints (tenant_id, url, secret_enc, events, label)

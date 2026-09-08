@@ -1,0 +1,6 @@
+{{define "pager"}}{{/* .Offset .Limit .Count .Path */}}
+<nav class="pager">
+  {{if gt .Offset 0}}<a hx-get="{{.Path}}?limit={{.Limit}}&offset={{.Prev}}" hx-target="closest section" hx-push-url="true" href="{{.Path}}?limit={{.Limit}}&offset={{.Prev}}">‹ newer</a>{{end}}
+  {{if ge .Count .Limit}}<a hx-get="{{.Path}}?limit={{.Limit}}&offset={{.Next}}" hx-target="closest section" hx-push-url="true" href="{{.Path}}?limit={{.Limit}}&offset={{.Next}}">older ›</a>{{end}}
+</nav>
+{{end}}

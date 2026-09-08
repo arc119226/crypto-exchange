@@ -1,0 +1,25 @@
+{{define "content"}}
+<section class="card narrow">
+  {{if .Data.Enrolled}}
+  <h1>Enter your code</h1>
+  <p>The six digits your authenticator shows right now.</p>
+  {{else if .Data.Pending}}
+  <h1>Finish setting up your authenticator</h1>
+  <p>Add the secret you were given by <code>exchange admin totp enroll</code> to your authenticator, then enter the first code it shows. This is the only time the secret was shown.</p>
+  {{else}}
+  <h1>No authenticator yet</h1>
+  <p>Administrators must use a TOTP code, and none has been issued for this account. An operator runs</p>
+  <pre>exchange admin totp enroll --email {{.Session.Email}}</pre>
+  <p>with database credentials, adds the secret it prints to an authenticator, and then signs in here.</p>
+  {{end}}
+  {{if or .Data.Enrolled .Data.Pending}}
+  <form method="post" action="/admin/totp">
+    <label>Code
+      <input type="text" name="code" inputmode="numeric" pattern="[0-9 ]{6,7}" autocomplete="one-time-code" required autofocus>
+    </label>
+    <button type="submit">Verify</button>
+  </form>
+  {{end}}
+  <form method="post" action="/admin/logout"><button type="submit" class="link">Cancel and sign out</button></form>
+</section>
+{{end}}

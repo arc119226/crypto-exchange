@@ -251,6 +251,24 @@ func (e PostingDirection) Valid() bool {
 	}
 }
 
+// Defines values for SystemStatusDatabase.
+const (
+	SystemStatusDatabaseError SystemStatusDatabase = "error"
+	SystemStatusDatabaseOk    SystemStatusDatabase = "ok"
+)
+
+// Valid indicates whether the value is a known member of the SystemStatusDatabase enum.
+func (e SystemStatusDatabase) Valid() bool {
+	switch e {
+	case SystemStatusDatabaseError:
+		return true
+	case SystemStatusDatabaseOk:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for WebhookDeliveryStatus.
 const (
 	WebhookDeliveryStatusDead      WebhookDeliveryStatus = "dead"
@@ -680,6 +698,13 @@ type ReconciliationReport struct {
 	StartedAt  time.Time            `json:"started_at"`
 }
 
+// ReconciliationSummary defines model for ReconciliationSummary.
+type ReconciliationSummary struct {
+	Balanced   bool      `json:"balanced"`
+	FinishedAt time.Time `json:"finished_at"`
+	ID         string    `json:"id"`
+}
+
 // Sweep defines model for Sweep.
 type Sweep struct {
 	// Amount Decimal serialized as a string (NUMERIC(36,18)); never a JSON number.
@@ -712,6 +737,28 @@ type Sweep struct {
 type SweepList struct {
 	Sweeps []Sweep `json:"sweeps"`
 }
+
+// SystemStatus defines model for SystemStatus.
+type SystemStatus struct {
+	// ConfirmingDeposits Deposits seen on chain and not yet credited.
+	ConfirmingDeposits       int                    `json:"confirming_deposits"`
+	Database                 SystemStatusDatabase   `json:"database"`
+	DeadWebhookDeliveries24H int                    `json:"dead_webhook_deliveries_24h"`
+	LastReconciliation       *ReconciliationSummary `json:"last_reconciliation,omitempty"`
+
+	// LedgerBalanced Every asset's debits equal its credits right now.
+	LedgerBalanced bool      `json:"ledger_balanced"`
+	Now            time.Time `json:"now"`
+
+	// OpenLedgerBreaks Assets currently out of balance and recorded as such.
+	OpenLedgerBreaks int `json:"open_ledger_breaks"`
+
+	// PendingWithdrawals Withdrawals waiting for a person (pending_review).
+	PendingWithdrawals int `json:"pending_withdrawals"`
+}
+
+// SystemStatusDatabase defines model for SystemStatus.Database.
+type SystemStatusDatabase string
 
 // TrialBalance defines model for TrialBalance.
 type TrialBalance struct {
@@ -1002,6 +1049,9 @@ type ServerInterface interface {
 	// ListSweeps Recent collections into the hot wallet
 	// (GET /admin/v1/sweeps)
 	ListSweeps(w http.ResponseWriter, r *http.Request, params ListSweepsParams)
+	// GetSystemStatus What the dashboard shows
+	// (GET /admin/v1/system/status)
+	GetSystemStatus(w http.ResponseWriter, r *http.Request)
 	// ListWebhookEndpoints Webhook endpoints, disabled ones included
 	// (GET /admin/v1/webhooks)
 	ListWebhookEndpoints(w http.ResponseWriter, r *http.Request)
@@ -1116,6 +1166,12 @@ func (_ Unimplemented) GetReconciliation(w http.ResponseWriter, r *http.Request)
 // ListSweeps Recent collections into the hot wallet
 // (GET /admin/v1/sweeps)
 func (_ Unimplemented) ListSweeps(w http.ResponseWriter, r *http.Request, params ListSweepsParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetSystemStatus What the dashboard shows
+// (GET /admin/v1/system/status)
+func (_ Unimplemented) GetSystemStatus(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -1632,6 +1688,20 @@ func (siw *ServerInterfaceWrapper) ListSweeps(w http.ResponseWriter, r *http.Req
 	handler.ServeHTTP(w, r)
 }
 
+// GetSystemStatus operation middleware
+func (siw *ServerInterfaceWrapper) GetSystemStatus(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetSystemStatus(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ListWebhookEndpoints operation middleware
 func (siw *ServerInterfaceWrapper) ListWebhookEndpoints(w http.ResponseWriter, r *http.Request) {
 
@@ -2068,6 +2138,9 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/admin/v1/webhooks/{id}/deliveries/{delivery_id}/replay", wrapper.ReplayWebhookDelivery)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/admin/v1/system/status", wrapper.GetSystemStatus)
 	})
 
 	return r
@@ -3056,6 +3129,59 @@ func (response ListSweeps500ApplicationProblemPlusJSONResponse) VisitListSweepsR
 	return err
 }
 
+type GetSystemStatusRequestObject struct {
+}
+
+type GetSystemStatusResponseObject interface {
+	VisitGetSystemStatusResponse(w http.ResponseWriter) error
+}
+
+type GetSystemStatus200JSONResponse SystemStatus
+
+func (response GetSystemStatus200JSONResponse) VisitGetSystemStatusResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetSystemStatus401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response GetSystemStatus401ApplicationProblemPlusJSONResponse) VisitGetSystemStatusResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetSystemStatus500ApplicationProblemPlusJSONResponse struct {
+	InternalErrorApplicationProblemPlusJSONResponse
+}
+
+func (response GetSystemStatus500ApplicationProblemPlusJSONResponse) VisitGetSystemStatusResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type ListWebhookEndpointsRequestObject struct {
 }
 
@@ -3815,6 +3941,9 @@ type StrictServerInterface interface {
 	// ListSweeps Recent collections into the hot wallet
 	// (GET /admin/v1/sweeps)
 	ListSweeps(ctx context.Context, request ListSweepsRequestObject) (ListSweepsResponseObject, error)
+	// GetSystemStatus What the dashboard shows
+	// (GET /admin/v1/system/status)
+	GetSystemStatus(ctx context.Context, request GetSystemStatusRequestObject) (GetSystemStatusResponseObject, error)
 	// ListWebhookEndpoints Webhook endpoints, disabled ones included
 	// (GET /admin/v1/webhooks)
 	ListWebhookEndpoints(ctx context.Context, request ListWebhookEndpointsRequestObject) (ListWebhookEndpointsResponseObject, error)
@@ -4263,6 +4392,30 @@ func (sh *strictHandler) ListSweeps(w http.ResponseWriter, r *http.Request, para
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(ListSweepsResponseObject); ok {
 		if err := validResponse.VisitListSweepsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetSystemStatus operation middleware
+func (sh *strictHandler) GetSystemStatus(w http.ResponseWriter, r *http.Request) {
+	var request GetSystemStatusRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetSystemStatus(ctx, request.(GetSystemStatusRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetSystemStatus")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetSystemStatusResponseObject); ok {
+		if err := validResponse.VisitGetSystemStatusResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

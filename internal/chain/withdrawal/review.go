@@ -44,6 +44,17 @@ func (r *Reviewer) Pending(ctx context.Context, limit int32) ([]Record, error) {
 	return records(rows)
 }
 
+// PendingCount is how many withdrawals are waiting for a person.
+func (r *Reviewer) PendingCount(ctx context.Context) (int64, error) {
+	n, err := sqlcgen.New(r.db).CountWithdrawalsByStatus(ctx, sqlcgen.CountWithdrawalsByStatusParams{
+		TenantID: r.tenant, Statuses: []string{StatusPendingReview},
+	})
+	if err != nil {
+		return 0, fmt.Errorf("withdrawal: count pending: %w", err)
+	}
+	return n, nil
+}
+
 // Get returns any withdrawal, whoever owns it. The admin API is the one caller
 // allowed to look across accounts.
 func (r *Reviewer) Get(ctx context.Context, id string) (Record, error) {

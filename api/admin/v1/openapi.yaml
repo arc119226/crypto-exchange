@@ -27,6 +27,7 @@ tags:
   - name: chain
   - name: reconciliation
   - name: webhooks
+  - name: system
 
 paths:
   /admin/v1/accounts:
@@ -743,6 +744,28 @@ paths:
           $ref: "#/components/responses/NotFound"
         "409":
           $ref: "#/components/responses/Conflict"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /admin/v1/system/status:
+    get:
+      tags: [system]
+      operationId: getSystemStatus
+      summary: What the dashboard shows
+      description: |
+        One read of the things an operator checks first thing: whether the
+        ledger balances, what the last reconciliation found, and how much is
+        waiting on a person. Counts are capped where noted; a tile that says
+        "500+" has made its point.
+      responses:
+        "200":
+          description: Status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SystemStatus"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "500":
           $ref: "#/components/responses/InternalError"
 
@@ -1497,6 +1520,46 @@ components:
         next_attempt_at:
           type: string
           format: date-time
+
+    SystemStatus:
+      type: object
+      required: [database, ledger_balanced, open_ledger_breaks, pending_withdrawals, confirming_deposits, dead_webhook_deliveries_24h, now]
+      properties:
+        database:
+          type: string
+          enum: [ok, error]
+        ledger_balanced:
+          type: boolean
+          description: Every asset's debits equal its credits right now.
+        open_ledger_breaks:
+          type: integer
+          description: Assets currently out of balance and recorded as such.
+        last_reconciliation:
+          $ref: "#/components/schemas/ReconciliationSummary"
+        pending_withdrawals:
+          type: integer
+          description: Withdrawals waiting for a person (pending_review).
+        confirming_deposits:
+          type: integer
+          description: Deposits seen on chain and not yet credited.
+        dead_webhook_deliveries_24h:
+          type: integer
+        now:
+          type: string
+          format: date-time
+
+    ReconciliationSummary:
+      type: object
+      nullable: true
+      required: [id, finished_at, balanced]
+      properties:
+        id:
+          type: string
+        finished_at:
+          type: string
+          format: date-time
+        balanced:
+          type: boolean
 
     Problem:
       type: object

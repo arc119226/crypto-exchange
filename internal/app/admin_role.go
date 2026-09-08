@@ -13,8 +13,11 @@ import (
 
 	"github.com/arc119226/crypto-exchange/internal/admin"
 	"github.com/arc119226/crypto-exchange/internal/audit"
+	"github.com/arc119226/crypto-exchange/internal/auth"
+	"github.com/arc119226/crypto-exchange/internal/chain/deposit"
 	"github.com/arc119226/crypto-exchange/internal/chain/withdrawal"
 	"github.com/arc119226/crypto-exchange/internal/ledger"
+	"github.com/arc119226/crypto-exchange/internal/ratelimit"
 	"github.com/arc119226/crypto-exchange/internal/registry"
 	"github.com/arc119226/crypto-exchange/internal/telemetry"
 	"github.com/arc119226/crypto-exchange/internal/webhook"
@@ -38,8 +41,10 @@ func newLedger(ctx context.Context, cfg Config, log *slog.Logger, pool *pgxpool.
 	return svc, nil
 }
 
-// newAdminServer builds the operator API listener: correlation ids,
-// metrics, panic recovery, the static admin API key, then the OpenAPI routes.
+// newAdminServer builds the operator listener: correlation ids, metrics,
+// panic recovery, then two groups on one router -- the OpenAPI routes behind
+// the static API key for machines, and the back-office pages behind a
+// session cookie for people (docs/plan-v1.0.md §12).
 func newAdminServer(cfg Config, log *slog.Logger, m *telemetry.HTTPMetrics, reg prometheus.Registerer, pool *pgxpool.Pool, l *ledger.Service) (*http.Server, error) {
 	// Only to seal the secrets of endpoints this role creates. Config.Validate
 	// has already checked the key, so a failure here is a wiring mistake --
@@ -48,6 +53,15 @@ func newAdminServer(cfg Config, log *slog.Logger, m *telemetry.HTTPMetrics, reg 
 	master, err := cfg.Webhook.Master()
 	if err != nil {
 		return nil, fmt.Errorf("webhook signing key: %w", err)
+	}
+	// Run has already refused to start without it; this only decodes it.
+	totpKey, err := cfg.Admin.TOTPMaster()
+	if err != nil {
+		return nil, fmt.Errorf("admin totp key: %w", err)
+	}
+	loginLimit, err := ratelimit.ParseLimit(cfg.RateLimit.LoginPerIP)
+	if err != nil {
+		return nil, fmt.Errorf("config: LOGIN_PER_IP: %w", err)
 	}
 	r := chi.NewRouter()
 	r.Use(telemetry.CorrelationMiddleware(log))
@@ -58,15 +72,6 @@ func newAdminServer(cfg Config, log *slog.Logger, m *telemetry.HTTPMetrics, reg 
 		return ""
 	}))
 	r.Use(recoverer())
-	r.Use(admin.WithClientIP)
-	// Cross-site request forgery, for the whole listener. Browsers announce
-	// where a request came from (Sec-Fetch-Site, Origin) and this refuses
-	// unsafe methods from anywhere but this origin; a client that sends
-	// neither header -- exchangectl, curl -- is not a browser and passes. The
-	// session cookie is also SameSite=Lax, so this is the second line. Two
-	// groups below: machines with the API key on /admin/v1, people with a
-	// session on /admin.
-	r.Use(http.NewCrossOriginProtection().Handler)
 	r.NotFound(func(w http.ResponseWriter, req *http.Request) {
 		admin.WriteProblem(w, req, http.StatusNotFound, "Not Found", "no route for "+req.Method+" "+req.URL.Path)
 	})
@@ -93,12 +98,29 @@ func newAdminServer(cfg Config, log *slog.Logger, m *telemetry.HTTPMetrics, reg 
 		// Endpoint configuration and replay. This role never delivers -- it has
 		// no consumer and no delivery loop -- so the only thing it does to the
 		// queue is add a run to it (migration 0016/0017 grant exactly that).
-		WithWebhooks(webhooks)
-	// Machines: the static key, on the OpenAPI routes only.
-	r.Group(func(api chi.Router) {
-		api.Use(admin.RequireAPIKey(cfg.Admin.APIKey.Reveal()))
-		admin.Mount(api, h)
+		WithWebhooks(webhooks).
+		// Read-only: what the chain role has seen and not yet credited.
+		WithDeposits(deposit.NewReader(pool, cfg.TenantID))
+	// The sessions people log in with. No signer: this role issues no JWTs,
+	// and no master key: it opens no API-key secret (docs/plan-v1.0.md §14).
+	sessions, err := auth.New(pool, auth.Config{
+		Tenant: cfg.TenantID, Issuer: cfg.Auth.Issuer, TOTPKey: totpKey, AdminSessionTTL: cfg.Admin.SessionTTL,
+	}, nil, nil, l, rec)
+	if err != nil {
+		return nil, fmt.Errorf("admin sessions: %w", err)
+	}
+	// One admin replica (docs/plan-v1.0.md §5.2), so the login throttle can
+	// live in memory: a second replica would only double the allowance.
+	ui, err := admin.NewUI(h, sessions, admin.UIConfig{
+		Cookies: admin.Cookies{Secure: cfg.SecureCookies()}, LoginLimit: loginLimit, Registerer: reg,
 	})
+	if err != nil {
+		return nil, err
+	}
+	if !cfg.SecureCookies() {
+		log.Warn("admin session cookie is not Secure (ADMIN_COOKIE_SECURE / EXCHANGE_ENV=dev): plain http only on a private network")
+	}
+	admin.Routes(r, h, ui, cfg.Admin.APIKey.Reveal())
 	return &http.Server{Addr: cfg.AdminAddr, Handler: r, ReadHeaderTimeout: 5 * time.Second}, nil
 }
 

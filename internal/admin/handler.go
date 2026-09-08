@@ -14,6 +14,7 @@ import (
 
 	"github.com/arc119226/crypto-exchange/internal/admin/gen"
 	"github.com/arc119226/crypto-exchange/internal/audit"
+	"github.com/arc119226/crypto-exchange/internal/chain/deposit"
 	"github.com/arc119226/crypto-exchange/internal/chain/withdrawal"
 	"github.com/arc119226/crypto-exchange/internal/ledger"
 	"github.com/arc119226/crypto-exchange/internal/registry"
@@ -39,6 +40,8 @@ type Handler struct {
 	// without the webhook tables, which turns those endpoints into 500s
 	// rather than reporting that no customer has subscribed to anything.
 	webhooks *webhook.Store
+	// deposits reads chain.deposits; nil without a chain.
+	deposits *deposit.Reader
 }
 
 var _ gen.StrictServerInterface = (*Handler)(nil)
@@ -65,6 +68,12 @@ func (h *Handler) WithWithdrawals(r *withdrawal.Reviewer) *Handler {
 // WithWebhooks enables the outbound-webhook endpoints.
 func (h *Handler) WithWebhooks(s *webhook.Store) *Handler {
 	h.webhooks = s
+	return h
+}
+
+// WithDeposits enables the deposit list and the dashboard's deposit count.
+func (h *Handler) WithDeposits(r *deposit.Reader) *Handler {
+	h.deposits = r
 	return h
 }
 

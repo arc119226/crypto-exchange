@@ -1,0 +1,35 @@
+{{define "content"}}
+<h1>Dashboard</h1>
+{{with .Data}}
+<section class="tiles">
+  <a class="tile {{if .LedgerBalanced}}ok{{else}}bad{{end}}" href="/admin/ledger">
+    <span class="label">Ledger</span>
+    <span class="value">{{if .LedgerBalanced}}balanced{{else}}OUT OF BALANCE{{end}}</span>
+    <span class="sub">{{.OpenLedgerBreaks}} open break{{if ne .OpenLedgerBreaks 1}}s{{end}}</span>
+  </a>
+  <a class="tile {{if .LastReconciliation}}{{if .LastReconciliation.Balanced}}ok{{else}}bad{{end}}{{else}}muted{{end}}" href="/admin/reconciliation">
+    <span class="label">Chain reconciliation</span>
+    {{if .LastReconciliation}}
+    <span class="value">{{if .LastReconciliation.Balanced}}balanced{{else}}BREAK{{end}}</span>
+    <span class="sub">{{when .LastReconciliation.FinishedAt}}</span>
+    {{else}}
+    <span class="value">no report yet</span>
+    <span class="sub">the chain role writes one every ETH_RECONCILE_INTERVAL</span>
+    {{end}}
+  </a>
+  <a class="tile {{if gt .PendingWithdrawals 0}}warn{{end}}" href="/admin/withdrawals">
+    <span class="label">Withdrawals waiting for review</span>
+    <span class="value">{{.PendingWithdrawals}}</span>
+  </a>
+  <a class="tile" href="/admin/chain">
+    <span class="label">Deposits confirming</span>
+    <span class="value">{{.ConfirmingDeposits}}</span>
+  </a>
+  <a class="tile {{if gt .DeadWebhookDeliveries24H 0}}warn{{end}}" href="/admin/webhooks">
+    <span class="label">Dead webhook deliveries, 24h</span>
+    <span class="value">{{.DeadWebhookDeliveries24H}}</span>
+  </a>
+</section>
+<p class="muted">As of {{when .Now}}. Database: {{.Database}}.</p>
+{{end}}
+{{end}}

@@ -252,6 +252,24 @@ func (e PostingDirection) Valid() bool {
 	}
 }
 
+// Defines values for SystemStatusDatabase.
+const (
+	SystemStatusDatabaseError SystemStatusDatabase = "error"
+	SystemStatusDatabaseOk    SystemStatusDatabase = "ok"
+)
+
+// Valid indicates whether the value is a known member of the SystemStatusDatabase enum.
+func (e SystemStatusDatabase) Valid() bool {
+	switch e {
+	case SystemStatusDatabaseError:
+		return true
+	case SystemStatusDatabaseOk:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for WebhookDeliveryStatus.
 const (
 	WebhookDeliveryStatusDead      WebhookDeliveryStatus = "dead"
@@ -681,6 +699,13 @@ type ReconciliationReport struct {
 	StartedAt  time.Time            `json:"started_at"`
 }
 
+// ReconciliationSummary defines model for ReconciliationSummary.
+type ReconciliationSummary struct {
+	Balanced   bool      `json:"balanced"`
+	FinishedAt time.Time `json:"finished_at"`
+	ID         string    `json:"id"`
+}
+
 // Sweep defines model for Sweep.
 type Sweep struct {
 	// Amount Decimal serialized as a string (NUMERIC(36,18)); never a JSON number.
@@ -713,6 +738,28 @@ type Sweep struct {
 type SweepList struct {
 	Sweeps []Sweep `json:"sweeps"`
 }
+
+// SystemStatus defines model for SystemStatus.
+type SystemStatus struct {
+	// ConfirmingDeposits Deposits seen on chain and not yet credited.
+	ConfirmingDeposits       int                    `json:"confirming_deposits"`
+	Database                 SystemStatusDatabase   `json:"database"`
+	DeadWebhookDeliveries24H int                    `json:"dead_webhook_deliveries_24h"`
+	LastReconciliation       *ReconciliationSummary `json:"last_reconciliation,omitempty"`
+
+	// LedgerBalanced Every asset's debits equal its credits right now.
+	LedgerBalanced bool      `json:"ledger_balanced"`
+	Now            time.Time `json:"now"`
+
+	// OpenLedgerBreaks Assets currently out of balance and recorded as such.
+	OpenLedgerBreaks int `json:"open_ledger_breaks"`
+
+	// PendingWithdrawals Withdrawals waiting for a person (pending_review).
+	PendingWithdrawals int `json:"pending_withdrawals"`
+}
+
+// SystemStatusDatabase defines model for SystemStatus.Database.
+type SystemStatusDatabase string
 
 // TrialBalance defines model for TrialBalance.
 type TrialBalance struct {
@@ -1229,6 +1276,16 @@ type ClientInterface interface {
 	//
 	// Corresponds with GET /admin/v1/sweeps (the `ListSweeps` operationId).
 	ListSweeps(ctx context.Context, params *ListSweepsParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetSystemStatus What the dashboard shows
+	//
+	// One read of the things an operator checks first thing: whether the
+	// ledger balances, what the last reconciliation found, and how much is
+	// waiting on a person. Counts are capped where noted; a tile that says
+	// "500+" has made its point.
+	//
+	// Corresponds with GET /admin/v1/system/status (the `GetSystemStatus` operationId).
+	GetSystemStatus(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// ListWebhookEndpoints Webhook endpoints, disabled ones included
 	//
@@ -1765,6 +1822,26 @@ func (c *Client) GetReconciliation(ctx context.Context, reqEditors ...RequestEdi
 // Corresponds with GET /admin/v1/sweeps (the `ListSweeps` operationId).
 func (c *Client) ListSweeps(ctx context.Context, params *ListSweepsParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewListSweepsRequest(c.Server, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// GetSystemStatus What the dashboard shows
+//
+// One read of the things an operator checks first thing: whether the
+// ledger balances, what the last reconciliation found, and how much is
+// waiting on a person. Counts are capped where noted; a tile that says
+// "500+" has made its point.
+//
+// Corresponds with GET /admin/v1/system/status (the `GetSystemStatus` operationId).
+func (c *Client) GetSystemStatus(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetSystemStatusRequest(c.Server)
 	if err != nil {
 		return nil, err
 	}
@@ -2771,6 +2848,33 @@ func NewListSweepsRequest(server string, params *ListSweepsParams) (*http.Reques
 	return req, nil
 }
 
+// NewGetSystemStatusRequest constructs an http.Request for the GetSystemStatus method
+func NewGetSystemStatusRequest(server string) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/admin/v1/system/status")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
 // NewListWebhookEndpointsRequest constructs an http.Request for the ListWebhookEndpoints method
 func NewListWebhookEndpointsRequest(server string) (*http.Request, error) {
 	var err error
@@ -3452,6 +3556,18 @@ type ClientWithResponsesInterface interface {
 	//
 	// Corresponds with GET /admin/v1/sweeps (the `ListSweeps` operationId).
 	ListSweepsWithResponse(ctx context.Context, params *ListSweepsParams, reqEditors ...RequestEditorFn) (*ListSweepsResponse, error)
+
+	// GetSystemStatusWithResponse What the dashboard shows
+	//
+	// One read of the things an operator checks first thing: whether the
+	// ledger balances, what the last reconciliation found, and how much is
+	// waiting on a person. Counts are capped where noted; a tile that says
+	// "500+" has made its point.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /admin/v1/system/status (the `GetSystemStatus` operationId).
+	GetSystemStatusWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*GetSystemStatusResponse, error)
 
 	// ListWebhookEndpointsWithResponse Webhook endpoints, disabled ones included
 	//
@@ -4487,6 +4603,61 @@ func (r ListSweepsResponse) ContentType() string {
 	return ""
 }
 
+type GetSystemStatusResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *SystemStatus
+	// ApplicationProblemJSON401 the response for an HTTP 401 `application/problem+json` response
+	ApplicationProblemJSON401 *Unauthorized
+	// ApplicationProblemJSON500 the response for an HTTP 500 `application/problem+json` response
+	ApplicationProblemJSON500 *InternalError
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r GetSystemStatusResponse) GetJSON200() *SystemStatus {
+	return r.JSON200
+}
+
+// GetApplicationProblemJSON401 returns the response for an HTTP 401 `application/problem+json` response
+func (r GetSystemStatusResponse) GetApplicationProblemJSON401() *Unauthorized {
+	return r.ApplicationProblemJSON401
+}
+
+// GetApplicationProblemJSON500 returns the response for an HTTP 500 `application/problem+json` response
+func (r GetSystemStatusResponse) GetApplicationProblemJSON500() *InternalError {
+	return r.ApplicationProblemJSON500
+}
+
+// GetBody returns the raw response body bytes
+func (r GetSystemStatusResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r GetSystemStatusResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetSystemStatusResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r GetSystemStatusResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
 type ListWebhookEndpointsResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -5409,6 +5580,24 @@ func (c *ClientWithResponses) ListSweepsWithResponse(ctx context.Context, params
 	return ParseListSweepsResponse(rsp)
 }
 
+// GetSystemStatusWithResponse What the dashboard shows
+//
+// One read of the things an operator checks first thing: whether the
+// ledger balances, what the last reconciliation found, and how much is
+// waiting on a person. Counts are capped where noted; a tile that says
+// "500+" has made its point.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /admin/v1/system/status (the `GetSystemStatus` operationId).
+func (c *ClientWithResponses) GetSystemStatusWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*GetSystemStatusResponse, error) {
+	rsp, err := c.GetSystemStatus(ctx, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetSystemStatusResponse(rsp)
+}
+
 // ListWebhookEndpointsWithResponse Webhook endpoints, disabled ones included
 //
 // Signing secrets are never returned; they are shown once, when the endpoint is created.
@@ -6292,6 +6481,46 @@ func ParseListSweepsResponse(rsp *http.Response) (*ListSweepsResponse, error) {
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
 		var dest SweepList
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON500 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetSystemStatusResponse parses an HTTP response from a GetSystemStatusWithResponse call
+func ParseGetSystemStatusResponse(rsp *http.Response) (*GetSystemStatusResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetSystemStatusResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest SystemStatus
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}

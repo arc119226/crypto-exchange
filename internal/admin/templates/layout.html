@@ -1,0 +1,39 @@
+{{define "layout"}}<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{.Title}} · exchange admin</title>
+<link rel="stylesheet" href="/admin/static/app.css">
+<script src="/admin/static/htmx.min.js" defer></script>
+</head>
+<body>
+<header class="top">
+  <a class="brand" href="/admin/">exchange <span>admin</span></a>
+  {{if and .Session .Session.TOTPVerified}}
+  <nav>
+    <a class="{{active .Path "/admin/"}}" href="/admin/">Dashboard</a>
+    <a class="{{active .Path "/admin/assets"}}" href="/admin/assets">Assets</a>
+    <a class="{{active .Path "/admin/markets"}}" href="/admin/markets">Markets</a>
+    <a class="{{active .Path "/admin/fee-schedules"}}" href="/admin/fee-schedules">Fees</a>
+    <a class="{{active .Path "/admin/withdrawal-limits"}}" href="/admin/withdrawal-limits">Limits</a>
+    <a class="{{active .Path "/admin/users"}}" href="/admin/users">Users</a>
+    <a class="{{active .Path "/admin/ledger"}}" href="/admin/ledger">Ledger</a>
+    <a class="{{active .Path "/admin/withdrawals"}}" href="/admin/withdrawals">Withdrawals</a>
+    <a class="{{active .Path "/admin/chain"}}" href="/admin/chain">Chain</a>
+    <a class="{{active .Path "/admin/reconciliation"}}" href="/admin/reconciliation">Reconciliation</a>
+    <a class="{{active .Path "/admin/audit"}}" href="/admin/audit">Audit</a>
+    <a class="{{active .Path "/admin/webhooks"}}" href="/admin/webhooks">Webhooks</a>
+  </nav>
+  <form method="post" action="/admin/logout" class="who">
+    <span>{{.Session.Email}}</span>
+    <button type="submit" class="link">Sign out</button>
+  </form>
+  {{end}}
+</header>
+<main>
+  {{if .Flash}}<div class="flash {{.Flash.Kind}}" role="status">{{.Flash.Text}}</div>{{end}}
+  {{template "content" .}}
+</main>
+</body>
+</html>{{end}}
