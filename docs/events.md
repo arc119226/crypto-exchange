@@ -107,7 +107,7 @@ schema; `planned` means the phase that adds it will add the schema with it.
 | `trade.executed` | engine | stream (trades, ticker, kline), worker, webhook | shipped |
 | `balance.updated` | engine, chain, admin | stream (private), webhook | shipped |
 | `market.updated` | admin | **engine (reload)**, stream, webhook | shipped |
-| `ledger.posted` | engine, chain, admin | stream (balances), back-office projection | planned (Phase 5) |
+| `ledger.posted` | engine, chain, admin | stream (balances), back-office projection | planned (Phase 6, with the private stream) |
 | `asset.updated`, `fee_schedule.updated` | admin | engine (reload), webhook | planned (Phase 5) |
 | `deposit.detected`, `deposit.credited`, `deposit.orphaned`, `deposit.dropped`, `deposit.reversed` | chain | stream, webhook, admin | shipped |
 | `withdrawal.requested` | api | stream, webhook, admin | shipped |
@@ -115,7 +115,7 @@ schema; `planned` means the phase that adds it will add the schema with it.
 | `sweep.completed`, `sweep.failed` | chain | admin | shipped |
 | `alert.hot_wallet_low` | chain | webhook, admin | shipped |
 | `reconciliation.break_detected` | **chain** | webhook, admin | shipped |
-| `user.kyc_level_updated`, `user.status_updated` | admin | webhook | planned (Phase 5) |
+| `user.status_updated`, `user.kyc_level_updated` | admin | webhook, admin | shipped |
 
 `deposit.*` events all share one payload: what a consumer needs about a
 deposit does not change with the way it moved, and the difference lives in the
@@ -181,6 +181,17 @@ The chain role writes these to the outbox; the **relay that publishes them
 runs in the engine role**, so a deployment without an engine leaves deposit,
 withdrawal, sweep, reconciliation and alert events sitting in
 `eventbus.outbox`.
+
+`user.*` is what an operator does to a person from the back office, and is
+the other pair with **no `account_id` and no sequence**: a user is not an
+account, so the subject ends in the house scope. `user.status_updated` names
+both ends. A freeze also freezes the user's spot account in the same
+transaction, and that account change is *not* a separate event: the ledger
+does not announce status, and a consumer that wants the account's state reads
+`GET /admin/v1/accounts/{id}`. `user.kyc_level_updated` changes what the
+withdrawal policy will decide next; nothing already pending is re-decided.
+Both are produced by the **admin** role, which has no relay of its own — the
+engine's relay publishes them, like every other outbox row.
 
 `order.*` and `trade.executed` carry `seq`; `order.*` and `balance.updated`
 carry `account_seq`. `order.accepted` is emitted for **every** order that was

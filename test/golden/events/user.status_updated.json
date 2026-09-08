@@ -1,0 +1,18 @@
+{
+  "event_id": "01J8Z2K3M4N5P6Q7R8S9T0V1Y1",
+  "event_type": "user.status_updated",
+  "schema_version": 1,
+  "tenant_id": "default",
+  "market_id": null,
+  "account_id": null,
+  "seq": null,
+  "occurred_at": "2026-09-05T08:15:23.412Z",
+  "correlation_id": "req_01J8Z2K2000000000000000000",
+  "payload": {
+    "user_id": "01J8Z2K3M4N5P6Q7R8S9T0U100",
+    "status": "frozen",
+    "previous_status": "active",
+    "version": 3,
+    "reason": "chargeback investigation, ticket 4821"
+  }
+}

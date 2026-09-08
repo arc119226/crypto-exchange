@@ -8,6 +8,8 @@ import (
 	"io/fs"
 	"log/slog"
 	"net/http"
+	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -63,6 +65,17 @@ var funcs = template.FuncMap{
 	},
 	"amount": func(a money.Amount) string { return a.String() },
 	"join":   strings.Join,
+	// badge maps a status to the stylesheet's three colours. Statuses are
+	// named string types all over the domain, so it takes any and prints.
+	"badge": func(status any) string {
+		switch fmt.Sprint(status) {
+		case "active", "credited", "confirmed", "delivered", "auto_approved", "approved", "completed", "enabled":
+			return "ok"
+		case "frozen", "rejected", "failed", "dead", "orphaned", "reversed", "delisted", "disabled":
+			return "bad"
+		}
+		return "warn"
+	},
 	"active": func(path, prefix string) string {
 		if prefix == HomePath && path == HomePath || prefix != HomePath && strings.HasPrefix(path, prefix) {
 			return "active"
@@ -159,4 +172,45 @@ func staticHandler() http.Handler {
 		w.Header().Set("Cache-Control", "public, max-age=86400")
 		files.ServeHTTP(w, r)
 	})
+}
+
+// pager is the newer/older links under a table. Prev and Next are full
+// URLs, or empty when there is nothing that way; the filters travel in them
+// so paging keeps the search. htmx swaps the section in place and pushes
+// the URL, so a reload lands on the same page.
+type pager struct {
+	Prev, Next string
+}
+
+// pageQuery reads limit and offset from a page's query, bounded.
+func pageQuery(q url.Values) (limit, offset int32) {
+	limit, offset = 50, 0
+	if n, err := strconv.Atoi(q.Get("limit")); err == nil && n > 0 && n <= 200 {
+		limit = int32(n) //nolint:gosec // bounded just above
+	}
+	if n, err := strconv.Atoi(q.Get("offset")); err == nil && n > 0 {
+		offset = int32(min(n, 1<<30)) //nolint:gosec // bounded just above
+	}
+	return limit, offset
+}
+
+// newPager builds the links for a page that showed got rows.
+func newPager(path string, keep url.Values, limit, offset int32, got int) pager {
+	link := func(off int32) string {
+		q := url.Values{}
+		for k, v := range keep {
+			q[k] = v
+		}
+		q.Set("limit", strconv.Itoa(int(limit)))
+		q.Set("offset", strconv.Itoa(int(off)))
+		return path + "?" + q.Encode()
+	}
+	var p pager
+	if offset > 0 {
+		p.Prev = link(max(0, offset-limit))
+	}
+	if got >= int(limit) {
+		p.Next = link(offset + limit)
+	}
+	return p
 }

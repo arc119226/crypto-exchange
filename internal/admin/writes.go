@@ -2,12 +2,14 @@ package admin
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 
 	"github.com/arc119226/crypto-exchange/internal/audit"
+	"github.com/arc119226/crypto-exchange/internal/auth"
 	"github.com/arc119226/crypto-exchange/internal/chain/withdrawal"
 	"github.com/arc119226/crypto-exchange/internal/eventbus"
 	"github.com/arc119226/crypto-exchange/internal/ledger"
@@ -261,4 +263,90 @@ func (h *Handler) replayWebhookDelivery(ctx context.Context, endpointID, deliver
 		})
 	})
 	return r, err
+}
+
+// setUserStatus freezes or releases a user and, in the same transaction,
+// their spot account: a frozen person whose account still trades is not
+// frozen (docs/plan-v1.0.md §12, domain.md §24). A user with no spot
+// account -- registration and bootstrap open one, nothing else does -- is
+// not an error.
+func (h *Handler) setUserStatus(ctx context.Context, id, status, reason string) (auth.User, error) {
+	if h.users == nil {
+		return auth.User{}, errUsersDisabled
+	}
+	a := actorFrom(ctx)
+	var after auth.User
+	err := h.inTx(ctx, func(tx pgx.Tx) error {
+		before, user, changed, err := h.users.SetUserStatus(ctx, tx, id, status)
+		if err != nil {
+			return err
+		}
+		after = user
+		if !changed {
+			return nil // already in that status: no audit row, no event
+		}
+		var accountID *string
+		switch acct, err := h.ledger.SpotAccountOf(ctx, tx, id); {
+		case errors.Is(err, ledger.ErrAccountNotFound):
+		case err != nil:
+			return err
+		default:
+			if _, err := h.ledger.SetAccountStatus(ctx, tx, acct.ID, ledger.AccountStatus(status)); err != nil {
+				return err
+			}
+			accountID = &acct.ID
+		}
+		if err := h.audit.Record(ctx, tx, audit.Event{
+			ActorType: a.Type, ActorID: a.ID, IP: a.IP, Action: "user.status.update", TargetType: "user", TargetID: id,
+			Before:        map[string]any{"status": before.Status, "version": before.Version},
+			After:         map[string]any{"status": after.Status, "version": after.Version, "reason": reason, "account_id": accountID},
+			CorrelationID: telemetry.CorrelationID(ctx),
+		}); err != nil {
+			return err
+		}
+		evt, err := auth.UserStatusUpdatedEvent(h.tenant, before, after, reason, time.Now().UTC().Truncate(time.Microsecond))
+		if err != nil {
+			return err
+		}
+		evt.CorrelationID = telemetry.CorrelationID(ctx)
+		_, err = eventbus.Outbox{}.Append(ctx, tx, evt)
+		return err
+	})
+	return after, err
+}
+
+// setUserKYCLevel moves a user between KYC levels. Nothing pending is
+// re-decided; the next withdrawal reads the new level.
+func (h *Handler) setUserKYCLevel(ctx context.Context, id string, level int, reason string) (auth.User, error) {
+	if h.users == nil {
+		return auth.User{}, errUsersDisabled
+	}
+	a := actorFrom(ctx)
+	var after auth.User
+	err := h.inTx(ctx, func(tx pgx.Tx) error {
+		before, user, changed, err := h.users.SetUserKYCLevel(ctx, tx, id, level)
+		if err != nil {
+			return err
+		}
+		after = user
+		if !changed {
+			return nil
+		}
+		if err := h.audit.Record(ctx, tx, audit.Event{
+			ActorType: a.Type, ActorID: a.ID, IP: a.IP, Action: "user.kyc_level.update", TargetType: "user", TargetID: id,
+			Before:        map[string]any{"kyc_level": before.KYCLevel, "version": before.Version},
+			After:         map[string]any{"kyc_level": after.KYCLevel, "version": after.Version, "reason": reason},
+			CorrelationID: telemetry.CorrelationID(ctx),
+		}); err != nil {
+			return err
+		}
+		evt, err := auth.UserKYCLevelUpdatedEvent(h.tenant, before, after, reason, time.Now().UTC().Truncate(time.Microsecond))
+		if err != nil {
+			return err
+		}
+		evt.CorrelationID = telemetry.CorrelationID(ctx)
+		_, err = eventbus.Outbox{}.Append(ctx, tx, evt)
+		return err
+	})
+	return after, err
 }

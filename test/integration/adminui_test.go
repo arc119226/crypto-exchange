@@ -94,7 +94,7 @@ func adminUIServer(t *testing.T, h *adminAuthHarness, limit ratelimit.Limit) *ht
 	l := ledger.New(h.adminPool, "default")
 	require.NoError(t, l.LoadHouseAccounts(context.Background()))
 	rec := audit.NewRecorder("default")
-	handler := admin.NewHandler(h.adminPool, l, registry.NewStore(h.adminPool), rec, "default")
+	handler := admin.NewHandler(h.adminPool, l, registry.NewStore(h.adminPool), rec, "default").WithUsers(h.svc)
 	ui, err := admin.NewUI(handler, h.svc, admin.UIConfig{LoginLimit: limit})
 	require.NoError(t, err)
 	r := chi.NewRouter()
@@ -103,6 +103,22 @@ func adminUIServer(t *testing.T, h *adminAuthHarness, limit ratelimit.Limit) *ht
 	srv := httptest.NewServer(r)
 	t.Cleanup(srv.Close)
 	return srv
+}
+
+// loginLimitForTests is wide enough that no page test trips it.
+var loginLimitForTests = ratelimit.Limit{N: 100, Window: time.Minute}
+
+// signIn walks the whole login for a page test: CLI-issued secret, password,
+// first code. The browser leaves with a verified cookie.
+func signIn(t *testing.T, b *browser, h *adminAuthHarness) {
+	t.Helper()
+	enrol, err := h.svc.EnrollTOTP(context.Background(), adminEmail)
+	require.NoError(t, err)
+	resp, _ := b.post("/admin/login", url.Values{"email": {adminEmail}, "password": {adminPassword}})
+	require.Equal(t, http.StatusSeeOther, resp.StatusCode)
+	resp, _ = b.post("/admin/totp", url.Values{"code": {h.code(t, enrol.Secret)}})
+	require.Equal(t, http.StatusSeeOther, resp.StatusCode)
+	require.Equal(t, admin.HomePath, resp.Header.Get("Location"))
 }
 
 // The login, through a browser: password, pending cookie, code from the

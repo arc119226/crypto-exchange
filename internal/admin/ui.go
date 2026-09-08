@@ -99,6 +99,10 @@ func (u *UI) mount(r chi.Router) {
 		pages.Group(func(admin chi.Router) {
 			admin.Use(RequireAdmin(u.sessions, u.cfg.Cookies))
 			admin.Get(HomePath, u.dashboard)
+			admin.Get("/admin/users", u.users)
+			admin.Get("/admin/users/{id}", u.user)
+			admin.Post("/admin/users/{id}/kyc-level", u.setUserKYC)
+			admin.Post("/admin/users/{id}/status", u.setUserStatus)
 		})
 	})
 }

@@ -14,6 +14,7 @@ import (
 
 	"github.com/arc119226/crypto-exchange/internal/admin/gen"
 	"github.com/arc119226/crypto-exchange/internal/audit"
+	"github.com/arc119226/crypto-exchange/internal/auth"
 	"github.com/arc119226/crypto-exchange/internal/chain/deposit"
 	"github.com/arc119226/crypto-exchange/internal/chain/withdrawal"
 	"github.com/arc119226/crypto-exchange/internal/ledger"
@@ -42,6 +43,10 @@ type Handler struct {
 	webhooks *webhook.Store
 	// deposits reads chain.deposits; nil without a chain.
 	deposits *deposit.Reader
+	// users is the directory and the two edits an operator makes to a
+	// person: KYC level and status. The same auth.Service the pages log in
+	// with; nil turns the user endpoints into 500s.
+	users *auth.Service
 }
 
 var _ gen.StrictServerInterface = (*Handler)(nil)
@@ -74,6 +79,12 @@ func (h *Handler) WithWebhooks(s *webhook.Store) *Handler {
 // WithDeposits enables the deposit list and the dashboard's deposit count.
 func (h *Handler) WithDeposits(r *deposit.Reader) *Handler {
 	h.deposits = r
+	return h
+}
+
+// WithUsers enables the user directory and edits.
+func (h *Handler) WithUsers(s *auth.Service) *Handler {
+	h.users = s
 	return h
 }
 

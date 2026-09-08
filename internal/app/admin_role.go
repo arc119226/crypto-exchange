@@ -88,6 +88,15 @@ func newAdminServer(cfg Config, log *slog.Logger, m *telemetry.HTTPMetrics, reg 
 	} else {
 		log.Warn("WEBHOOK_SIGNING_KEY is not set: the webhook endpoints are disabled")
 	}
+	// The sessions people log in with, and the user directory they edit. No
+	// signer: this role issues no JWTs, and no master key: it opens no
+	// API-key secret (docs/plan-v1.0.md §14).
+	sessions, err := auth.New(pool, auth.Config{
+		Tenant: cfg.TenantID, Issuer: cfg.Auth.Issuer, TOTPKey: totpKey, AdminSessionTTL: cfg.Admin.SessionTTL,
+	}, nil, nil, l, rec)
+	if err != nil {
+		return nil, fmt.Errorf("admin sessions: %w", err)
+	}
 	h := admin.NewHandler(pool, l, registry.NewStore(pool), rec, cfg.TenantID).
 		// Which chain's reconciliation reports this role shows. It cannot
 		// produce one -- it has no node -- so this is only which rows to read.
@@ -100,15 +109,9 @@ func newAdminServer(cfg Config, log *slog.Logger, m *telemetry.HTTPMetrics, reg 
 		// queue is add a run to it (migration 0016/0017 grant exactly that).
 		WithWebhooks(webhooks).
 		// Read-only: what the chain role has seen and not yet credited.
-		WithDeposits(deposit.NewReader(pool, cfg.TenantID))
-	// The sessions people log in with. No signer: this role issues no JWTs,
-	// and no master key: it opens no API-key secret (docs/plan-v1.0.md §14).
-	sessions, err := auth.New(pool, auth.Config{
-		Tenant: cfg.TenantID, Issuer: cfg.Auth.Issuer, TOTPKey: totpKey, AdminSessionTTL: cfg.Admin.SessionTTL,
-	}, nil, nil, l, rec)
-	if err != nil {
-		return nil, fmt.Errorf("admin sessions: %w", err)
-	}
+		WithDeposits(deposit.NewReader(pool, cfg.TenantID)).
+		// People: the directory, KYC levels, freezes.
+		WithUsers(sessions)
 	// One admin replica (docs/plan-v1.0.md §5.2), so the login throttle can
 	// live in memory: a second replica would only double the allowance.
 	ui, err := admin.NewUI(h, sessions, admin.UIConfig{

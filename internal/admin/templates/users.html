@@ -1,0 +1,42 @@
+{{define "content"}}
+<h1>Users</h1>
+{{with .Data}}
+<form method="get" action="/admin/users" class="row">
+  <label>Email contains <input type="search" name="email" value="{{.Filter.Email}}" placeholder="@example.com"></label>
+  <label>Status
+    <select name="status">
+      <option value="">any</option>
+      <option value="active"{{if eq .Filter.Status "active"}} selected{{end}}>active</option>
+      <option value="frozen"{{if eq .Filter.Status "frozen"}} selected{{end}}>frozen</option>
+    </select>
+  </label>
+  <label>Role
+    <select name="role">
+      <option value="">any</option>
+      <option value="user"{{if eq .Filter.Role "user"}} selected{{end}}>user</option>
+      <option value="admin"{{if eq .Filter.Role "admin"}} selected{{end}}>admin</option>
+    </select>
+  </label>
+  <button type="submit" class="quiet">Filter</button>
+</form>
+<section id="list">
+<table>
+  <thead><tr><th>Email</th><th>Role</th><th class="num">KYC</th><th>Status</th><th>Created</th></tr></thead>
+  <tbody>
+  {{range .Users}}
+  <tr>
+    <td><a href="/admin/users/{{.ID}}">{{.Email}}</a></td>
+    <td>{{.Role}}{{if .TOTPEnabled}} <span class="muted">· totp</span>{{end}}</td>
+    <td class="num">{{.KYCLevel}}</td>
+    <td><span class="badge {{badge .Status}}">{{.Status}}</span></td>
+    <td>{{when .CreatedAt}}</td>
+  </tr>
+  {{else}}
+  <tr><td colspan="5" class="muted">No users match.</td></tr>
+  {{end}}
+  </tbody>
+</table>
+{{template "pager" .Pager}}
+</section>
+{{end}}
+{{end}}

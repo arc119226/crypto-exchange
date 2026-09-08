@@ -15,6 +15,7 @@ import (
 
 	"github.com/arc119226/crypto-exchange/internal/admin/gen"
 	"github.com/arc119226/crypto-exchange/internal/auth"
+	"github.com/arc119226/crypto-exchange/internal/ledger"
 	"github.com/arc119226/crypto-exchange/internal/ratelimit"
 )
 
@@ -335,3 +336,59 @@ func TestActiveNav(t *testing.T) {
 
 // auth.Service is what admin_role.go hands NewUI; the fakes above stand in for it.
 var _ Sessions = (*auth.Service)(nil)
+
+func TestUserTemplatesRender(t *testing.T) {
+	tpl, err := loadTemplates()
+	require.NoError(t, err)
+	verified := &auth.AdminSession{Email: "ops@example.com", TOTPEnabled: true, TOTPVerified: true}
+	alice := auth.User{ID: "u-alice", Email: "alice@example.com", Role: "user", KYCLevel: 1, Status: "active", Version: 2, CreatedAt: time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)}
+	frozen := alice
+	frozen.Status = "frozen"
+
+	render := func(name string, data any) string {
+		rec := httptest.NewRecorder()
+		tpl.render(rec, httptest.NewRequest(http.MethodGet, "/admin/users", nil), http.StatusOK, name, view{Title: "Users", Session: verified, Data: data})
+		return rec.Body.String()
+	}
+
+	body := render("users", usersData{Filter: auth.UserFilter{Email: "ali", Status: "active"}, Users: []auth.User{alice}, Pager: newPager("/admin/users", url.Values{"email": {"ali"}}, 1, 1, 1)})
+	assert.Contains(t, body, `href="/admin/users/u-alice"`)
+	assert.Contains(t, body, `value="ali"`)
+	assert.Contains(t, body, `<option value="active" selected>`)
+	assert.Contains(t, body, `class="badge ok">active<`)
+	assert.Contains(t, body, `hx-get="/admin/users?email=ali&amp;limit=1&amp;offset=0"`, "newer")
+	assert.Contains(t, body, `hx-get="/admin/users?email=ali&amp;limit=1&amp;offset=2"`, "older")
+	assert.Contains(t, body, `class="active" href="/admin/users"`, "the nav item")
+
+	body = render("users", usersData{})
+	assert.Contains(t, body, "No users match.")
+	assert.NotContains(t, body, `class="pager"`)
+
+	acct := &ledger.Account{ID: "acct-alice", Status: ledger.StatusActive}
+	body = render("user", userData{User: alice, Account: acct, Levels: []int{0, 1, 2}})
+	assert.Contains(t, body, `<option value="1" selected>`)
+	assert.Contains(t, body, `<input type="hidden" name="status" value="frozen">`)
+	assert.Contains(t, body, ">Freeze<")
+	assert.Contains(t, body, `href="/admin/ledger?account_id=acct-alice"`)
+	assert.Contains(t, body, "version 2")
+
+	body = render("user", userData{User: frozen, Levels: []int{0, 1, 2}})
+	assert.Contains(t, body, `<input type="hidden" name="status" value="active">`)
+	assert.Contains(t, body, ">Release<")
+	assert.Contains(t, body, `<dd><span class="muted">none</span></dd>`)
+}
+
+func TestPager(t *testing.T) {
+	limit, offset := pageQuery(url.Values{"limit": {"500"}, "offset": {"-3"}})
+	assert.Equal(t, int32(50), limit, "over the cap: the default")
+	assert.Equal(t, int32(0), offset)
+	limit, offset = pageQuery(url.Values{"limit": {"20"}, "offset": {"40"}})
+	assert.Equal(t, int32(20), limit)
+	assert.Equal(t, int32(40), offset)
+
+	p := newPager("/admin/x", nil, 20, 0, 19)
+	assert.Equal(t, pager{}, p, "first page, not full: nowhere to go")
+	p = newPager("/admin/x", url.Values{"status": {"frozen"}}, 20, 30, 20)
+	assert.Equal(t, "/admin/x?limit=20&offset=10&status=frozen", p.Prev)
+	assert.Equal(t, "/admin/x?limit=20&offset=50&status=frozen", p.Next)
+}

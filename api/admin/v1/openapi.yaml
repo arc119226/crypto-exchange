@@ -20,6 +20,7 @@ security:
   - AdminApiKey: []
 tags:
   - name: accounts
+  - name: users
   - name: ledger
   - name: registry
   - name: audit
@@ -30,6 +31,133 @@ tags:
   - name: system
 
 paths:
+  /admin/v1/users:
+    get:
+      tags: [users]
+      operationId: listUsers
+      summary: List users
+      description: >
+        The operator's directory. `email` is a fragment matched anywhere in
+        the address (no wildcards). Newest first.
+      parameters:
+        - name: email
+          in: query
+          schema:
+            type: string
+        - name: status
+          in: query
+          schema:
+            $ref: "#/components/schemas/UserStatus"
+        - name: role
+          in: query
+          schema:
+            $ref: "#/components/schemas/UserRole"
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+      responses:
+        "200":
+          description: Users
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /admin/v1/users/{id}:
+    get:
+      tags: [users]
+      operationId: getUser
+      summary: Get one user
+      parameters:
+        - $ref: "#/components/parameters/UserID"
+      responses:
+        "200":
+          description: User
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /admin/v1/users/{id}/kyc-level:
+    put:
+      tags: [users]
+      operationId: setUserKycLevel
+      summary: Set a user's KYC level
+      description: >
+        The withdrawal policy reads the level on each request, so the next
+        withdrawal is decided under the new limits; nothing already pending is
+        re-decided. Publishes `user.kyc_level_updated` when the level changes.
+      parameters:
+        - $ref: "#/components/parameters/UserID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/KycLevelRequest"
+      responses:
+        "200":
+          description: Updated user (unchanged when already at that level)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /admin/v1/users/{id}/status:
+    put:
+      tags: [users]
+      operationId: setUserStatus
+      summary: Freeze or release a user
+      description: >
+        Frozen means the user cannot log in, refresh a token or use an API
+        key, and their spot account is frozen in the same transaction (no
+        orders, no withdrawals). An access token already issued lasts its
+        fifteen minutes. Releasing reverses all of it. Refuses to freeze the
+        last active administrator. Publishes `user.status_updated` when the
+        status changes.
+      parameters:
+        - $ref: "#/components/parameters/UserID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UserStatusRequest"
+      responses:
+        "200":
+          description: Updated user (unchanged when already in that status)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
   /admin/v1/accounts:
     get:
       tags: [accounts]
@@ -783,6 +911,12 @@ components:
       required: true
       schema:
         type: string
+    UserID:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
     MarketSymbol:
       name: symbol
       in: path
@@ -1027,6 +1161,75 @@ components:
       properties:
         status:
           $ref: "#/components/schemas/AccountStatus"
+        reason:
+          type: string
+          minLength: 1
+
+    UserStatus:
+      type: string
+      enum: [active, frozen]
+
+    UserRole:
+      type: string
+      enum: [user, admin]
+
+    User:
+      type: object
+      required: [id, email, role, kyc_level, status, totp_enabled, version, created_at, updated_at]
+      properties:
+        id:
+          type: string
+        email:
+          type: string
+        role:
+          $ref: "#/components/schemas/UserRole"
+        kyc_level:
+          type: integer
+          minimum: 0
+          maximum: 2
+        status:
+          $ref: "#/components/schemas/UserStatus"
+        totp_enabled:
+          type: boolean
+          description: Only ever true for administrators.
+        version:
+          type: integer
+          format: int32
+          description: Increases on every edit.
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    UserList:
+      type: object
+      required: [users]
+      properties:
+        users:
+          type: array
+          items:
+            $ref: "#/components/schemas/User"
+
+    KycLevelRequest:
+      type: object
+      required: [kyc_level, reason]
+      properties:
+        kyc_level:
+          type: integer
+          minimum: 0
+          maximum: 2
+        reason:
+          type: string
+          minLength: 1
+
+    UserStatusRequest:
+      type: object
+      required: [status, reason]
+      properties:
+        status:
+          $ref: "#/components/schemas/UserStatus"
         reason:
           type: string
           minLength: 1

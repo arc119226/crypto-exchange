@@ -20,6 +20,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/arc119226/crypto-exchange/internal/auth"
 	"github.com/arc119226/crypto-exchange/internal/chain/deposit"
 	"github.com/arc119226/crypto-exchange/internal/chain/reconcile"
 	"github.com/arc119226/crypto-exchange/internal/chain/sweep"
@@ -36,7 +37,7 @@ const (
 	goldenDir = "../golden/events"
 )
 
-// update rewrites the golden files: go test ./test/contract -update
+// update rewrites the golden files: UPDATE_GOLDEN=1 go test ./test/contract
 var update = os.Getenv("UPDATE_GOLDEN") != ""
 
 func amt(s string) money.Amount { return money.MustParse(s) }
@@ -69,6 +70,9 @@ var (
 		// what §6.4.4 finds once the money is where it should be
 		"reconciliation.break_detected": "01J8Z2K3M4N5P6Q7R8S9T0V1X9",
 		"alert.hot_wallet_low":          "01J8Z2K3M4N5P6Q7R8S9T0V1Y0",
+		// what an operator does to a person from the back office (§12)
+		"user.status_updated":    "01J8Z2K3M4N5P6Q7R8S9T0V1Y1",
+		"user.kyc_level_updated": "01J8Z2K3M4N5P6Q7R8S9T0V1Y2",
 	}
 )
 
@@ -202,6 +206,16 @@ func sample(t *testing.T, eventType string) eventbus.Envelope {
 			ChainID: 31337, Address: "0x14dc79964da2c08b23698b3d3cc7ca32193d9955",
 			Asset: "ETH", Balance: amt("0.42"), Threshold: amt("1"),
 		}
+	case auth.EventUserStatusUpdated:
+		payload = auth.UserStatusUpdatedPayload{
+			UserID: "01J8Z2K3M4N5P6Q7R8S9T0U100", Status: "frozen", PreviousStatus: "active", Version: 3,
+			Reason: "chargeback investigation, ticket 4821",
+		}
+	case auth.EventUserKYCLevelUpdated:
+		payload = auth.UserKYCLevelUpdatedPayload{
+			UserID: "01J8Z2K3M4N5P6Q7R8S9T0U100", KYCLevel: 2, PreviousKYCLevel: 0, Version: 4,
+			Reason: "documents verified",
+		}
 	case registry.EventMarketUpdated:
 		env.MarketID = str(market)
 		payload = registry.MarketUpdatedPayload{
@@ -224,6 +238,7 @@ func ptr[T any](v T) *T { return &v }
 func allEventTypes() []string {
 	out := append([]string{}, trading.EventTypes()...)
 	out = append(out, registry.EventTypes()...)
+	out = append(out, auth.EventTypes()...)
 	out = append(out, deposit.EventTypes()...)
 	out = append(out, withdrawal.EventTypes()...)
 	out = append(out, sweep.EventTypes()...)

@@ -71,8 +71,11 @@ type User struct {
 	Status   string
 	// TOTPEnabled is only ever true for administrators.
 	TOTPEnabled bool
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
+	// Version increases on every edit; user.* events carry it so a consumer
+	// can order two changes to the same user.
+	Version   int32
+	CreatedAt time.Time
+	UpdatedAt time.Time
 }
 
 // Session is what register / login / refresh return.
@@ -616,7 +619,10 @@ func hashToken(raw string) []byte {
 }
 
 func userFromRow(r sqlcgen.AuthUser) User {
-	return User{ID: r.ID, TenantID: r.TenantID, Email: r.Email, Role: r.Role, KYCLevel: int(r.KycLevel), Status: r.Status, TOTPEnabled: r.TotpEnabled, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt}
+	return User{
+		ID: r.ID, TenantID: r.TenantID, Email: r.Email, Role: r.Role, KYCLevel: int(r.KycLevel), Status: r.Status,
+		TOTPEnabled: r.TotpEnabled, Version: r.Version, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt,
+	}
 }
 
 func apiKeyFromRow(r sqlcgen.AuthApiKey) APIKey {
