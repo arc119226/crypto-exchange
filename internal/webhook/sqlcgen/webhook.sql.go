@@ -14,7 +14,7 @@ import (
 
 const claimDue = `-- name: ClaimDue :many
 SELECT q.tenant_id, q.endpoint_id, q.event_id, q.run_id, ev.event_type, ev.body, q.attempts,
-       e.url, e.secret_enc
+       e.url, e.secret_enc, e.previous_secret_enc, e.previous_secret_until
 FROM webhook.queue q
 JOIN webhook.endpoints e ON e.id = q.endpoint_id
 JOIN webhook.events ev ON ev.tenant_id = q.tenant_id AND ev.event_id = q.event_id
@@ -30,15 +30,17 @@ type ClaimDueParams struct {
 }
 
 type ClaimDueRow struct {
-	TenantID   string
-	EndpointID string
-	EventID    string
-	RunID      string
-	EventType  string
-	Body       []byte
-	Attempts   int32
-	Url        string
-	SecretEnc  []byte
+	TenantID            string
+	EndpointID          string
+	EventID             string
+	RunID               string
+	EventType           string
+	Body                []byte
+	Attempts            int32
+	Url                 string
+	SecretEnc           []byte
+	PreviousSecretEnc   []byte
+	PreviousSecretUntil pgtype.Timestamptz
 }
 
 // What is owed now. FOR UPDATE SKIP LOCKED keeps two workers off each other's
@@ -65,6 +67,8 @@ func (q *Queries) ClaimDue(ctx context.Context, arg ClaimDueParams) ([]ClaimDueR
 			&i.Attempts,
 			&i.Url,
 			&i.SecretEnc,
+			&i.PreviousSecretEnc,
+			&i.PreviousSecretUntil,
 		); err != nil {
 			return nil, err
 		}
@@ -74,6 +78,25 @@ func (q *Queries) ClaimDue(ctx context.Context, arg ClaimDueParams) ([]ClaimDueR
 		return nil, err
 	}
 	return items, nil
+}
+
+const countDeadDeliveriesSince = `-- name: CountDeadDeliveriesSince :one
+SELECT count(*) FROM webhook.deliveries
+WHERE tenant_id = $1 AND status = 'dead' AND created_at >= $2
+`
+
+type CountDeadDeliveriesSinceParams struct {
+	TenantID  string
+	CreatedAt time.Time
+}
+
+// Deliveries the schedule gave up on. The dashboard shows the last day's
+// worth: past that a customer has already noticed, or never will.
+func (q *Queries) CountDeadDeliveriesSince(ctx context.Context, arg CountDeadDeliveriesSinceParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countDeadDeliveriesSince, arg.TenantID, arg.CreatedAt)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
 }
 
 const createEndpoint = `-- name: CreateEndpoint :one
@@ -580,6 +603,55 @@ func (q *Queries) RescheduleQueued(ctx context.Context, arg RescheduleQueuedPara
 		arg.NextAttemptAt,
 	)
 	return err
+}
+
+const rotateEndpointSecret = `-- name: RotateEndpointSecret :one
+UPDATE webhook.endpoints
+SET previous_secret_enc = secret_enc, previous_secret_until = $4, secret_enc = $3, updated_at = now()
+WHERE tenant_id = $1 AND id = $2
+RETURNING id, url, events, label, status, created_at, updated_at, previous_secret_until
+`
+
+type RotateEndpointSecretParams struct {
+	TenantID            string
+	ID                  string
+	SecretEnc           []byte
+	PreviousSecretUntil pgtype.Timestamptz
+}
+
+type RotateEndpointSecretRow struct {
+	ID                  string
+	Url                 string
+	Events              []string
+	Label               string
+	Status              string
+	CreatedAt           time.Time
+	UpdatedAt           time.Time
+	PreviousSecretUntil pgtype.Timestamptz
+}
+
+// The secret in force moves to previous_* for the grace period and the new
+// one takes its place. A second rotation inside the grace period replaces
+// the previous one: at most two secrets are ever valid, the newest two.
+func (q *Queries) RotateEndpointSecret(ctx context.Context, arg RotateEndpointSecretParams) (RotateEndpointSecretRow, error) {
+	row := q.db.QueryRow(ctx, rotateEndpointSecret,
+		arg.TenantID,
+		arg.ID,
+		arg.SecretEnc,
+		arg.PreviousSecretUntil,
+	)
+	var i RotateEndpointSecretRow
+	err := row.Scan(
+		&i.ID,
+		&i.Url,
+		&i.Events,
+		&i.Label,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.PreviousSecretUntil,
+	)
+	return i, err
 }
 
 const setEndpointStatus = `-- name: SetEndpointStatus :one

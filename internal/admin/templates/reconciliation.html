@@ -1,0 +1,89 @@
+{{define "content"}}
+<h1>Reconciliation</h1>
+{{with .Data}}
+<section class="card">
+  <h2>Latest pass {{with .Latest}}<span class="badge {{if .Balanced}}ok{{else}}bad{{end}}">{{if .Balanced}}balanced{{else}}BREAK{{end}}</span>{{end}}</h2>
+  {{with .Latest}}
+  <p class="muted">{{when .FinishedAt}} · chain {{.ChainID}} · <span class="mono">{{.ID}}</span></p>
+  <table>
+    <thead><tr><th>Asset</th><th class="num">Block</th><th class="num">Ledger</th><th class="num">Chain</th><th class="num">Uncredited</th><th class="num">Above frontier</th><th class="num">In flight</th><th class="num">Diff</th></tr></thead>
+    <tbody>
+    {{range .Lines}}
+    <tr class="{{if .Broken}}bad{{end}}">
+      <td>{{.Asset}}</td><td class="num">{{.BlockHeight}}</td>
+      <td class="num">{{amount .LedgerTotal}}</td><td class="num">{{amount .ChainTotal}}</td>
+      <td class="num">{{amount .Uncredited}}</td><td class="num">{{amount .AboveFrontier}}</td><td class="num">{{amount .InFlight}}</td>
+      <td class="num">{{if .Broken}}<strong>{{amount .Diff}}</strong>{{else}}0{{end}}</td>
+    </tr>
+    {{end}}
+    </tbody>
+  </table>
+  {{else}}
+  <p class="muted">No pass has been recorded yet. The chain role writes one every ETH_RECONCILE_INTERVAL.</p>
+  {{end}}
+</section>
+<section class="card">
+  <h2>Chain breaks</h2>
+  <p class="muted">On-chain custody against the ledger, per asset and pass. A break is answered by the next balanced pass, or by a house adjustment below.</p>
+  <table>
+    <thead><tr><th>Detected</th><th>Asset</th><th class="num">Block</th><th class="num">Ledger</th><th class="num">Chain</th><th class="num">Diff</th><th>Report</th></tr></thead>
+    <tbody>
+    {{range .ChainBreaks}}
+    <tr><td>{{when .DetectedAt}}</td><td>{{.Line.Asset}}</td><td class="num">{{.Line.BlockHeight}}</td><td class="num">{{amount .Line.LedgerTotal}}</td><td class="num">{{amount .Line.ChainTotal}}</td><td class="num"><strong>{{amount .Line.Diff}}</strong></td><td class="mono muted">{{.ReportID}}</td></tr>
+    {{else}}
+    <tr><td colspan="7" class="muted">None on record.</td></tr>
+    {{end}}
+    </tbody>
+  </table>
+</section>
+<section class="card">
+  <h2>Ledger breaks</h2>
+  <p class="muted">The ledger against itself: an asset whose debits and credits disagree. Checked by this role every thirty seconds; closes on its own when the books agree again.</p>
+  <table>
+    <thead><tr><th>Detected</th><th>Asset</th><th class="num">Debits</th><th class="num">Credits</th><th class="num">Diff</th><th>Resolved</th></tr></thead>
+    <tbody>
+    {{range .LedgerBreaks}}
+    <tr><td>{{when .DetectedAt}}</td><td>{{.Asset}}</td><td class="num">{{amount .Debits}}</td><td class="num">{{amount .Credits}}</td><td class="num"><strong>{{amount .Diff}}</strong></td><td>{{if .ResolvedAt}}{{whenp .ResolvedAt}}{{else}}<span class="badge bad">open</span>{{end}}</td></tr>
+    {{else}}
+    <tr><td colspan="6" class="muted">None on record.</td></tr>
+    {{end}}
+    </tbody>
+  </table>
+</section>
+<section class="card">
+  <h2>House adjustments</h2>
+  <p class="muted">How a break gets answered once someone has established where it came from. Deliberately not automatic.</p>
+  <table>
+    <thead><tr><th>#</th><th>When</th><th>Reason</th><th>Postings</th></tr></thead>
+    <tbody>
+    {{range .HouseAdjustments}}
+    <tr><td class="num">{{.ID}}</td><td>{{when .CreatedAt}}</td><td>{{.Reason}}</td><td>{{range .Postings}}<div><span class="mono">{{.AccountID}}</span> {{.Direction}} {{amount .Amount}} {{.Asset}}</div>{{end}}</td></tr>
+    {{else}}
+    <tr><td colspan="4" class="muted">None yet.</td></tr>
+    {{end}}
+    </tbody>
+  </table>
+  <form method="post" action="/admin/ledger/house-adjustments" class="row">
+    <label>House account <select name="code">{{range .HouseCodes}}<option value="{{.}}">{{.}}</option>{{end}}</select></label>
+    <label>Asset <select name="asset">{{range .Assets}}<option value="{{.Symbol}}">{{.Symbol}}</option>{{end}}</select></label>
+    <label>Amount <input type="text" name="amount" required></label>
+    <label>Direction <select name="direction"><option value="debit">debit</option><option value="credit">credit</option></select></label>
+    <label>Reason <input type="text" name="reason" required placeholder="where the difference came from"></label>
+    <button type="submit" class="danger">Post</button>
+  </form>
+</section>
+<section class="card">
+  <h2>Passes</h2>
+  <table>
+    <thead><tr><th>Finished</th><th>Result</th><th class="num">Assets</th><th>Report</th></tr></thead>
+    <tbody>
+    {{range .Reports}}
+    <tr><td>{{when .FinishedAt}}</td><td><span class="badge {{if .Balanced}}ok{{else}}bad{{end}}">{{if .Balanced}}balanced{{else}}break{{end}}</span></td><td class="num">{{len .Lines}}</td><td class="mono muted">{{.ID}}</td></tr>
+    {{else}}
+    <tr><td colspan="4" class="muted">None yet.</td></tr>
+    {{end}}
+    </tbody>
+  </table>
+</section>
+{{end}}
+{{end}}

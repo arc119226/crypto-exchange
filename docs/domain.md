@@ -273,7 +273,7 @@ E1 是計畫的實質錯誤(會讓一條人工處置路徑在資料庫層失敗)
 5. **(Phase 3)** `order.accepted` 對「同交易內立刻全部成交」的單也要發(§6.2 規則),事件順序 accepted → executed×n → filled 在 outbox 內以 `id` 排序即可;跨市場順序不保證 → 客戶端只能依 `account_seq`。
 6. **(Phase 4)** ERC-20 歸集第 1 步「精確 gas」G′ 的估算若低於實際,第 2 步失敗;建議 G′ = estimate × 1.2 並接受少量 ETH 灰塵留在充值地址(第 6 節)。
 7. **(Phase 4)** `withdrawal_fee`(v1 = 0)一旦非零,應在 `funds_locked` 時一併 Hold(X + fee),`confirmed` 時 fee 進 `fee_revenue`;計畫沒有這筆分錄,v1.1 補。
-8. **(Phase 5)** 對帳報表的 `external` 明細如何呈現「已知原因」?建議 `journal_entries.kind ∈ {faucet, adjustment, write_off}` + `reason`。
+8. **(Phase 5)** 對帳報表的 `external` 明細如何呈現「已知原因」?建議 `journal_entries.kind ∈ {faucet, adjustment, write_off}` + `reason`。→ **Phase 5 答**:不加 kind。對帳頁把最近的 house adjustments(`ref_type = 'house_adjustment'`,含 `reason` 與分錄)列在 breaks 正下方,「已知原因」就是操作者在 `reason` 寫下的那句話;要分類的話是 Phase 6 報表的事(§24)。
 
 ---
 
@@ -318,7 +318,7 @@ Phase 3 分三個 PR:3a 引擎與事件(本節)、3b auth + public 交易端點 
 | Settle / Release 鍵(§6.1.3、§8 E4) | `settle:trade:{trade_id}`;`release:order:{order_id}:{seq}` 用於取消、IOC 剩餘、`filled` 殘值 | 買方限價價差 release 在 Settle entry 內(`ledger.BuildSettleEntry`);市價買剩餘預算在終態一次 Release |
 | 不變量 3:Σhold(order) = 未成交應凍結 | `Σ hold_remaining` over open orders per `(account, hold_asset)` == `ledger.balances.hold`(`assertHoldInvariant`,每個交易測試與屬性測試每輪皆驗) | 這是 Phase 2 唯一無法測的不變量,現在補齊 |
 | 事件 envelope(§7.1) | `eventbus.Envelope`;`event_id` ULID(單毫秒內單調);subject `ex.v1.<domain>.<type>.<tenant>.<scope>`,scope = 市場符號(市場域)或 account_id(帳戶域) | `event_type` 兩段式由 CHECK 與 `Validate` 雙重鎖住;`account_seq` 在同一交易內 `UPDATE ledger.accounts SET next_seq = next_seq + 1` |
-| 事件 catalog(§7.2) | 3a 發出 `order.accepted / updated / filled / cancelled / rejected`、`trade.executed`、`balance.updated`(每命令每 (account, asset) 一則,取最終餘額) | `ledger.posted` 留給 Phase 5 admin 投影首次消費時再發;payload 結構在 `internal/trading/events.go`,3b 產出 `api/events/v1/*.json` + golden 測試 |
+| 事件 catalog(§7.2) | 3a 發出 `order.accepted / updated / filled / cancelled / rejected`、`trade.executed`、`balance.updated`(每命令每 (account, asset) 一則,取最終餘額) | `ledger.posted` 留給 Phase 6 私有推播首次消費時再發(Phase 5 後台直接讀表,不需要投影;§24);payload 結構在 `internal/trading/events.go`,3b 產出 `api/events/v1/*.json` + golden 測試 |
 | outbox → JetStream(§7.3) | `migrations/0006_eventbus_core.sql`(`outbox` + `AFTER INSERT` statement trigger `pg_notify('outbox_new')`、`processed_events`);`eventbus.Relay`(LISTEN + 100 ms 輪詢、依 id 批次發布、`Nats-Msg-Id = event_id`、成功後 `published_at`);`eventbus.EnsureStreams`(`EX_TRADING / EX_CHAIN / EX_REGISTRY`,2 分鐘去重窗) | 只有 engine role(持 advisory lock)跑 relay;`TestOutboxRelayPublishesToJetStream` 證明重發同一批列 stream 訊息數不變 |
 | 單一引擎實例(§5.1) | `Engine.Start` 以 `pg_try_advisory_lock(hash("exchange-engine:"+tenant))` 在專用連線上取鎖,取不到每秒重試、`/readyz` 的 `engine` 檢查為 false | `TestEngineSingleInstanceLock`:第二個引擎在鎖釋放前無法啟動 |
 | policy 最小版(§8) | `policy.Basic`:`active` 才收新單;`halted / cancel_only` 只收取消;凍結帳戶可取消不可下單 | 限額與提現政策在 Phase 4/5 |
@@ -346,7 +346,7 @@ Phase 3 分三個 PR:3a 引擎與事件(本節)、3b auth + public 交易端點 
 | `client_order_id` 冪等與狀態碼 | 新單 201;相同內容重送 200 + 原單;同 id 不同內容 422;業務拒單是 **201 + `status=rejected`**(拒單是一張單,不是錯誤);參數錯誤 400;市場不存在 404;引擎不在 503 | 3a 的 `PlaceOrderResult.Replayed` 直接對應 201 / 200 |
 | 帳戶資料只看自己的 | `GET /v1/orders/{id}`、`DELETE`、`GET /v1/fills?order_id=` 都以 `(tenant, account_id, id)` 過濾,他人的單一律 404 / 空;`GET /v1/ledger/entries` 只回呼叫者自己的 posting(對手方與 `fee_revenue` 腿不出現) | `ListFillsByAccount` 的 `order_id` 條件同時要求該單是呼叫者自己的 maker / taker 腿(整合測試抓到的漏洞) |
 | 深度(§7.4) | `GET /v1/markets/{symbol}/depth` 直接讀同進程引擎的 `Snapshot`(含 `last_seq`),預設 20 檔、上限 200;沒有引擎回 503 | 3c 拆分部署後由 stream / Redis 快照提供 |
-| `exchange admin bootstrap`(§14) | `auth.Service.BootstrapAdmin`:冪等,已存在則不改密碼;寫審計 `auth.admin.bootstrap`;需 `ADMIN_BOOTSTRAP_EMAIL / PASSWORD` | `exchangectl` 目前沒有 admin 登入(admin TOTP + session 在 Phase 5) |
+| `exchange admin bootstrap`(§14) | `auth.Service.BootstrapAdmin`:冪等,已存在則不改密碼;寫審計 `auth.admin.bootstrap`;需 `ADMIN_BOOTSTRAP_EMAIL / PASSWORD` | `exchangectl` 沒有 admin 登入,而且這是設計:機器用 admin API key,人用瀏覽器的密碼 + TOTP 登入(Phase 5,§24) |
 | `exchangectl`(§12 Phase 3) | `user register\|login\|logout\|me`、`api-keys create\|list\|revoke`、`orders place\|cancel\|list\|get`、`balances`、`fills`、`book`、`trades`、`e2e`;憑證 `--token` / `EXCHANGE_TOKEN` 或 `--api-key --api-secret` / `EXCHANGE_API_KEY(_SECRET)`,API key 模式對每個**帶憑證的**請求做 HMAC 簽章;`user register|login|logout` 走 `newAnonymousClient`,一個憑證都不帶 | `e2e` 用 admin API 注資、依 §6.1.4 數字逐項斷言、再驗試算平衡 |
 
 **驗證(整合測試,`test/integration/api_test.go`)**:未帶憑證 401、壞 token 401 + `WWW-Authenticate`;註冊(大小寫不敏感 409、弱密碼 422、格式 400)、登入(錯誤密碼與不存在帳號同為 401)、refresh 輪替 → 舊 token 重放 401 且家族撤銷、登出後 401、登出冪等;§6.1.4 (a)(b)(c) 經 HTTP 逐數字相符(買方 `8004 / 1200`、`0.3992 ETH`、賣方 `795.204`、fee `0.796 USDC` / `0.0008 ETH`、取消後 `9204`);201 / 200 / 422 / 400 / 404;拒單 `insufficient_balance`、`invalid_price_tick` 為 201 + rejected;他人訂單 404;fills 雙方看到同一 `trade_id`;ledger entries 只含自己的 4 條 settle posting;depth / trades;API key 建立、簽 GET 與帶 query、簽 body、篡改 body 401、錯簽 / 過期時間戳 / 錯 secret / 未知 key / 壞 timestamp 皆 401、read key 下單 403、key 不能建 key 403、IP 白名單 403 / 200、撤銷後 401、他人 key 404;第 6 次登入 429 + `Retry-After ≤ 12`;審計計數;admin bootstrap 冪等且 role=admin 可登入。
@@ -936,3 +936,58 @@ afac2058  USDC  250.5  confirmed          ← 下一輪重新規劃的
 - **`ON CONFLICT DO NOTHING` 不寫目標,就是在對每一個未來的約束簽空白支票。** 這裡它同時吞掉了兩個完全不同的衝突,其中一個是設計要的(併發重複結算),另一個是資料遺失。指定目標之後,新長出來的約束會大聲失敗而不是丟掉一列。
 - **一個測試如果自己寫了它要驗的那句 SQL,它什麼都沒驗。** `TestAStaleSettleCannotDequeueAnotherRun` 第一版是自己 `DELETE ... AND run_id = $2` 然後斷言刪了 0 列——把 `Dequeue` 的 fence 拿掉,它照樣綠。改成用一個會卡住的 receiver 讓兩個 tick 真的重疊、走真正的 `settle`,才變成紅得起來的測試。三個 schema 改動全部都這樣反向驗過。
 - **§22.8 那條又出現了一次,而且這次是索引的註解在說謊。** 一段解釋「這個索引防止 X」的註解,和一個真的防止 X 的索引,在 code review 裡看起來一模一樣。
+
+## 24. Phase 5c / 5d 程式碼與 §8 / §12 / §14 的對應(後台、admin 登入、registry 與用戶編輯、帳本自檢、secret 輪替)
+
+Phase 5 剩下的全部圍繞一件事:營運方在這之前沒有任何不用 CLI 就能操作的介面。這一輪把 §12 的產出物「`internal/admin` 完整、後台可用」做完:登入、十三個頁面、缺的 admin API、帳本自檢、webhook secret 輪替,以及 `exchangectl` 的對應動詞。表格是對應,小節是為什麼。
+
+| 項目 | 實作 | 備註 |
+|---|---|---|
+| admin 登入(§14) | `auth.AdminLogin` 密碼 → **pending session**(10 分鐘,只能到 `/admin/totp` 與登出)→ `TOTPConfirm` / `TOTPVerify` 換發 **verified session**(`ADMIN_SESSION_TTL`,預設 8h);session 為 32 bytes 隨機 token,`auth.admin_sessions` 存 SHA-256(0018);撤銷是 `revoked_at` 時間戳,不刪列 | 密碼階段錯誤一律 `ErrInvalidCredentials`,並以 dummy hash 等化時間;pending 與 verified 是**兩列**,驗碼不是把一列升級而是換一列 |
+| TOTP(§8、§14) | `pquerna/otp` RFC 6238(SHA-1、6 位、30 秒);secret 以 `ADMIN_TOTP_KEY`(**不共用** `API_KEY_MASTER_KEY`)`secretbox.Seal` 存 `auth.users.totp_secret_enc`;`totpMatch` 對 now − 30 s / now / now + 30 s 各以 `Skew: 0` 比對並**記下配中的那一步**(`totp_last_step`),`step ≤ last` 拒絕;連錯 5 次 `totp_locked_until = now + 15 min` | 副作用:同一個 30 秒窗口內第二次登入會被拒,runbook 寫明。鎖定只計 TOTP 錯誤,密碼階段依 IP 節流(`admin_login_attempts_total{outcome}`),知道 email 的人鎖不了 admin |
+| secret 只由 CLI 發(修 H4) | `exchange admin totp enroll --email X`:伺服端、DB 憑證,印 otpauth URL 與 base32 到操作者終端機(`--qr-out` 可存 PNG),**撤銷該 admin 所有 session**;瀏覽器只收第一個 code 確認 | 原設計讓瀏覽器在 pending 階段自己產 secret,等於「只有密碼的人」可以把自己升成完整 admin |
+| `RequireAdmin` / `RequirePending`(`internal/admin/session.go`) | cookie `admin_session`(`HttpOnly; SameSite=Lax; Path=/admin`;`Secure` 由 `ADMIN_COOKIE_SECURE` 決定,`EXCHANGE_ENV=dev` 預設關)→ `auth.AdminSession` → `Principal{Method: MethodAdminSession}`;htmx 請求(`HX-Request`)回 `HX-Redirect` 而不是 302 | auth 維持 HTTP-agnostic:它認 token,`internal/admin` 認 cookie 與轉址 |
+| CSRF(§8「CSRF token」) | `http.NewCrossOriginProtection()`(Go 1.25+)包**整個** admin router,加 `SameSite=Lax`;沒有每張表單的 token | 偏離計畫書。stdlib 的機制靠 `Sec-Fetch-Site` / `Origin`,擋得住的與 token 相同,還順便讓 cookie 的 `Path=/admin` 涵蓋 `/admin/v1` 不再是隱患;不送這兩個 header 的 `exchangectl` / curl 直接通過。鐵律不變:沒有會改狀態的 GET |
+| 一個 router、兩個群組(`admin.Routes`) | `/admin/v1/*` → `RequireAPIKey`(靜態 `X-Admin-Api-Key`,不變);`/admin/*` → session;`/` → 302 `/admin/` | scoped admin API key(§7.4)**未做**,見 24.2 |
+| 寫入邏輯只有一份(§8「所有寫入走 admin OpenAPI handler」) | 每個寫入是 `Handler` 上一個 unexported 方法(`writes.go`):交易 + 審計 + outbox 事件;strict 方法把 error 對到 problem+json,頁面把同一個 error 對到 flash(`done()`) | 原設計讓 UI 直接呼叫 strict-server 方法,會逼 UI 對 response union 做 type switch、還拿到 `/admin/v1/...` 的 `instance` |
+| actor 從 context 取(`actorFrom`) | session principal 存在 → `(admin, user_id)`,否則 `(api_key, "admin-api-key")`;同時餵 `ReviewParams.AdminID`,`reviewed_by` 終於記得到人 | 審計 actor 的政策:登入**成功後**才是 `admin`,失敗的嘗試是 `user`(不管是誰),CLI 動作是 `system` |
+| 凍結用戶要真的凍(修 H1) | `PUT /users/{id}/status` 在同一筆交易裡 `ledger.SetAccountStatus` 該用戶的現貨帳戶,admin 的話連帶撤銷後台 session;`Login`、`Refresh`、`VerifyAPIKeyRequest` 都檢查 `status`;最後一個 active admin 不能凍(`ErrLastAdmin` → 409) | 之前 `auth.users.status` 除了登入沒有任何地方讀:下單看 `ledger.accounts.status`,API key 與 refresh 完全不看。已發出的 access token 在 15 分鐘內仍有效,這是 access token 的本質 |
+| 用戶 API + 事件 | `GET /users`(email 片段用 `position()` 不用 LIKE、status、role)、`GET /users/{id}`、`PUT .../kyc-level`、`PUT .../status`;`user.kyc_level_updated` / `user.status_updated`(`internal/auth/events.go`,auth 的 depguard 只多開 `eventbus`,只做 envelope) | 同一個 level / status 再設一次:不記審計、不發事件、version 不動 |
+| registry 寫入 API + 事件 | `GET/POST /assets`、`GET/PUT /assets/{symbol}`、`POST /markets`、`GET/PUT /markets/{symbol}`、`GET/POST /fee-schedules`、`PUT /fee-schedules/{name}`、`GET /withdrawal-limits`、`PUT /withdrawal-limits/{asset}/{kyc_level}`、`POST /engine/reload`;`asset.updated`、`fee_schedule.updated`、`registry.reload` 新事件,`market.updated` 在 create / update 也發並帶 `changed_fields` | 靠 registry 既有的「upsert 只在有欄位改變時 bump version」判斷 no-op;審計 `Before`/`After` 存整列可寫欄位,事件只存欄位名。fee schedule 改了**不**對其下每個市場各發一則 `market.updated`:引擎任何 registry 事件都整包重載 |
+| `registry` domain 可路由(修 H2) | `eventbus.StreamConfigs` 的 `EX_REGISTRY` 與 `webhookStreamDomains` 加 `registry`;reload consumer 的 `FilterSubjects` 加 `registry.*` | 不加的話 relay 發布 `registry.reload` 會被 JetStream 拒絕,`TestSubjectsAreRoutable` 會紅 |
+| 帳本自檢(修 H3;§6.4.4 三向對帳的第一向) | `admin.ledger_breaks`(0019):admin role 既有的 30 秒迴圈(`observeLedger`)在算完 `ledger_trial_balance_diff` 後呼叫 `Handler.WatchLedgerBreaks` → `ledger.ReconcileBreaks`(同一交易:插列 + outbox `reconciliation.ledger_break_detected`);**邊緣觸發**:同額不重發、變額則舊列 `resolved_at` 新列開、回零自動 resolve | 不放進 `reconciliation_breaks`:chain role 的對帳要節點、hot wallet、scan cursor 全部就緒才走得到 `record`,節點掛掉時帳本內部檢查最有價值,那條路卻走不到;而 `break_detected` 的五個鏈欄位全列 required,改 nullable 是破壞性契約變更。§12 DoD 的字面是 `reconciliation_breaks`,實際的表是同一家族的 `ledger_breaks` |
+| 植入錯帳測試(§12 DoD) | `TestPlantedPostingOpensALedgerBreak`:以 `exchange` superuser `SET session_replication_role = replica` 關掉約束 trigger 後插一筆單邊 posting → 一列 open break + 一則事件 → 再跑一次安靜 → 換額則舊 resolve 新開 → 補上對邊則 resolve | 帳本自己的 `postings_balanced` trigger 拒絕不平衡分錄,這正是它該做的;錯帳只能從程式碼以外進來,而那正是 watcher 存在的理由 |
+| webhook secret 輪替(5c) | 0020:`previous_secret_enc` + `previous_secret_until`(CHECK 兩者同有同無);`POST /webhooks/{id}/rotate-secret`(`grace_hours` 預設 24、上限 168)新 secret 只在回應出現一次;`ClaimDue` 多回舊 secret,寬限期內 dispatcher 以 `SignAll` 簽 `v1=<new>,v1=<old>`(時鐘是 dispatcher 自己的 `now`,測試可撥);再輪替一次是**取代**舊 secret,永遠只有最新兩把;審計 `After` 只記 `previous_secret_until` | **`webhook.Verify` 原本只驗最後一個 `v1=`**(迴圈 `v1 = v` 覆蓋),與 `docs/webhooks.md` 說的「任一符合」不一致——這是既有的文件與程式不合,現在改成任一符合,而且每個候選都比對完才回答,時間不洩漏配中的是第幾個 |
+| 後台頁面(§12) | login、totp(三種狀態)、dashboard、assets、markets、fee-schedules、withdrawal-limits、users(+ 詳情)、ledger、withdrawals、chain、reconciliation、audit、webhooks;`html/template` + `embed`,htmx 2.0.4 隨 binary 內嵌(0BSD),只做表格分頁(`hx-select="#list"` 從整頁回應裡挑出表格);CSP `default-src 'self'`,template 裡沒有一行 inline script | 每個 template 在啟動時 parse,每頁有 fixture 渲染測試,加上一個以 cookie jar 走完登入的整合測試(`adminui_*_test.go`) |
+| 「只顯示一次」的 secret 在頁面上 | 建立 / 輪替 endpoint 後照樣 PRG 轉址(瀏覽器重新整理不會重送),secret 放在**伺服端**一次性 stash(`revealStash`,隨機 token、5 分鐘),`?reveal=<token>` 讀一次即銷毀 | 不放 flash cookie:瀏覽器會把 cookie 寫到磁碟 |
+| 缺的讀 API | `GET /deposits`(status/asset/分頁)、`GET /hot-wallet`(`hotwallet.Describe` + ledger 的 `custody_hot` 餘額 + `low_alerted_at`)、`GET /reconciliation/reports`、`GET /reconciliation/breaks`(**兩種**放同一回應的兩個陣列)、`GET /audit-events` 加 `actor_type` / `actor_id`、`GET /system/status`(dashboard) | 兩種 break 欄位完全不同,合成一個 union 型別會讓消費者去猜哪些欄位有值 |
+| `exchangectl admin` | `users list\|get\|set-kyc\|freeze\|unfreeze`、`assets list\|get\|create\|set`、`markets create\|set`、`fee-schedules list\|create\|set`、`withdrawal-limits list\|set`、`deposits list`、`hot-wallet`、`breaks`、`reload`、`webhooks rotate-secret`;asset / market 欄位太多,`create` / `set` 從 JSON 檔讀 body,`--reason` 一律必填 | 對假 admin API 測「送了什麼、印了什麼」 |
+| metrics | `admin_login_attempts_total{outcome=password_ok\|password_failed\|totp_ok\|totp_failed\|locked\|not_enrolled\|throttled\|error}` | `ledger_trial_balance_diff` 不變;open break 數在 `GET /system/status` |
+
+### 24.1 設計審查抓到的四個 High
+
+計畫先經過一輪對抗式檢查,四個缺陷都是在寫第一行程式之前改掉的:
+
+- **H1 凍結不凍。** 原設計只在 `auth.users.status` 寫 `frozen`,但那個欄位除了登入沒有人讀:下單看 `ledger.accounts.status`,`Refresh` 與 `VerifyAPIKeyRequest` 完全不看。一個被凍結的用戶拿著 refresh token 可以無限續命,拿著 API key 可以照常下單提現。修法是「一個開關」:同一筆交易連帶凍現貨帳戶,三個驗證路徑都加檢查。整合測試 `TestAdminUsers` 逐條驗:凍結後 `Login`、`Refresh` 都回 `ErrUserFrozen`,帳戶 `frozen`,釋放後全部反轉。
+- **H2 `registry.reload` 發得出去、送不出去。** `EX_REGISTRY` stream 的 subject 白名單裡沒有 `registry` domain,relay 發布會被 JetStream 拒絕——而且是在 outbox 已經 commit 之後,等於一則永遠卡在 outbox 的事件。`TestSubjectsAreRoutable` 對每一個 `EventTypes()` 的樣本算 subject 再問 `StreamFor`,所以漏掉會在 `make test` 就紅,不用等到有 NATS 的環境。
+- **H3 錯帳測試放錯表。** §12 DoD 寫「植入錯帳 → `reconciliation_breaks` 有一筆」,但那張表是 chain role 對帳的產物,要節點就緒才寫得到;植入一筆單邊 posting,鏈上對帳根本不會注意到(鏈上餘額沒變)。帳本內部的不平衡是另一個檢查,要另一張表、另一個事件、跑在另一個 role。
+- **H4 secret 由瀏覽器產生。** 原設計的 `/admin/totp/enroll` 讓 pending session(只證明了密碼)自己產 secret 並確認——這樣密碼外洩就等於帳號外洩,TOTP 沒有第二因子的意義。改成 secret 只由持 DB 憑證的 CLI 產生。
+
+### 24.2 與計畫書的偏離,以及刻意不做的
+
+- **CSRF 用 stdlib 而不是 token**(§8 line 637):見表格。文件層面的差異寫在這裡;程式層面 `admin.Routes` 的註解說明了為什麼是整個 router。
+- **scoped admin API key + HMAC**(§7.4、ADR-0006「機器整合用 admin API key(scope 如 `users:kyc_write`)」):**不做**。人已經走 session 了,機器整合的 key 分級留給後面;靜態 key 留著,`internal/admin/auth.go` 的註解說明現況。
+- **`POST /reconciliation/run`**(§7.4):admin 沒有節點(§20.1),不做。
+- **`DELETE /webhooks/{id}`**:5b 已決定沒有 DELETE(§23.2)。
+- **`ledger.posted` 事件**:Phase 6 私有推播才需要,`docs/events.md` 改標 Phase 6。
+- **清理 job**(outbox、`webhook.events`、過期 `admin_sessions`):§5.2 歸 worker,Phase 5 未列,不做;`admin_sessions` 的過期列只是佔空間,`AdminSession` 查 hash 時就會拒絕。
+- **TOTP 秘密只由 CLI 發**:見 H4。runbook `docs/runbooks/admin-totp.md`。
+
+### 24.3 這一輪學到的事
+
+- **一個假設寫進三個地方,就會在第三個地方被抓到。** 我在 template、註解、測試裡各寫了一次「administrators hold no funds」;整合測試跑起來,bootstrap 出來的 admin 有一個現貨帳戶(`BootstrapAdmin` 開了一個)。程式碼本來就兩種情況都處理(`ErrAccountNotFound` 容忍),錯的只是說明文字——但說明文字錯了,下一個讀的人就會照著錯的模型改程式。
+- **在 GET 裡設 flash 等於沒設。** flash 只在**下一個**請求讀 cookie;GET 頁面找不到東西時 `setFlash` 再 render,那句話永遠不會出現。兩個頁面測試同時紅,同一個原因。改成 render 時直接帶 `Flash`。
+- **jsonb 會把你的 JSON 重排。** 對 outbox `payload::text` 做子字串斷言在本機過了兩次、第三次紅:Postgres 存 jsonb 時重排鍵並加空格。用 `payload->>'diff'`。
+- **gosec 的 taint 分析是跨函式的,而且不認得你的驗證。** `http.Redirect` 到一個由 `chi.URLParam` 組出來的路徑會被標 G710,經過一個檢查 id 格式的 helper 之後照樣標。留下的兩個 `//nolint:gosec` 寫明路徑從哪來、經過什麼檢查;另外五個早退改走同一個 helper,不是為了消警告,是那本來就是同一件事。
+- **文件說「任一符合」而程式只驗最後一個。** `webhook.Verify` 從 5a 就寫成 `for ... { v1 = v }`,`docs/webhooks.md` 從 5b 就說 header 可以帶多個 `v1=`。在只有一把 secret 的世界裡兩者等價,所以沒有測試能分辨;輪替一上來就不等價。§22.8 那條「會說謊的註解」的變體:會說謊的文件。
+- **`make gen-check` 在 commit 之前永遠紅。** 它 diff 的對象是 HEAD,不是工作樹。中途看到它紅不代表產生的程式碼有問題;`make gen` 之後 `git status` 沒有新變動才是對的訊號。

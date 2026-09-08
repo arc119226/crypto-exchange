@@ -10,6 +10,18 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+type AuthAdminSession struct {
+	IDHash         []byte
+	TenantID       string
+	UserID         string
+	CreatedAt      time.Time
+	ExpiresAt      time.Time
+	TotpVerifiedAt pgtype.Timestamptz
+	LastSeenAt     time.Time
+	RevokedAt      pgtype.Timestamptz
+	Ip             string
+}
+
 type AuthApiKey struct {
 	ID          string
 	TenantID    string
@@ -36,16 +48,19 @@ type AuthRefreshToken struct {
 }
 
 type AuthUser struct {
-	ID            string
-	TenantID      string
-	Email         string
-	PasswordHash  string
-	Role          string
-	KycLevel      int16
-	Status        string
-	TotpSecretEnc []byte
-	TotpEnabled   bool
-	Version       int32
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
+	ID              string
+	TenantID        string
+	Email           string
+	PasswordHash    string
+	Role            string
+	KycLevel        int16
+	Status          string
+	TotpSecretEnc   []byte
+	TotpEnabled     bool
+	Version         int32
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
+	TotpFailures    int32
+	TotpLockedUntil pgtype.Timestamptz
+	TotpLastStep    *int64
 }

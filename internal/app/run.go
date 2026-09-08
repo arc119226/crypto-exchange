@@ -14,6 +14,7 @@ import (
 	"github.com/redis/go-redis/v9"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/arc119226/crypto-exchange/internal/admin"
 	"github.com/arc119226/crypto-exchange/internal/ledger"
 	"github.com/arc119226/crypto-exchange/internal/platform/natsx"
 	"github.com/arc119226/crypto-exchange/internal/platform/pg"
@@ -61,6 +62,7 @@ func Run(ctx context.Context, cfg Config, roles []Role, bi BuildInfo) error {
 	var (
 		servers      []*http.Server
 		adminLedger  *ledger.Service
+		adminHandler *admin.Handler
 		eng          engineComponents
 		sharedLedger *ledger.Service
 		apiRefresh   *registryRefresher
@@ -129,15 +131,23 @@ func Run(ctx context.Context, cfg Config, roles []Role, bi BuildInfo) error {
 			if cfg.Admin.APIKey.Reveal() == "" {
 				return fmt.Errorf("config: ADMIN_API_KEY is required for the admin role")
 			}
+			// Administrators must use TOTP (docs/plan-v1.0.md §14), so a role
+			// that cannot open their secrets cannot log anyone in. Refusing
+			// to start is the honest failure; an admin that came up and then
+			// 500ed every login would be found later and less clearly.
+			if !cfg.Admin.TOTPKey.IsSet() {
+				return fmt.Errorf("config: ADMIN_TOTP_KEY is required for the admin role (run `make gen-dev-secrets`)")
+			}
 			l, err := ledgerFor()
 			if err != nil {
 				return err
 			}
 			adminLedger = l
-			srv, err := newAdminServer(cfg, log, httpMetrics, reg, d.pool, l)
+			srv, h, err := newAdminServer(cfg, log, httpMetrics, reg, d.pool, l)
 			if err != nil {
 				return err
 			}
+			adminHandler = h
 			servers = append(servers, srv)
 		case RoleChain:
 			l, err := ledgerFor()
@@ -172,7 +182,7 @@ func Run(ctx context.Context, cfg Config, roles []Role, bi BuildInfo) error {
 		g.Go(listenAndServe(s, log))
 	}
 	if adminLedger != nil {
-		g.Go(func() error { return observeTrialBalance(gctx, log, adminLedger) })
+		g.Go(func() error { return observeLedger(gctx, log, adminLedger, adminHandler) })
 	}
 	if signer != nil {
 		g.Go(func() error { return signer.run(gctx, log) })

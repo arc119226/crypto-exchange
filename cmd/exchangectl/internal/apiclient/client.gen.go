@@ -3871,6 +3871,8 @@ type LoginResponse struct {
 	ApplicationProblemJSON400 *BadRequest
 	// ApplicationProblemJSON401 the response for an HTTP 401 `application/problem+json` response
 	ApplicationProblemJSON401 *Unauthorized
+	// ApplicationProblemJSON403 the response for an HTTP 403 `application/problem+json` response
+	ApplicationProblemJSON403 *Forbidden
 	// ApplicationProblemJSON429 the response for an HTTP 429 `application/problem+json` response
 	ApplicationProblemJSON429 *TooManyRequests
 	// ApplicationProblemJSON500 the response for an HTTP 500 `application/problem+json` response
@@ -3892,6 +3894,11 @@ func (r LoginResponse) GetApplicationProblemJSON400() *BadRequest {
 // GetApplicationProblemJSON401 returns the response for an HTTP 401 `application/problem+json` response
 func (r LoginResponse) GetApplicationProblemJSON401() *Unauthorized {
 	return r.ApplicationProblemJSON401
+}
+
+// GetApplicationProblemJSON403 returns the response for an HTTP 403 `application/problem+json` response
+func (r LoginResponse) GetApplicationProblemJSON403() *Forbidden {
+	return r.ApplicationProblemJSON403
 }
 
 // GetApplicationProblemJSON429 returns the response for an HTTP 429 `application/problem+json` response
@@ -5898,6 +5905,13 @@ func ParseLoginResponse(rsp *http.Response) (*LoginResponse, error) {
 			return nil, err
 		}
 		response.ApplicationProblemJSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest Forbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON403 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 429:
 		var dest TooManyRequests

@@ -107,15 +107,17 @@ schema; `planned` means the phase that adds it will add the schema with it.
 | `trade.executed` | engine | stream (trades, ticker, kline), worker, webhook | shipped |
 | `balance.updated` | engine, chain, admin | stream (private), webhook | shipped |
 | `market.updated` | admin | **engine (reload)**, stream, webhook | shipped |
-| `ledger.posted` | engine, chain, admin | stream (balances), back-office projection | planned (Phase 5) |
-| `asset.updated`, `fee_schedule.updated` | admin | engine (reload), webhook | planned (Phase 5) |
+| `ledger.posted` | engine, chain, admin | stream (balances), back-office projection | planned (Phase 6, with the private stream) |
+| `asset.updated`, `fee_schedule.updated` | admin | engine (reload), webhook | shipped |
+| `registry.reload` | admin | engine (reload), webhook | shipped |
 | `deposit.detected`, `deposit.credited`, `deposit.orphaned`, `deposit.dropped`, `deposit.reversed` | chain | stream, webhook, admin | shipped |
 | `withdrawal.requested` | api | stream, webhook, admin | shipped |
 | `withdrawal.state_changed` | api, chain, admin | stream, webhook, admin | shipped |
 | `sweep.completed`, `sweep.failed` | chain | admin | shipped |
 | `alert.hot_wallet_low` | chain | webhook, admin | shipped |
 | `reconciliation.break_detected` | **chain** | webhook, admin | shipped |
-| `user.kyc_level_updated`, `user.status_updated` | admin | webhook | planned (Phase 5) |
+| `reconciliation.ledger_break_detected` | **admin** | webhook, admin | shipped |
+| `user.status_updated`, `user.kyc_level_updated` | admin | webhook, admin | shipped |
 
 `deposit.*` events all share one payload: what a consumer needs about a
 deposit does not change with the way it moved, and the difference lives in the
@@ -172,6 +174,19 @@ wallet when the balance crosses the line — remembered in
 either. A consumer that wants the current state should read
 `GET /admin/v1/reconciliation`, not count events.
 
+`reconciliation.ledger_break_detected` is the other half of §6.4.4, the one
+that needs no node: the ledger against itself, one asset whose debits and
+credits disagree. The **admin** role finds it on the same thirty-second loop
+that refreshes `ledger_trial_balance_diff`, records it in
+`admin.ledger_breaks`, and publishes it from the same transaction. The two
+break events are deliberately two types rather than one with optional fields:
+they are found by different roles, argued about against different terms, and
+a consumer that subscribes to one should not have to check which kind arrived.
+Like its sibling it is edge-triggered -- a break that stays out by the same
+amount is not re-announced, one whose size changes is (the old row is resolved
+and a new one opened, so the history keeps every size it had) -- and it closes
+on its own when the books agree again.
+
 `reconciliation.break_detected` carries every term of the comparison and not
 just `diff`, because the terms are what say where to look: a difference the
 same size as an uncredited deposit and a difference nothing explains want very
@@ -181,6 +196,27 @@ The chain role writes these to the outbox; the **relay that publishes them
 runs in the engine role**, so a deployment without an engine leaves deposit,
 withdrawal, sweep, reconciliation and alert events sitting in
 `eventbus.outbox`.
+
+`asset.updated` and `fee_schedule.updated` complete the registry set, and
+`market.updated` is now also sent when a market is created or edited (with
+`changed_fields` naming what), not only when its status moves. A fee schedule
+change sends **no** `market.updated` for the markets on it: the engine reloads
+its whole cache on any registry event, so one event is enough for it, and a
+consumer that shows per-market fees should reload on `fee_schedule.updated`
+rather than expect one event per market. `registry.reload` is an operator
+asking every engine to reload with no row changed -- after a seed, or when in
+doubt -- and carries only the reason; the audit trail has who asked.
+
+`user.*` is what an operator does to a person from the back office, and is
+the other pair with **no `account_id` and no sequence**: a user is not an
+account, so the subject ends in the house scope. `user.status_updated` names
+both ends. A freeze also freezes the user's spot account in the same
+transaction, and that account change is *not* a separate event: the ledger
+does not announce status, and a consumer that wants the account's state reads
+`GET /admin/v1/accounts/{id}`. `user.kyc_level_updated` changes what the
+withdrawal policy will decide next; nothing already pending is re-decided.
+Both are produced by the **admin** role, which has no relay of its own — the
+engine's relay publishes them, like every other outbox row.
 
 `order.*` and `trade.executed` carry `seq`; `order.*` and `balance.updated`
 carry `account_seq`. `order.accepted` is emitted for **every** order that was

@@ -20,6 +20,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/arc119226/crypto-exchange/internal/admin"
+	"github.com/arc119226/crypto-exchange/internal/auth"
 	"github.com/arc119226/crypto-exchange/internal/chain/deposit"
 	"github.com/arc119226/crypto-exchange/internal/chain/reconcile"
 	"github.com/arc119226/crypto-exchange/internal/chain/sweep"
@@ -36,7 +38,7 @@ const (
 	goldenDir = "../golden/events"
 )
 
-// update rewrites the golden files: go test ./test/contract -update
+// update rewrites the golden files: UPDATE_GOLDEN=1 go test ./test/contract
 var update = os.Getenv("UPDATE_GOLDEN") != ""
 
 func amt(s string) money.Amount { return money.MustParse(s) }
@@ -54,6 +56,12 @@ var (
 		"trade.executed":  "01J8Z2K3M4N5P6Q7R8S9T0V1W7",
 		"balance.updated": "01J8Z2K3M4N5P6Q7R8S9T0V1W8",
 		"market.updated":  "01J8Z2K3M4N5P6Q7R8S9T0V1W9",
+		// the rest of the registry, editable from the back office (§12)
+		"asset.updated":        "01J8Z2K3M4N5P6Q7R8S9T0V1Y3",
+		"fee_schedule.updated": "01J8Z2K3M4N5P6Q7R8S9T0V1Y4",
+		"registry.reload":      "01J8Z2K3M4N5P6Q7R8S9T0V1Y5",
+		// the ledger against itself, found by the admin role (§12)
+		"reconciliation.ledger_break_detected": "01J8Z2K3M4N5P6Q7R8S9T0V1Y6",
 		// the deposit story of docs/plan-v1.0.md §6.4.1, one id per state
 		"deposit.detected": "01J8Z2K3M4N5P6Q7R8S9T0V1X0",
 		"deposit.credited": "01J8Z2K3M4N5P6Q7R8S9T0V1X1",
@@ -69,6 +77,9 @@ var (
 		// what §6.4.4 finds once the money is where it should be
 		"reconciliation.break_detected": "01J8Z2K3M4N5P6Q7R8S9T0V1X9",
 		"alert.hot_wallet_low":          "01J8Z2K3M4N5P6Q7R8S9T0V1Y0",
+		// what an operator does to a person from the back office (§12)
+		"user.status_updated":    "01J8Z2K3M4N5P6Q7R8S9T0V1Y1",
+		"user.kyc_level_updated": "01J8Z2K3M4N5P6Q7R8S9T0V1Y2",
 	}
 )
 
@@ -202,6 +213,33 @@ func sample(t *testing.T, eventType string) eventbus.Envelope {
 			ChainID: 31337, Address: "0x14dc79964da2c08b23698b3d3cc7ca32193d9955",
 			Asset: "ETH", Balance: amt("0.42"), Threshold: amt("1"),
 		}
+	case auth.EventUserStatusUpdated:
+		payload = auth.UserStatusUpdatedPayload{
+			UserID: "01J8Z2K3M4N5P6Q7R8S9T0U100", Status: "frozen", PreviousStatus: "active", Version: 3,
+			Reason: "chargeback investigation, ticket 4821",
+		}
+	case auth.EventUserKYCLevelUpdated:
+		payload = auth.UserKYCLevelUpdatedPayload{
+			UserID: "01J8Z2K3M4N5P6Q7R8S9T0U100", KYCLevel: 2, PreviousKYCLevel: 0, Version: 4,
+			Reason: "documents verified",
+		}
+	case admin.EventLedgerBreakDetected:
+		payload = admin.LedgerBreakPayload{
+			BreakID: "01J8Z2K3M4N5P6Q7R8S9T0B100", Asset: "ETH", Debits: amt("1250.5"), Credits: amt("1249"), Diff: amt("1.5"),
+			DetectedAt: fixedTime,
+		}
+	case registry.EventAssetUpdated:
+		payload = registry.AssetUpdatedPayload{
+			AssetID: "01J8Z2K3M4N5P6Q7R8S9T0A100", Symbol: "USDC", Status: "active", DepositEnabled: true, WithdrawEnabled: false,
+			ChangedFields: []string{"withdraw_enabled"}, Version: 3, Reason: "issuer maintenance window",
+		}
+	case registry.EventFeeScheduleUpdated:
+		payload = registry.FeeScheduleUpdatedPayload{
+			FeeScheduleID: "01J8Z2K3M4N5P6Q7R8S9T0F100", Name: "default", MakerBps: 8, TakerBps: 18,
+			ChangedFields: []string{"maker_bps", "taker_bps"}, Version: 2, Reason: "Q4 pricing",
+		}
+	case registry.EventRegistryReload:
+		payload = registry.RegistryReloadPayload{Reason: "seeded ARB-USDC by hand"}
 	case registry.EventMarketUpdated:
 		env.MarketID = str(market)
 		payload = registry.MarketUpdatedPayload{
@@ -224,6 +262,8 @@ func ptr[T any](v T) *T { return &v }
 func allEventTypes() []string {
 	out := append([]string{}, trading.EventTypes()...)
 	out = append(out, registry.EventTypes()...)
+	out = append(out, auth.EventTypes()...)
+	out = append(out, admin.EventTypes()...)
 	out = append(out, deposit.EventTypes()...)
 	out = append(out, withdrawal.EventTypes()...)
 	out = append(out, sweep.EventTypes()...)

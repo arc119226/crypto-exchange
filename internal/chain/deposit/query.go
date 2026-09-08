@@ -81,3 +81,14 @@ func records(rows []sqlcgen.ChainDeposit) ([]Record, error) {
 	}
 	return out, nil
 }
+
+// CountInStatus counts the tenant's deposits in any of the statuses.
+func (r *Reader) CountInStatus(ctx context.Context, statuses ...string) (int64, error) {
+	n, err := sqlcgen.New(r.db).CountDepositsInStatus(ctx, sqlcgen.CountDepositsInStatusParams{
+		TenantID: r.tenant, Statuses: statuses,
+	})
+	if err != nil {
+		return 0, fmt.Errorf("deposit: count: %w", err)
+	}
+	return n, nil
+}

@@ -8,7 +8,21 @@ package sqlcgen
 import (
 	"context"
 	"time"
+
+	"github.com/jackc/pgx/v5/pgtype"
 )
+
+const countActiveAdmins = `-- name: CountActiveAdmins :one
+SELECT count(*) FROM auth.users WHERE tenant_id = $1 AND role = 'admin' AND status = 'active'
+`
+
+// Freezing the last one would lock everybody out of the back office.
+func (q *Queries) CountActiveAdmins(ctx context.Context, tenantID string) (int64, error) {
+	row := q.db.QueryRow(ctx, countActiveAdmins, tenantID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
 
 const countAdmins = `-- name: CountAdmins :one
 SELECT count(*) FROM auth.users WHERE tenant_id = $1 AND role = 'admin'
@@ -26,7 +40,7 @@ const createUser = `-- name: CreateUser :one
 
 INSERT INTO auth.users (tenant_id, email, password_hash, role)
 VALUES ($1, $2, $3, $4)
-RETURNING id, tenant_id, email, password_hash, role, kyc_level, status, totp_secret_enc, totp_enabled, version, created_at, updated_at
+RETURNING id, tenant_id, email, password_hash, role, kyc_level, status, totp_secret_enc, totp_enabled, version, created_at, updated_at, totp_failures, totp_locked_until, totp_last_step
 `
 
 type CreateUserParams struct {
@@ -60,8 +74,27 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (AuthUse
 		&i.Version,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TotpFailures,
+		&i.TotpLockedUntil,
+		&i.TotpLastStep,
 	)
 	return i, err
+}
+
+const enableTOTP = `-- name: EnableTOTP :exec
+UPDATE auth.users
+   SET totp_enabled = true, totp_failures = 0, totp_locked_until = NULL, totp_last_step = $2
+ WHERE id = $1
+`
+
+type EnableTOTPParams struct {
+	ID           string
+	TotpLastStep *int64
+}
+
+func (q *Queries) EnableTOTP(ctx context.Context, arg EnableTOTPParams) error {
+	_, err := q.db.Exec(ctx, enableTOTP, arg.ID, arg.TotpLastStep)
+	return err
 }
 
 const getAPIKey = `-- name: GetAPIKey :one
@@ -110,6 +143,27 @@ func (q *Queries) GetAPIKeyByKeyID(ctx context.Context, keyID string) (AuthApiKe
 	return i, err
 }
 
+const getAdminSessionByHash = `-- name: GetAdminSessionByHash :one
+SELECT id_hash, tenant_id, user_id, created_at, expires_at, totp_verified_at, last_seen_at, revoked_at, ip FROM auth.admin_sessions WHERE id_hash = $1
+`
+
+func (q *Queries) GetAdminSessionByHash(ctx context.Context, idHash []byte) (AuthAdminSession, error) {
+	row := q.db.QueryRow(ctx, getAdminSessionByHash, idHash)
+	var i AuthAdminSession
+	err := row.Scan(
+		&i.IDHash,
+		&i.TenantID,
+		&i.UserID,
+		&i.CreatedAt,
+		&i.ExpiresAt,
+		&i.TotpVerifiedAt,
+		&i.LastSeenAt,
+		&i.RevokedAt,
+		&i.Ip,
+	)
+	return i, err
+}
+
 const getRefreshTokenByHash = `-- name: GetRefreshTokenByHash :one
 SELECT id, tenant_id, user_id, token_hash, expires_at, created_at, revoked_at, replaced_by FROM auth.refresh_tokens WHERE token_hash = $1
 `
@@ -131,7 +185,7 @@ func (q *Queries) GetRefreshTokenByHash(ctx context.Context, tokenHash []byte) (
 }
 
 const getUser = `-- name: GetUser :one
-SELECT id, tenant_id, email, password_hash, role, kyc_level, status, totp_secret_enc, totp_enabled, version, created_at, updated_at FROM auth.users WHERE id = $1
+SELECT id, tenant_id, email, password_hash, role, kyc_level, status, totp_secret_enc, totp_enabled, version, created_at, updated_at, totp_failures, totp_locked_until, totp_last_step FROM auth.users WHERE id = $1
 `
 
 func (q *Queries) GetUser(ctx context.Context, id string) (AuthUser, error) {
@@ -150,12 +204,15 @@ func (q *Queries) GetUser(ctx context.Context, id string) (AuthUser, error) {
 		&i.Version,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TotpFailures,
+		&i.TotpLockedUntil,
+		&i.TotpLastStep,
 	)
 	return i, err
 }
 
 const getUserByEmail = `-- name: GetUserByEmail :one
-SELECT id, tenant_id, email, password_hash, role, kyc_level, status, totp_secret_enc, totp_enabled, version, created_at, updated_at FROM auth.users WHERE tenant_id = $1 AND email = $2
+SELECT id, tenant_id, email, password_hash, role, kyc_level, status, totp_secret_enc, totp_enabled, version, created_at, updated_at, totp_failures, totp_locked_until, totp_last_step FROM auth.users WHERE tenant_id = $1 AND email = $2
 `
 
 type GetUserByEmailParams struct {
@@ -179,6 +236,9 @@ func (q *Queries) GetUserByEmail(ctx context.Context, arg GetUserByEmailParams) 
 		&i.Version,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TotpFailures,
+		&i.TotpLockedUntil,
+		&i.TotpLastStep,
 	)
 	return i, err
 }
@@ -224,6 +284,47 @@ func (q *Queries) InsertAPIKey(ctx context.Context, arg InsertAPIKeyParams) (Aut
 		&i.CreatedAt,
 		&i.LastUsedAt,
 		&i.RevokedAt,
+	)
+	return i, err
+}
+
+const insertAdminSession = `-- name: InsertAdminSession :one
+
+INSERT INTO auth.admin_sessions (id_hash, tenant_id, user_id, expires_at, totp_verified_at, ip)
+VALUES ($1, $2, $3, $4, $5, $6)
+RETURNING id_hash, tenant_id, user_id, created_at, expires_at, totp_verified_at, last_seen_at, revoked_at, ip
+`
+
+type InsertAdminSessionParams struct {
+	IDHash         []byte
+	TenantID       string
+	UserID         string
+	ExpiresAt      time.Time
+	TotpVerifiedAt pgtype.Timestamptz
+	Ip             string
+}
+
+// Admin sessions (0018) ----------------------------------------------------
+func (q *Queries) InsertAdminSession(ctx context.Context, arg InsertAdminSessionParams) (AuthAdminSession, error) {
+	row := q.db.QueryRow(ctx, insertAdminSession,
+		arg.IDHash,
+		arg.TenantID,
+		arg.UserID,
+		arg.ExpiresAt,
+		arg.TotpVerifiedAt,
+		arg.Ip,
+	)
+	var i AuthAdminSession
+	err := row.Scan(
+		&i.IDHash,
+		&i.TenantID,
+		&i.UserID,
+		&i.CreatedAt,
+		&i.ExpiresAt,
+		&i.TotpVerifiedAt,
+		&i.LastSeenAt,
+		&i.RevokedAt,
+		&i.Ip,
 	)
 	return i, err
 }
@@ -300,6 +401,114 @@ func (q *Queries) ListAPIKeysByUser(ctx context.Context, userID string) ([]AuthA
 	return items, nil
 }
 
+const listUsers = `-- name: ListUsers :many
+SELECT id, tenant_id, email, password_hash, role, kyc_level, status, totp_secret_enc, totp_enabled, version, created_at, updated_at, totp_failures, totp_locked_until, totp_last_step FROM auth.users
+WHERE tenant_id = $1
+  AND ($4::text = '' OR position($4::text IN email) > 0)
+  AND ($5::text = '' OR status = $5::text)
+  AND ($6::text = '' OR role = $6::text)
+ORDER BY created_at DESC, id
+LIMIT $2 OFFSET $3
+`
+
+type ListUsersParams struct {
+	TenantID string
+	Limit    int32
+	Offset   int32
+	Email    string
+	Status   string
+	Role     string
+}
+
+// The operator's directory view. position() rather than LIKE so an email
+// fragment cannot carry wildcards.
+func (q *Queries) ListUsers(ctx context.Context, arg ListUsersParams) ([]AuthUser, error) {
+	rows, err := q.db.Query(ctx, listUsers,
+		arg.TenantID,
+		arg.Limit,
+		arg.Offset,
+		arg.Email,
+		arg.Status,
+		arg.Role,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AuthUser{}
+	for rows.Next() {
+		var i AuthUser
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.Email,
+			&i.PasswordHash,
+			&i.Role,
+			&i.KycLevel,
+			&i.Status,
+			&i.TotpSecretEnc,
+			&i.TotpEnabled,
+			&i.Version,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.TotpFailures,
+			&i.TotpLockedUntil,
+			&i.TotpLastStep,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const recordTOTPFailure = `-- name: RecordTOTPFailure :one
+UPDATE auth.users
+   SET totp_failures = totp_failures + 1,
+       totp_locked_until = CASE WHEN totp_failures + 1 >= $2::int
+                                THEN $3::timestamptz
+                                ELSE totp_locked_until END
+ WHERE id = $1
+RETURNING totp_failures, totp_locked_until
+`
+
+type RecordTOTPFailureParams struct {
+	ID          string
+	MaxFailures int32
+	LockUntil   time.Time
+}
+
+type RecordTOTPFailureRow struct {
+	TotpFailures    int32
+	TotpLockedUntil pgtype.Timestamptz
+}
+
+// Locks when this failure reaches the limit. The lock time is computed by the
+// caller so tests can drive the clock.
+func (q *Queries) RecordTOTPFailure(ctx context.Context, arg RecordTOTPFailureParams) (RecordTOTPFailureRow, error) {
+	row := q.db.QueryRow(ctx, recordTOTPFailure, arg.ID, arg.MaxFailures, arg.LockUntil)
+	var i RecordTOTPFailureRow
+	err := row.Scan(&i.TotpFailures, &i.TotpLockedUntil)
+	return i, err
+}
+
+const recordTOTPSuccess = `-- name: RecordTOTPSuccess :exec
+UPDATE auth.users SET totp_failures = 0, totp_locked_until = NULL, totp_last_step = $2 WHERE id = $1
+`
+
+type RecordTOTPSuccessParams struct {
+	ID           string
+	TotpLastStep *int64
+}
+
+func (q *Queries) RecordTOTPSuccess(ctx context.Context, arg RecordTOTPSuccessParams) error {
+	_, err := q.db.Exec(ctx, recordTOTPSuccess, arg.ID, arg.TotpLastStep)
+	return err
+}
+
 const revokeAPIKey = `-- name: RevokeAPIKey :execrows
 UPDATE auth.api_keys SET revoked_at = now() WHERE id = $1 AND user_id = $2 AND revoked_at IS NULL
 `
@@ -311,6 +520,18 @@ type RevokeAPIKeyParams struct {
 
 func (q *Queries) RevokeAPIKey(ctx context.Context, arg RevokeAPIKeyParams) (int64, error) {
 	result, err := q.db.Exec(ctx, revokeAPIKey, arg.ID, arg.UserID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const revokeAdminSession = `-- name: RevokeAdminSession :execrows
+UPDATE auth.admin_sessions SET revoked_at = now() WHERE id_hash = $1 AND revoked_at IS NULL
+`
+
+func (q *Queries) RevokeAdminSession(ctx context.Context, idHash []byte) (int64, error) {
+	result, err := q.db.Exec(ctx, revokeAdminSession, idHash)
 	if err != nil {
 		return 0, err
 	}
@@ -337,6 +558,18 @@ func (q *Queries) RevokeRefreshToken(ctx context.Context, arg RevokeRefreshToken
 	return result.RowsAffected(), nil
 }
 
+const revokeUserAdminSessions = `-- name: RevokeUserAdminSessions :execrows
+UPDATE auth.admin_sessions SET revoked_at = now() WHERE user_id = $1 AND revoked_at IS NULL
+`
+
+func (q *Queries) RevokeUserAdminSessions(ctx context.Context, userID string) (int64, error) {
+	result, err := q.db.Exec(ctx, revokeUserAdminSessions, userID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const revokeUserRefreshTokens = `-- name: RevokeUserRefreshTokens :execrows
 UPDATE auth.refresh_tokens SET revoked_at = now() WHERE user_id = $1 AND revoked_at IS NULL
 `
@@ -349,6 +582,28 @@ func (q *Queries) RevokeUserRefreshTokens(ctx context.Context, userID string) (i
 	return result.RowsAffected(), nil
 }
 
+const setPendingTOTPSecret = `-- name: SetPendingTOTPSecret :exec
+
+UPDATE auth.users
+   SET totp_secret_enc = $2, totp_enabled = false,
+       totp_failures = 0, totp_locked_until = NULL, totp_last_step = NULL
+ WHERE id = $1
+`
+
+type SetPendingTOTPSecretParams struct {
+	ID            string
+	TotpSecretEnc []byte
+}
+
+// TOTP (0007 columns + 0018 bookkeeping) -------------------------------------
+// None of these bump version / updated_at: a failed code is not an edit of
+// the user, and a counter that rewrote the row's version would make every
+// optimistic check elsewhere see phantom changes.
+func (q *Queries) SetPendingTOTPSecret(ctx context.Context, arg SetPendingTOTPSecretParams) error {
+	_, err := q.db.Exec(ctx, setPendingTOTPSecret, arg.ID, arg.TotpSecretEnc)
+	return err
+}
+
 const touchAPIKey = `-- name: TouchAPIKey :exec
 UPDATE auth.api_keys SET last_used_at = now() WHERE id = $1
 `
@@ -358,8 +613,17 @@ func (q *Queries) TouchAPIKey(ctx context.Context, id string) error {
 	return err
 }
 
+const touchAdminSession = `-- name: TouchAdminSession :exec
+UPDATE auth.admin_sessions SET last_seen_at = now() WHERE id_hash = $1
+`
+
+func (q *Queries) TouchAdminSession(ctx context.Context, idHash []byte) error {
+	_, err := q.db.Exec(ctx, touchAdminSession, idHash)
+	return err
+}
+
 const updateUserKYCLevel = `-- name: UpdateUserKYCLevel :one
-UPDATE auth.users SET kyc_level = $2, version = version + 1, updated_at = now() WHERE id = $1 RETURNING id, tenant_id, email, password_hash, role, kyc_level, status, totp_secret_enc, totp_enabled, version, created_at, updated_at
+UPDATE auth.users SET kyc_level = $2, version = version + 1, updated_at = now() WHERE id = $1 RETURNING id, tenant_id, email, password_hash, role, kyc_level, status, totp_secret_enc, totp_enabled, version, created_at, updated_at, totp_failures, totp_locked_until, totp_last_step
 `
 
 type UpdateUserKYCLevelParams struct {
@@ -383,6 +647,9 @@ func (q *Queries) UpdateUserKYCLevel(ctx context.Context, arg UpdateUserKYCLevel
 		&i.Version,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TotpFailures,
+		&i.TotpLockedUntil,
+		&i.TotpLastStep,
 	)
 	return i, err
 }
@@ -402,7 +669,7 @@ func (q *Queries) UpdateUserPassword(ctx context.Context, arg UpdateUserPassword
 }
 
 const updateUserStatus = `-- name: UpdateUserStatus :one
-UPDATE auth.users SET status = $2, version = version + 1, updated_at = now() WHERE id = $1 RETURNING id, tenant_id, email, password_hash, role, kyc_level, status, totp_secret_enc, totp_enabled, version, created_at, updated_at
+UPDATE auth.users SET status = $2, version = version + 1, updated_at = now() WHERE id = $1 RETURNING id, tenant_id, email, password_hash, role, kyc_level, status, totp_secret_enc, totp_enabled, version, created_at, updated_at, totp_failures, totp_locked_until, totp_last_step
 `
 
 type UpdateUserStatusParams struct {
@@ -426,6 +693,9 @@ func (q *Queries) UpdateUserStatus(ctx context.Context, arg UpdateUserStatusPara
 		&i.Version,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TotpFailures,
+		&i.TotpLockedUntil,
+		&i.TotpLastStep,
 	)
 	return i, err
 }

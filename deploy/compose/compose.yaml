@@ -258,6 +258,12 @@ services:
       ADMIN_API_KEY: ${ADMIN_API_KEY}
       ADMIN_BOOTSTRAP_EMAIL: ${ADMIN_BOOTSTRAP_EMAIL:-admin@example.com}
       ADMIN_BOOTSTRAP_PASSWORD: ${ADMIN_BOOTSTRAP_PASSWORD}
+      ADMIN_TOTP_KEY: ${ADMIN_TOTP_KEY}
+      # The back office is served over plain HTTP on localhost here, so the
+      # session cookie must not be Secure or the browser will never send it.
+      # EXCHANGE_ENV=dev already implies this; the line is here so the
+      # decision is visible where the port is.
+      ADMIN_COOKIE_SECURE: "false"
       WEBHOOK_SIGNING_KEY: ${WEBHOOK_SIGNING_KEY}
     ports: ["127.0.0.1:8082:8082"]
     depends_on: *app-deps
@@ -297,6 +303,8 @@ services:
       ADMIN_API_KEY: ${ADMIN_API_KEY}
       ADMIN_BOOTSTRAP_EMAIL: ${ADMIN_BOOTSTRAP_EMAIL:-admin@example.com}
       ADMIN_BOOTSTRAP_PASSWORD: ${ADMIN_BOOTSTRAP_PASSWORD}
+      ADMIN_TOTP_KEY: ${ADMIN_TOTP_KEY}
+      ADMIN_COOKIE_SECURE: "false"
       ETH_REQUIRED_CONFIRMATIONS_DEFAULT: "1"   # anvil: a deposit in the head block is already confirmed
       ETH_SCAN_INTERVAL: 2s
       ETH_SWEEP_INTERVAL: 3s                    # same reasoning as exchange-chain above

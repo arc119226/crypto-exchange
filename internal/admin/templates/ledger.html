@@ -1,0 +1,75 @@
+{{define "content"}}
+<h1>Ledger</h1>
+{{with .Data}}
+<section class="card">
+  <h2>Trial balance <span class="badge {{if .Balanced}}ok{{else}}bad{{end}}">{{if .Balanced}}balanced{{else}}OUT OF BALANCE{{end}}</span></h2>
+  <table>
+    <thead><tr><th>Asset</th><th class="num">Debits</th><th class="num">Credits</th><th class="num">Diff</th></tr></thead>
+    <tbody>
+    {{range .Trial}}<tr><td>{{.Asset}}</td><td class="num">{{amount .Debits}}</td><td class="num">{{amount .Credits}}</td><td class="num">{{if .Diff.IsZero}}0{{else}}<strong>{{amount .Diff}}</strong>{{end}}</td></tr>
+    {{else}}<tr><td colspan="4" class="muted">No postings yet.</td></tr>{{end}}
+    </tbody>
+  </table>
+  <h2>House accounts</h2>
+  <table>
+    <thead><tr><th>Account</th><th>Type</th><th>Asset</th><th class="num">Balance</th></tr></thead>
+    <tbody>
+    {{range .House}}<tr><td>{{.Code}}</td><td>{{.Type}}</td><td>{{.Asset}}</td><td class="num">{{amount .Balance}}</td></tr>
+    {{else}}<tr><td colspan="4" class="muted">No house balances yet.</td></tr>{{end}}
+    </tbody>
+  </table>
+</section>
+<section class="card">
+  <h2>Look up</h2>
+  <form method="get" action="/admin/ledger" class="row">
+    <label>Account id <input type="text" name="account_id" value="{{.AccountID}}" class="mono" placeholder="uuid"></label>
+    <label>Ref type <input type="text" name="ref_type" value="{{.Filter.RefType}}" placeholder="adjustment, withdrawal, …"></label>
+    <label>Ref id <input type="text" name="ref_id" value="{{.Filter.RefID}}" class="mono"></label>
+    <button type="submit" class="quiet">Show</button>
+  </form>
+  {{if .Account}}
+  <h3>Account <span class="mono">{{.Account.ID}}</span> <span class="badge {{badge .Account.Status}}">{{.Account.Status}}</span></h3>
+  <table>
+    <thead><tr><th>Asset</th><th class="num">Available</th><th class="num">Hold</th><th class="num">Total</th></tr></thead>
+    <tbody>
+    {{range .Balances}}<tr><td>{{.Asset}}</td><td class="num">{{amount .Available}}</td><td class="num">{{amount .Hold}}</td><td class="num">{{amount .Total}}</td></tr>
+    {{else}}<tr><td colspan="4" class="muted">No balances.</td></tr>{{end}}
+    </tbody>
+  </table>
+  {{end}}
+</section>
+<section id="list">
+<h2>Entries{{if .Account}} of this account{{end}}</h2>
+<table>
+  <thead><tr><th>#</th><th>When</th><th>Kind</th><th>Ref</th><th>Reason</th><th>Postings</th></tr></thead>
+  <tbody>
+  {{range .Entries}}
+  <tr>
+    <td class="num">{{.ID}}</td>
+    <td>{{when .CreatedAt}}</td>
+    <td>{{.Kind}}</td>
+    <td>{{.RefType}}{{if .RefID}} <span class="mono muted">{{.RefID}}</span>{{end}}</td>
+    <td>{{.Reason}}</td>
+    <td>{{range .Postings}}<div><span class="mono">{{.AccountID}}</span> {{.Bucket}} {{.Direction}} {{amount .Amount}} {{.Asset}}</div>{{end}}</td>
+  </tr>
+  {{else}}
+  <tr><td colspan="6" class="muted">No entries match.</td></tr>
+  {{end}}
+  </tbody>
+</table>
+{{template "pager" .Pager}}
+</section>
+<section class="card">
+  <h2>Post an adjustment</h2>
+  <p class="muted">Against the external account, with the reason in the audit trail. Each submit is a new entry; refresh does not repeat it, but pressing the button twice does.</p>
+  <form method="post" action="/admin/ledger/adjustments" class="row">
+    <label>Account id <input type="text" name="account_id" value="{{.AccountID}}" class="mono" required></label>
+    <label>Asset <select name="asset">{{range .Assets}}<option value="{{.Symbol}}">{{.Symbol}}</option>{{end}}</select></label>
+    <label>Amount <input type="text" name="amount" required></label>
+    <label>Direction <select name="direction"><option value="credit">credit (give)</option><option value="debit">debit (take)</option></select></label>
+    <label>Reason <input type="text" name="reason" required placeholder="recorded in the audit trail"></label>
+    <button type="submit" class="danger">Post</button>
+  </form>
+</section>
+{{end}}
+{{end}}

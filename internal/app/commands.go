@@ -181,6 +181,49 @@ func BootstrapAdmin(ctx context.Context, cfg Config, out io.Writer) error {
 	return nil
 }
 
+// EnrollTOTP issues a TOTP secret for an administrator and prints the one
+// copy of it that will ever be shown. Run it with database credentials, like
+// BootstrapAdmin: the browser deliberately cannot do this, because anyone
+// holding the password of an administrator who has not yet enrolled could
+// otherwise finish enrolling as them. If qrPath is set the QR is written
+// there as a PNG (0600) for scanning; the terminal gets the URL and secret.
+func EnrollTOTP(ctx context.Context, cfg Config, email, qrPath string, out io.Writer) error {
+	master, err := cfg.Admin.TOTPMaster()
+	if err != nil {
+		return err
+	}
+	if len(master) == 0 {
+		return fmt.Errorf("admin totp enroll: ADMIN_TOTP_KEY is required")
+	}
+	pool, err := pg.Open(ctx, pg.PoolConfig{DSN: cfg.DB.URL.Reveal(), MaxConns: 2, ApplicationName: "exchange-totp-enroll"})
+	if err != nil {
+		return fmt.Errorf("admin totp enroll: %w", err)
+	}
+	defer pool.Close()
+	l := ledger.New(pool, cfg.TenantID)
+	svc, err := auth.New(pool, auth.Config{Tenant: cfg.TenantID, Issuer: cfg.Auth.Issuer, TOTPKey: master}, nil, nil, l, audit.NewRecorder(cfg.TenantID))
+	if err != nil {
+		return err
+	}
+	enrol, err := svc.EnrollTOTP(ctx, email)
+	if err != nil {
+		return fmt.Errorf("admin totp enroll: %w", err)
+	}
+	if qrPath != "" {
+		if err := os.WriteFile(qrPath, enrol.PNG, 0o600); err != nil {
+			return fmt.Errorf("admin totp enroll: write qr: %w", err)
+		}
+	}
+	_, _ = fmt.Fprintf(out, "admin totp enroll: %s\n\n", email)
+	_, _ = fmt.Fprintf(out, "  otpauth URL  %s\n", enrol.URL)
+	_, _ = fmt.Fprintf(out, "  secret       %s\n", enrol.Secret)
+	if qrPath != "" {
+		_, _ = fmt.Fprintf(out, "  qr           %s\n", qrPath)
+	}
+	_, _ = fmt.Fprintln(out, "\nAdd it to an authenticator now; this is the only time it is shown. Then sign in at\n/admin/login and enter the first code to finish. Every existing session of this\nadministrator has been signed out.")
+	return nil
+}
+
 // Healthcheck performs a GET and succeeds on any 2xx. It is the container
 // HEALTHCHECK command (distroless has no shell or curl).
 func Healthcheck(ctx context.Context, url string, timeout time.Duration) error {

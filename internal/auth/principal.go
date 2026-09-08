@@ -50,12 +50,22 @@ type Method string
 const (
 	MethodJWT    Method = "jwt"
 	MethodAPIKey Method = "api_key"
+	// MethodAdminSession is a back-office browser session (password + TOTP).
+	// It carries no scopes and no account: it is an operator, not a trader.
+	MethodAdminSession Method = "admin_session"
 )
 
 // Roles.
 const (
 	RoleUser  = "user"
 	RoleAdmin = "admin"
+)
+
+// User statuses (auth.users.status). Frozen means frozen: no login, no
+// refresh, no API key, and the spot account is frozen with it.
+const (
+	StatusActive = "active"
+	StatusFrozen = "frozen"
 )
 
 // Principal is the authenticated caller as the rest of the API sees it.

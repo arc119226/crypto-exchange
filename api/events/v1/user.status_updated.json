@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/arc119226/crypto-exchange/api/events/v1/user.status_updated.json",
+  "title": "user.status_updated",
+  "description": "An operator froze or released a user. Frozen means no login, no token refresh, no API key, and the spot account takes no orders and no withdrawals; an access token already issued lasts its fifteen minutes. No account_id and no sequence: a user is not an account.",
+  "type": "object",
+  "required": [
+    "user_id",
+    "status",
+    "previous_status",
+    "version"
+  ],
+  "properties": {
+    "user_id": {
+      "type": "string"
+    },
+    "status": {
+      "enum": [
+        "active",
+        "frozen"
+      ]
+    },
+    "previous_status": {
+      "enum": [
+        "active",
+        "frozen"
+      ]
+    },
+    "version": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "User row version after the change; increases on every edit."
+    },
+    "reason": {
+      "type": "string",
+      "description": "Operator's reason, recorded in the audit trail."
+    }
+  }
+}

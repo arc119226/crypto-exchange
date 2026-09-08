@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
@@ -30,6 +31,7 @@ func newAdminWebhooksCmd() *cobra.Command {
 		newAdminWebhooksStatusCmd("enable", "active", "Start delivering to an endpoint again"),
 		newAdminWebhooksDeliveriesCmd(),
 		newAdminWebhooksReplayCmd(),
+		newAdminWebhooksRotateSecretCmd(),
 	)
 	return c
 }
@@ -282,6 +284,53 @@ func newAdminWebhooksDeliveriesCmd() *cobra.Command {
 	}
 	c.Flags().Int32Var(&limit, "limit", 100, "how many attempts to show")
 	return c
+}
+
+func newAdminWebhooksRotateSecretCmd() *cobra.Command {
+	var (
+		grace  int32
+		reason string
+	)
+	cmd := &cobra.Command{
+		Use:   "rotate-secret <endpoint-id>",
+		Short: "Issue a new signing secret; the old one keeps signing for a grace period",
+		Long: "Prints the new secret exactly once. Until the grace period ends every delivery\n" +
+			"carries two signatures, v1=<new>,v1=<old>, so the receiver can switch at its own\n" +
+			"pace; after it only the new secret signs. Rotating again inside the grace period\n" +
+			"replaces the old secret -- the newest two are the only ones ever valid.",
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			format, err := outputFormat(cmd)
+			if err != nil {
+				return err
+			}
+			if reason == "" {
+				return errors.New("--reason is required; it goes in the audit trail")
+			}
+			client, base, err := newAdminClient(cmd)
+			if err != nil {
+				return err
+			}
+			resp, err := client.RotateWebhookSecretWithResponse(cmd.Context(), args[0],
+				adminclient.RotateWebhookSecretJSONRequestBody{GraceHours: &grace, Reason: reason})
+			if err != nil {
+				return transportError(base, err)
+			}
+			if resp.JSON200 == nil {
+				return adminError(resp.HTTPResponse, resp.Body)
+			}
+			if format == "json" {
+				return printJSON(cmd.OutOrStdout(), resp.JSON200)
+			}
+			r := resp.JSON200
+			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "endpoint %s\nsecret   %s\nthe old secret also signs until %s\n",
+				r.ID, r.Secret, r.PreviousSecretUntil.UTC().Format("2006-01-02T15:04:05Z"))
+			return nil
+		},
+	}
+	cmd.Flags().Int32Var(&grace, "grace-hours", 24, "how long the old secret keeps signing (1-168)")
+	cmd.Flags().StringVar(&reason, "reason", "", "why (required; recorded in the audit trail)")
+	return cmd
 }
 
 func newAdminWebhooksReplayCmd() *cobra.Command {

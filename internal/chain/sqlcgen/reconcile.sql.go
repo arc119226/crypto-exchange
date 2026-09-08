@@ -297,6 +297,109 @@ func (q *Queries) ListReconciliationBreaks(ctx context.Context, arg ListReconcil
 	return items, nil
 }
 
+const listReconciliationBreaksForTenant = `-- name: ListReconciliationBreaksForTenant :many
+SELECT id, tenant_id, report_id, chain_id, asset, block_height, ledger_total, chain_total, uncredited, above_frontier, in_flight, diff, created_at FROM admin.reconciliation_breaks
+WHERE tenant_id = $1 AND chain_id = $2
+ORDER BY created_at DESC, asset
+LIMIT $3 OFFSET $4
+`
+
+type ListReconciliationBreaksForTenantParams struct {
+	TenantID string
+	ChainID  int64
+	Limit    int32
+	Offset   int32
+}
+
+// Every break on record, newest first, for the back office; the per-report
+// read above is what the pass itself uses.
+func (q *Queries) ListReconciliationBreaksForTenant(ctx context.Context, arg ListReconciliationBreaksForTenantParams) ([]AdminReconciliationBreak, error) {
+	rows, err := q.db.Query(ctx, listReconciliationBreaksForTenant,
+		arg.TenantID,
+		arg.ChainID,
+		arg.Limit,
+		arg.Offset,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AdminReconciliationBreak{}
+	for rows.Next() {
+		var i AdminReconciliationBreak
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.ReportID,
+			&i.ChainID,
+			&i.Asset,
+			&i.BlockHeight,
+			&i.LedgerTotal,
+			&i.ChainTotal,
+			&i.Uncredited,
+			&i.AboveFrontier,
+			&i.InFlight,
+			&i.Diff,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listReconciliationReports = `-- name: ListReconciliationReports :many
+SELECT id, tenant_id, chain_id, started_at, finished_at, balanced, lines, created_at FROM admin.reconciliation_reports
+WHERE tenant_id = $1 AND chain_id = $2
+ORDER BY finished_at DESC
+LIMIT $3 OFFSET $4
+`
+
+type ListReconciliationReportsParams struct {
+	TenantID string
+	ChainID  int64
+	Limit    int32
+	Offset   int32
+}
+
+func (q *Queries) ListReconciliationReports(ctx context.Context, arg ListReconciliationReportsParams) ([]AdminReconciliationReport, error) {
+	rows, err := q.db.Query(ctx, listReconciliationReports,
+		arg.TenantID,
+		arg.ChainID,
+		arg.Limit,
+		arg.Offset,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AdminReconciliationReport{}
+	for rows.Next() {
+		var i AdminReconciliationReport
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.ChainID,
+			&i.StartedAt,
+			&i.FinishedAt,
+			&i.Balanced,
+			&i.Lines,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const setHotWalletLowAlerted = `-- name: SetHotWalletLowAlerted :exec
 UPDATE chain.hot_wallets
 SET low_alerted_at = $3, updated_at = now()

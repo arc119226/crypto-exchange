@@ -12,5 +12,7 @@ WHERE tenant_id = $1
   AND (sqlc.arg(action)::text = '' OR action = sqlc.arg(action)::text)
   AND (sqlc.arg(target_type)::text = '' OR target_type = sqlc.arg(target_type)::text)
   AND (sqlc.arg(target_id)::text = '' OR target_id = sqlc.arg(target_id)::text)
+  AND (sqlc.arg(actor_type)::text = '' OR actor_type = sqlc.arg(actor_type)::text)
+  AND (sqlc.arg(actor_id)::text = '' OR actor_id = sqlc.arg(actor_id)::text)
 ORDER BY id DESC
 LIMIT $2 OFFSET $3;

@@ -100,8 +100,12 @@ type Filter struct {
 	Action     string
 	TargetType string
 	TargetID   string
-	Limit      int32
-	Offset     int32
+	// ActorType and ActorID answer "what did this person do", the question
+	// the back office asks most (docs/plan-v1.0.md §14).
+	ActorType string
+	ActorID   string
+	Limit     int32
+	Offset    int32
 }
 
 // List returns events newest first.
@@ -110,7 +114,7 @@ func (r *Recorder) List(ctx context.Context, db sqlcgen.DBTX, f Filter) ([]Recor
 		f.Limit = 100
 	}
 	rows, err := sqlcgen.New(db).ListAuditEvents(ctx, sqlcgen.ListAuditEventsParams{
-		TenantID: r.tenant, Action: f.Action, TargetType: f.TargetType, TargetID: f.TargetID, Limit: f.Limit, Offset: f.Offset,
+		TenantID: r.tenant, Action: f.Action, TargetType: f.TargetType, TargetID: f.TargetID, ActorType: f.ActorType, ActorID: f.ActorID, Limit: f.Limit, Offset: f.Offset,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("audit: list: %w", err)

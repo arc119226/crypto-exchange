@@ -71,6 +71,54 @@ func (e AdjustmentRequestDirection) Valid() bool {
 	}
 }
 
+// Defines values for AdminDepositStatus.
+const (
+	AdminDepositStatusConfirming AdminDepositStatus = "confirming"
+	AdminDepositStatusCredited   AdminDepositStatus = "credited"
+	AdminDepositStatusDetected   AdminDepositStatus = "detected"
+	AdminDepositStatusDropped    AdminDepositStatus = "dropped"
+	AdminDepositStatusOrphaned   AdminDepositStatus = "orphaned"
+	AdminDepositStatusReversed   AdminDepositStatus = "reversed"
+)
+
+// Valid indicates whether the value is a known member of the AdminDepositStatus enum.
+func (e AdminDepositStatus) Valid() bool {
+	switch e {
+	case AdminDepositStatusConfirming:
+		return true
+	case AdminDepositStatusCredited:
+		return true
+	case AdminDepositStatusDetected:
+		return true
+	case AdminDepositStatusDropped:
+		return true
+	case AdminDepositStatusOrphaned:
+		return true
+	case AdminDepositStatusReversed:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AssetStatus.
+const (
+	AssetStatusActive   AssetStatus = "active"
+	AssetStatusDisabled AssetStatus = "disabled"
+)
+
+// Valid indicates whether the value is a known member of the AssetStatus enum.
+func (e AssetStatus) Valid() bool {
+	switch e {
+	case AssetStatusActive:
+		return true
+	case AssetStatusDisabled:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for AuditEventActorType.
 const (
 	AuditEventActorTypeAPIKey AuditEventActorType = "api_key"
@@ -251,6 +299,60 @@ func (e PostingDirection) Valid() bool {
 	}
 }
 
+// Defines values for SystemStatusDatabase.
+const (
+	SystemStatusDatabaseError SystemStatusDatabase = "error"
+	SystemStatusDatabaseOk    SystemStatusDatabase = "ok"
+)
+
+// Valid indicates whether the value is a known member of the SystemStatusDatabase enum.
+func (e SystemStatusDatabase) Valid() bool {
+	switch e {
+	case SystemStatusDatabaseError:
+		return true
+	case SystemStatusDatabaseOk:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for UserRole.
+const (
+	UserRoleAdmin UserRole = "admin"
+	UserRoleUser  UserRole = "user"
+)
+
+// Valid indicates whether the value is a known member of the UserRole enum.
+func (e UserRole) Valid() bool {
+	switch e {
+	case UserRoleAdmin:
+		return true
+	case UserRoleUser:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for UserStatus.
+const (
+	UserStatusActive UserStatus = "active"
+	UserStatusFrozen UserStatus = "frozen"
+)
+
+// Valid indicates whether the value is a known member of the UserStatus enum.
+func (e UserStatus) Valid() bool {
+	switch e {
+	case UserStatusActive:
+		return true
+	case UserStatusFrozen:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for WebhookDeliveryStatus.
 const (
 	WebhookDeliveryStatusDead      WebhookDeliveryStatus = "dead"
@@ -335,6 +437,60 @@ func (e WithdrawalReviewRequestDecision) Valid() bool {
 	}
 }
 
+// Defines values for ListAuditEventsParamsActorType.
+const (
+	ListAuditEventsParamsActorTypeAPIKey ListAuditEventsParamsActorType = "api_key"
+	ListAuditEventsParamsActorTypeAdmin  ListAuditEventsParamsActorType = "admin"
+	ListAuditEventsParamsActorTypeSystem ListAuditEventsParamsActorType = "system"
+	ListAuditEventsParamsActorTypeUser   ListAuditEventsParamsActorType = "user"
+)
+
+// Valid indicates whether the value is a known member of the ListAuditEventsParamsActorType enum.
+func (e ListAuditEventsParamsActorType) Valid() bool {
+	switch e {
+	case ListAuditEventsParamsActorTypeAPIKey:
+		return true
+	case ListAuditEventsParamsActorTypeAdmin:
+		return true
+	case ListAuditEventsParamsActorTypeSystem:
+		return true
+	case ListAuditEventsParamsActorTypeUser:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ListDepositsParamsStatus.
+const (
+	ListDepositsParamsStatusConfirming ListDepositsParamsStatus = "confirming"
+	ListDepositsParamsStatusCredited   ListDepositsParamsStatus = "credited"
+	ListDepositsParamsStatusDetected   ListDepositsParamsStatus = "detected"
+	ListDepositsParamsStatusDropped    ListDepositsParamsStatus = "dropped"
+	ListDepositsParamsStatusOrphaned   ListDepositsParamsStatus = "orphaned"
+	ListDepositsParamsStatusReversed   ListDepositsParamsStatus = "reversed"
+)
+
+// Valid indicates whether the value is a known member of the ListDepositsParamsStatus enum.
+func (e ListDepositsParamsStatus) Valid() bool {
+	switch e {
+	case ListDepositsParamsStatusConfirming:
+		return true
+	case ListDepositsParamsStatusCredited:
+		return true
+	case ListDepositsParamsStatusDetected:
+		return true
+	case ListDepositsParamsStatusDropped:
+		return true
+	case ListDepositsParamsStatusOrphaned:
+		return true
+	case ListDepositsParamsStatusReversed:
+		return true
+	default:
+		return false
+	}
+}
+
 // Account defines model for Account.
 type Account struct {
 	CreatedAt time.Time `json:"created_at"`
@@ -390,6 +546,34 @@ type AdjustmentRequest struct {
 // AdjustmentRequestDirection credit adds to the user's available balance, debit removes.
 type AdjustmentRequestDirection string
 
+// AdminDeposit defines model for AdminDeposit.
+type AdminDeposit struct {
+	AccountID string `json:"account_id"`
+	Address   string `json:"address"`
+
+	// Amount Decimal serialized as a string (NUMERIC(36,18)); never a JSON number.
+	//
+	// Example: 1990.00
+	Amount        Amount             `json:"amount"`
+	Asset         string             `json:"asset"`
+	BlockNumber   int64              `json:"block_number"`
+	Confirmations int32              `json:"confirmations"`
+	CreatedAt     time.Time          `json:"created_at"`
+	CreditedAt    *time.Time         `json:"credited_at,omitempty"`
+	ID            string             `json:"id"`
+	LogIndex      int32              `json:"log_index"`
+	Status        AdminDepositStatus `json:"status"`
+	TxHash        string             `json:"tx_hash"`
+}
+
+// AdminDepositStatus defines model for AdminDeposit.Status.
+type AdminDepositStatus string
+
+// AdminDepositList defines model for AdminDepositList.
+type AdminDepositList struct {
+	Deposits []AdminDeposit `json:"deposits"`
+}
+
 // AdminWithdrawal defines model for AdminWithdrawal.
 type AdminWithdrawal struct {
 	AccountID string `json:"account_id"`
@@ -423,6 +607,90 @@ type AdminWithdrawalList struct {
 //
 // Example: 1990.00
 type Amount = money.Amount
+
+// Asset defines model for Asset.
+type Asset struct {
+	ChainID int64 `json:"chain_id"`
+
+	// ContractAddress Absent for the native coin.
+	ContractAddress *string   `json:"contract_address,omitempty"`
+	CreatedAt       time.Time `json:"created_at"`
+	DepositEnabled  bool      `json:"deposit_enabled"`
+	DisplayScale    int32     `json:"display_scale"`
+	ID              string    `json:"id"`
+	IsNative        bool      `json:"is_native"`
+
+	// MinDeposit Decimal serialized as a string (NUMERIC(36,18)); never a JSON number.
+	//
+	// Example: 1990.00
+	MinDeposit Amount `json:"min_deposit"`
+
+	// MinWithdrawal Decimal serialized as a string (NUMERIC(36,18)); never a JSON number.
+	//
+	// Example: 1990.00
+	MinWithdrawal         Amount      `json:"min_withdrawal"`
+	Name                  string      `json:"name"`
+	RequiredConfirmations int32       `json:"required_confirmations"`
+	Scale                 int32       `json:"scale"`
+	Status                AssetStatus `json:"status"`
+
+	// SweepThreshold Decimal serialized as a string (NUMERIC(36,18)); never a JSON number.
+	//
+	// Example: 1990.00
+	SweepThreshold  Amount    `json:"sweep_threshold"`
+	Symbol          string    `json:"symbol"`
+	UpdatedAt       time.Time `json:"updated_at"`
+	Version         int32     `json:"version"`
+	WithdrawEnabled bool      `json:"withdraw_enabled"`
+
+	// WithdrawalFee Decimal serialized as a string (NUMERIC(36,18)); never a JSON number.
+	//
+	// Example: 1990.00
+	WithdrawalFee Amount `json:"withdrawal_fee"`
+}
+
+// AssetList defines model for AssetList.
+type AssetList struct {
+	Assets []Asset `json:"assets"`
+}
+
+// AssetRequest defines model for AssetRequest.
+type AssetRequest struct {
+	ChainID         int64   `json:"chain_id"`
+	ContractAddress *string `json:"contract_address,omitempty"`
+	DepositEnabled  bool    `json:"deposit_enabled"`
+	DisplayScale    int32   `json:"display_scale"`
+	IsNative        bool    `json:"is_native"`
+
+	// MinDeposit Decimal serialized as a string (NUMERIC(36,18)); never a JSON number.
+	//
+	// Example: 1990.00
+	MinDeposit Amount `json:"min_deposit"`
+
+	// MinWithdrawal Decimal serialized as a string (NUMERIC(36,18)); never a JSON number.
+	//
+	// Example: 1990.00
+	MinWithdrawal         Amount      `json:"min_withdrawal"`
+	Name                  string      `json:"name"`
+	Reason                string      `json:"reason"`
+	RequiredConfirmations int32       `json:"required_confirmations"`
+	Scale                 int32       `json:"scale"`
+	Status                AssetStatus `json:"status"`
+
+	// SweepThreshold Decimal serialized as a string (NUMERIC(36,18)); never a JSON number.
+	//
+	// Example: 1990.00
+	SweepThreshold  Amount `json:"sweep_threshold"`
+	WithdrawEnabled bool   `json:"withdraw_enabled"`
+
+	// WithdrawalFee Decimal serialized as a string (NUMERIC(36,18)); never a JSON number.
+	//
+	// Example: 1990.00
+	WithdrawalFee Amount `json:"withdrawal_fee"`
+}
+
+// AssetStatus defines model for AssetStatus.
+type AssetStatus string
 
 // AuditEvent defines model for AuditEvent.
 type AuditEvent struct {
@@ -473,10 +741,129 @@ type BalanceList struct {
 	Balances  []Balance `json:"balances"`
 }
 
+// ChainBreak defines model for ChainBreak.
+type ChainBreak struct {
+	// AboveFrontier Decimal serialized as a string (NUMERIC(36,18)); never a JSON number.
+	//
+	// Example: 1990.00
+	AboveFrontier Amount `json:"above_frontier"`
+	Asset         string `json:"asset"`
+	BlockHeight   int64  `json:"block_height"`
+	ChainID       int64  `json:"chain_id"`
+
+	// ChainTotal Decimal serialized as a string (NUMERIC(36,18)); never a JSON number.
+	//
+	// Example: 1990.00
+	ChainTotal Amount    `json:"chain_total"`
+	DetectedAt time.Time `json:"detected_at"`
+
+	// Diff Decimal serialized as a string (NUMERIC(36,18)); never a JSON number.
+	//
+	// Example: 1990.00
+	Diff Amount `json:"diff"`
+	ID   string `json:"id"`
+
+	// InFlight Decimal serialized as a string (NUMERIC(36,18)); never a JSON number.
+	//
+	// Example: 1990.00
+	InFlight Amount `json:"in_flight"`
+
+	// LedgerTotal Decimal serialized as a string (NUMERIC(36,18)); never a JSON number.
+	//
+	// Example: 1990.00
+	LedgerTotal Amount `json:"ledger_total"`
+	ReportID    string `json:"report_id"`
+
+	// Uncredited Decimal serialized as a string (NUMERIC(36,18)); never a JSON number.
+	//
+	// Example: 1990.00
+	Uncredited Amount `json:"uncredited"`
+}
+
 // CreateAccountRequest defines model for CreateAccountRequest.
 type CreateAccountRequest struct {
 	// OwnerUserID Optional until Phase 3 introduces users.
 	OwnerUserID *string `json:"owner_user_id,omitempty"`
+}
+
+// CreateAssetRequest defines model for CreateAssetRequest.
+type CreateAssetRequest struct {
+	ChainID         int64   `json:"chain_id"`
+	ContractAddress *string `json:"contract_address,omitempty"`
+	DepositEnabled  bool    `json:"deposit_enabled"`
+	DisplayScale    int32   `json:"display_scale"`
+	IsNative        bool    `json:"is_native"`
+
+	// MinDeposit Decimal serialized as a string (NUMERIC(36,18)); never a JSON number.
+	//
+	// Example: 1990.00
+	MinDeposit Amount `json:"min_deposit"`
+
+	// MinWithdrawal Decimal serialized as a string (NUMERIC(36,18)); never a JSON number.
+	//
+	// Example: 1990.00
+	MinWithdrawal         Amount      `json:"min_withdrawal"`
+	Name                  string      `json:"name"`
+	Reason                string      `json:"reason"`
+	RequiredConfirmations int32       `json:"required_confirmations"`
+	Scale                 int32       `json:"scale"`
+	Status                AssetStatus `json:"status"`
+
+	// SweepThreshold Decimal serialized as a string (NUMERIC(36,18)); never a JSON number.
+	//
+	// Example: 1990.00
+	SweepThreshold Amount `json:"sweep_threshold"`
+
+	// Symbol Example: USDC
+	Symbol          string `json:"symbol"`
+	WithdrawEnabled bool   `json:"withdraw_enabled"`
+
+	// WithdrawalFee Decimal serialized as a string (NUMERIC(36,18)); never a JSON number.
+	//
+	// Example: 1990.00
+	WithdrawalFee Amount `json:"withdrawal_fee"`
+}
+
+// CreateFeeScheduleRequest defines model for CreateFeeScheduleRequest.
+type CreateFeeScheduleRequest struct {
+	MakerBps int32 `json:"maker_bps"`
+
+	// Name Example: vip
+	Name     string `json:"name"`
+	Reason   string `json:"reason"`
+	TakerBps int32  `json:"taker_bps"`
+}
+
+// CreateMarketRequest defines model for CreateMarketRequest.
+type CreateMarketRequest struct {
+	BaseAsset      string  `json:"base_asset"`
+	FeeSchedule    string  `json:"fee_schedule"`
+	MaxQty         *Amount `json:"max_qty,omitempty"`
+	MaxSlippageBps *int32  `json:"max_slippage_bps,omitempty"`
+
+	// MinNotional Decimal serialized as a string (NUMERIC(36,18)); never a JSON number.
+	//
+	// Example: 1990.00
+	MinNotional Amount `json:"min_notional"`
+
+	// PriceTick Decimal serialized as a string (NUMERIC(36,18)); never a JSON number.
+	//
+	// Example: 1990.00
+	PriceTick Amount `json:"price_tick"`
+
+	// QtyStep Decimal serialized as a string (NUMERIC(36,18)); never a JSON number.
+	//
+	// Example: 1990.00
+	QtyStep         Amount `json:"qty_step"`
+	QuoteAsset      string `json:"quote_asset"`
+	Reason          string `json:"reason"`
+	SelfTradePolicy string `json:"self_trade_policy"`
+
+	// Status active takes orders and cancels; halted and cancel_only take cancels only; delisted requires an empty book (docs/plan-v1.0.md 6.6).
+	Status MarketStatus `json:"status"`
+
+	// Symbol Example: ETH-USDC
+	Symbol string `json:"symbol"`
 }
 
 // CreatedWebhookEndpoint defines model for CreatedWebhookEndpoint.
@@ -497,6 +884,55 @@ type CreatedWebhookEndpoint struct {
 
 	// URL Example: https://example.com/hooks/exchange
 	URL string `json:"url"`
+}
+
+// FeeSchedule defines model for FeeSchedule.
+type FeeSchedule struct {
+	CreatedAt     time.Time `json:"created_at"`
+	EffectiveFrom time.Time `json:"effective_from"`
+	ID            string    `json:"id"`
+	MakerBps      int32     `json:"maker_bps"`
+	Name          string    `json:"name"`
+	TakerBps      int32     `json:"taker_bps"`
+	UpdatedAt     time.Time `json:"updated_at"`
+	Version       int32     `json:"version"`
+}
+
+// FeeScheduleList defines model for FeeScheduleList.
+type FeeScheduleList struct {
+	FeeSchedules []FeeSchedule `json:"fee_schedules"`
+}
+
+// FeeScheduleRequest defines model for FeeScheduleRequest.
+type FeeScheduleRequest struct {
+	MakerBps int32  `json:"maker_bps"`
+	Reason   string `json:"reason"`
+	TakerBps int32  `json:"taker_bps"`
+}
+
+// HotWallet defines model for HotWallet.
+type HotWallet struct {
+	Address string `json:"address"`
+
+	// Balances The ledger's custody_hot balance per asset.
+	Balances []HotWalletBalance `json:"balances"`
+	ChainID  int64              `json:"chain_id"`
+
+	// Low alert.hot_wallet_low has been raised and not cleared.
+	Low          bool       `json:"low"`
+	LowAlertedAt *time.Time `json:"low_alerted_at,omitempty"`
+	NextNonce    int64      `json:"next_nonce"`
+	UpdatedAt    time.Time  `json:"updated_at"`
+}
+
+// HotWalletBalance defines model for HotWalletBalance.
+type HotWalletBalance struct {
+	Asset string `json:"asset"`
+
+	// Balance Decimal serialized as a string (NUMERIC(36,18)); never a JSON number.
+	//
+	// Example: 1990.00
+	Balance Amount `json:"balance"`
 }
 
 // HouseAdjustmentRequest defines model for HouseAdjustmentRequest.
@@ -564,11 +1000,49 @@ type JournalEntryList struct {
 	Entries []JournalEntry `json:"entries"`
 }
 
+// KycLevelRequest defines model for KycLevelRequest.
+type KycLevelRequest struct {
+	KycLevel int    `json:"kyc_level"`
+	Reason   string `json:"reason"`
+}
+
+// LedgerBreak defines model for LedgerBreak.
+type LedgerBreak struct {
+	Asset string `json:"asset"`
+
+	// Credits Decimal serialized as a string (NUMERIC(36,18)); never a JSON number.
+	//
+	// Example: 1990.00
+	Credits Amount `json:"credits"`
+
+	// Debits Decimal serialized as a string (NUMERIC(36,18)); never a JSON number.
+	//
+	// Example: 1990.00
+	Debits     Amount    `json:"debits"`
+	DetectedAt time.Time `json:"detected_at"`
+
+	// Diff Decimal serialized as a string (NUMERIC(36,18)); never a JSON number.
+	//
+	// Example: 1990.00
+	Diff       Amount     `json:"diff"`
+	ID         string     `json:"id"`
+	ResolvedAt *time.Time `json:"resolved_at,omitempty"`
+}
+
 // Market defines model for Market.
 type Market struct {
 	BaseAsset string `json:"base_asset"`
-	ID        string `json:"id"`
-	MakerBps  int32  `json:"maker_bps"`
+
+	// FeeSchedule Name of the fee schedule the bps come from.
+	FeeSchedule *string `json:"fee_schedule,omitempty"`
+	ID          string  `json:"id"`
+	MakerBps    int32   `json:"maker_bps"`
+
+	// MaxQty Largest single order; absent means no cap.
+	MaxQty *Amount `json:"max_qty,omitempty"`
+
+	// MaxSlippageBps Market-order price protection band; absent means none.
+	MaxSlippageBps *int32 `json:"max_slippage_bps,omitempty"`
 
 	// MinNotional Decimal serialized as a string (NUMERIC(36,18)); never a JSON number.
 	//
@@ -599,6 +1073,35 @@ type Market struct {
 // MarketList defines model for MarketList.
 type MarketList struct {
 	Markets []Market `json:"markets"`
+}
+
+// MarketRequest defines model for MarketRequest.
+type MarketRequest struct {
+	BaseAsset      string  `json:"base_asset"`
+	FeeSchedule    string  `json:"fee_schedule"`
+	MaxQty         *Amount `json:"max_qty,omitempty"`
+	MaxSlippageBps *int32  `json:"max_slippage_bps,omitempty"`
+
+	// MinNotional Decimal serialized as a string (NUMERIC(36,18)); never a JSON number.
+	//
+	// Example: 1990.00
+	MinNotional Amount `json:"min_notional"`
+
+	// PriceTick Decimal serialized as a string (NUMERIC(36,18)); never a JSON number.
+	//
+	// Example: 1990.00
+	PriceTick Amount `json:"price_tick"`
+
+	// QtyStep Decimal serialized as a string (NUMERIC(36,18)); never a JSON number.
+	//
+	// Example: 1990.00
+	QtyStep         Amount `json:"qty_step"`
+	QuoteAsset      string `json:"quote_asset"`
+	Reason          string `json:"reason"`
+	SelfTradePolicy string `json:"self_trade_policy"`
+
+	// Status active takes orders and cancels; halted and cancel_only take cancels only; delisted requires an empty book (docs/plan-v1.0.md 6.6).
+	Status MarketStatus `json:"status"`
 }
 
 // MarketStatus active takes orders and cancels; halted and cancel_only take cancels only; delisted requires an empty book (docs/plan-v1.0.md 6.6).
@@ -641,6 +1144,12 @@ type Problem struct {
 	Type          string `json:"type"`
 }
 
+// ReconciliationBreaks defines model for ReconciliationBreaks.
+type ReconciliationBreaks struct {
+	ChainBreaks  []ChainBreak  `json:"chain_breaks"`
+	LedgerBreaks []LedgerBreak `json:"ledger_breaks"`
+}
+
 // ReconciliationLine defines model for ReconciliationLine.
 type ReconciliationLine struct {
 	// AboveFrontier The net effect the ledger booked for transactions mined above block_height.
@@ -680,6 +1189,47 @@ type ReconciliationReport struct {
 	StartedAt  time.Time            `json:"started_at"`
 }
 
+// ReconciliationReportList defines model for ReconciliationReportList.
+type ReconciliationReportList struct {
+	Reports []ReconciliationReport `json:"reports"`
+}
+
+// ReconciliationSummary defines model for ReconciliationSummary.
+type ReconciliationSummary struct {
+	Balanced   bool      `json:"balanced"`
+	FinishedAt time.Time `json:"finished_at"`
+	ID         string    `json:"id"`
+}
+
+// ReloadAccepted defines model for ReloadAccepted.
+type ReloadAccepted struct {
+	EventID    string    `json:"event_id"`
+	OccurredAt time.Time `json:"occurred_at"`
+}
+
+// ReloadRequest defines model for ReloadRequest.
+type ReloadRequest struct {
+	Reason string `json:"reason"`
+}
+
+// RotateSecretRequest defines model for RotateSecretRequest.
+type RotateSecretRequest struct {
+	// GraceHours How long the old secret keeps signing alongside the new one.
+	GraceHours *int32 `json:"grace_hours,omitempty"`
+	Reason     string `json:"reason"`
+}
+
+// RotatedWebhookSecret defines model for RotatedWebhookSecret.
+type RotatedWebhookSecret struct {
+	ID string `json:"id"`
+
+	// PreviousSecretUntil Until when deliveries also carry the old secret's signature
+	PreviousSecretUntil time.Time `json:"previous_secret_until"`
+
+	// Secret The new HMAC signing secret, shown exactly once
+	Secret string `json:"secret"`
+}
+
 // Sweep defines model for Sweep.
 type Sweep struct {
 	// Amount Decimal serialized as a string (NUMERIC(36,18)); never a JSON number.
@@ -713,6 +1263,28 @@ type SweepList struct {
 	Sweeps []Sweep `json:"sweeps"`
 }
 
+// SystemStatus defines model for SystemStatus.
+type SystemStatus struct {
+	// ConfirmingDeposits Deposits seen on chain and not yet credited.
+	ConfirmingDeposits       int                    `json:"confirming_deposits"`
+	Database                 SystemStatusDatabase   `json:"database"`
+	DeadWebhookDeliveries24H int                    `json:"dead_webhook_deliveries_24h"`
+	LastReconciliation       *ReconciliationSummary `json:"last_reconciliation,omitempty"`
+
+	// LedgerBalanced Every asset's debits equal its credits right now.
+	LedgerBalanced bool      `json:"ledger_balanced"`
+	Now            time.Time `json:"now"`
+
+	// OpenLedgerBreaks Assets currently out of balance and recorded as such.
+	OpenLedgerBreaks int `json:"open_ledger_breaks"`
+
+	// PendingWithdrawals Withdrawals waiting for a person (pending_review).
+	PendingWithdrawals int `json:"pending_withdrawals"`
+}
+
+// SystemStatusDatabase defines model for SystemStatus.Database.
+type SystemStatusDatabase string
+
 // TrialBalance defines model for TrialBalance.
 type TrialBalance struct {
 	// Balanced true when every diff is zero.
@@ -739,6 +1311,40 @@ type TrialBalanceLine struct {
 	//
 	// Example: 1990.00
 	Diff Amount `json:"diff"`
+}
+
+// User defines model for User.
+type User struct {
+	CreatedAt time.Time  `json:"created_at"`
+	Email     string     `json:"email"`
+	ID        string     `json:"id"`
+	KycLevel  int        `json:"kyc_level"`
+	Role      UserRole   `json:"role"`
+	Status    UserStatus `json:"status"`
+
+	// TotpEnabled Only ever true for administrators.
+	TotpEnabled bool      `json:"totp_enabled"`
+	UpdatedAt   time.Time `json:"updated_at"`
+
+	// Version Increases on every edit.
+	Version int32 `json:"version"`
+}
+
+// UserList defines model for UserList.
+type UserList struct {
+	Users []User `json:"users"`
+}
+
+// UserRole defines model for UserRole.
+type UserRole string
+
+// UserStatus defines model for UserStatus.
+type UserStatus string
+
+// UserStatusRequest defines model for UserStatusRequest.
+type UserStatusRequest struct {
+	Reason string     `json:"reason"`
+	Status UserStatus `json:"status"`
 }
 
 // WebhookDelivery defines model for WebhookDelivery.
@@ -829,6 +1435,45 @@ type WebhookReplay struct {
 	RunID         string    `json:"run_id"`
 }
 
+// WithdrawalLimit defines model for WithdrawalLimit.
+type WithdrawalLimit struct {
+	Asset string `json:"asset"`
+
+	// AutoApproveLimit Decimal serialized as a string (NUMERIC(36,18)); never a JSON number.
+	//
+	// Example: 1990.00
+	AutoApproveLimit Amount `json:"auto_approve_limit"`
+
+	// DailyLimit Decimal serialized as a string (NUMERIC(36,18)); never a JSON number.
+	//
+	// Example: 1990.00
+	DailyLimit          Amount    `json:"daily_limit"`
+	KycLevel            int       `json:"kyc_level"`
+	RequireManualReview bool      `json:"require_manual_review"`
+	UpdatedAt           time.Time `json:"updated_at"`
+	Version             int32     `json:"version"`
+}
+
+// WithdrawalLimitList defines model for WithdrawalLimitList.
+type WithdrawalLimitList struct {
+	WithdrawalLimits []WithdrawalLimit `json:"withdrawal_limits"`
+}
+
+// WithdrawalLimitRequest defines model for WithdrawalLimitRequest.
+type WithdrawalLimitRequest struct {
+	// AutoApproveLimit Decimal serialized as a string (NUMERIC(36,18)); never a JSON number.
+	//
+	// Example: 1990.00
+	AutoApproveLimit Amount `json:"auto_approve_limit"`
+
+	// DailyLimit Decimal serialized as a string (NUMERIC(36,18)); never a JSON number.
+	//
+	// Example: 1990.00
+	DailyLimit          Amount `json:"daily_limit"`
+	Reason              string `json:"reason"`
+	RequireManualReview bool   `json:"require_manual_review"`
+}
+
 // WithdrawalResolveRequest defines model for WithdrawalResolveRequest.
 type WithdrawalResolveRequest struct {
 	Action WithdrawalResolveRequestAction `json:"action"`
@@ -854,6 +1499,18 @@ type WithdrawalReviewRequestDecision string
 // AccountID defines model for AccountID.
 type AccountID = string
 
+// AssetPath Example: ETH
+type AssetPath = string
+
+// AssetSymbol Example: USDC
+type AssetSymbol = string
+
+// FeeScheduleName Example: default
+type FeeScheduleName = string
+
+// KycLevelPath defines model for KycLevelPath.
+type KycLevelPath = int
+
 // Limit defines model for Limit.
 type Limit = int32
 
@@ -862,6 +1519,9 @@ type MarketSymbol = string
 
 // Offset defines model for Offset.
 type Offset = int32
+
+// UserID defines model for UserID.
+type UserID = string
 
 // WebhookDeliveryID defines model for WebhookDeliveryID.
 type WebhookDeliveryID = string
@@ -896,12 +1556,28 @@ type ListAccountsParams struct {
 
 // ListAuditEventsParams defines parameters for ListAuditEvents.
 type ListAuditEventsParams struct {
-	Action     *string `form:"action,omitempty" json:"action,omitempty"`
-	TargetType *string `form:"target_type,omitempty" json:"target_type,omitempty"`
-	TargetID   *string `form:"target_id,omitempty" json:"target_id,omitempty"`
-	Limit      *Limit  `form:"limit,omitempty" json:"limit,omitempty"`
-	Offset     *Offset `form:"offset,omitempty" json:"offset,omitempty"`
+	Action     *string                         `form:"action,omitempty" json:"action,omitempty"`
+	TargetType *string                         `form:"target_type,omitempty" json:"target_type,omitempty"`
+	TargetID   *string                         `form:"target_id,omitempty" json:"target_id,omitempty"`
+	ActorType  *ListAuditEventsParamsActorType `form:"actor_type,omitempty" json:"actor_type,omitempty"`
+	ActorID    *string                         `form:"actor_id,omitempty" json:"actor_id,omitempty"`
+	Limit      *Limit                          `form:"limit,omitempty" json:"limit,omitempty"`
+	Offset     *Offset                         `form:"offset,omitempty" json:"offset,omitempty"`
 }
+
+// ListAuditEventsParamsActorType defines parameters for ListAuditEvents.
+type ListAuditEventsParamsActorType string
+
+// ListDepositsParams defines parameters for ListDeposits.
+type ListDepositsParams struct {
+	Status *ListDepositsParamsStatus `form:"status,omitempty" json:"status,omitempty"`
+	Asset  *string                   `form:"asset,omitempty" json:"asset,omitempty"`
+	Limit  *Limit                    `form:"limit,omitempty" json:"limit,omitempty"`
+	Offset *Offset                   `form:"offset,omitempty" json:"offset,omitempty"`
+}
+
+// ListDepositsParamsStatus defines parameters for ListDeposits.
+type ListDepositsParamsStatus string
 
 // ListEntriesParams defines parameters for ListEntries.
 type ListEntriesParams struct {
@@ -912,9 +1588,30 @@ type ListEntriesParams struct {
 	Offset    *Offset `form:"offset,omitempty" json:"offset,omitempty"`
 }
 
+// ListReconciliationBreaksParams defines parameters for ListReconciliationBreaks.
+type ListReconciliationBreaksParams struct {
+	Limit  *Limit  `form:"limit,omitempty" json:"limit,omitempty"`
+	Offset *Offset `form:"offset,omitempty" json:"offset,omitempty"`
+}
+
+// ListReconciliationReportsParams defines parameters for ListReconciliationReports.
+type ListReconciliationReportsParams struct {
+	Limit  *Limit  `form:"limit,omitempty" json:"limit,omitempty"`
+	Offset *Offset `form:"offset,omitempty" json:"offset,omitempty"`
+}
+
 // ListSweepsParams defines parameters for ListSweeps.
 type ListSweepsParams struct {
 	Limit *Limit `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// ListUsersParams defines parameters for ListUsers.
+type ListUsersParams struct {
+	Email  *string     `form:"email,omitempty" json:"email,omitempty"`
+	Status *UserStatus `form:"status,omitempty" json:"status,omitempty"`
+	Role   *UserRole   `form:"role,omitempty" json:"role,omitempty"`
+	Limit  *Limit      `form:"limit,omitempty" json:"limit,omitempty"`
+	Offset *Offset     `form:"offset,omitempty" json:"offset,omitempty"`
 }
 
 // ListWebhookDeliveriesParams defines parameters for ListWebhookDeliveries.
@@ -934,14 +1631,41 @@ type CreateAccountJSONRequestBody = CreateAccountRequest
 // SetAccountStatusJSONRequestBody defines body for SetAccountStatus for application/json ContentType.
 type SetAccountStatusJSONRequestBody = AccountStatusRequest
 
+// CreateAssetJSONRequestBody defines body for CreateAsset for application/json ContentType.
+type CreateAssetJSONRequestBody = CreateAssetRequest
+
+// UpdateAssetJSONRequestBody defines body for UpdateAsset for application/json ContentType.
+type UpdateAssetJSONRequestBody = AssetRequest
+
+// RequestReloadJSONRequestBody defines body for RequestReload for application/json ContentType.
+type RequestReloadJSONRequestBody = ReloadRequest
+
+// CreateFeeScheduleJSONRequestBody defines body for CreateFeeSchedule for application/json ContentType.
+type CreateFeeScheduleJSONRequestBody = CreateFeeScheduleRequest
+
+// UpdateFeeScheduleJSONRequestBody defines body for UpdateFeeSchedule for application/json ContentType.
+type UpdateFeeScheduleJSONRequestBody = FeeScheduleRequest
+
 // CreateAdjustmentJSONRequestBody defines body for CreateAdjustment for application/json ContentType.
 type CreateAdjustmentJSONRequestBody = AdjustmentRequest
 
 // CreateHouseAdjustmentJSONRequestBody defines body for CreateHouseAdjustment for application/json ContentType.
 type CreateHouseAdjustmentJSONRequestBody = HouseAdjustmentRequest
 
+// CreateMarketJSONRequestBody defines body for CreateMarket for application/json ContentType.
+type CreateMarketJSONRequestBody = CreateMarketRequest
+
+// UpdateMarketJSONRequestBody defines body for UpdateMarket for application/json ContentType.
+type UpdateMarketJSONRequestBody = MarketRequest
+
 // SetMarketStatusJSONRequestBody defines body for SetMarketStatus for application/json ContentType.
 type SetMarketStatusJSONRequestBody = MarketStatusRequest
+
+// SetUserKycLevelJSONRequestBody defines body for SetUserKycLevel for application/json ContentType.
+type SetUserKycLevelJSONRequestBody = KycLevelRequest
+
+// SetUserStatusJSONRequestBody defines body for SetUserStatus for application/json ContentType.
+type SetUserStatusJSONRequestBody = UserStatusRequest
 
 // CreateWebhookEndpointJSONRequestBody defines body for CreateWebhookEndpoint for application/json ContentType.
 type CreateWebhookEndpointJSONRequestBody = WebhookEndpointRequest
@@ -949,8 +1673,14 @@ type CreateWebhookEndpointJSONRequestBody = WebhookEndpointRequest
 // UpdateWebhookEndpointJSONRequestBody defines body for UpdateWebhookEndpoint for application/json ContentType.
 type UpdateWebhookEndpointJSONRequestBody = WebhookEndpointUpdateRequest
 
+// RotateWebhookSecretJSONRequestBody defines body for RotateWebhookSecret for application/json ContentType.
+type RotateWebhookSecretJSONRequestBody = RotateSecretRequest
+
 // SetWebhookEndpointStatusJSONRequestBody defines body for SetWebhookEndpointStatus for application/json ContentType.
 type SetWebhookEndpointStatusJSONRequestBody = WebhookEndpointStatusRequest
+
+// SetWithdrawalLimitJSONRequestBody defines body for SetWithdrawalLimit for application/json ContentType.
+type SetWithdrawalLimitJSONRequestBody = WithdrawalLimitRequest
 
 // ResolveWithdrawalJSONRequestBody defines body for ResolveWithdrawal for application/json ContentType.
 type ResolveWithdrawalJSONRequestBody = WithdrawalResolveRequest
@@ -975,9 +1705,39 @@ type ServerInterface interface {
 	// SetAccountStatus Freeze or reactivate an account
 	// (PUT /admin/v1/accounts/{id}/status)
 	SetAccountStatus(w http.ResponseWriter, r *http.Request, id AccountID)
+	// ListAssets Assets of the tenant
+	// (GET /admin/v1/assets)
+	ListAssets(w http.ResponseWriter, r *http.Request)
+	// CreateAsset List a new asset
+	// (POST /admin/v1/assets)
+	CreateAsset(w http.ResponseWriter, r *http.Request)
+	// GetAsset Get one asset
+	// (GET /admin/v1/assets/{symbol})
+	GetAsset(w http.ResponseWriter, r *http.Request, symbol AssetSymbol)
+	// UpdateAsset Edit an asset
+	// (PUT /admin/v1/assets/{symbol})
+	UpdateAsset(w http.ResponseWriter, r *http.Request, symbol AssetSymbol)
 	// ListAuditEvents Audit trail, newest first
 	// (GET /admin/v1/audit-events)
 	ListAuditEvents(w http.ResponseWriter, r *http.Request, params ListAuditEventsParams)
+	// ListDeposits Deposits the chain role has seen, newest first
+	// (GET /admin/v1/deposits)
+	ListDeposits(w http.ResponseWriter, r *http.Request, params ListDepositsParams)
+	// RequestReload Ask every engine to reload its registry cache
+	// (POST /admin/v1/engine/reload)
+	RequestReload(w http.ResponseWriter, r *http.Request)
+	// ListFeeSchedules Fee schedules of the tenant
+	// (GET /admin/v1/fee-schedules)
+	ListFeeSchedules(w http.ResponseWriter, r *http.Request)
+	// CreateFeeSchedule Add a fee schedule
+	// (POST /admin/v1/fee-schedules)
+	CreateFeeSchedule(w http.ResponseWriter, r *http.Request)
+	// UpdateFeeSchedule Change a fee schedule's rates
+	// (PUT /admin/v1/fee-schedules/{name})
+	UpdateFeeSchedule(w http.ResponseWriter, r *http.Request, name FeeScheduleName)
+	// GetHotWallet The hot wallet, as the chain role keeps it
+	// (GET /admin/v1/hot-wallet)
+	GetHotWallet(w http.ResponseWriter, r *http.Request)
 	// CreateAdjustment Post a manual adjustment against the external account
 	// (POST /admin/v1/ledger/adjustments)
 	CreateAdjustment(w http.ResponseWriter, r *http.Request)
@@ -993,15 +1753,45 @@ type ServerInterface interface {
 	// ListMarkets Markets of the tenant
 	// (GET /admin/v1/markets)
 	ListMarkets(w http.ResponseWriter, r *http.Request)
+	// CreateMarket List a new market
+	// (POST /admin/v1/markets)
+	CreateMarket(w http.ResponseWriter, r *http.Request)
+	// GetMarket Get one market
+	// (GET /admin/v1/markets/{symbol})
+	GetMarket(w http.ResponseWriter, r *http.Request, symbol MarketSymbol)
+	// UpdateMarket Edit a market
+	// (PUT /admin/v1/markets/{symbol})
+	UpdateMarket(w http.ResponseWriter, r *http.Request, symbol MarketSymbol)
 	// SetMarketStatus Halt, resume or delist a market
 	// (PUT /admin/v1/markets/{symbol}/status)
 	SetMarketStatus(w http.ResponseWriter, r *http.Request, symbol MarketSymbol)
 	// GetReconciliation The latest comparison of ledger custody against on-chain balances
 	// (GET /admin/v1/reconciliation)
 	GetReconciliation(w http.ResponseWriter, r *http.Request)
+	// ListReconciliationBreaks Every break on record, both kinds, newest first
+	// (GET /admin/v1/reconciliation/breaks)
+	ListReconciliationBreaks(w http.ResponseWriter, r *http.Request, params ListReconciliationBreaksParams)
+	// ListReconciliationReports Reconciliation passes, newest first
+	// (GET /admin/v1/reconciliation/reports)
+	ListReconciliationReports(w http.ResponseWriter, r *http.Request, params ListReconciliationReportsParams)
 	// ListSweeps Recent collections into the hot wallet
 	// (GET /admin/v1/sweeps)
 	ListSweeps(w http.ResponseWriter, r *http.Request, params ListSweepsParams)
+	// GetSystemStatus What the dashboard shows
+	// (GET /admin/v1/system/status)
+	GetSystemStatus(w http.ResponseWriter, r *http.Request)
+	// ListUsers List users
+	// (GET /admin/v1/users)
+	ListUsers(w http.ResponseWriter, r *http.Request, params ListUsersParams)
+	// GetUser Get one user
+	// (GET /admin/v1/users/{id})
+	GetUser(w http.ResponseWriter, r *http.Request, id UserID)
+	// SetUserKycLevel Set a user's KYC level
+	// (PUT /admin/v1/users/{id}/kyc-level)
+	SetUserKycLevel(w http.ResponseWriter, r *http.Request, id UserID)
+	// SetUserStatus Freeze or release a user
+	// (PUT /admin/v1/users/{id}/status)
+	SetUserStatus(w http.ResponseWriter, r *http.Request, id UserID)
 	// ListWebhookEndpoints Webhook endpoints, disabled ones included
 	// (GET /admin/v1/webhooks)
 	ListWebhookEndpoints(w http.ResponseWriter, r *http.Request)
@@ -1017,9 +1807,18 @@ type ServerInterface interface {
 	// ReplayWebhookDelivery Send the event behind a delivery again
 	// (POST /admin/v1/webhooks/{id}/deliveries/{delivery_id}/replay)
 	ReplayWebhookDelivery(w http.ResponseWriter, r *http.Request, id WebhookEndpointID, deliveryID WebhookDeliveryID)
+	// RotateWebhookSecret Issue a new signing secret and keep the old one for a grace period
+	// (POST /admin/v1/webhooks/{id}/rotate-secret)
+	RotateWebhookSecret(w http.ResponseWriter, r *http.Request, id WebhookEndpointID)
 	// SetWebhookEndpointStatus Enable or disable an endpoint
 	// (PUT /admin/v1/webhooks/{id}/status)
 	SetWebhookEndpointStatus(w http.ResponseWriter, r *http.Request, id WebhookEndpointID)
+	// ListWithdrawalLimits Withdrawal limits per asset and KYC level
+	// (GET /admin/v1/withdrawal-limits)
+	ListWithdrawalLimits(w http.ResponseWriter, r *http.Request)
+	// SetWithdrawalLimit Set the limits of one asset at one KYC level
+	// (PUT /admin/v1/withdrawal-limits/{asset}/{kyc_level})
+	SetWithdrawalLimit(w http.ResponseWriter, r *http.Request, asset AssetPath, kycLevel KycLevelPath)
 	// ListWithdrawalsForReview The withdrawal review queue
 	// (GET /admin/v1/withdrawals)
 	ListWithdrawalsForReview(w http.ResponseWriter, r *http.Request, params ListWithdrawalsForReviewParams)
@@ -1065,9 +1864,69 @@ func (_ Unimplemented) SetAccountStatus(w http.ResponseWriter, r *http.Request, 
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// ListAssets Assets of the tenant
+// (GET /admin/v1/assets)
+func (_ Unimplemented) ListAssets(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// CreateAsset List a new asset
+// (POST /admin/v1/assets)
+func (_ Unimplemented) CreateAsset(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetAsset Get one asset
+// (GET /admin/v1/assets/{symbol})
+func (_ Unimplemented) GetAsset(w http.ResponseWriter, r *http.Request, symbol AssetSymbol) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// UpdateAsset Edit an asset
+// (PUT /admin/v1/assets/{symbol})
+func (_ Unimplemented) UpdateAsset(w http.ResponseWriter, r *http.Request, symbol AssetSymbol) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // ListAuditEvents Audit trail, newest first
 // (GET /admin/v1/audit-events)
 func (_ Unimplemented) ListAuditEvents(w http.ResponseWriter, r *http.Request, params ListAuditEventsParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ListDeposits Deposits the chain role has seen, newest first
+// (GET /admin/v1/deposits)
+func (_ Unimplemented) ListDeposits(w http.ResponseWriter, r *http.Request, params ListDepositsParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// RequestReload Ask every engine to reload its registry cache
+// (POST /admin/v1/engine/reload)
+func (_ Unimplemented) RequestReload(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ListFeeSchedules Fee schedules of the tenant
+// (GET /admin/v1/fee-schedules)
+func (_ Unimplemented) ListFeeSchedules(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// CreateFeeSchedule Add a fee schedule
+// (POST /admin/v1/fee-schedules)
+func (_ Unimplemented) CreateFeeSchedule(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// UpdateFeeSchedule Change a fee schedule's rates
+// (PUT /admin/v1/fee-schedules/{name})
+func (_ Unimplemented) UpdateFeeSchedule(w http.ResponseWriter, r *http.Request, name FeeScheduleName) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetHotWallet The hot wallet, as the chain role keeps it
+// (GET /admin/v1/hot-wallet)
+func (_ Unimplemented) GetHotWallet(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -1101,6 +1960,24 @@ func (_ Unimplemented) ListMarkets(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// CreateMarket List a new market
+// (POST /admin/v1/markets)
+func (_ Unimplemented) CreateMarket(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetMarket Get one market
+// (GET /admin/v1/markets/{symbol})
+func (_ Unimplemented) GetMarket(w http.ResponseWriter, r *http.Request, symbol MarketSymbol) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// UpdateMarket Edit a market
+// (PUT /admin/v1/markets/{symbol})
+func (_ Unimplemented) UpdateMarket(w http.ResponseWriter, r *http.Request, symbol MarketSymbol) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // SetMarketStatus Halt, resume or delist a market
 // (PUT /admin/v1/markets/{symbol}/status)
 func (_ Unimplemented) SetMarketStatus(w http.ResponseWriter, r *http.Request, symbol MarketSymbol) {
@@ -1113,9 +1990,51 @@ func (_ Unimplemented) GetReconciliation(w http.ResponseWriter, r *http.Request)
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// ListReconciliationBreaks Every break on record, both kinds, newest first
+// (GET /admin/v1/reconciliation/breaks)
+func (_ Unimplemented) ListReconciliationBreaks(w http.ResponseWriter, r *http.Request, params ListReconciliationBreaksParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ListReconciliationReports Reconciliation passes, newest first
+// (GET /admin/v1/reconciliation/reports)
+func (_ Unimplemented) ListReconciliationReports(w http.ResponseWriter, r *http.Request, params ListReconciliationReportsParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // ListSweeps Recent collections into the hot wallet
 // (GET /admin/v1/sweeps)
 func (_ Unimplemented) ListSweeps(w http.ResponseWriter, r *http.Request, params ListSweepsParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetSystemStatus What the dashboard shows
+// (GET /admin/v1/system/status)
+func (_ Unimplemented) GetSystemStatus(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ListUsers List users
+// (GET /admin/v1/users)
+func (_ Unimplemented) ListUsers(w http.ResponseWriter, r *http.Request, params ListUsersParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetUser Get one user
+// (GET /admin/v1/users/{id})
+func (_ Unimplemented) GetUser(w http.ResponseWriter, r *http.Request, id UserID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// SetUserKycLevel Set a user's KYC level
+// (PUT /admin/v1/users/{id}/kyc-level)
+func (_ Unimplemented) SetUserKycLevel(w http.ResponseWriter, r *http.Request, id UserID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// SetUserStatus Freeze or release a user
+// (PUT /admin/v1/users/{id}/status)
+func (_ Unimplemented) SetUserStatus(w http.ResponseWriter, r *http.Request, id UserID) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -1149,9 +2068,27 @@ func (_ Unimplemented) ReplayWebhookDelivery(w http.ResponseWriter, r *http.Requ
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// RotateWebhookSecret Issue a new signing secret and keep the old one for a grace period
+// (POST /admin/v1/webhooks/{id}/rotate-secret)
+func (_ Unimplemented) RotateWebhookSecret(w http.ResponseWriter, r *http.Request, id WebhookEndpointID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // SetWebhookEndpointStatus Enable or disable an endpoint
 // (PUT /admin/v1/webhooks/{id}/status)
 func (_ Unimplemented) SetWebhookEndpointStatus(w http.ResponseWriter, r *http.Request, id WebhookEndpointID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ListWithdrawalLimits Withdrawal limits per asset and KYC level
+// (GET /admin/v1/withdrawal-limits)
+func (_ Unimplemented) ListWithdrawalLimits(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// SetWithdrawalLimit Set the limits of one asset at one KYC level
+// (PUT /admin/v1/withdrawal-limits/{asset}/{kyc_level})
+func (_ Unimplemented) SetWithdrawalLimit(w http.ResponseWriter, r *http.Request, asset AssetPath, kycLevel KycLevelPath) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -1333,6 +2270,86 @@ func (siw *ServerInterfaceWrapper) SetAccountStatus(w http.ResponseWriter, r *ht
 	handler.ServeHTTP(w, r)
 }
 
+// ListAssets operation middleware
+func (siw *ServerInterfaceWrapper) ListAssets(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListAssets(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateAsset operation middleware
+func (siw *ServerInterfaceWrapper) CreateAsset(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateAsset(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetAsset operation middleware
+func (siw *ServerInterfaceWrapper) GetAsset(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "symbol" -------------
+	var symbol AssetSymbol
+
+	err = runtime.BindStyledParameterWithOptions("simple", "symbol", chi.URLParam(r, "symbol"), &symbol, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "symbol", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetAsset(w, r, symbol)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// UpdateAsset operation middleware
+func (siw *ServerInterfaceWrapper) UpdateAsset(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "symbol" -------------
+	var symbol AssetSymbol
+
+	err = runtime.BindStyledParameterWithOptions("simple", "symbol", chi.URLParam(r, "symbol"), &symbol, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "symbol", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UpdateAsset(w, r, symbol)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ListAuditEvents operation middleware
 func (siw *ServerInterfaceWrapper) ListAuditEvents(w http.ResponseWriter, r *http.Request) {
 
@@ -1381,6 +2398,32 @@ func (siw *ServerInterfaceWrapper) ListAuditEvents(w http.ResponseWriter, r *htt
 		return
 	}
 
+	// ------------- Optional query parameter "actor_type" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "actor_type", r.URL.Query(), &params.ActorType, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "actor_type"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "actor_type", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "actor_id" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "actor_id", r.URL.Query(), &params.ActorID, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "actor_id"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "actor_id", Err: err})
+		}
+		return
+	}
+
 	// ------------- Optional query parameter "limit" -------------
 
 	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: "int32"})
@@ -1409,6 +2452,160 @@ func (siw *ServerInterfaceWrapper) ListAuditEvents(w http.ResponseWriter, r *htt
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ListAuditEvents(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListDeposits operation middleware
+func (siw *ServerInterfaceWrapper) ListDeposits(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListDepositsParams
+
+	// ------------- Optional query parameter "status" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "status", r.URL.Query(), &params.Status, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "status"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "status", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "asset" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "asset", r.URL.Query(), &params.Asset, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "asset"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "asset", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: "int32"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "offset" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "offset", r.URL.Query(), &params.Offset, runtime.BindQueryParameterOptions{Type: "integer", Format: "int32"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "offset"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "offset", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListDeposits(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RequestReload operation middleware
+func (siw *ServerInterfaceWrapper) RequestReload(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RequestReload(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListFeeSchedules operation middleware
+func (siw *ServerInterfaceWrapper) ListFeeSchedules(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListFeeSchedules(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateFeeSchedule operation middleware
+func (siw *ServerInterfaceWrapper) CreateFeeSchedule(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateFeeSchedule(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// UpdateFeeSchedule operation middleware
+func (siw *ServerInterfaceWrapper) UpdateFeeSchedule(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "name" -------------
+	var name FeeScheduleName
+
+	err = runtime.BindStyledParameterWithOptions("simple", "name", chi.URLParam(r, "name"), &name, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "name", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UpdateFeeSchedule(w, r, name)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetHotWallet operation middleware
+func (siw *ServerInterfaceWrapper) GetHotWallet(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetHotWallet(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -1559,6 +2756,72 @@ func (siw *ServerInterfaceWrapper) ListMarkets(w http.ResponseWriter, r *http.Re
 	handler.ServeHTTP(w, r)
 }
 
+// CreateMarket operation middleware
+func (siw *ServerInterfaceWrapper) CreateMarket(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateMarket(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetMarket operation middleware
+func (siw *ServerInterfaceWrapper) GetMarket(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "symbol" -------------
+	var symbol MarketSymbol
+
+	err = runtime.BindStyledParameterWithOptions("simple", "symbol", chi.URLParam(r, "symbol"), &symbol, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "symbol", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetMarket(w, r, symbol)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// UpdateMarket operation middleware
+func (siw *ServerInterfaceWrapper) UpdateMarket(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "symbol" -------------
+	var symbol MarketSymbol
+
+	err = runtime.BindStyledParameterWithOptions("simple", "symbol", chi.URLParam(r, "symbol"), &symbol, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "symbol", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UpdateMarket(w, r, symbol)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // SetMarketStatus operation middleware
 func (siw *ServerInterfaceWrapper) SetMarketStatus(w http.ResponseWriter, r *http.Request) {
 
@@ -1599,6 +2862,98 @@ func (siw *ServerInterfaceWrapper) GetReconciliation(w http.ResponseWriter, r *h
 	handler.ServeHTTP(w, r)
 }
 
+// ListReconciliationBreaks operation middleware
+func (siw *ServerInterfaceWrapper) ListReconciliationBreaks(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListReconciliationBreaksParams
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: "int32"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "offset" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "offset", r.URL.Query(), &params.Offset, runtime.BindQueryParameterOptions{Type: "integer", Format: "int32"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "offset"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "offset", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListReconciliationBreaks(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListReconciliationReports operation middleware
+func (siw *ServerInterfaceWrapper) ListReconciliationReports(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListReconciliationReportsParams
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: "int32"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "offset" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "offset", r.URL.Query(), &params.Offset, runtime.BindQueryParameterOptions{Type: "integer", Format: "int32"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "offset"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "offset", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListReconciliationReports(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ListSweeps operation middleware
 func (siw *ServerInterfaceWrapper) ListSweeps(w http.ResponseWriter, r *http.Request) {
 
@@ -1623,6 +2978,183 @@ func (siw *ServerInterfaceWrapper) ListSweeps(w http.ResponseWriter, r *http.Req
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ListSweeps(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetSystemStatus operation middleware
+func (siw *ServerInterfaceWrapper) GetSystemStatus(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetSystemStatus(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListUsers operation middleware
+func (siw *ServerInterfaceWrapper) ListUsers(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListUsersParams
+
+	// ------------- Optional query parameter "email" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "email", r.URL.Query(), &params.Email, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "email"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "email", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "status" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "status", r.URL.Query(), &params.Status, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "status"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "status", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "role" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "role", r.URL.Query(), &params.Role, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "role"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "role", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: "int32"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "offset" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "offset", r.URL.Query(), &params.Offset, runtime.BindQueryParameterOptions{Type: "integer", Format: "int32"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "offset"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "offset", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListUsers(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetUser operation middleware
+func (siw *ServerInterfaceWrapper) GetUser(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id UserID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetUser(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SetUserKycLevel operation middleware
+func (siw *ServerInterfaceWrapper) SetUserKycLevel(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id UserID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SetUserKycLevel(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SetUserStatus operation middleware
+func (siw *ServerInterfaceWrapper) SetUserStatus(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id UserID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SetUserStatus(w, r, id)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -1776,6 +3308,32 @@ func (siw *ServerInterfaceWrapper) ReplayWebhookDelivery(w http.ResponseWriter, 
 	handler.ServeHTTP(w, r)
 }
 
+// RotateWebhookSecret operation middleware
+func (siw *ServerInterfaceWrapper) RotateWebhookSecret(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id WebhookEndpointID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RotateWebhookSecret(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // SetWebhookEndpointStatus operation middleware
 func (siw *ServerInterfaceWrapper) SetWebhookEndpointStatus(w http.ResponseWriter, r *http.Request) {
 
@@ -1793,6 +3351,55 @@ func (siw *ServerInterfaceWrapper) SetWebhookEndpointStatus(w http.ResponseWrite
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.SetWebhookEndpointStatus(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListWithdrawalLimits operation middleware
+func (siw *ServerInterfaceWrapper) ListWithdrawalLimits(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListWithdrawalLimits(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SetWithdrawalLimit operation middleware
+func (siw *ServerInterfaceWrapper) SetWithdrawalLimit(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "asset" -------------
+	var asset AssetPath
+
+	err = runtime.BindStyledParameterWithOptions("simple", "asset", chi.URLParam(r, "asset"), &asset, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "asset", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "kyc_level" -------------
+	var kycLevel KycLevelPath
+
+	err = runtime.BindStyledParameterWithOptions("simple", "kyc_level", chi.URLParam(r, "kyc_level"), &kycLevel, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "kyc_level", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SetWithdrawalLimit(w, r, asset, kycLevel)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -2001,6 +3608,18 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	}
 
 	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/admin/v1/users", wrapper.ListUsers)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/admin/v1/users/{id}", wrapper.GetUser)
+	})
+	r.Group(func(r chi.Router) {
+		r.Put(options.BaseURL+"/admin/v1/users/{id}/kyc-level", wrapper.SetUserKycLevel)
+	})
+	r.Group(func(r chi.Router) {
+		r.Put(options.BaseURL+"/admin/v1/users/{id}/status", wrapper.SetUserStatus)
+	})
+	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/admin/v1/accounts", wrapper.ListAccounts)
 	})
 	r.Group(func(r chi.Router) {
@@ -2016,7 +3635,46 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Get(options.BaseURL+"/admin/v1/accounts/{id}/balances", wrapper.GetAccountBalances)
 	})
 	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/admin/v1/assets", wrapper.ListAssets)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/admin/v1/assets", wrapper.CreateAsset)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/admin/v1/assets/{symbol}", wrapper.GetAsset)
+	})
+	r.Group(func(r chi.Router) {
+		r.Put(options.BaseURL+"/admin/v1/assets/{symbol}", wrapper.UpdateAsset)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/admin/v1/fee-schedules", wrapper.ListFeeSchedules)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/admin/v1/fee-schedules", wrapper.CreateFeeSchedule)
+	})
+	r.Group(func(r chi.Router) {
+		r.Put(options.BaseURL+"/admin/v1/fee-schedules/{name}", wrapper.UpdateFeeSchedule)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/admin/v1/withdrawal-limits", wrapper.ListWithdrawalLimits)
+	})
+	r.Group(func(r chi.Router) {
+		r.Put(options.BaseURL+"/admin/v1/withdrawal-limits/{asset}/{kyc_level}", wrapper.SetWithdrawalLimit)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/admin/v1/engine/reload", wrapper.RequestReload)
+	})
+	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/admin/v1/markets", wrapper.ListMarkets)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/admin/v1/markets", wrapper.CreateMarket)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/admin/v1/markets/{symbol}", wrapper.GetMarket)
+	})
+	r.Group(func(r chi.Router) {
+		r.Put(options.BaseURL+"/admin/v1/markets/{symbol}", wrapper.UpdateMarket)
 	})
 	r.Group(func(r chi.Router) {
 		r.Put(options.BaseURL+"/admin/v1/markets/{symbol}/status", wrapper.SetMarketStatus)
@@ -2046,6 +3704,18 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Post(options.BaseURL+"/admin/v1/ledger/house-adjustments", wrapper.CreateHouseAdjustment)
 	})
 	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/admin/v1/deposits", wrapper.ListDeposits)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/admin/v1/hot-wallet", wrapper.GetHotWallet)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/admin/v1/reconciliation/reports", wrapper.ListReconciliationReports)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/admin/v1/reconciliation/breaks", wrapper.ListReconciliationBreaks)
+	})
+	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/admin/v1/reconciliation", wrapper.GetReconciliation)
 	})
 	r.Group(func(r chi.Router) {
@@ -2064,10 +3734,16 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Put(options.BaseURL+"/admin/v1/webhooks/{id}/status", wrapper.SetWebhookEndpointStatus)
 	})
 	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/admin/v1/webhooks/{id}/rotate-secret", wrapper.RotateWebhookSecret)
+	})
+	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/admin/v1/webhooks/{id}/deliveries", wrapper.ListWebhookDeliveries)
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/admin/v1/webhooks/{id}/deliveries/{delivery_id}/replay", wrapper.ReplayWebhookDelivery)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/admin/v1/system/status", wrapper.GetSystemStatus)
 	})
 
 	return r
@@ -2434,6 +4110,302 @@ func (response SetAccountStatus500ApplicationProblemPlusJSONResponse) VisitSetAc
 	return err
 }
 
+type ListAssetsRequestObject struct {
+}
+
+type ListAssetsResponseObject interface {
+	VisitListAssetsResponse(w http.ResponseWriter) error
+}
+
+type ListAssets200JSONResponse AssetList
+
+func (response ListAssets200JSONResponse) VisitListAssetsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListAssets401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response ListAssets401ApplicationProblemPlusJSONResponse) VisitListAssetsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListAssets500ApplicationProblemPlusJSONResponse struct {
+	InternalErrorApplicationProblemPlusJSONResponse
+}
+
+func (response ListAssets500ApplicationProblemPlusJSONResponse) VisitListAssetsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateAssetRequestObject struct {
+	Body *CreateAssetJSONRequestBody
+}
+
+type CreateAssetResponseObject interface {
+	VisitCreateAssetResponse(w http.ResponseWriter) error
+}
+
+type CreateAsset201JSONResponse Asset
+
+func (response CreateAsset201JSONResponse) VisitCreateAssetResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateAsset400ApplicationProblemPlusJSONResponse struct {
+	BadRequestApplicationProblemPlusJSONResponse
+}
+
+func (response CreateAsset400ApplicationProblemPlusJSONResponse) VisitCreateAssetResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateAsset401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response CreateAsset401ApplicationProblemPlusJSONResponse) VisitCreateAssetResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateAsset409ApplicationProblemPlusJSONResponse struct {
+	ConflictApplicationProblemPlusJSONResponse
+}
+
+func (response CreateAsset409ApplicationProblemPlusJSONResponse) VisitCreateAssetResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateAsset500ApplicationProblemPlusJSONResponse struct {
+	InternalErrorApplicationProblemPlusJSONResponse
+}
+
+func (response CreateAsset500ApplicationProblemPlusJSONResponse) VisitCreateAssetResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetAssetRequestObject struct {
+	Symbol AssetSymbol `json:"symbol"`
+}
+
+type GetAssetResponseObject interface {
+	VisitGetAssetResponse(w http.ResponseWriter) error
+}
+
+type GetAsset200JSONResponse Asset
+
+func (response GetAsset200JSONResponse) VisitGetAssetResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetAsset401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response GetAsset401ApplicationProblemPlusJSONResponse) VisitGetAssetResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetAsset404ApplicationProblemPlusJSONResponse struct {
+	NotFoundApplicationProblemPlusJSONResponse
+}
+
+func (response GetAsset404ApplicationProblemPlusJSONResponse) VisitGetAssetResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetAsset500ApplicationProblemPlusJSONResponse struct {
+	InternalErrorApplicationProblemPlusJSONResponse
+}
+
+func (response GetAsset500ApplicationProblemPlusJSONResponse) VisitGetAssetResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateAssetRequestObject struct {
+	Symbol AssetSymbol `json:"symbol"`
+	Body   *UpdateAssetJSONRequestBody
+}
+
+type UpdateAssetResponseObject interface {
+	VisitUpdateAssetResponse(w http.ResponseWriter) error
+}
+
+type UpdateAsset200JSONResponse Asset
+
+func (response UpdateAsset200JSONResponse) VisitUpdateAssetResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateAsset400ApplicationProblemPlusJSONResponse struct {
+	BadRequestApplicationProblemPlusJSONResponse
+}
+
+func (response UpdateAsset400ApplicationProblemPlusJSONResponse) VisitUpdateAssetResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateAsset401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response UpdateAsset401ApplicationProblemPlusJSONResponse) VisitUpdateAssetResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateAsset404ApplicationProblemPlusJSONResponse struct {
+	NotFoundApplicationProblemPlusJSONResponse
+}
+
+func (response UpdateAsset404ApplicationProblemPlusJSONResponse) VisitUpdateAssetResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateAsset500ApplicationProblemPlusJSONResponse struct {
+	InternalErrorApplicationProblemPlusJSONResponse
+}
+
+func (response UpdateAsset500ApplicationProblemPlusJSONResponse) VisitUpdateAssetResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type ListAuditEventsRequestObject struct {
 	Params ListAuditEventsParams
 }
@@ -2477,6 +4449,425 @@ type ListAuditEvents500ApplicationProblemPlusJSONResponse struct {
 }
 
 func (response ListAuditEvents500ApplicationProblemPlusJSONResponse) VisitListAuditEventsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListDepositsRequestObject struct {
+	Params ListDepositsParams
+}
+
+type ListDepositsResponseObject interface {
+	VisitListDepositsResponse(w http.ResponseWriter) error
+}
+
+type ListDeposits200JSONResponse AdminDepositList
+
+func (response ListDeposits200JSONResponse) VisitListDepositsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListDeposits401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response ListDeposits401ApplicationProblemPlusJSONResponse) VisitListDepositsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListDeposits500ApplicationProblemPlusJSONResponse struct {
+	InternalErrorApplicationProblemPlusJSONResponse
+}
+
+func (response ListDeposits500ApplicationProblemPlusJSONResponse) VisitListDepositsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RequestReloadRequestObject struct {
+	Body *RequestReloadJSONRequestBody
+}
+
+type RequestReloadResponseObject interface {
+	VisitRequestReloadResponse(w http.ResponseWriter) error
+}
+
+type RequestReload202JSONResponse ReloadAccepted
+
+func (response RequestReload202JSONResponse) VisitRequestReloadResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(202)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RequestReload400ApplicationProblemPlusJSONResponse struct {
+	BadRequestApplicationProblemPlusJSONResponse
+}
+
+func (response RequestReload400ApplicationProblemPlusJSONResponse) VisitRequestReloadResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RequestReload401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response RequestReload401ApplicationProblemPlusJSONResponse) VisitRequestReloadResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RequestReload500ApplicationProblemPlusJSONResponse struct {
+	InternalErrorApplicationProblemPlusJSONResponse
+}
+
+func (response RequestReload500ApplicationProblemPlusJSONResponse) VisitRequestReloadResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListFeeSchedulesRequestObject struct {
+}
+
+type ListFeeSchedulesResponseObject interface {
+	VisitListFeeSchedulesResponse(w http.ResponseWriter) error
+}
+
+type ListFeeSchedules200JSONResponse FeeScheduleList
+
+func (response ListFeeSchedules200JSONResponse) VisitListFeeSchedulesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListFeeSchedules401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response ListFeeSchedules401ApplicationProblemPlusJSONResponse) VisitListFeeSchedulesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListFeeSchedules500ApplicationProblemPlusJSONResponse struct {
+	InternalErrorApplicationProblemPlusJSONResponse
+}
+
+func (response ListFeeSchedules500ApplicationProblemPlusJSONResponse) VisitListFeeSchedulesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateFeeScheduleRequestObject struct {
+	Body *CreateFeeScheduleJSONRequestBody
+}
+
+type CreateFeeScheduleResponseObject interface {
+	VisitCreateFeeScheduleResponse(w http.ResponseWriter) error
+}
+
+type CreateFeeSchedule201JSONResponse FeeSchedule
+
+func (response CreateFeeSchedule201JSONResponse) VisitCreateFeeScheduleResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateFeeSchedule400ApplicationProblemPlusJSONResponse struct {
+	BadRequestApplicationProblemPlusJSONResponse
+}
+
+func (response CreateFeeSchedule400ApplicationProblemPlusJSONResponse) VisitCreateFeeScheduleResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateFeeSchedule401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response CreateFeeSchedule401ApplicationProblemPlusJSONResponse) VisitCreateFeeScheduleResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateFeeSchedule409ApplicationProblemPlusJSONResponse struct {
+	ConflictApplicationProblemPlusJSONResponse
+}
+
+func (response CreateFeeSchedule409ApplicationProblemPlusJSONResponse) VisitCreateFeeScheduleResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateFeeSchedule500ApplicationProblemPlusJSONResponse struct {
+	InternalErrorApplicationProblemPlusJSONResponse
+}
+
+func (response CreateFeeSchedule500ApplicationProblemPlusJSONResponse) VisitCreateFeeScheduleResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateFeeScheduleRequestObject struct {
+	Name FeeScheduleName `json:"name"`
+	Body *UpdateFeeScheduleJSONRequestBody
+}
+
+type UpdateFeeScheduleResponseObject interface {
+	VisitUpdateFeeScheduleResponse(w http.ResponseWriter) error
+}
+
+type UpdateFeeSchedule200JSONResponse FeeSchedule
+
+func (response UpdateFeeSchedule200JSONResponse) VisitUpdateFeeScheduleResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateFeeSchedule400ApplicationProblemPlusJSONResponse struct {
+	BadRequestApplicationProblemPlusJSONResponse
+}
+
+func (response UpdateFeeSchedule400ApplicationProblemPlusJSONResponse) VisitUpdateFeeScheduleResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateFeeSchedule401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response UpdateFeeSchedule401ApplicationProblemPlusJSONResponse) VisitUpdateFeeScheduleResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateFeeSchedule404ApplicationProblemPlusJSONResponse struct {
+	NotFoundApplicationProblemPlusJSONResponse
+}
+
+func (response UpdateFeeSchedule404ApplicationProblemPlusJSONResponse) VisitUpdateFeeScheduleResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateFeeSchedule500ApplicationProblemPlusJSONResponse struct {
+	InternalErrorApplicationProblemPlusJSONResponse
+}
+
+func (response UpdateFeeSchedule500ApplicationProblemPlusJSONResponse) VisitUpdateFeeScheduleResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetHotWalletRequestObject struct {
+}
+
+type GetHotWalletResponseObject interface {
+	VisitGetHotWalletResponse(w http.ResponseWriter) error
+}
+
+type GetHotWallet200JSONResponse HotWallet
+
+func (response GetHotWallet200JSONResponse) VisitGetHotWalletResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetHotWallet401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response GetHotWallet401ApplicationProblemPlusJSONResponse) VisitGetHotWalletResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetHotWallet404ApplicationProblemPlusJSONResponse struct {
+	NotFoundApplicationProblemPlusJSONResponse
+}
+
+func (response GetHotWallet404ApplicationProblemPlusJSONResponse) VisitGetHotWalletResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetHotWallet500ApplicationProblemPlusJSONResponse struct {
+	InternalErrorApplicationProblemPlusJSONResponse
+}
+
+func (response GetHotWallet500ApplicationProblemPlusJSONResponse) VisitGetHotWalletResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
@@ -2846,6 +5237,265 @@ func (response ListMarkets500ApplicationProblemPlusJSONResponse) VisitListMarket
 	return err
 }
 
+type CreateMarketRequestObject struct {
+	Body *CreateMarketJSONRequestBody
+}
+
+type CreateMarketResponseObject interface {
+	VisitCreateMarketResponse(w http.ResponseWriter) error
+}
+
+type CreateMarket201JSONResponse Market
+
+func (response CreateMarket201JSONResponse) VisitCreateMarketResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateMarket400ApplicationProblemPlusJSONResponse struct {
+	BadRequestApplicationProblemPlusJSONResponse
+}
+
+func (response CreateMarket400ApplicationProblemPlusJSONResponse) VisitCreateMarketResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateMarket401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response CreateMarket401ApplicationProblemPlusJSONResponse) VisitCreateMarketResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateMarket404ApplicationProblemPlusJSONResponse struct {
+	NotFoundApplicationProblemPlusJSONResponse
+}
+
+func (response CreateMarket404ApplicationProblemPlusJSONResponse) VisitCreateMarketResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateMarket409ApplicationProblemPlusJSONResponse struct {
+	ConflictApplicationProblemPlusJSONResponse
+}
+
+func (response CreateMarket409ApplicationProblemPlusJSONResponse) VisitCreateMarketResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateMarket500ApplicationProblemPlusJSONResponse struct {
+	InternalErrorApplicationProblemPlusJSONResponse
+}
+
+func (response CreateMarket500ApplicationProblemPlusJSONResponse) VisitCreateMarketResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetMarketRequestObject struct {
+	Symbol MarketSymbol `json:"symbol"`
+}
+
+type GetMarketResponseObject interface {
+	VisitGetMarketResponse(w http.ResponseWriter) error
+}
+
+type GetMarket200JSONResponse Market
+
+func (response GetMarket200JSONResponse) VisitGetMarketResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetMarket401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response GetMarket401ApplicationProblemPlusJSONResponse) VisitGetMarketResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetMarket404ApplicationProblemPlusJSONResponse struct {
+	NotFoundApplicationProblemPlusJSONResponse
+}
+
+func (response GetMarket404ApplicationProblemPlusJSONResponse) VisitGetMarketResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetMarket500ApplicationProblemPlusJSONResponse struct {
+	InternalErrorApplicationProblemPlusJSONResponse
+}
+
+func (response GetMarket500ApplicationProblemPlusJSONResponse) VisitGetMarketResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateMarketRequestObject struct {
+	Symbol MarketSymbol `json:"symbol"`
+	Body   *UpdateMarketJSONRequestBody
+}
+
+type UpdateMarketResponseObject interface {
+	VisitUpdateMarketResponse(w http.ResponseWriter) error
+}
+
+type UpdateMarket200JSONResponse Market
+
+func (response UpdateMarket200JSONResponse) VisitUpdateMarketResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateMarket400ApplicationProblemPlusJSONResponse struct {
+	BadRequestApplicationProblemPlusJSONResponse
+}
+
+func (response UpdateMarket400ApplicationProblemPlusJSONResponse) VisitUpdateMarketResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateMarket401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response UpdateMarket401ApplicationProblemPlusJSONResponse) VisitUpdateMarketResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateMarket404ApplicationProblemPlusJSONResponse struct {
+	NotFoundApplicationProblemPlusJSONResponse
+}
+
+func (response UpdateMarket404ApplicationProblemPlusJSONResponse) VisitUpdateMarketResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateMarket500ApplicationProblemPlusJSONResponse struct {
+	InternalErrorApplicationProblemPlusJSONResponse
+}
+
+func (response UpdateMarket500ApplicationProblemPlusJSONResponse) VisitUpdateMarketResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type SetMarketStatusRequestObject struct {
 	Symbol MarketSymbol `json:"symbol"`
 	Body   *SetMarketStatusJSONRequestBody
@@ -3002,6 +5652,114 @@ func (response GetReconciliation500ApplicationProblemPlusJSONResponse) VisitGetR
 	return err
 }
 
+type ListReconciliationBreaksRequestObject struct {
+	Params ListReconciliationBreaksParams
+}
+
+type ListReconciliationBreaksResponseObject interface {
+	VisitListReconciliationBreaksResponse(w http.ResponseWriter) error
+}
+
+type ListReconciliationBreaks200JSONResponse ReconciliationBreaks
+
+func (response ListReconciliationBreaks200JSONResponse) VisitListReconciliationBreaksResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListReconciliationBreaks401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response ListReconciliationBreaks401ApplicationProblemPlusJSONResponse) VisitListReconciliationBreaksResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListReconciliationBreaks500ApplicationProblemPlusJSONResponse struct {
+	InternalErrorApplicationProblemPlusJSONResponse
+}
+
+func (response ListReconciliationBreaks500ApplicationProblemPlusJSONResponse) VisitListReconciliationBreaksResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListReconciliationReportsRequestObject struct {
+	Params ListReconciliationReportsParams
+}
+
+type ListReconciliationReportsResponseObject interface {
+	VisitListReconciliationReportsResponse(w http.ResponseWriter) error
+}
+
+type ListReconciliationReports200JSONResponse ReconciliationReportList
+
+func (response ListReconciliationReports200JSONResponse) VisitListReconciliationReportsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListReconciliationReports401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response ListReconciliationReports401ApplicationProblemPlusJSONResponse) VisitListReconciliationReportsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListReconciliationReports500ApplicationProblemPlusJSONResponse struct {
+	InternalErrorApplicationProblemPlusJSONResponse
+}
+
+func (response ListReconciliationReports500ApplicationProblemPlusJSONResponse) VisitListReconciliationReportsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type ListSweepsRequestObject struct {
 	Params ListSweepsParams
 }
@@ -3045,6 +5803,373 @@ type ListSweeps500ApplicationProblemPlusJSONResponse struct {
 }
 
 func (response ListSweeps500ApplicationProblemPlusJSONResponse) VisitListSweepsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetSystemStatusRequestObject struct {
+}
+
+type GetSystemStatusResponseObject interface {
+	VisitGetSystemStatusResponse(w http.ResponseWriter) error
+}
+
+type GetSystemStatus200JSONResponse SystemStatus
+
+func (response GetSystemStatus200JSONResponse) VisitGetSystemStatusResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetSystemStatus401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response GetSystemStatus401ApplicationProblemPlusJSONResponse) VisitGetSystemStatusResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetSystemStatus500ApplicationProblemPlusJSONResponse struct {
+	InternalErrorApplicationProblemPlusJSONResponse
+}
+
+func (response GetSystemStatus500ApplicationProblemPlusJSONResponse) VisitGetSystemStatusResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListUsersRequestObject struct {
+	Params ListUsersParams
+}
+
+type ListUsersResponseObject interface {
+	VisitListUsersResponse(w http.ResponseWriter) error
+}
+
+type ListUsers200JSONResponse UserList
+
+func (response ListUsers200JSONResponse) VisitListUsersResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListUsers401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response ListUsers401ApplicationProblemPlusJSONResponse) VisitListUsersResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListUsers500ApplicationProblemPlusJSONResponse struct {
+	InternalErrorApplicationProblemPlusJSONResponse
+}
+
+func (response ListUsers500ApplicationProblemPlusJSONResponse) VisitListUsersResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetUserRequestObject struct {
+	ID UserID `json:"id"`
+}
+
+type GetUserResponseObject interface {
+	VisitGetUserResponse(w http.ResponseWriter) error
+}
+
+type GetUser200JSONResponse User
+
+func (response GetUser200JSONResponse) VisitGetUserResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetUser401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response GetUser401ApplicationProblemPlusJSONResponse) VisitGetUserResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetUser404ApplicationProblemPlusJSONResponse struct {
+	NotFoundApplicationProblemPlusJSONResponse
+}
+
+func (response GetUser404ApplicationProblemPlusJSONResponse) VisitGetUserResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetUser500ApplicationProblemPlusJSONResponse struct {
+	InternalErrorApplicationProblemPlusJSONResponse
+}
+
+func (response GetUser500ApplicationProblemPlusJSONResponse) VisitGetUserResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetUserKycLevelRequestObject struct {
+	ID   UserID `json:"id"`
+	Body *SetUserKycLevelJSONRequestBody
+}
+
+type SetUserKycLevelResponseObject interface {
+	VisitSetUserKycLevelResponse(w http.ResponseWriter) error
+}
+
+type SetUserKycLevel200JSONResponse User
+
+func (response SetUserKycLevel200JSONResponse) VisitSetUserKycLevelResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetUserKycLevel400ApplicationProblemPlusJSONResponse struct {
+	BadRequestApplicationProblemPlusJSONResponse
+}
+
+func (response SetUserKycLevel400ApplicationProblemPlusJSONResponse) VisitSetUserKycLevelResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetUserKycLevel401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response SetUserKycLevel401ApplicationProblemPlusJSONResponse) VisitSetUserKycLevelResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetUserKycLevel404ApplicationProblemPlusJSONResponse struct {
+	NotFoundApplicationProblemPlusJSONResponse
+}
+
+func (response SetUserKycLevel404ApplicationProblemPlusJSONResponse) VisitSetUserKycLevelResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetUserKycLevel500ApplicationProblemPlusJSONResponse struct {
+	InternalErrorApplicationProblemPlusJSONResponse
+}
+
+func (response SetUserKycLevel500ApplicationProblemPlusJSONResponse) VisitSetUserKycLevelResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetUserStatusRequestObject struct {
+	ID   UserID `json:"id"`
+	Body *SetUserStatusJSONRequestBody
+}
+
+type SetUserStatusResponseObject interface {
+	VisitSetUserStatusResponse(w http.ResponseWriter) error
+}
+
+type SetUserStatus200JSONResponse User
+
+func (response SetUserStatus200JSONResponse) VisitSetUserStatusResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetUserStatus400ApplicationProblemPlusJSONResponse struct {
+	BadRequestApplicationProblemPlusJSONResponse
+}
+
+func (response SetUserStatus400ApplicationProblemPlusJSONResponse) VisitSetUserStatusResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetUserStatus401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response SetUserStatus401ApplicationProblemPlusJSONResponse) VisitSetUserStatusResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetUserStatus404ApplicationProblemPlusJSONResponse struct {
+	NotFoundApplicationProblemPlusJSONResponse
+}
+
+func (response SetUserStatus404ApplicationProblemPlusJSONResponse) VisitSetUserStatusResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetUserStatus409ApplicationProblemPlusJSONResponse struct {
+	ConflictApplicationProblemPlusJSONResponse
+}
+
+func (response SetUserStatus409ApplicationProblemPlusJSONResponse) VisitSetUserStatusResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetUserStatus500ApplicationProblemPlusJSONResponse struct {
+	InternalErrorApplicationProblemPlusJSONResponse
+}
+
+func (response SetUserStatus500ApplicationProblemPlusJSONResponse) VisitSetUserStatusResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
@@ -3424,6 +6549,93 @@ func (response ReplayWebhookDelivery500ApplicationProblemPlusJSONResponse) Visit
 	return err
 }
 
+type RotateWebhookSecretRequestObject struct {
+	ID   WebhookEndpointID `json:"id"`
+	Body *RotateWebhookSecretJSONRequestBody
+}
+
+type RotateWebhookSecretResponseObject interface {
+	VisitRotateWebhookSecretResponse(w http.ResponseWriter) error
+}
+
+type RotateWebhookSecret200JSONResponse RotatedWebhookSecret
+
+func (response RotateWebhookSecret200JSONResponse) VisitRotateWebhookSecretResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RotateWebhookSecret400ApplicationProblemPlusJSONResponse struct {
+	BadRequestApplicationProblemPlusJSONResponse
+}
+
+func (response RotateWebhookSecret400ApplicationProblemPlusJSONResponse) VisitRotateWebhookSecretResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RotateWebhookSecret401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response RotateWebhookSecret401ApplicationProblemPlusJSONResponse) VisitRotateWebhookSecretResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RotateWebhookSecret404ApplicationProblemPlusJSONResponse struct {
+	NotFoundApplicationProblemPlusJSONResponse
+}
+
+func (response RotateWebhookSecret404ApplicationProblemPlusJSONResponse) VisitRotateWebhookSecretResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RotateWebhookSecret500ApplicationProblemPlusJSONResponse struct {
+	InternalErrorApplicationProblemPlusJSONResponse
+}
+
+func (response RotateWebhookSecret500ApplicationProblemPlusJSONResponse) VisitRotateWebhookSecretResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type SetWebhookEndpointStatusRequestObject struct {
 	ID   WebhookEndpointID `json:"id"`
 	Body *SetWebhookEndpointStatusJSONRequestBody
@@ -3500,6 +6712,147 @@ type SetWebhookEndpointStatus500ApplicationProblemPlusJSONResponse struct {
 }
 
 func (response SetWebhookEndpointStatus500ApplicationProblemPlusJSONResponse) VisitSetWebhookEndpointStatusResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListWithdrawalLimitsRequestObject struct {
+}
+
+type ListWithdrawalLimitsResponseObject interface {
+	VisitListWithdrawalLimitsResponse(w http.ResponseWriter) error
+}
+
+type ListWithdrawalLimits200JSONResponse WithdrawalLimitList
+
+func (response ListWithdrawalLimits200JSONResponse) VisitListWithdrawalLimitsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListWithdrawalLimits401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response ListWithdrawalLimits401ApplicationProblemPlusJSONResponse) VisitListWithdrawalLimitsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListWithdrawalLimits500ApplicationProblemPlusJSONResponse struct {
+	InternalErrorApplicationProblemPlusJSONResponse
+}
+
+func (response ListWithdrawalLimits500ApplicationProblemPlusJSONResponse) VisitListWithdrawalLimitsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetWithdrawalLimitRequestObject struct {
+	Asset    AssetPath    `json:"asset"`
+	KycLevel KycLevelPath `json:"kyc_level"`
+	Body     *SetWithdrawalLimitJSONRequestBody
+}
+
+type SetWithdrawalLimitResponseObject interface {
+	VisitSetWithdrawalLimitResponse(w http.ResponseWriter) error
+}
+
+type SetWithdrawalLimit200JSONResponse WithdrawalLimit
+
+func (response SetWithdrawalLimit200JSONResponse) VisitSetWithdrawalLimitResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetWithdrawalLimit400ApplicationProblemPlusJSONResponse struct {
+	BadRequestApplicationProblemPlusJSONResponse
+}
+
+func (response SetWithdrawalLimit400ApplicationProblemPlusJSONResponse) VisitSetWithdrawalLimitResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetWithdrawalLimit401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response SetWithdrawalLimit401ApplicationProblemPlusJSONResponse) VisitSetWithdrawalLimitResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetWithdrawalLimit404ApplicationProblemPlusJSONResponse struct {
+	NotFoundApplicationProblemPlusJSONResponse
+}
+
+func (response SetWithdrawalLimit404ApplicationProblemPlusJSONResponse) VisitSetWithdrawalLimitResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetWithdrawalLimit500ApplicationProblemPlusJSONResponse struct {
+	InternalErrorApplicationProblemPlusJSONResponse
+}
+
+func (response SetWithdrawalLimit500ApplicationProblemPlusJSONResponse) VisitSetWithdrawalLimitResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
@@ -3788,9 +7141,39 @@ type StrictServerInterface interface {
 	// SetAccountStatus Freeze or reactivate an account
 	// (PUT /admin/v1/accounts/{id}/status)
 	SetAccountStatus(ctx context.Context, request SetAccountStatusRequestObject) (SetAccountStatusResponseObject, error)
+	// ListAssets Assets of the tenant
+	// (GET /admin/v1/assets)
+	ListAssets(ctx context.Context, request ListAssetsRequestObject) (ListAssetsResponseObject, error)
+	// CreateAsset List a new asset
+	// (POST /admin/v1/assets)
+	CreateAsset(ctx context.Context, request CreateAssetRequestObject) (CreateAssetResponseObject, error)
+	// GetAsset Get one asset
+	// (GET /admin/v1/assets/{symbol})
+	GetAsset(ctx context.Context, request GetAssetRequestObject) (GetAssetResponseObject, error)
+	// UpdateAsset Edit an asset
+	// (PUT /admin/v1/assets/{symbol})
+	UpdateAsset(ctx context.Context, request UpdateAssetRequestObject) (UpdateAssetResponseObject, error)
 	// ListAuditEvents Audit trail, newest first
 	// (GET /admin/v1/audit-events)
 	ListAuditEvents(ctx context.Context, request ListAuditEventsRequestObject) (ListAuditEventsResponseObject, error)
+	// ListDeposits Deposits the chain role has seen, newest first
+	// (GET /admin/v1/deposits)
+	ListDeposits(ctx context.Context, request ListDepositsRequestObject) (ListDepositsResponseObject, error)
+	// RequestReload Ask every engine to reload its registry cache
+	// (POST /admin/v1/engine/reload)
+	RequestReload(ctx context.Context, request RequestReloadRequestObject) (RequestReloadResponseObject, error)
+	// ListFeeSchedules Fee schedules of the tenant
+	// (GET /admin/v1/fee-schedules)
+	ListFeeSchedules(ctx context.Context, request ListFeeSchedulesRequestObject) (ListFeeSchedulesResponseObject, error)
+	// CreateFeeSchedule Add a fee schedule
+	// (POST /admin/v1/fee-schedules)
+	CreateFeeSchedule(ctx context.Context, request CreateFeeScheduleRequestObject) (CreateFeeScheduleResponseObject, error)
+	// UpdateFeeSchedule Change a fee schedule's rates
+	// (PUT /admin/v1/fee-schedules/{name})
+	UpdateFeeSchedule(ctx context.Context, request UpdateFeeScheduleRequestObject) (UpdateFeeScheduleResponseObject, error)
+	// GetHotWallet The hot wallet, as the chain role keeps it
+	// (GET /admin/v1/hot-wallet)
+	GetHotWallet(ctx context.Context, request GetHotWalletRequestObject) (GetHotWalletResponseObject, error)
 	// CreateAdjustment Post a manual adjustment against the external account
 	// (POST /admin/v1/ledger/adjustments)
 	CreateAdjustment(ctx context.Context, request CreateAdjustmentRequestObject) (CreateAdjustmentResponseObject, error)
@@ -3806,15 +7189,45 @@ type StrictServerInterface interface {
 	// ListMarkets Markets of the tenant
 	// (GET /admin/v1/markets)
 	ListMarkets(ctx context.Context, request ListMarketsRequestObject) (ListMarketsResponseObject, error)
+	// CreateMarket List a new market
+	// (POST /admin/v1/markets)
+	CreateMarket(ctx context.Context, request CreateMarketRequestObject) (CreateMarketResponseObject, error)
+	// GetMarket Get one market
+	// (GET /admin/v1/markets/{symbol})
+	GetMarket(ctx context.Context, request GetMarketRequestObject) (GetMarketResponseObject, error)
+	// UpdateMarket Edit a market
+	// (PUT /admin/v1/markets/{symbol})
+	UpdateMarket(ctx context.Context, request UpdateMarketRequestObject) (UpdateMarketResponseObject, error)
 	// SetMarketStatus Halt, resume or delist a market
 	// (PUT /admin/v1/markets/{symbol}/status)
 	SetMarketStatus(ctx context.Context, request SetMarketStatusRequestObject) (SetMarketStatusResponseObject, error)
 	// GetReconciliation The latest comparison of ledger custody against on-chain balances
 	// (GET /admin/v1/reconciliation)
 	GetReconciliation(ctx context.Context, request GetReconciliationRequestObject) (GetReconciliationResponseObject, error)
+	// ListReconciliationBreaks Every break on record, both kinds, newest first
+	// (GET /admin/v1/reconciliation/breaks)
+	ListReconciliationBreaks(ctx context.Context, request ListReconciliationBreaksRequestObject) (ListReconciliationBreaksResponseObject, error)
+	// ListReconciliationReports Reconciliation passes, newest first
+	// (GET /admin/v1/reconciliation/reports)
+	ListReconciliationReports(ctx context.Context, request ListReconciliationReportsRequestObject) (ListReconciliationReportsResponseObject, error)
 	// ListSweeps Recent collections into the hot wallet
 	// (GET /admin/v1/sweeps)
 	ListSweeps(ctx context.Context, request ListSweepsRequestObject) (ListSweepsResponseObject, error)
+	// GetSystemStatus What the dashboard shows
+	// (GET /admin/v1/system/status)
+	GetSystemStatus(ctx context.Context, request GetSystemStatusRequestObject) (GetSystemStatusResponseObject, error)
+	// ListUsers List users
+	// (GET /admin/v1/users)
+	ListUsers(ctx context.Context, request ListUsersRequestObject) (ListUsersResponseObject, error)
+	// GetUser Get one user
+	// (GET /admin/v1/users/{id})
+	GetUser(ctx context.Context, request GetUserRequestObject) (GetUserResponseObject, error)
+	// SetUserKycLevel Set a user's KYC level
+	// (PUT /admin/v1/users/{id}/kyc-level)
+	SetUserKycLevel(ctx context.Context, request SetUserKycLevelRequestObject) (SetUserKycLevelResponseObject, error)
+	// SetUserStatus Freeze or release a user
+	// (PUT /admin/v1/users/{id}/status)
+	SetUserStatus(ctx context.Context, request SetUserStatusRequestObject) (SetUserStatusResponseObject, error)
 	// ListWebhookEndpoints Webhook endpoints, disabled ones included
 	// (GET /admin/v1/webhooks)
 	ListWebhookEndpoints(ctx context.Context, request ListWebhookEndpointsRequestObject) (ListWebhookEndpointsResponseObject, error)
@@ -3830,9 +7243,18 @@ type StrictServerInterface interface {
 	// ReplayWebhookDelivery Send the event behind a delivery again
 	// (POST /admin/v1/webhooks/{id}/deliveries/{delivery_id}/replay)
 	ReplayWebhookDelivery(ctx context.Context, request ReplayWebhookDeliveryRequestObject) (ReplayWebhookDeliveryResponseObject, error)
+	// RotateWebhookSecret Issue a new signing secret and keep the old one for a grace period
+	// (POST /admin/v1/webhooks/{id}/rotate-secret)
+	RotateWebhookSecret(ctx context.Context, request RotateWebhookSecretRequestObject) (RotateWebhookSecretResponseObject, error)
 	// SetWebhookEndpointStatus Enable or disable an endpoint
 	// (PUT /admin/v1/webhooks/{id}/status)
 	SetWebhookEndpointStatus(ctx context.Context, request SetWebhookEndpointStatusRequestObject) (SetWebhookEndpointStatusResponseObject, error)
+	// ListWithdrawalLimits Withdrawal limits per asset and KYC level
+	// (GET /admin/v1/withdrawal-limits)
+	ListWithdrawalLimits(ctx context.Context, request ListWithdrawalLimitsRequestObject) (ListWithdrawalLimitsResponseObject, error)
+	// SetWithdrawalLimit Set the limits of one asset at one KYC level
+	// (PUT /admin/v1/withdrawal-limits/{asset}/{kyc_level})
+	SetWithdrawalLimit(ctx context.Context, request SetWithdrawalLimitRequestObject) (SetWithdrawalLimitResponseObject, error)
 	// ListWithdrawalsForReview The withdrawal review queue
 	// (GET /admin/v1/withdrawals)
 	ListWithdrawalsForReview(ctx context.Context, request ListWithdrawalsForReviewRequestObject) (ListWithdrawalsForReviewResponseObject, error)
@@ -4025,6 +7447,120 @@ func (sh *strictHandler) SetAccountStatus(w http.ResponseWriter, r *http.Request
 	}
 }
 
+// ListAssets operation middleware
+func (sh *strictHandler) ListAssets(w http.ResponseWriter, r *http.Request) {
+	var request ListAssetsRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListAssets(ctx, request.(ListAssetsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListAssets")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListAssetsResponseObject); ok {
+		if err := validResponse.VisitListAssetsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CreateAsset operation middleware
+func (sh *strictHandler) CreateAsset(w http.ResponseWriter, r *http.Request) {
+	var request CreateAssetRequestObject
+
+	var body CreateAssetJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CreateAsset(ctx, request.(CreateAssetRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CreateAsset")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CreateAssetResponseObject); ok {
+		if err := validResponse.VisitCreateAssetResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetAsset operation middleware
+func (sh *strictHandler) GetAsset(w http.ResponseWriter, r *http.Request, symbol AssetSymbol) {
+	var request GetAssetRequestObject
+
+	request.Symbol = symbol
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetAsset(ctx, request.(GetAssetRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetAsset")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetAssetResponseObject); ok {
+		if err := validResponse.VisitGetAssetResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// UpdateAsset operation middleware
+func (sh *strictHandler) UpdateAsset(w http.ResponseWriter, r *http.Request, symbol AssetSymbol) {
+	var request UpdateAssetRequestObject
+
+	request.Symbol = symbol
+
+	var body UpdateAssetJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.UpdateAsset(ctx, request.(UpdateAssetRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "UpdateAsset")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(UpdateAssetResponseObject); ok {
+		if err := validResponse.VisitUpdateAssetResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // ListAuditEvents operation middleware
 func (sh *strictHandler) ListAuditEvents(w http.ResponseWriter, r *http.Request, params ListAuditEventsParams) {
 	var request ListAuditEventsRequestObject
@@ -4044,6 +7580,175 @@ func (sh *strictHandler) ListAuditEvents(w http.ResponseWriter, r *http.Request,
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(ListAuditEventsResponseObject); ok {
 		if err := validResponse.VisitListAuditEventsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListDeposits operation middleware
+func (sh *strictHandler) ListDeposits(w http.ResponseWriter, r *http.Request, params ListDepositsParams) {
+	var request ListDepositsRequestObject
+
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListDeposits(ctx, request.(ListDepositsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListDeposits")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListDepositsResponseObject); ok {
+		if err := validResponse.VisitListDepositsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RequestReload operation middleware
+func (sh *strictHandler) RequestReload(w http.ResponseWriter, r *http.Request) {
+	var request RequestReloadRequestObject
+
+	var body RequestReloadJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RequestReload(ctx, request.(RequestReloadRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RequestReload")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RequestReloadResponseObject); ok {
+		if err := validResponse.VisitRequestReloadResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListFeeSchedules operation middleware
+func (sh *strictHandler) ListFeeSchedules(w http.ResponseWriter, r *http.Request) {
+	var request ListFeeSchedulesRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListFeeSchedules(ctx, request.(ListFeeSchedulesRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListFeeSchedules")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListFeeSchedulesResponseObject); ok {
+		if err := validResponse.VisitListFeeSchedulesResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CreateFeeSchedule operation middleware
+func (sh *strictHandler) CreateFeeSchedule(w http.ResponseWriter, r *http.Request) {
+	var request CreateFeeScheduleRequestObject
+
+	var body CreateFeeScheduleJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CreateFeeSchedule(ctx, request.(CreateFeeScheduleRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CreateFeeSchedule")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CreateFeeScheduleResponseObject); ok {
+		if err := validResponse.VisitCreateFeeScheduleResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// UpdateFeeSchedule operation middleware
+func (sh *strictHandler) UpdateFeeSchedule(w http.ResponseWriter, r *http.Request, name FeeScheduleName) {
+	var request UpdateFeeScheduleRequestObject
+
+	request.Name = name
+
+	var body UpdateFeeScheduleJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.UpdateFeeSchedule(ctx, request.(UpdateFeeScheduleRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "UpdateFeeSchedule")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(UpdateFeeScheduleResponseObject); ok {
+		if err := validResponse.VisitUpdateFeeScheduleResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetHotWallet operation middleware
+func (sh *strictHandler) GetHotWallet(w http.ResponseWriter, r *http.Request) {
+	var request GetHotWalletRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetHotWallet(ctx, request.(GetHotWalletRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetHotWallet")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetHotWalletResponseObject); ok {
+		if err := validResponse.VisitGetHotWalletResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
@@ -4187,6 +7892,96 @@ func (sh *strictHandler) ListMarkets(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// CreateMarket operation middleware
+func (sh *strictHandler) CreateMarket(w http.ResponseWriter, r *http.Request) {
+	var request CreateMarketRequestObject
+
+	var body CreateMarketJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CreateMarket(ctx, request.(CreateMarketRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CreateMarket")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CreateMarketResponseObject); ok {
+		if err := validResponse.VisitCreateMarketResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetMarket operation middleware
+func (sh *strictHandler) GetMarket(w http.ResponseWriter, r *http.Request, symbol MarketSymbol) {
+	var request GetMarketRequestObject
+
+	request.Symbol = symbol
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetMarket(ctx, request.(GetMarketRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetMarket")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetMarketResponseObject); ok {
+		if err := validResponse.VisitGetMarketResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// UpdateMarket operation middleware
+func (sh *strictHandler) UpdateMarket(w http.ResponseWriter, r *http.Request, symbol MarketSymbol) {
+	var request UpdateMarketRequestObject
+
+	request.Symbol = symbol
+
+	var body UpdateMarketJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.UpdateMarket(ctx, request.(UpdateMarketRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "UpdateMarket")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(UpdateMarketResponseObject); ok {
+		if err := validResponse.VisitUpdateMarketResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // SetMarketStatus operation middleware
 func (sh *strictHandler) SetMarketStatus(w http.ResponseWriter, r *http.Request, symbol MarketSymbol) {
 	var request SetMarketStatusRequestObject
@@ -4244,6 +8039,58 @@ func (sh *strictHandler) GetReconciliation(w http.ResponseWriter, r *http.Reques
 	}
 }
 
+// ListReconciliationBreaks operation middleware
+func (sh *strictHandler) ListReconciliationBreaks(w http.ResponseWriter, r *http.Request, params ListReconciliationBreaksParams) {
+	var request ListReconciliationBreaksRequestObject
+
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListReconciliationBreaks(ctx, request.(ListReconciliationBreaksRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListReconciliationBreaks")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListReconciliationBreaksResponseObject); ok {
+		if err := validResponse.VisitListReconciliationBreaksResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListReconciliationReports operation middleware
+func (sh *strictHandler) ListReconciliationReports(w http.ResponseWriter, r *http.Request, params ListReconciliationReportsParams) {
+	var request ListReconciliationReportsRequestObject
+
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListReconciliationReports(ctx, request.(ListReconciliationReportsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListReconciliationReports")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListReconciliationReportsResponseObject); ok {
+		if err := validResponse.VisitListReconciliationReportsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // ListSweeps operation middleware
 func (sh *strictHandler) ListSweeps(w http.ResponseWriter, r *http.Request, params ListSweepsParams) {
 	var request ListSweepsRequestObject
@@ -4263,6 +8110,148 @@ func (sh *strictHandler) ListSweeps(w http.ResponseWriter, r *http.Request, para
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(ListSweepsResponseObject); ok {
 		if err := validResponse.VisitListSweepsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetSystemStatus operation middleware
+func (sh *strictHandler) GetSystemStatus(w http.ResponseWriter, r *http.Request) {
+	var request GetSystemStatusRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetSystemStatus(ctx, request.(GetSystemStatusRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetSystemStatus")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetSystemStatusResponseObject); ok {
+		if err := validResponse.VisitGetSystemStatusResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListUsers operation middleware
+func (sh *strictHandler) ListUsers(w http.ResponseWriter, r *http.Request, params ListUsersParams) {
+	var request ListUsersRequestObject
+
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListUsers(ctx, request.(ListUsersRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListUsers")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListUsersResponseObject); ok {
+		if err := validResponse.VisitListUsersResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetUser operation middleware
+func (sh *strictHandler) GetUser(w http.ResponseWriter, r *http.Request, id UserID) {
+	var request GetUserRequestObject
+
+	request.ID = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetUser(ctx, request.(GetUserRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetUser")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetUserResponseObject); ok {
+		if err := validResponse.VisitGetUserResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// SetUserKycLevel operation middleware
+func (sh *strictHandler) SetUserKycLevel(w http.ResponseWriter, r *http.Request, id UserID) {
+	var request SetUserKycLevelRequestObject
+
+	request.ID = id
+
+	var body SetUserKycLevelJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.SetUserKycLevel(ctx, request.(SetUserKycLevelRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "SetUserKycLevel")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(SetUserKycLevelResponseObject); ok {
+		if err := validResponse.VisitSetUserKycLevelResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// SetUserStatus operation middleware
+func (sh *strictHandler) SetUserStatus(w http.ResponseWriter, r *http.Request, id UserID) {
+	var request SetUserStatusRequestObject
+
+	request.ID = id
+
+	var body SetUserStatusJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.SetUserStatus(ctx, request.(SetUserStatusRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "SetUserStatus")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(SetUserStatusResponseObject); ok {
+		if err := validResponse.VisitSetUserStatusResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
@@ -4412,6 +8401,39 @@ func (sh *strictHandler) ReplayWebhookDelivery(w http.ResponseWriter, r *http.Re
 	}
 }
 
+// RotateWebhookSecret operation middleware
+func (sh *strictHandler) RotateWebhookSecret(w http.ResponseWriter, r *http.Request, id WebhookEndpointID) {
+	var request RotateWebhookSecretRequestObject
+
+	request.ID = id
+
+	var body RotateWebhookSecretJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RotateWebhookSecret(ctx, request.(RotateWebhookSecretRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RotateWebhookSecret")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RotateWebhookSecretResponseObject); ok {
+		if err := validResponse.VisitRotateWebhookSecretResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // SetWebhookEndpointStatus operation middleware
 func (sh *strictHandler) SetWebhookEndpointStatus(w http.ResponseWriter, r *http.Request, id WebhookEndpointID) {
 	var request SetWebhookEndpointStatusRequestObject
@@ -4438,6 +8460,64 @@ func (sh *strictHandler) SetWebhookEndpointStatus(w http.ResponseWriter, r *http
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(SetWebhookEndpointStatusResponseObject); ok {
 		if err := validResponse.VisitSetWebhookEndpointStatusResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListWithdrawalLimits operation middleware
+func (sh *strictHandler) ListWithdrawalLimits(w http.ResponseWriter, r *http.Request) {
+	var request ListWithdrawalLimitsRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListWithdrawalLimits(ctx, request.(ListWithdrawalLimitsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListWithdrawalLimits")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListWithdrawalLimitsResponseObject); ok {
+		if err := validResponse.VisitListWithdrawalLimitsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// SetWithdrawalLimit operation middleware
+func (sh *strictHandler) SetWithdrawalLimit(w http.ResponseWriter, r *http.Request, asset AssetPath, kycLevel KycLevelPath) {
+	var request SetWithdrawalLimitRequestObject
+
+	request.Asset = asset
+	request.KycLevel = kycLevel
+
+	var body SetWithdrawalLimitJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.SetWithdrawalLimit(ctx, request.(SetWithdrawalLimitRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "SetWithdrawalLimit")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(SetWithdrawalLimitResponseObject); ok {
+		if err := validResponse.VisitSetWithdrawalLimitResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

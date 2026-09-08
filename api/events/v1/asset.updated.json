@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/arc119226/crypto-exchange/api/events/v1/asset.updated.json",
+  "title": "asset.updated",
+  "description": "A registry change to an asset: created, edited, enabled or disabled for deposits or withdrawals. The engine consumes it and reloads its registry cache.",
+  "type": "object",
+  "required": [
+    "asset_id",
+    "symbol",
+    "status",
+    "deposit_enabled",
+    "withdraw_enabled",
+    "changed_fields",
+    "version"
+  ],
+  "properties": {
+    "asset_id": {
+      "type": "string"
+    },
+    "symbol": {
+      "type": "string"
+    },
+    "status": {
+      "enum": [
+        "active",
+        "disabled"
+      ]
+    },
+    "deposit_enabled": {
+      "type": "boolean"
+    },
+    "withdraw_enabled": {
+      "type": "boolean"
+    },
+    "changed_fields": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Which fields the write touched; [\"created\"] for a new asset."
+    },
+    "version": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Registry row version after the change; increases on every real change."
+    },
+    "reason": {
+      "type": "string",
+      "description": "Operator's reason, recorded in the audit trail."
+    }
+  }
+}

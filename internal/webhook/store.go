@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/arc119226/crypto-exchange/internal/platform/secretbox"
@@ -331,6 +332,17 @@ func (s *Store) QueuedAt(ctx context.Context, endpointID, deliveryID string) (ti
 	return row.NextAttemptAt, nil
 }
 
+// DeadSince counts deliveries the schedule gave up on after since.
+func (s *Store) DeadSince(ctx context.Context, since time.Time) (int64, error) {
+	n, err := sqlcgen.New(s.db).CountDeadDeliveriesSince(ctx, sqlcgen.CountDeadDeliveriesSinceParams{
+		TenantID: s.tenant, CreatedAt: since,
+	})
+	if err != nil {
+		return 0, fmt.Errorf("webhook: count dead deliveries: %w", err)
+	}
+	return n, nil
+}
+
 // validate refuses what migration 0016's CHECKs would refuse anyway, so the
 // caller gets a 400 that says which field rather than a constraint name.
 func validate(u string, events []string) error {
@@ -381,4 +393,54 @@ func newSecret() (string, error) {
 		return "", fmt.Errorf("webhook: secret: %w", err)
 	}
 	return hex.EncodeToString(b[:]), nil
+}
+
+// Rotated is what a rotation returns: the new secret, once, and when the old
+// one stops being accepted.
+type Rotated struct {
+	Endpoint      Endpoint
+	Secret        string
+	PreviousUntil time.Time
+}
+
+// MaxGrace bounds how long the old secret keeps signing after a rotation.
+const MaxGrace = 7 * 24 * time.Hour
+
+// RotateSecret issues a new signing secret and keeps the old one for grace.
+// Every delivery in that window carries both signatures (docs/webhooks.md,
+// "Rotating the secret"), so a receiver that has switched and one that has
+// not both keep verifying. The new secret is in the return value and nowhere
+// else, like Create's.
+func (s *Store) RotateSecret(ctx context.Context, tx pgx.Tx, id string, grace time.Duration, now time.Time) (Rotated, error) {
+	if !looksLikeUUID(id) {
+		return Rotated{}, ErrNotFound
+	}
+	if grace <= 0 || grace > MaxGrace {
+		return Rotated{}, fmt.Errorf("%w: grace must be between 1 second and %s", ErrInvalid, MaxGrace)
+	}
+	secret, err := newSecret()
+	if err != nil {
+		return Rotated{}, err
+	}
+	sealed, err := secretbox.Seal(s.master, secret)
+	if err != nil {
+		return Rotated{}, fmt.Errorf("webhook: seal secret: %w", err)
+	}
+	until := now.Add(grace)
+	row, err := sqlcgen.New(tx).RotateEndpointSecret(ctx, sqlcgen.RotateEndpointSecretParams{
+		TenantID: s.tenant, ID: id, SecretEnc: sealed, PreviousSecretUntil: pgtype.Timestamptz{Time: until, Valid: true},
+	})
+	switch {
+	case errors.Is(err, pgx.ErrNoRows):
+		return Rotated{}, ErrNotFound
+	case err != nil:
+		return Rotated{}, fmt.Errorf("webhook: rotate secret: %w", err)
+	}
+	return Rotated{
+		Endpoint: Endpoint{
+			ID: row.ID, URL: row.Url, Events: row.Events, Label: row.Label,
+			Status: row.Status, CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt,
+		},
+		Secret: secret, PreviousUntil: until,
+	}, nil
 }

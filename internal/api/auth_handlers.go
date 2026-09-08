@@ -84,6 +84,9 @@ func (h *Handler) Login(ctx context.Context, req gen.LoginRequestObject) (gen.Lo
 	if errors.Is(err, auth.ErrInvalidCredentials) {
 		return gen.Login401ApplicationProblemPlusJSONResponse{UnauthorizedApplicationProblemPlusJSONResponse: gen.UnauthorizedApplicationProblemPlusJSONResponse(h.problem(ctx, 401, "Unauthorized", "invalid email or password"))}, nil
 	}
+	if errors.Is(err, auth.ErrUserFrozen) {
+		return gen.Login403ApplicationProblemPlusJSONResponse{ForbiddenApplicationProblemPlusJSONResponse: h.forbidden(ctx, "this user is frozen")}, nil
+	}
 	if err != nil {
 		return nil, fmt.Errorf("login: %w", err)
 	}

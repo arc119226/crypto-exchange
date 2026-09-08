@@ -72,6 +72,54 @@ func (e AdjustmentRequestDirection) Valid() bool {
 	}
 }
 
+// Defines values for AdminDepositStatus.
+const (
+	AdminDepositStatusConfirming AdminDepositStatus = "confirming"
+	AdminDepositStatusCredited   AdminDepositStatus = "credited"
+	AdminDepositStatusDetected   AdminDepositStatus = "detected"
+	AdminDepositStatusDropped    AdminDepositStatus = "dropped"
+	AdminDepositStatusOrphaned   AdminDepositStatus = "orphaned"
+	AdminDepositStatusReversed   AdminDepositStatus = "reversed"
+)
+
+// Valid indicates whether the value is a known member of the AdminDepositStatus enum.
+func (e AdminDepositStatus) Valid() bool {
+	switch e {
+	case AdminDepositStatusConfirming:
+		return true
+	case AdminDepositStatusCredited:
+		return true
+	case AdminDepositStatusDetected:
+		return true
+	case AdminDepositStatusDropped:
+		return true
+	case AdminDepositStatusOrphaned:
+		return true
+	case AdminDepositStatusReversed:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AssetStatus.
+const (
+	AssetStatusActive   AssetStatus = "active"
+	AssetStatusDisabled AssetStatus = "disabled"
+)
+
+// Valid indicates whether the value is a known member of the AssetStatus enum.
+func (e AssetStatus) Valid() bool {
+	switch e {
+	case AssetStatusActive:
+		return true
+	case AssetStatusDisabled:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for AuditEventActorType.
 const (
 	AuditEventActorTypeAPIKey AuditEventActorType = "api_key"
@@ -252,6 +300,60 @@ func (e PostingDirection) Valid() bool {
 	}
 }
 
+// Defines values for SystemStatusDatabase.
+const (
+	SystemStatusDatabaseError SystemStatusDatabase = "error"
+	SystemStatusDatabaseOk    SystemStatusDatabase = "ok"
+)
+
+// Valid indicates whether the value is a known member of the SystemStatusDatabase enum.
+func (e SystemStatusDatabase) Valid() bool {
+	switch e {
+	case SystemStatusDatabaseError:
+		return true
+	case SystemStatusDatabaseOk:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for UserRole.
+const (
+	UserRoleAdmin UserRole = "admin"
+	UserRoleUser  UserRole = "user"
+)
+
+// Valid indicates whether the value is a known member of the UserRole enum.
+func (e UserRole) Valid() bool {
+	switch e {
+	case UserRoleAdmin:
+		return true
+	case UserRoleUser:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for UserStatus.
+const (
+	UserStatusActive UserStatus = "active"
+	UserStatusFrozen UserStatus = "frozen"
+)
+
+// Valid indicates whether the value is a known member of the UserStatus enum.
+func (e UserStatus) Valid() bool {
+	switch e {
+	case UserStatusActive:
+		return true
+	case UserStatusFrozen:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for WebhookDeliveryStatus.
 const (
 	WebhookDeliveryStatusDead      WebhookDeliveryStatus = "dead"
@@ -336,6 +438,60 @@ func (e WithdrawalReviewRequestDecision) Valid() bool {
 	}
 }
 
+// Defines values for ListAuditEventsParamsActorType.
+const (
+	ListAuditEventsParamsActorTypeAPIKey ListAuditEventsParamsActorType = "api_key"
+	ListAuditEventsParamsActorTypeAdmin  ListAuditEventsParamsActorType = "admin"
+	ListAuditEventsParamsActorTypeSystem ListAuditEventsParamsActorType = "system"
+	ListAuditEventsParamsActorTypeUser   ListAuditEventsParamsActorType = "user"
+)
+
+// Valid indicates whether the value is a known member of the ListAuditEventsParamsActorType enum.
+func (e ListAuditEventsParamsActorType) Valid() bool {
+	switch e {
+	case ListAuditEventsParamsActorTypeAPIKey:
+		return true
+	case ListAuditEventsParamsActorTypeAdmin:
+		return true
+	case ListAuditEventsParamsActorTypeSystem:
+		return true
+	case ListAuditEventsParamsActorTypeUser:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ListDepositsParamsStatus.
+const (
+	ListDepositsParamsStatusConfirming ListDepositsParamsStatus = "confirming"
+	ListDepositsParamsStatusCredited   ListDepositsParamsStatus = "credited"
+	ListDepositsParamsStatusDetected   ListDepositsParamsStatus = "detected"
+	ListDepositsParamsStatusDropped    ListDepositsParamsStatus = "dropped"
+	ListDepositsParamsStatusOrphaned   ListDepositsParamsStatus = "orphaned"
+	ListDepositsParamsStatusReversed   ListDepositsParamsStatus = "reversed"
+)
+
+// Valid indicates whether the value is a known member of the ListDepositsParamsStatus enum.
+func (e ListDepositsParamsStatus) Valid() bool {
+	switch e {
+	case ListDepositsParamsStatusConfirming:
+		return true
+	case ListDepositsParamsStatusCredited:
+		return true
+	case ListDepositsParamsStatusDetected:
+		return true
+	case ListDepositsParamsStatusDropped:
+		return true
+	case ListDepositsParamsStatusOrphaned:
+		return true
+	case ListDepositsParamsStatusReversed:
+		return true
+	default:
+		return false
+	}
+}
+
 // Account defines model for Account.
 type Account struct {
 	CreatedAt time.Time `json:"created_at"`
@@ -391,6 +547,34 @@ type AdjustmentRequest struct {
 // AdjustmentRequestDirection credit adds to the user's available balance, debit removes.
 type AdjustmentRequestDirection string
 
+// AdminDeposit defines model for AdminDeposit.
+type AdminDeposit struct {
+	AccountID string `json:"account_id"`
+	Address   string `json:"address"`
+
+	// Amount Decimal serialized as a string (NUMERIC(36,18)); never a JSON number.
+	//
+	// Example: 1990.00
+	Amount        Amount             `json:"amount"`
+	Asset         string             `json:"asset"`
+	BlockNumber   int64              `json:"block_number"`
+	Confirmations int32              `json:"confirmations"`
+	CreatedAt     time.Time          `json:"created_at"`
+	CreditedAt    *time.Time         `json:"credited_at,omitempty"`
+	ID            string             `json:"id"`
+	LogIndex      int32              `json:"log_index"`
+	Status        AdminDepositStatus `json:"status"`
+	TxHash        string             `json:"tx_hash"`
+}
+
+// AdminDepositStatus defines model for AdminDeposit.Status.
+type AdminDepositStatus string
+
+// AdminDepositList defines model for AdminDepositList.
+type AdminDepositList struct {
+	Deposits []AdminDeposit `json:"deposits"`
+}
+
 // AdminWithdrawal defines model for AdminWithdrawal.
 type AdminWithdrawal struct {
 	AccountID string `json:"account_id"`
@@ -424,6 +608,90 @@ type AdminWithdrawalList struct {
 //
 // Example: 1990.00
 type Amount = money.Amount
+
+// Asset defines model for Asset.
+type Asset struct {
+	ChainID int64 `json:"chain_id"`
+
+	// ContractAddress Absent for the native coin.
+	ContractAddress *string   `json:"contract_address,omitempty"`
+	CreatedAt       time.Time `json:"created_at"`
+	DepositEnabled  bool      `json:"deposit_enabled"`
+	DisplayScale    int32     `json:"display_scale"`
+	ID              string    `json:"id"`
+	IsNative        bool      `json:"is_native"`
+
+	// MinDeposit Decimal serialized as a string (NUMERIC(36,18)); never a JSON number.
+	//
+	// Example: 1990.00
+	MinDeposit Amount `json:"min_deposit"`
+
+	// MinWithdrawal Decimal serialized as a string (NUMERIC(36,18)); never a JSON number.
+	//
+	// Example: 1990.00
+	MinWithdrawal         Amount      `json:"min_withdrawal"`
+	Name                  string      `json:"name"`
+	RequiredConfirmations int32       `json:"required_confirmations"`
+	Scale                 int32       `json:"scale"`
+	Status                AssetStatus `json:"status"`
+
+	// SweepThreshold Decimal serialized as a string (NUMERIC(36,18)); never a JSON number.
+	//
+	// Example: 1990.00
+	SweepThreshold  Amount    `json:"sweep_threshold"`
+	Symbol          string    `json:"symbol"`
+	UpdatedAt       time.Time `json:"updated_at"`
+	Version         int32     `json:"version"`
+	WithdrawEnabled bool      `json:"withdraw_enabled"`
+
+	// WithdrawalFee Decimal serialized as a string (NUMERIC(36,18)); never a JSON number.
+	//
+	// Example: 1990.00
+	WithdrawalFee Amount `json:"withdrawal_fee"`
+}
+
+// AssetList defines model for AssetList.
+type AssetList struct {
+	Assets []Asset `json:"assets"`
+}
+
+// AssetRequest defines model for AssetRequest.
+type AssetRequest struct {
+	ChainID         int64   `json:"chain_id"`
+	ContractAddress *string `json:"contract_address,omitempty"`
+	DepositEnabled  bool    `json:"deposit_enabled"`
+	DisplayScale    int32   `json:"display_scale"`
+	IsNative        bool    `json:"is_native"`
+
+	// MinDeposit Decimal serialized as a string (NUMERIC(36,18)); never a JSON number.
+	//
+	// Example: 1990.00
+	MinDeposit Amount `json:"min_deposit"`
+
+	// MinWithdrawal Decimal serialized as a string (NUMERIC(36,18)); never a JSON number.
+	//
+	// Example: 1990.00
+	MinWithdrawal         Amount      `json:"min_withdrawal"`
+	Name                  string      `json:"name"`
+	Reason                string      `json:"reason"`
+	RequiredConfirmations int32       `json:"required_confirmations"`
+	Scale                 int32       `json:"scale"`
+	Status                AssetStatus `json:"status"`
+
+	// SweepThreshold Decimal serialized as a string (NUMERIC(36,18)); never a JSON number.
+	//
+	// Example: 1990.00
+	SweepThreshold  Amount `json:"sweep_threshold"`
+	WithdrawEnabled bool   `json:"withdraw_enabled"`
+
+	// WithdrawalFee Decimal serialized as a string (NUMERIC(36,18)); never a JSON number.
+	//
+	// Example: 1990.00
+	WithdrawalFee Amount `json:"withdrawal_fee"`
+}
+
+// AssetStatus defines model for AssetStatus.
+type AssetStatus string
 
 // AuditEvent defines model for AuditEvent.
 type AuditEvent struct {
@@ -474,10 +742,129 @@ type BalanceList struct {
 	Balances  []Balance `json:"balances"`
 }
 
+// ChainBreak defines model for ChainBreak.
+type ChainBreak struct {
+	// AboveFrontier Decimal serialized as a string (NUMERIC(36,18)); never a JSON number.
+	//
+	// Example: 1990.00
+	AboveFrontier Amount `json:"above_frontier"`
+	Asset         string `json:"asset"`
+	BlockHeight   int64  `json:"block_height"`
+	ChainID       int64  `json:"chain_id"`
+
+	// ChainTotal Decimal serialized as a string (NUMERIC(36,18)); never a JSON number.
+	//
+	// Example: 1990.00
+	ChainTotal Amount    `json:"chain_total"`
+	DetectedAt time.Time `json:"detected_at"`
+
+	// Diff Decimal serialized as a string (NUMERIC(36,18)); never a JSON number.
+	//
+	// Example: 1990.00
+	Diff Amount `json:"diff"`
+	ID   string `json:"id"`
+
+	// InFlight Decimal serialized as a string (NUMERIC(36,18)); never a JSON number.
+	//
+	// Example: 1990.00
+	InFlight Amount `json:"in_flight"`
+
+	// LedgerTotal Decimal serialized as a string (NUMERIC(36,18)); never a JSON number.
+	//
+	// Example: 1990.00
+	LedgerTotal Amount `json:"ledger_total"`
+	ReportID    string `json:"report_id"`
+
+	// Uncredited Decimal serialized as a string (NUMERIC(36,18)); never a JSON number.
+	//
+	// Example: 1990.00
+	Uncredited Amount `json:"uncredited"`
+}
+
 // CreateAccountRequest defines model for CreateAccountRequest.
 type CreateAccountRequest struct {
 	// OwnerUserID Optional until Phase 3 introduces users.
 	OwnerUserID *string `json:"owner_user_id,omitempty"`
+}
+
+// CreateAssetRequest defines model for CreateAssetRequest.
+type CreateAssetRequest struct {
+	ChainID         int64   `json:"chain_id"`
+	ContractAddress *string `json:"contract_address,omitempty"`
+	DepositEnabled  bool    `json:"deposit_enabled"`
+	DisplayScale    int32   `json:"display_scale"`
+	IsNative        bool    `json:"is_native"`
+
+	// MinDeposit Decimal serialized as a string (NUMERIC(36,18)); never a JSON number.
+	//
+	// Example: 1990.00
+	MinDeposit Amount `json:"min_deposit"`
+
+	// MinWithdrawal Decimal serialized as a string (NUMERIC(36,18)); never a JSON number.
+	//
+	// Example: 1990.00
+	MinWithdrawal         Amount      `json:"min_withdrawal"`
+	Name                  string      `json:"name"`
+	Reason                string      `json:"reason"`
+	RequiredConfirmations int32       `json:"required_confirmations"`
+	Scale                 int32       `json:"scale"`
+	Status                AssetStatus `json:"status"`
+
+	// SweepThreshold Decimal serialized as a string (NUMERIC(36,18)); never a JSON number.
+	//
+	// Example: 1990.00
+	SweepThreshold Amount `json:"sweep_threshold"`
+
+	// Symbol Example: USDC
+	Symbol          string `json:"symbol"`
+	WithdrawEnabled bool   `json:"withdraw_enabled"`
+
+	// WithdrawalFee Decimal serialized as a string (NUMERIC(36,18)); never a JSON number.
+	//
+	// Example: 1990.00
+	WithdrawalFee Amount `json:"withdrawal_fee"`
+}
+
+// CreateFeeScheduleRequest defines model for CreateFeeScheduleRequest.
+type CreateFeeScheduleRequest struct {
+	MakerBps int32 `json:"maker_bps"`
+
+	// Name Example: vip
+	Name     string `json:"name"`
+	Reason   string `json:"reason"`
+	TakerBps int32  `json:"taker_bps"`
+}
+
+// CreateMarketRequest defines model for CreateMarketRequest.
+type CreateMarketRequest struct {
+	BaseAsset      string  `json:"base_asset"`
+	FeeSchedule    string  `json:"fee_schedule"`
+	MaxQty         *Amount `json:"max_qty,omitempty"`
+	MaxSlippageBps *int32  `json:"max_slippage_bps,omitempty"`
+
+	// MinNotional Decimal serialized as a string (NUMERIC(36,18)); never a JSON number.
+	//
+	// Example: 1990.00
+	MinNotional Amount `json:"min_notional"`
+
+	// PriceTick Decimal serialized as a string (NUMERIC(36,18)); never a JSON number.
+	//
+	// Example: 1990.00
+	PriceTick Amount `json:"price_tick"`
+
+	// QtyStep Decimal serialized as a string (NUMERIC(36,18)); never a JSON number.
+	//
+	// Example: 1990.00
+	QtyStep         Amount `json:"qty_step"`
+	QuoteAsset      string `json:"quote_asset"`
+	Reason          string `json:"reason"`
+	SelfTradePolicy string `json:"self_trade_policy"`
+
+	// Status active takes orders and cancels; halted and cancel_only take cancels only; delisted requires an empty book (docs/plan-v1.0.md 6.6).
+	Status MarketStatus `json:"status"`
+
+	// Symbol Example: ETH-USDC
+	Symbol string `json:"symbol"`
 }
 
 // CreatedWebhookEndpoint defines model for CreatedWebhookEndpoint.
@@ -498,6 +885,55 @@ type CreatedWebhookEndpoint struct {
 
 	// URL Example: https://example.com/hooks/exchange
 	URL string `json:"url"`
+}
+
+// FeeSchedule defines model for FeeSchedule.
+type FeeSchedule struct {
+	CreatedAt     time.Time `json:"created_at"`
+	EffectiveFrom time.Time `json:"effective_from"`
+	ID            string    `json:"id"`
+	MakerBps      int32     `json:"maker_bps"`
+	Name          string    `json:"name"`
+	TakerBps      int32     `json:"taker_bps"`
+	UpdatedAt     time.Time `json:"updated_at"`
+	Version       int32     `json:"version"`
+}
+
+// FeeScheduleList defines model for FeeScheduleList.
+type FeeScheduleList struct {
+	FeeSchedules []FeeSchedule `json:"fee_schedules"`
+}
+
+// FeeScheduleRequest defines model for FeeScheduleRequest.
+type FeeScheduleRequest struct {
+	MakerBps int32  `json:"maker_bps"`
+	Reason   string `json:"reason"`
+	TakerBps int32  `json:"taker_bps"`
+}
+
+// HotWallet defines model for HotWallet.
+type HotWallet struct {
+	Address string `json:"address"`
+
+	// Balances The ledger's custody_hot balance per asset.
+	Balances []HotWalletBalance `json:"balances"`
+	ChainID  int64              `json:"chain_id"`
+
+	// Low alert.hot_wallet_low has been raised and not cleared.
+	Low          bool       `json:"low"`
+	LowAlertedAt *time.Time `json:"low_alerted_at,omitempty"`
+	NextNonce    int64      `json:"next_nonce"`
+	UpdatedAt    time.Time  `json:"updated_at"`
+}
+
+// HotWalletBalance defines model for HotWalletBalance.
+type HotWalletBalance struct {
+	Asset string `json:"asset"`
+
+	// Balance Decimal serialized as a string (NUMERIC(36,18)); never a JSON number.
+	//
+	// Example: 1990.00
+	Balance Amount `json:"balance"`
 }
 
 // HouseAdjustmentRequest defines model for HouseAdjustmentRequest.
@@ -565,11 +1001,49 @@ type JournalEntryList struct {
 	Entries []JournalEntry `json:"entries"`
 }
 
+// KycLevelRequest defines model for KycLevelRequest.
+type KycLevelRequest struct {
+	KycLevel int    `json:"kyc_level"`
+	Reason   string `json:"reason"`
+}
+
+// LedgerBreak defines model for LedgerBreak.
+type LedgerBreak struct {
+	Asset string `json:"asset"`
+
+	// Credits Decimal serialized as a string (NUMERIC(36,18)); never a JSON number.
+	//
+	// Example: 1990.00
+	Credits Amount `json:"credits"`
+
+	// Debits Decimal serialized as a string (NUMERIC(36,18)); never a JSON number.
+	//
+	// Example: 1990.00
+	Debits     Amount    `json:"debits"`
+	DetectedAt time.Time `json:"detected_at"`
+
+	// Diff Decimal serialized as a string (NUMERIC(36,18)); never a JSON number.
+	//
+	// Example: 1990.00
+	Diff       Amount     `json:"diff"`
+	ID         string     `json:"id"`
+	ResolvedAt *time.Time `json:"resolved_at,omitempty"`
+}
+
 // Market defines model for Market.
 type Market struct {
 	BaseAsset string `json:"base_asset"`
-	ID        string `json:"id"`
-	MakerBps  int32  `json:"maker_bps"`
+
+	// FeeSchedule Name of the fee schedule the bps come from.
+	FeeSchedule *string `json:"fee_schedule,omitempty"`
+	ID          string  `json:"id"`
+	MakerBps    int32   `json:"maker_bps"`
+
+	// MaxQty Largest single order; absent means no cap.
+	MaxQty *Amount `json:"max_qty,omitempty"`
+
+	// MaxSlippageBps Market-order price protection band; absent means none.
+	MaxSlippageBps *int32 `json:"max_slippage_bps,omitempty"`
 
 	// MinNotional Decimal serialized as a string (NUMERIC(36,18)); never a JSON number.
 	//
@@ -600,6 +1074,35 @@ type Market struct {
 // MarketList defines model for MarketList.
 type MarketList struct {
 	Markets []Market `json:"markets"`
+}
+
+// MarketRequest defines model for MarketRequest.
+type MarketRequest struct {
+	BaseAsset      string  `json:"base_asset"`
+	FeeSchedule    string  `json:"fee_schedule"`
+	MaxQty         *Amount `json:"max_qty,omitempty"`
+	MaxSlippageBps *int32  `json:"max_slippage_bps,omitempty"`
+
+	// MinNotional Decimal serialized as a string (NUMERIC(36,18)); never a JSON number.
+	//
+	// Example: 1990.00
+	MinNotional Amount `json:"min_notional"`
+
+	// PriceTick Decimal serialized as a string (NUMERIC(36,18)); never a JSON number.
+	//
+	// Example: 1990.00
+	PriceTick Amount `json:"price_tick"`
+
+	// QtyStep Decimal serialized as a string (NUMERIC(36,18)); never a JSON number.
+	//
+	// Example: 1990.00
+	QtyStep         Amount `json:"qty_step"`
+	QuoteAsset      string `json:"quote_asset"`
+	Reason          string `json:"reason"`
+	SelfTradePolicy string `json:"self_trade_policy"`
+
+	// Status active takes orders and cancels; halted and cancel_only take cancels only; delisted requires an empty book (docs/plan-v1.0.md 6.6).
+	Status MarketStatus `json:"status"`
 }
 
 // MarketStatus active takes orders and cancels; halted and cancel_only take cancels only; delisted requires an empty book (docs/plan-v1.0.md 6.6).
@@ -642,6 +1145,12 @@ type Problem struct {
 	Type          string `json:"type"`
 }
 
+// ReconciliationBreaks defines model for ReconciliationBreaks.
+type ReconciliationBreaks struct {
+	ChainBreaks  []ChainBreak  `json:"chain_breaks"`
+	LedgerBreaks []LedgerBreak `json:"ledger_breaks"`
+}
+
 // ReconciliationLine defines model for ReconciliationLine.
 type ReconciliationLine struct {
 	// AboveFrontier The net effect the ledger booked for transactions mined above block_height.
@@ -681,6 +1190,47 @@ type ReconciliationReport struct {
 	StartedAt  time.Time            `json:"started_at"`
 }
 
+// ReconciliationReportList defines model for ReconciliationReportList.
+type ReconciliationReportList struct {
+	Reports []ReconciliationReport `json:"reports"`
+}
+
+// ReconciliationSummary defines model for ReconciliationSummary.
+type ReconciliationSummary struct {
+	Balanced   bool      `json:"balanced"`
+	FinishedAt time.Time `json:"finished_at"`
+	ID         string    `json:"id"`
+}
+
+// ReloadAccepted defines model for ReloadAccepted.
+type ReloadAccepted struct {
+	EventID    string    `json:"event_id"`
+	OccurredAt time.Time `json:"occurred_at"`
+}
+
+// ReloadRequest defines model for ReloadRequest.
+type ReloadRequest struct {
+	Reason string `json:"reason"`
+}
+
+// RotateSecretRequest defines model for RotateSecretRequest.
+type RotateSecretRequest struct {
+	// GraceHours How long the old secret keeps signing alongside the new one.
+	GraceHours *int32 `json:"grace_hours,omitempty"`
+	Reason     string `json:"reason"`
+}
+
+// RotatedWebhookSecret defines model for RotatedWebhookSecret.
+type RotatedWebhookSecret struct {
+	ID string `json:"id"`
+
+	// PreviousSecretUntil Until when deliveries also carry the old secret's signature
+	PreviousSecretUntil time.Time `json:"previous_secret_until"`
+
+	// Secret The new HMAC signing secret, shown exactly once
+	Secret string `json:"secret"`
+}
+
 // Sweep defines model for Sweep.
 type Sweep struct {
 	// Amount Decimal serialized as a string (NUMERIC(36,18)); never a JSON number.
@@ -714,6 +1264,28 @@ type SweepList struct {
 	Sweeps []Sweep `json:"sweeps"`
 }
 
+// SystemStatus defines model for SystemStatus.
+type SystemStatus struct {
+	// ConfirmingDeposits Deposits seen on chain and not yet credited.
+	ConfirmingDeposits       int                    `json:"confirming_deposits"`
+	Database                 SystemStatusDatabase   `json:"database"`
+	DeadWebhookDeliveries24H int                    `json:"dead_webhook_deliveries_24h"`
+	LastReconciliation       *ReconciliationSummary `json:"last_reconciliation,omitempty"`
+
+	// LedgerBalanced Every asset's debits equal its credits right now.
+	LedgerBalanced bool      `json:"ledger_balanced"`
+	Now            time.Time `json:"now"`
+
+	// OpenLedgerBreaks Assets currently out of balance and recorded as such.
+	OpenLedgerBreaks int `json:"open_ledger_breaks"`
+
+	// PendingWithdrawals Withdrawals waiting for a person (pending_review).
+	PendingWithdrawals int `json:"pending_withdrawals"`
+}
+
+// SystemStatusDatabase defines model for SystemStatus.Database.
+type SystemStatusDatabase string
+
 // TrialBalance defines model for TrialBalance.
 type TrialBalance struct {
 	// Balanced true when every diff is zero.
@@ -740,6 +1312,40 @@ type TrialBalanceLine struct {
 	//
 	// Example: 1990.00
 	Diff Amount `json:"diff"`
+}
+
+// User defines model for User.
+type User struct {
+	CreatedAt time.Time  `json:"created_at"`
+	Email     string     `json:"email"`
+	ID        string     `json:"id"`
+	KycLevel  int        `json:"kyc_level"`
+	Role      UserRole   `json:"role"`
+	Status    UserStatus `json:"status"`
+
+	// TotpEnabled Only ever true for administrators.
+	TotpEnabled bool      `json:"totp_enabled"`
+	UpdatedAt   time.Time `json:"updated_at"`
+
+	// Version Increases on every edit.
+	Version int32 `json:"version"`
+}
+
+// UserList defines model for UserList.
+type UserList struct {
+	Users []User `json:"users"`
+}
+
+// UserRole defines model for UserRole.
+type UserRole string
+
+// UserStatus defines model for UserStatus.
+type UserStatus string
+
+// UserStatusRequest defines model for UserStatusRequest.
+type UserStatusRequest struct {
+	Reason string     `json:"reason"`
+	Status UserStatus `json:"status"`
 }
 
 // WebhookDelivery defines model for WebhookDelivery.
@@ -830,6 +1436,45 @@ type WebhookReplay struct {
 	RunID         string    `json:"run_id"`
 }
 
+// WithdrawalLimit defines model for WithdrawalLimit.
+type WithdrawalLimit struct {
+	Asset string `json:"asset"`
+
+	// AutoApproveLimit Decimal serialized as a string (NUMERIC(36,18)); never a JSON number.
+	//
+	// Example: 1990.00
+	AutoApproveLimit Amount `json:"auto_approve_limit"`
+
+	// DailyLimit Decimal serialized as a string (NUMERIC(36,18)); never a JSON number.
+	//
+	// Example: 1990.00
+	DailyLimit          Amount    `json:"daily_limit"`
+	KycLevel            int       `json:"kyc_level"`
+	RequireManualReview bool      `json:"require_manual_review"`
+	UpdatedAt           time.Time `json:"updated_at"`
+	Version             int32     `json:"version"`
+}
+
+// WithdrawalLimitList defines model for WithdrawalLimitList.
+type WithdrawalLimitList struct {
+	WithdrawalLimits []WithdrawalLimit `json:"withdrawal_limits"`
+}
+
+// WithdrawalLimitRequest defines model for WithdrawalLimitRequest.
+type WithdrawalLimitRequest struct {
+	// AutoApproveLimit Decimal serialized as a string (NUMERIC(36,18)); never a JSON number.
+	//
+	// Example: 1990.00
+	AutoApproveLimit Amount `json:"auto_approve_limit"`
+
+	// DailyLimit Decimal serialized as a string (NUMERIC(36,18)); never a JSON number.
+	//
+	// Example: 1990.00
+	DailyLimit          Amount `json:"daily_limit"`
+	Reason              string `json:"reason"`
+	RequireManualReview bool   `json:"require_manual_review"`
+}
+
 // WithdrawalResolveRequest defines model for WithdrawalResolveRequest.
 type WithdrawalResolveRequest struct {
 	Action WithdrawalResolveRequestAction `json:"action"`
@@ -855,6 +1500,18 @@ type WithdrawalReviewRequestDecision string
 // AccountID defines model for AccountID.
 type AccountID = string
 
+// AssetPath Example: ETH
+type AssetPath = string
+
+// AssetSymbol Example: USDC
+type AssetSymbol = string
+
+// FeeScheduleName Example: default
+type FeeScheduleName = string
+
+// KycLevelPath defines model for KycLevelPath.
+type KycLevelPath = int
+
 // Limit defines model for Limit.
 type Limit = int32
 
@@ -863,6 +1520,9 @@ type MarketSymbol = string
 
 // Offset defines model for Offset.
 type Offset = int32
+
+// UserID defines model for UserID.
+type UserID = string
 
 // WebhookDeliveryID defines model for WebhookDeliveryID.
 type WebhookDeliveryID = string
@@ -897,12 +1557,28 @@ type ListAccountsParams struct {
 
 // ListAuditEventsParams defines parameters for ListAuditEvents.
 type ListAuditEventsParams struct {
-	Action     *string `form:"action,omitempty" json:"action,omitempty"`
-	TargetType *string `form:"target_type,omitempty" json:"target_type,omitempty"`
-	TargetID   *string `form:"target_id,omitempty" json:"target_id,omitempty"`
-	Limit      *Limit  `form:"limit,omitempty" json:"limit,omitempty"`
-	Offset     *Offset `form:"offset,omitempty" json:"offset,omitempty"`
+	Action     *string                         `form:"action,omitempty" json:"action,omitempty"`
+	TargetType *string                         `form:"target_type,omitempty" json:"target_type,omitempty"`
+	TargetID   *string                         `form:"target_id,omitempty" json:"target_id,omitempty"`
+	ActorType  *ListAuditEventsParamsActorType `form:"actor_type,omitempty" json:"actor_type,omitempty"`
+	ActorID    *string                         `form:"actor_id,omitempty" json:"actor_id,omitempty"`
+	Limit      *Limit                          `form:"limit,omitempty" json:"limit,omitempty"`
+	Offset     *Offset                         `form:"offset,omitempty" json:"offset,omitempty"`
 }
+
+// ListAuditEventsParamsActorType defines parameters for ListAuditEvents.
+type ListAuditEventsParamsActorType string
+
+// ListDepositsParams defines parameters for ListDeposits.
+type ListDepositsParams struct {
+	Status *ListDepositsParamsStatus `form:"status,omitempty" json:"status,omitempty"`
+	Asset  *string                   `form:"asset,omitempty" json:"asset,omitempty"`
+	Limit  *Limit                    `form:"limit,omitempty" json:"limit,omitempty"`
+	Offset *Offset                   `form:"offset,omitempty" json:"offset,omitempty"`
+}
+
+// ListDepositsParamsStatus defines parameters for ListDeposits.
+type ListDepositsParamsStatus string
 
 // ListEntriesParams defines parameters for ListEntries.
 type ListEntriesParams struct {
@@ -913,9 +1589,30 @@ type ListEntriesParams struct {
 	Offset    *Offset `form:"offset,omitempty" json:"offset,omitempty"`
 }
 
+// ListReconciliationBreaksParams defines parameters for ListReconciliationBreaks.
+type ListReconciliationBreaksParams struct {
+	Limit  *Limit  `form:"limit,omitempty" json:"limit,omitempty"`
+	Offset *Offset `form:"offset,omitempty" json:"offset,omitempty"`
+}
+
+// ListReconciliationReportsParams defines parameters for ListReconciliationReports.
+type ListReconciliationReportsParams struct {
+	Limit  *Limit  `form:"limit,omitempty" json:"limit,omitempty"`
+	Offset *Offset `form:"offset,omitempty" json:"offset,omitempty"`
+}
+
 // ListSweepsParams defines parameters for ListSweeps.
 type ListSweepsParams struct {
 	Limit *Limit `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// ListUsersParams defines parameters for ListUsers.
+type ListUsersParams struct {
+	Email  *string     `form:"email,omitempty" json:"email,omitempty"`
+	Status *UserStatus `form:"status,omitempty" json:"status,omitempty"`
+	Role   *UserRole   `form:"role,omitempty" json:"role,omitempty"`
+	Limit  *Limit      `form:"limit,omitempty" json:"limit,omitempty"`
+	Offset *Offset     `form:"offset,omitempty" json:"offset,omitempty"`
 }
 
 // ListWebhookDeliveriesParams defines parameters for ListWebhookDeliveries.
@@ -935,14 +1632,41 @@ type CreateAccountJSONRequestBody = CreateAccountRequest
 // SetAccountStatusJSONRequestBody defines body for SetAccountStatus for application/json ContentType.
 type SetAccountStatusJSONRequestBody = AccountStatusRequest
 
+// CreateAssetJSONRequestBody defines body for CreateAsset for application/json ContentType.
+type CreateAssetJSONRequestBody = CreateAssetRequest
+
+// UpdateAssetJSONRequestBody defines body for UpdateAsset for application/json ContentType.
+type UpdateAssetJSONRequestBody = AssetRequest
+
+// RequestReloadJSONRequestBody defines body for RequestReload for application/json ContentType.
+type RequestReloadJSONRequestBody = ReloadRequest
+
+// CreateFeeScheduleJSONRequestBody defines body for CreateFeeSchedule for application/json ContentType.
+type CreateFeeScheduleJSONRequestBody = CreateFeeScheduleRequest
+
+// UpdateFeeScheduleJSONRequestBody defines body for UpdateFeeSchedule for application/json ContentType.
+type UpdateFeeScheduleJSONRequestBody = FeeScheduleRequest
+
 // CreateAdjustmentJSONRequestBody defines body for CreateAdjustment for application/json ContentType.
 type CreateAdjustmentJSONRequestBody = AdjustmentRequest
 
 // CreateHouseAdjustmentJSONRequestBody defines body for CreateHouseAdjustment for application/json ContentType.
 type CreateHouseAdjustmentJSONRequestBody = HouseAdjustmentRequest
 
+// CreateMarketJSONRequestBody defines body for CreateMarket for application/json ContentType.
+type CreateMarketJSONRequestBody = CreateMarketRequest
+
+// UpdateMarketJSONRequestBody defines body for UpdateMarket for application/json ContentType.
+type UpdateMarketJSONRequestBody = MarketRequest
+
 // SetMarketStatusJSONRequestBody defines body for SetMarketStatus for application/json ContentType.
 type SetMarketStatusJSONRequestBody = MarketStatusRequest
+
+// SetUserKycLevelJSONRequestBody defines body for SetUserKycLevel for application/json ContentType.
+type SetUserKycLevelJSONRequestBody = KycLevelRequest
+
+// SetUserStatusJSONRequestBody defines body for SetUserStatus for application/json ContentType.
+type SetUserStatusJSONRequestBody = UserStatusRequest
 
 // CreateWebhookEndpointJSONRequestBody defines body for CreateWebhookEndpoint for application/json ContentType.
 type CreateWebhookEndpointJSONRequestBody = WebhookEndpointRequest
@@ -950,8 +1674,14 @@ type CreateWebhookEndpointJSONRequestBody = WebhookEndpointRequest
 // UpdateWebhookEndpointJSONRequestBody defines body for UpdateWebhookEndpoint for application/json ContentType.
 type UpdateWebhookEndpointJSONRequestBody = WebhookEndpointUpdateRequest
 
+// RotateWebhookSecretJSONRequestBody defines body for RotateWebhookSecret for application/json ContentType.
+type RotateWebhookSecretJSONRequestBody = RotateSecretRequest
+
 // SetWebhookEndpointStatusJSONRequestBody defines body for SetWebhookEndpointStatus for application/json ContentType.
 type SetWebhookEndpointStatusJSONRequestBody = WebhookEndpointStatusRequest
+
+// SetWithdrawalLimitJSONRequestBody defines body for SetWithdrawalLimit for application/json ContentType.
+type SetWithdrawalLimitJSONRequestBody = WithdrawalLimitRequest
 
 // ResolveWithdrawalJSONRequestBody defines body for ResolveWithdrawal for application/json ContentType.
 type ResolveWithdrawalJSONRequestBody = WithdrawalResolveRequest
@@ -1080,10 +1810,123 @@ type ClientInterface interface {
 	// Corresponds with PUT /admin/v1/accounts/{id}/status (the `SetAccountStatus` operationId).
 	SetAccountStatus(ctx context.Context, id AccountID, body SetAccountStatusJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// ListAssets Assets of the tenant
+	//
+	// Corresponds with GET /admin/v1/assets (the `ListAssets` operationId).
+	ListAssets(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// CreateAssetWithBody List a new asset
+	//
+	// Publishes asset.updated with changed_fields ["created"]. A market can reference the asset from then on; deposits and withdrawals follow the two enabled flags.
+	//
+	// Takes any type of body and a specified content type.
+	//
+	// Corresponds with POST /admin/v1/assets (the `CreateAsset` operationId).
+	CreateAssetWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// CreateAsset List a new asset
+	//
+	// Publishes asset.updated with changed_fields ["created"]. A market can reference the asset from then on; deposits and withdrawals follow the two enabled flags.
+	//
+	// Takes a body of the `application/json` content type.
+	//
+	// Corresponds with POST /admin/v1/assets (the `CreateAsset` operationId).
+	CreateAsset(ctx context.Context, body CreateAssetJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetAsset Get one asset
+	//
+	// Corresponds with GET /admin/v1/assets/{symbol} (the `GetAsset` operationId).
+	GetAsset(ctx context.Context, symbol AssetSymbol, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// UpdateAssetWithBody Edit an asset
+	//
+	// Replaces every writable field. Publishes asset.updated naming the fields that changed; a body equal to the current row changes nothing and emits no event. The scale cannot shrink below what any market on the asset needs.
+	//
+	// Takes any type of body and a specified content type.
+	//
+	// Corresponds with PUT /admin/v1/assets/{symbol} (the `UpdateAsset` operationId).
+	UpdateAssetWithBody(ctx context.Context, symbol AssetSymbol, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// UpdateAsset Edit an asset
+	//
+	// Replaces every writable field. Publishes asset.updated naming the fields that changed; a body equal to the current row changes nothing and emits no event. The scale cannot shrink below what any market on the asset needs.
+	//
+	// Takes a body of the `application/json` content type.
+	//
+	// Corresponds with PUT /admin/v1/assets/{symbol} (the `UpdateAsset` operationId).
+	UpdateAsset(ctx context.Context, symbol AssetSymbol, body UpdateAssetJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// ListAuditEvents Audit trail, newest first
 	//
 	// Corresponds with GET /admin/v1/audit-events (the `ListAuditEvents` operationId).
 	ListAuditEvents(ctx context.Context, params *ListAuditEventsParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ListDeposits Deposits the chain role has seen, newest first
+	//
+	// Corresponds with GET /admin/v1/deposits (the `ListDeposits` operationId).
+	ListDeposits(ctx context.Context, params *ListDepositsParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// RequestReloadWithBody Ask every engine to reload its registry cache
+	//
+	// Publishes registry.reload with no row changed: after a seed, or when in doubt. 202: the request is in the outbox; the engine's reload consumer acts on it.
+	//
+	// Takes any type of body and a specified content type.
+	//
+	// Corresponds with POST /admin/v1/engine/reload (the `RequestReload` operationId).
+	RequestReloadWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// RequestReload Ask every engine to reload its registry cache
+	//
+	// Publishes registry.reload with no row changed: after a seed, or when in doubt. 202: the request is in the outbox; the engine's reload consumer acts on it.
+	//
+	// Takes a body of the `application/json` content type.
+	//
+	// Corresponds with POST /admin/v1/engine/reload (the `RequestReload` operationId).
+	RequestReload(ctx context.Context, body RequestReloadJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ListFeeSchedules Fee schedules of the tenant
+	//
+	// Corresponds with GET /admin/v1/fee-schedules (the `ListFeeSchedules` operationId).
+	ListFeeSchedules(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// CreateFeeScheduleWithBody Add a fee schedule
+	//
+	// Takes any type of body and a specified content type.
+	//
+	// Corresponds with POST /admin/v1/fee-schedules (the `CreateFeeSchedule` operationId).
+	CreateFeeScheduleWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// CreateFeeSchedule Add a fee schedule
+	//
+	// Takes a body of the `application/json` content type.
+	//
+	// Corresponds with POST /admin/v1/fee-schedules (the `CreateFeeSchedule` operationId).
+	CreateFeeSchedule(ctx context.Context, body CreateFeeScheduleJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// UpdateFeeScheduleWithBody Change a fee schedule's rates
+	//
+	// Every market on the schedule pays the new rates from the next trade. Publishes fee_schedule.updated (and no market.updated for the markets on it; the engine reloads its whole cache on either).
+	//
+	// Takes any type of body and a specified content type.
+	//
+	// Corresponds with PUT /admin/v1/fee-schedules/{name} (the `UpdateFeeSchedule` operationId).
+	UpdateFeeScheduleWithBody(ctx context.Context, name FeeScheduleName, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// UpdateFeeSchedule Change a fee schedule's rates
+	//
+	// Every market on the schedule pays the new rates from the next trade. Publishes fee_schedule.updated (and no market.updated for the markets on it; the engine reloads its whole cache on either).
+	//
+	// Takes a body of the `application/json` content type.
+	//
+	// Corresponds with PUT /admin/v1/fee-schedules/{name} (the `UpdateFeeSchedule` operationId).
+	UpdateFeeSchedule(ctx context.Context, name FeeScheduleName, body UpdateFeeScheduleJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetHotWallet The hot wallet, as the chain role keeps it
+	//
+	// Address, next nonce and the low-balance alert state from chain.hot_wallets, with the ledger's custody_hot balance per asset. The chain's own figure is what reconciliation compares that balance to. 404 until the chain role has started once against this chain.
+	//
+	// Corresponds with GET /admin/v1/hot-wallet (the `GetHotWallet` operationId).
+	GetHotWallet(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// CreateAdjustmentWithBody Post a manual adjustment against the external account
 	//
@@ -1180,6 +2023,47 @@ type ClientInterface interface {
 	// Corresponds with GET /admin/v1/markets (the `ListMarkets` operationId).
 	ListMarkets(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// CreateMarketWithBody List a new market
+	//
+	// Assets and the fee schedule are referenced by symbol and name, and must exist. Publishes market.updated with changed_fields ["created"]; the engine opens the book on reload.
+	//
+	// Takes any type of body and a specified content type.
+	//
+	// Corresponds with POST /admin/v1/markets (the `CreateMarket` operationId).
+	CreateMarketWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// CreateMarket List a new market
+	//
+	// Assets and the fee schedule are referenced by symbol and name, and must exist. Publishes market.updated with changed_fields ["created"]; the engine opens the book on reload.
+	//
+	// Takes a body of the `application/json` content type.
+	//
+	// Corresponds with POST /admin/v1/markets (the `CreateMarket` operationId).
+	CreateMarket(ctx context.Context, body CreateMarketJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetMarket Get one market
+	//
+	// Corresponds with GET /admin/v1/markets/{symbol} (the `GetMarket` operationId).
+	GetMarket(ctx context.Context, symbol MarketSymbol, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// UpdateMarketWithBody Edit a market
+	//
+	// Replaces every writable field, status included. Publishes market.updated naming the fields that changed; a body equal to the current row changes nothing and emits no event. Precision must still fit the assets (price_tick within the quote scale, qty_step within the base scale).
+	//
+	// Takes any type of body and a specified content type.
+	//
+	// Corresponds with PUT /admin/v1/markets/{symbol} (the `UpdateMarket` operationId).
+	UpdateMarketWithBody(ctx context.Context, symbol MarketSymbol, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// UpdateMarket Edit a market
+	//
+	// Replaces every writable field, status included. Publishes market.updated naming the fields that changed; a body equal to the current row changes nothing and emits no event. Precision must still fit the assets (price_tick within the quote scale, qty_step within the base scale).
+	//
+	// Takes a body of the `application/json` content type.
+	//
+	// Corresponds with PUT /admin/v1/markets/{symbol} (the `UpdateMarket` operationId).
+	UpdateMarket(ctx context.Context, symbol MarketSymbol, body UpdateMarketJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// SetMarketStatusWithBody Halt, resume or delist a market
 	//
 	// Changes the market's trading status and publishes market.updated, which the engine consumes to reload its registry cache without a restart. Setting the status a market already has changes nothing and emits no event. The path parameter is the symbol, matching GET /v1/markets/{symbol}.
@@ -1221,6 +2105,18 @@ type ClientInterface interface {
 	// Corresponds with GET /admin/v1/reconciliation (the `GetReconciliation` operationId).
 	GetReconciliation(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// ListReconciliationBreaks Every break on record, both kinds, newest first
+	//
+	// Two families with different terms. A chain break is one asset of one reconciliation pass whose on-chain custody did not match the ledger's; the chain role writes it (docs/plan-v1.0.md §6.4.4). A ledger break is one asset whose debits and credits do not agree, found by the admin role checking the ledger against itself; it has an open/resolved state because the condition can end.
+	//
+	// Corresponds with GET /admin/v1/reconciliation/breaks (the `ListReconciliationBreaks` operationId).
+	ListReconciliationBreaks(ctx context.Context, params *ListReconciliationBreaksParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ListReconciliationReports Reconciliation passes, newest first
+	//
+	// Corresponds with GET /admin/v1/reconciliation/reports (the `ListReconciliationReports` operationId).
+	ListReconciliationReports(ctx context.Context, params *ListReconciliationReportsParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// ListSweeps Recent collections into the hot wallet
 	//
 	// Sweeps move deposits from the per-account addresses they landed on to the hot wallet withdrawals are paid from (docs/plan-v1.0.md §6.4.3). No user balance is involved: a sweep moves the exchange's own custody between two of its own house accounts.
@@ -1229,6 +2125,64 @@ type ClientInterface interface {
 	//
 	// Corresponds with GET /admin/v1/sweeps (the `ListSweeps` operationId).
 	ListSweeps(ctx context.Context, params *ListSweepsParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetSystemStatus What the dashboard shows
+	//
+	// One read of the things an operator checks first thing: whether the
+	// ledger balances, what the last reconciliation found, and how much is
+	// waiting on a person. Counts are capped where noted; a tile that says
+	// "500+" has made its point.
+	//
+	// Corresponds with GET /admin/v1/system/status (the `GetSystemStatus` operationId).
+	GetSystemStatus(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ListUsers List users
+	//
+	// The operator's directory. `email` is a fragment matched anywhere in the address (no wildcards). Newest first.
+	//
+	// Corresponds with GET /admin/v1/users (the `ListUsers` operationId).
+	ListUsers(ctx context.Context, params *ListUsersParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetUser Get one user
+	//
+	// Corresponds with GET /admin/v1/users/{id} (the `GetUser` operationId).
+	GetUser(ctx context.Context, id UserID, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// SetUserKycLevelWithBody Set a user's KYC level
+	//
+	// The withdrawal policy reads the level on each request, so the next withdrawal is decided under the new limits; nothing already pending is re-decided. Publishes `user.kyc_level_updated` when the level changes.
+	//
+	// Takes any type of body and a specified content type.
+	//
+	// Corresponds with PUT /admin/v1/users/{id}/kyc-level (the `SetUserKycLevel` operationId).
+	SetUserKycLevelWithBody(ctx context.Context, id UserID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// SetUserKycLevel Set a user's KYC level
+	//
+	// The withdrawal policy reads the level on each request, so the next withdrawal is decided under the new limits; nothing already pending is re-decided. Publishes `user.kyc_level_updated` when the level changes.
+	//
+	// Takes a body of the `application/json` content type.
+	//
+	// Corresponds with PUT /admin/v1/users/{id}/kyc-level (the `SetUserKycLevel` operationId).
+	SetUserKycLevel(ctx context.Context, id UserID, body SetUserKycLevelJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// SetUserStatusWithBody Freeze or release a user
+	//
+	// Frozen means the user cannot log in, refresh a token or use an API key, and their spot account is frozen in the same transaction (no orders, no withdrawals). An access token already issued lasts its fifteen minutes. Releasing reverses all of it. Refuses to freeze the last active administrator. Publishes `user.status_updated` when the status changes.
+	//
+	// Takes any type of body and a specified content type.
+	//
+	// Corresponds with PUT /admin/v1/users/{id}/status (the `SetUserStatus` operationId).
+	SetUserStatusWithBody(ctx context.Context, id UserID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// SetUserStatus Freeze or release a user
+	//
+	// Frozen means the user cannot log in, refresh a token or use an API key, and their spot account is frozen in the same transaction (no orders, no withdrawals). An access token already issued lasts its fifteen minutes. Releasing reverses all of it. Refuses to freeze the last active administrator. Publishes `user.status_updated` when the status changes.
+	//
+	// Takes a body of the `application/json` content type.
+	//
+	// Corresponds with PUT /admin/v1/users/{id}/status (the `SetUserStatus` operationId).
+	SetUserStatus(ctx context.Context, id UserID, body SetUserStatusJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// ListWebhookEndpoints Webhook endpoints, disabled ones included
 	//
@@ -1314,6 +2268,24 @@ type ClientInterface interface {
 	// Corresponds with POST /admin/v1/webhooks/{id}/deliveries/{delivery_id}/replay (the `ReplayWebhookDelivery` operationId).
 	ReplayWebhookDelivery(ctx context.Context, id WebhookEndpointID, deliveryID WebhookDeliveryID, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// RotateWebhookSecretWithBody Issue a new signing secret and keep the old one for a grace period
+	//
+	// The new secret is in this response and nowhere else. Until previous_secret_until, every delivery carries two signatures, `v1=<new>,v1=<old>`, so a receiver that has switched and one that has not both keep verifying; after it, only the new one signs. Rotating again inside the grace period replaces the old secret: the newest two are the only ones ever valid.
+	//
+	// Takes any type of body and a specified content type.
+	//
+	// Corresponds with POST /admin/v1/webhooks/{id}/rotate-secret (the `RotateWebhookSecret` operationId).
+	RotateWebhookSecretWithBody(ctx context.Context, id WebhookEndpointID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// RotateWebhookSecret Issue a new signing secret and keep the old one for a grace period
+	//
+	// The new secret is in this response and nowhere else. Until previous_secret_until, every delivery carries two signatures, `v1=<new>,v1=<old>`, so a receiver that has switched and one that has not both keep verifying; after it, only the new one signs. Rotating again inside the grace period replaces the old secret: the newest two are the only ones ever valid.
+	//
+	// Takes a body of the `application/json` content type.
+	//
+	// Corresponds with POST /admin/v1/webhooks/{id}/rotate-secret (the `RotateWebhookSecret` operationId).
+	RotateWebhookSecret(ctx context.Context, id WebhookEndpointID, body RotateWebhookSecretJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// SetWebhookEndpointStatusWithBody Enable or disable an endpoint
 	//
 	// Disabling also drops whatever is still queued for the endpoint. Queued deliveries to an inactive endpoint are not pending but unreachable, and leaving them would fire a batch of stale events at the customer whenever the integration was turned back on. The delivery history is untouched, and the number dropped is recorded in the audit trail.
@@ -1331,6 +2303,29 @@ type ClientInterface interface {
 	//
 	// Corresponds with PUT /admin/v1/webhooks/{id}/status (the `SetWebhookEndpointStatus` operationId).
 	SetWebhookEndpointStatus(ctx context.Context, id WebhookEndpointID, body SetWebhookEndpointStatusJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ListWithdrawalLimits Withdrawal limits per asset and KYC level
+	//
+	// Corresponds with GET /admin/v1/withdrawal-limits (the `ListWithdrawalLimits` operationId).
+	ListWithdrawalLimits(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// SetWithdrawalLimitWithBody Set the limits of one asset at one KYC level
+	//
+	// Creates the row when there is none. The withdrawal policy reads the limits on each request, so the next withdrawal is decided under the new ones. No event: nothing caches these.
+	//
+	// Takes any type of body and a specified content type.
+	//
+	// Corresponds with PUT /admin/v1/withdrawal-limits/{asset}/{kyc_level} (the `SetWithdrawalLimit` operationId).
+	SetWithdrawalLimitWithBody(ctx context.Context, asset AssetPath, kycLevel KycLevelPath, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// SetWithdrawalLimit Set the limits of one asset at one KYC level
+	//
+	// Creates the row when there is none. The withdrawal policy reads the limits on each request, so the next withdrawal is decided under the new ones. No event: nothing caches these.
+	//
+	// Takes a body of the `application/json` content type.
+	//
+	// Corresponds with PUT /admin/v1/withdrawal-limits/{asset}/{kyc_level} (the `SetWithdrawalLimit` operationId).
+	SetWithdrawalLimit(ctx context.Context, asset AssetPath, kycLevel KycLevelPath, body SetWithdrawalLimitJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// ListWithdrawalsForReview The withdrawal review queue
 	//
@@ -1505,11 +2500,274 @@ func (c *Client) SetAccountStatus(ctx context.Context, id AccountID, body SetAcc
 	return c.Client.Do(req)
 }
 
+// ListAssets Assets of the tenant
+//
+// Corresponds with GET /admin/v1/assets (the `ListAssets` operationId).
+func (c *Client) ListAssets(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListAssetsRequest(c.Server)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// CreateAssetWithBody List a new asset
+//
+// Publishes asset.updated with changed_fields ["created"]. A market can reference the asset from then on; deposits and withdrawals follow the two enabled flags.
+//
+// Takes any type of body and a specified content type.
+//
+// Corresponds with POST /admin/v1/assets (the `CreateAsset` operationId).
+func (c *Client) CreateAssetWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCreateAssetRequestWithBody(c.Server, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// CreateAsset List a new asset
+//
+// Publishes asset.updated with changed_fields ["created"]. A market can reference the asset from then on; deposits and withdrawals follow the two enabled flags.
+//
+// Takes a body of the `application/json` content type.
+//
+// Corresponds with POST /admin/v1/assets (the `CreateAsset` operationId).
+func (c *Client) CreateAsset(ctx context.Context, body CreateAssetJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCreateAssetRequest(c.Server, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// GetAsset Get one asset
+//
+// Corresponds with GET /admin/v1/assets/{symbol} (the `GetAsset` operationId).
+func (c *Client) GetAsset(ctx context.Context, symbol AssetSymbol, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetAssetRequest(c.Server, symbol)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// UpdateAssetWithBody Edit an asset
+//
+// Replaces every writable field. Publishes asset.updated naming the fields that changed; a body equal to the current row changes nothing and emits no event. The scale cannot shrink below what any market on the asset needs.
+//
+// Takes any type of body and a specified content type.
+//
+// Corresponds with PUT /admin/v1/assets/{symbol} (the `UpdateAsset` operationId).
+func (c *Client) UpdateAssetWithBody(ctx context.Context, symbol AssetSymbol, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewUpdateAssetRequestWithBody(c.Server, symbol, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// UpdateAsset Edit an asset
+//
+// Replaces every writable field. Publishes asset.updated naming the fields that changed; a body equal to the current row changes nothing and emits no event. The scale cannot shrink below what any market on the asset needs.
+//
+// Takes a body of the `application/json` content type.
+//
+// Corresponds with PUT /admin/v1/assets/{symbol} (the `UpdateAsset` operationId).
+func (c *Client) UpdateAsset(ctx context.Context, symbol AssetSymbol, body UpdateAssetJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewUpdateAssetRequest(c.Server, symbol, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
 // ListAuditEvents Audit trail, newest first
 //
 // Corresponds with GET /admin/v1/audit-events (the `ListAuditEvents` operationId).
 func (c *Client) ListAuditEvents(ctx context.Context, params *ListAuditEventsParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewListAuditEventsRequest(c.Server, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// ListDeposits Deposits the chain role has seen, newest first
+//
+// Corresponds with GET /admin/v1/deposits (the `ListDeposits` operationId).
+func (c *Client) ListDeposits(ctx context.Context, params *ListDepositsParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListDepositsRequest(c.Server, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// RequestReloadWithBody Ask every engine to reload its registry cache
+//
+// Publishes registry.reload with no row changed: after a seed, or when in doubt. 202: the request is in the outbox; the engine's reload consumer acts on it.
+//
+// Takes any type of body and a specified content type.
+//
+// Corresponds with POST /admin/v1/engine/reload (the `RequestReload` operationId).
+func (c *Client) RequestReloadWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewRequestReloadRequestWithBody(c.Server, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// RequestReload Ask every engine to reload its registry cache
+//
+// Publishes registry.reload with no row changed: after a seed, or when in doubt. 202: the request is in the outbox; the engine's reload consumer acts on it.
+//
+// Takes a body of the `application/json` content type.
+//
+// Corresponds with POST /admin/v1/engine/reload (the `RequestReload` operationId).
+func (c *Client) RequestReload(ctx context.Context, body RequestReloadJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewRequestReloadRequest(c.Server, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// ListFeeSchedules Fee schedules of the tenant
+//
+// Corresponds with GET /admin/v1/fee-schedules (the `ListFeeSchedules` operationId).
+func (c *Client) ListFeeSchedules(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListFeeSchedulesRequest(c.Server)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// CreateFeeScheduleWithBody Add a fee schedule
+//
+// Takes any type of body and a specified content type.
+//
+// Corresponds with POST /admin/v1/fee-schedules (the `CreateFeeSchedule` operationId).
+func (c *Client) CreateFeeScheduleWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCreateFeeScheduleRequestWithBody(c.Server, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// CreateFeeSchedule Add a fee schedule
+//
+// Takes a body of the `application/json` content type.
+//
+// Corresponds with POST /admin/v1/fee-schedules (the `CreateFeeSchedule` operationId).
+func (c *Client) CreateFeeSchedule(ctx context.Context, body CreateFeeScheduleJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCreateFeeScheduleRequest(c.Server, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// UpdateFeeScheduleWithBody Change a fee schedule's rates
+//
+// Every market on the schedule pays the new rates from the next trade. Publishes fee_schedule.updated (and no market.updated for the markets on it; the engine reloads its whole cache on either).
+//
+// Takes any type of body and a specified content type.
+//
+// Corresponds with PUT /admin/v1/fee-schedules/{name} (the `UpdateFeeSchedule` operationId).
+func (c *Client) UpdateFeeScheduleWithBody(ctx context.Context, name FeeScheduleName, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewUpdateFeeScheduleRequestWithBody(c.Server, name, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// UpdateFeeSchedule Change a fee schedule's rates
+//
+// Every market on the schedule pays the new rates from the next trade. Publishes fee_schedule.updated (and no market.updated for the markets on it; the engine reloads its whole cache on either).
+//
+// Takes a body of the `application/json` content type.
+//
+// Corresponds with PUT /admin/v1/fee-schedules/{name} (the `UpdateFeeSchedule` operationId).
+func (c *Client) UpdateFeeSchedule(ctx context.Context, name FeeScheduleName, body UpdateFeeScheduleJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewUpdateFeeScheduleRequest(c.Server, name, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// GetHotWallet The hot wallet, as the chain role keeps it
+//
+// Address, next nonce and the low-balance alert state from chain.hot_wallets, with the ledger's custody_hot balance per asset. The chain's own figure is what reconciliation compares that balance to. 404 until the chain role has started once against this chain.
+//
+// Corresponds with GET /admin/v1/hot-wallet (the `GetHotWallet` operationId).
+func (c *Client) GetHotWallet(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetHotWalletRequest(c.Server)
 	if err != nil {
 		return nil, err
 	}
@@ -1685,6 +2943,97 @@ func (c *Client) ListMarkets(ctx context.Context, reqEditors ...RequestEditorFn)
 	return c.Client.Do(req)
 }
 
+// CreateMarketWithBody List a new market
+//
+// Assets and the fee schedule are referenced by symbol and name, and must exist. Publishes market.updated with changed_fields ["created"]; the engine opens the book on reload.
+//
+// Takes any type of body and a specified content type.
+//
+// Corresponds with POST /admin/v1/markets (the `CreateMarket` operationId).
+func (c *Client) CreateMarketWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCreateMarketRequestWithBody(c.Server, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// CreateMarket List a new market
+//
+// Assets and the fee schedule are referenced by symbol and name, and must exist. Publishes market.updated with changed_fields ["created"]; the engine opens the book on reload.
+//
+// Takes a body of the `application/json` content type.
+//
+// Corresponds with POST /admin/v1/markets (the `CreateMarket` operationId).
+func (c *Client) CreateMarket(ctx context.Context, body CreateMarketJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCreateMarketRequest(c.Server, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// GetMarket Get one market
+//
+// Corresponds with GET /admin/v1/markets/{symbol} (the `GetMarket` operationId).
+func (c *Client) GetMarket(ctx context.Context, symbol MarketSymbol, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetMarketRequest(c.Server, symbol)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// UpdateMarketWithBody Edit a market
+//
+// Replaces every writable field, status included. Publishes market.updated naming the fields that changed; a body equal to the current row changes nothing and emits no event. Precision must still fit the assets (price_tick within the quote scale, qty_step within the base scale).
+//
+// Takes any type of body and a specified content type.
+//
+// Corresponds with PUT /admin/v1/markets/{symbol} (the `UpdateMarket` operationId).
+func (c *Client) UpdateMarketWithBody(ctx context.Context, symbol MarketSymbol, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewUpdateMarketRequestWithBody(c.Server, symbol, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// UpdateMarket Edit a market
+//
+// Replaces every writable field, status included. Publishes market.updated naming the fields that changed; a body equal to the current row changes nothing and emits no event. Precision must still fit the assets (price_tick within the quote scale, qty_step within the base scale).
+//
+// Takes a body of the `application/json` content type.
+//
+// Corresponds with PUT /admin/v1/markets/{symbol} (the `UpdateMarket` operationId).
+func (c *Client) UpdateMarket(ctx context.Context, symbol MarketSymbol, body UpdateMarketJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewUpdateMarketRequest(c.Server, symbol, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
 // SetMarketStatusWithBody Halt, resume or delist a market
 //
 // Changes the market's trading status and publishes market.updated, which the engine consumes to reload its registry cache without a restart. Setting the status a market already has changes nothing and emits no event. The path parameter is the symbol, matching GET /v1/markets/{symbol}.
@@ -1756,6 +3105,38 @@ func (c *Client) GetReconciliation(ctx context.Context, reqEditors ...RequestEdi
 	return c.Client.Do(req)
 }
 
+// ListReconciliationBreaks Every break on record, both kinds, newest first
+//
+// Two families with different terms. A chain break is one asset of one reconciliation pass whose on-chain custody did not match the ledger's; the chain role writes it (docs/plan-v1.0.md §6.4.4). A ledger break is one asset whose debits and credits do not agree, found by the admin role checking the ledger against itself; it has an open/resolved state because the condition can end.
+//
+// Corresponds with GET /admin/v1/reconciliation/breaks (the `ListReconciliationBreaks` operationId).
+func (c *Client) ListReconciliationBreaks(ctx context.Context, params *ListReconciliationBreaksParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListReconciliationBreaksRequest(c.Server, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// ListReconciliationReports Reconciliation passes, newest first
+//
+// Corresponds with GET /admin/v1/reconciliation/reports (the `ListReconciliationReports` operationId).
+func (c *Client) ListReconciliationReports(ctx context.Context, params *ListReconciliationReportsParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListReconciliationReportsRequest(c.Server, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
 // ListSweeps Recent collections into the hot wallet
 //
 // Sweeps move deposits from the per-account addresses they landed on to the hot wallet withdrawals are paid from (docs/plan-v1.0.md §6.4.3). No user balance is involved: a sweep moves the exchange's own custody between two of its own house accounts.
@@ -1765,6 +3146,134 @@ func (c *Client) GetReconciliation(ctx context.Context, reqEditors ...RequestEdi
 // Corresponds with GET /admin/v1/sweeps (the `ListSweeps` operationId).
 func (c *Client) ListSweeps(ctx context.Context, params *ListSweepsParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewListSweepsRequest(c.Server, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// GetSystemStatus What the dashboard shows
+//
+// One read of the things an operator checks first thing: whether the
+// ledger balances, what the last reconciliation found, and how much is
+// waiting on a person. Counts are capped where noted; a tile that says
+// "500+" has made its point.
+//
+// Corresponds with GET /admin/v1/system/status (the `GetSystemStatus` operationId).
+func (c *Client) GetSystemStatus(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetSystemStatusRequest(c.Server)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// ListUsers List users
+//
+// The operator's directory. `email` is a fragment matched anywhere in the address (no wildcards). Newest first.
+//
+// Corresponds with GET /admin/v1/users (the `ListUsers` operationId).
+func (c *Client) ListUsers(ctx context.Context, params *ListUsersParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListUsersRequest(c.Server, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// GetUser Get one user
+//
+// Corresponds with GET /admin/v1/users/{id} (the `GetUser` operationId).
+func (c *Client) GetUser(ctx context.Context, id UserID, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetUserRequest(c.Server, id)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// SetUserKycLevelWithBody Set a user's KYC level
+//
+// The withdrawal policy reads the level on each request, so the next withdrawal is decided under the new limits; nothing already pending is re-decided. Publishes `user.kyc_level_updated` when the level changes.
+//
+// Takes any type of body and a specified content type.
+//
+// Corresponds with PUT /admin/v1/users/{id}/kyc-level (the `SetUserKycLevel` operationId).
+func (c *Client) SetUserKycLevelWithBody(ctx context.Context, id UserID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewSetUserKycLevelRequestWithBody(c.Server, id, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// SetUserKycLevel Set a user's KYC level
+//
+// The withdrawal policy reads the level on each request, so the next withdrawal is decided under the new limits; nothing already pending is re-decided. Publishes `user.kyc_level_updated` when the level changes.
+//
+// Takes a body of the `application/json` content type.
+//
+// Corresponds with PUT /admin/v1/users/{id}/kyc-level (the `SetUserKycLevel` operationId).
+func (c *Client) SetUserKycLevel(ctx context.Context, id UserID, body SetUserKycLevelJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewSetUserKycLevelRequest(c.Server, id, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// SetUserStatusWithBody Freeze or release a user
+//
+// Frozen means the user cannot log in, refresh a token or use an API key, and their spot account is frozen in the same transaction (no orders, no withdrawals). An access token already issued lasts its fifteen minutes. Releasing reverses all of it. Refuses to freeze the last active administrator. Publishes `user.status_updated` when the status changes.
+//
+// Takes any type of body and a specified content type.
+//
+// Corresponds with PUT /admin/v1/users/{id}/status (the `SetUserStatus` operationId).
+func (c *Client) SetUserStatusWithBody(ctx context.Context, id UserID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewSetUserStatusRequestWithBody(c.Server, id, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// SetUserStatus Freeze or release a user
+//
+// Frozen means the user cannot log in, refresh a token or use an API key, and their spot account is frozen in the same transaction (no orders, no withdrawals). An access token already issued lasts its fifteen minutes. Releasing reverses all of it. Refuses to freeze the last active administrator. Publishes `user.status_updated` when the status changes.
+//
+// Takes a body of the `application/json` content type.
+//
+// Corresponds with PUT /admin/v1/users/{id}/status (the `SetUserStatus` operationId).
+func (c *Client) SetUserStatus(ctx context.Context, id UserID, body SetUserStatusJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewSetUserStatusRequest(c.Server, id, body)
 	if err != nil {
 		return nil, err
 	}
@@ -1929,6 +3438,44 @@ func (c *Client) ReplayWebhookDelivery(ctx context.Context, id WebhookEndpointID
 	return c.Client.Do(req)
 }
 
+// RotateWebhookSecretWithBody Issue a new signing secret and keep the old one for a grace period
+//
+// The new secret is in this response and nowhere else. Until previous_secret_until, every delivery carries two signatures, `v1=<new>,v1=<old>`, so a receiver that has switched and one that has not both keep verifying; after it, only the new one signs. Rotating again inside the grace period replaces the old secret: the newest two are the only ones ever valid.
+//
+// Takes any type of body and a specified content type.
+//
+// Corresponds with POST /admin/v1/webhooks/{id}/rotate-secret (the `RotateWebhookSecret` operationId).
+func (c *Client) RotateWebhookSecretWithBody(ctx context.Context, id WebhookEndpointID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewRotateWebhookSecretRequestWithBody(c.Server, id, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// RotateWebhookSecret Issue a new signing secret and keep the old one for a grace period
+//
+// The new secret is in this response and nowhere else. Until previous_secret_until, every delivery carries two signatures, `v1=<new>,v1=<old>`, so a receiver that has switched and one that has not both keep verifying; after it, only the new one signs. Rotating again inside the grace period replaces the old secret: the newest two are the only ones ever valid.
+//
+// Takes a body of the `application/json` content type.
+//
+// Corresponds with POST /admin/v1/webhooks/{id}/rotate-secret (the `RotateWebhookSecret` operationId).
+func (c *Client) RotateWebhookSecret(ctx context.Context, id WebhookEndpointID, body RotateWebhookSecretJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewRotateWebhookSecretRequest(c.Server, id, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
 // SetWebhookEndpointStatusWithBody Enable or disable an endpoint
 //
 // Disabling also drops whatever is still queued for the endpoint. Queued deliveries to an inactive endpoint are not pending but unreachable, and leaving them would fire a batch of stale events at the customer whenever the integration was turned back on. The delivery history is untouched, and the number dropped is recorded in the audit trail.
@@ -1957,6 +3504,59 @@ func (c *Client) SetWebhookEndpointStatusWithBody(ctx context.Context, id Webhoo
 // Corresponds with PUT /admin/v1/webhooks/{id}/status (the `SetWebhookEndpointStatus` operationId).
 func (c *Client) SetWebhookEndpointStatus(ctx context.Context, id WebhookEndpointID, body SetWebhookEndpointStatusJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewSetWebhookEndpointStatusRequest(c.Server, id, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// ListWithdrawalLimits Withdrawal limits per asset and KYC level
+//
+// Corresponds with GET /admin/v1/withdrawal-limits (the `ListWithdrawalLimits` operationId).
+func (c *Client) ListWithdrawalLimits(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListWithdrawalLimitsRequest(c.Server)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// SetWithdrawalLimitWithBody Set the limits of one asset at one KYC level
+//
+// Creates the row when there is none. The withdrawal policy reads the limits on each request, so the next withdrawal is decided under the new ones. No event: nothing caches these.
+//
+// Takes any type of body and a specified content type.
+//
+// Corresponds with PUT /admin/v1/withdrawal-limits/{asset}/{kyc_level} (the `SetWithdrawalLimit` operationId).
+func (c *Client) SetWithdrawalLimitWithBody(ctx context.Context, asset AssetPath, kycLevel KycLevelPath, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewSetWithdrawalLimitRequestWithBody(c.Server, asset, kycLevel, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// SetWithdrawalLimit Set the limits of one asset at one KYC level
+//
+// Creates the row when there is none. The withdrawal policy reads the limits on each request, so the next withdrawal is decided under the new ones. No event: nothing caches these.
+//
+// Takes a body of the `application/json` content type.
+//
+// Corresponds with PUT /admin/v1/withdrawal-limits/{asset}/{kyc_level} (the `SetWithdrawalLimit` operationId).
+func (c *Client) SetWithdrawalLimit(ctx context.Context, asset AssetPath, kycLevel KycLevelPath, body SetWithdrawalLimitJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewSetWithdrawalLimitRequest(c.Server, asset, kycLevel, body)
 	if err != nil {
 		return nil, err
 	}
@@ -2305,6 +3905,154 @@ func NewSetAccountStatusRequestWithBody(server string, id AccountID, contentType
 	return req, nil
 }
 
+// NewListAssetsRequest constructs an http.Request for the ListAssets method
+func NewListAssetsRequest(server string) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/admin/v1/assets")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewCreateAssetRequest calls the generic CreateAsset builder with application/json body
+func NewCreateAssetRequest(server string, body CreateAssetJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewCreateAssetRequestWithBody(server, "application/json", bodyReader)
+}
+
+// NewCreateAssetRequestWithBody constructs an http.Request for the CreateAsset method, with any body, and a specified content type
+func NewCreateAssetRequestWithBody(server string, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/admin/v1/assets")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewGetAssetRequest constructs an http.Request for the GetAsset method
+func NewGetAssetRequest(server string, symbol AssetSymbol) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "symbol", symbol, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/admin/v1/assets/%s", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewUpdateAssetRequest calls the generic UpdateAsset builder with application/json body
+func NewUpdateAssetRequest(server string, symbol AssetSymbol, body UpdateAssetJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewUpdateAssetRequestWithBody(server, symbol, "application/json", bodyReader)
+}
+
+// NewUpdateAssetRequestWithBody constructs an http.Request for the UpdateAsset method, with any body, and a specified content type
+func NewUpdateAssetRequestWithBody(server string, symbol AssetSymbol, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "symbol", symbol, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/admin/v1/assets/%s", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPut, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
 // NewListAuditEventsRequest constructs an http.Request for the ListAuditEvents method
 func NewListAuditEventsRequest(server string, params *ListAuditEventsParams) (*http.Request, error) {
 	var err error
@@ -2369,6 +4117,30 @@ func NewListAuditEventsRequest(server string, params *ListAuditEventsParams) (*h
 
 		}
 
+		if params.ActorType != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "actor_type", *params.ActorType, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.ActorID != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "actor_id", *params.ActorID, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
 		if params.Limit != nil {
 
 			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "limit", *params.Limit, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "integer", Format: "int32"}); err != nil {
@@ -2397,6 +4169,277 @@ func NewListAuditEventsRequest(server string, params *ListAuditEventsParams) (*h
 			rawQueryFragments = append(rawQueryFragments, encoded)
 		}
 		queryURL.RawQuery = strings.Join(rawQueryFragments, "&")
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewListDepositsRequest constructs an http.Request for the ListDeposits method
+func NewListDepositsRequest(server string, params *ListDepositsParams) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/admin/v1/deposits")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		// queryValues collects non-styled parameters (passthrough, JSON)
+		// that are safe to round-trip through url.Values.Encode().
+		queryValues := queryURL.Query()
+		// rawQueryFragments collects pre-encoded query fragments from
+		// styled parameters, preserving literal commas as delimiters
+		// per the OpenAPI spec (e.g. "color=blue,black,brown").
+		var rawQueryFragments []string
+
+		if params.Status != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "status", *params.Status, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.Asset != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "asset", *params.Asset, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.Limit != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "limit", *params.Limit, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "integer", Format: "int32"}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.Offset != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "offset", *params.Offset, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "integer", Format: "int32"}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if encoded := queryValues.Encode(); encoded != "" {
+			rawQueryFragments = append(rawQueryFragments, encoded)
+		}
+		queryURL.RawQuery = strings.Join(rawQueryFragments, "&")
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewRequestReloadRequest calls the generic RequestReload builder with application/json body
+func NewRequestReloadRequest(server string, body RequestReloadJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewRequestReloadRequestWithBody(server, "application/json", bodyReader)
+}
+
+// NewRequestReloadRequestWithBody constructs an http.Request for the RequestReload method, with any body, and a specified content type
+func NewRequestReloadRequestWithBody(server string, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/admin/v1/engine/reload")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewListFeeSchedulesRequest constructs an http.Request for the ListFeeSchedules method
+func NewListFeeSchedulesRequest(server string) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/admin/v1/fee-schedules")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewCreateFeeScheduleRequest calls the generic CreateFeeSchedule builder with application/json body
+func NewCreateFeeScheduleRequest(server string, body CreateFeeScheduleJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewCreateFeeScheduleRequestWithBody(server, "application/json", bodyReader)
+}
+
+// NewCreateFeeScheduleRequestWithBody constructs an http.Request for the CreateFeeSchedule method, with any body, and a specified content type
+func NewCreateFeeScheduleRequestWithBody(server string, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/admin/v1/fee-schedules")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewUpdateFeeScheduleRequest calls the generic UpdateFeeSchedule builder with application/json body
+func NewUpdateFeeScheduleRequest(server string, name FeeScheduleName, body UpdateFeeScheduleJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewUpdateFeeScheduleRequestWithBody(server, name, "application/json", bodyReader)
+}
+
+// NewUpdateFeeScheduleRequestWithBody constructs an http.Request for the UpdateFeeSchedule method, with any body, and a specified content type
+func NewUpdateFeeScheduleRequestWithBody(server string, name FeeScheduleName, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "name", name, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/admin/v1/fee-schedules/%s", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPut, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewGetHotWalletRequest constructs an http.Request for the GetHotWallet method
+func NewGetHotWalletRequest(server string) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/admin/v1/hot-wallet")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
 	}
 
 	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
@@ -2643,6 +4686,127 @@ func NewListMarketsRequest(server string) (*http.Request, error) {
 	return req, nil
 }
 
+// NewCreateMarketRequest calls the generic CreateMarket builder with application/json body
+func NewCreateMarketRequest(server string, body CreateMarketJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewCreateMarketRequestWithBody(server, "application/json", bodyReader)
+}
+
+// NewCreateMarketRequestWithBody constructs an http.Request for the CreateMarket method, with any body, and a specified content type
+func NewCreateMarketRequestWithBody(server string, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/admin/v1/markets")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewGetMarketRequest constructs an http.Request for the GetMarket method
+func NewGetMarketRequest(server string, symbol MarketSymbol) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "symbol", symbol, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/admin/v1/markets/%s", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewUpdateMarketRequest calls the generic UpdateMarket builder with application/json body
+func NewUpdateMarketRequest(server string, symbol MarketSymbol, body UpdateMarketJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewUpdateMarketRequestWithBody(server, symbol, "application/json", bodyReader)
+}
+
+// NewUpdateMarketRequestWithBody constructs an http.Request for the UpdateMarket method, with any body, and a specified content type
+func NewUpdateMarketRequestWithBody(server string, symbol MarketSymbol, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "symbol", symbol, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/admin/v1/markets/%s", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPut, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
 // NewSetMarketStatusRequest calls the generic SetMarketStatus builder with application/json body
 func NewSetMarketStatusRequest(server string, symbol MarketSymbol, body SetMarketStatusJSONRequestBody) (*http.Request, error) {
 	var bodyReader io.Reader
@@ -2717,6 +4881,138 @@ func NewGetReconciliationRequest(server string) (*http.Request, error) {
 	return req, nil
 }
 
+// NewListReconciliationBreaksRequest constructs an http.Request for the ListReconciliationBreaks method
+func NewListReconciliationBreaksRequest(server string, params *ListReconciliationBreaksParams) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/admin/v1/reconciliation/breaks")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		// queryValues collects non-styled parameters (passthrough, JSON)
+		// that are safe to round-trip through url.Values.Encode().
+		queryValues := queryURL.Query()
+		// rawQueryFragments collects pre-encoded query fragments from
+		// styled parameters, preserving literal commas as delimiters
+		// per the OpenAPI spec (e.g. "color=blue,black,brown").
+		var rawQueryFragments []string
+
+		if params.Limit != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "limit", *params.Limit, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "integer", Format: "int32"}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.Offset != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "offset", *params.Offset, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "integer", Format: "int32"}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if encoded := queryValues.Encode(); encoded != "" {
+			rawQueryFragments = append(rawQueryFragments, encoded)
+		}
+		queryURL.RawQuery = strings.Join(rawQueryFragments, "&")
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewListReconciliationReportsRequest constructs an http.Request for the ListReconciliationReports method
+func NewListReconciliationReportsRequest(server string, params *ListReconciliationReportsParams) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/admin/v1/reconciliation/reports")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		// queryValues collects non-styled parameters (passthrough, JSON)
+		// that are safe to round-trip through url.Values.Encode().
+		queryValues := queryURL.Query()
+		// rawQueryFragments collects pre-encoded query fragments from
+		// styled parameters, preserving literal commas as delimiters
+		// per the OpenAPI spec (e.g. "color=blue,black,brown").
+		var rawQueryFragments []string
+
+		if params.Limit != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "limit", *params.Limit, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "integer", Format: "int32"}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.Offset != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "offset", *params.Offset, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "integer", Format: "int32"}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if encoded := queryValues.Encode(); encoded != "" {
+			rawQueryFragments = append(rawQueryFragments, encoded)
+		}
+		queryURL.RawQuery = strings.Join(rawQueryFragments, "&")
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
 // NewListSweepsRequest constructs an http.Request for the ListSweeps method
 func NewListSweepsRequest(server string, params *ListSweepsParams) (*http.Request, error) {
 	var err error
@@ -2767,6 +5063,263 @@ func NewListSweepsRequest(server string, params *ListSweepsParams) (*http.Reques
 	if err != nil {
 		return nil, err
 	}
+
+	return req, nil
+}
+
+// NewGetSystemStatusRequest constructs an http.Request for the GetSystemStatus method
+func NewGetSystemStatusRequest(server string) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/admin/v1/system/status")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewListUsersRequest constructs an http.Request for the ListUsers method
+func NewListUsersRequest(server string, params *ListUsersParams) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/admin/v1/users")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		// queryValues collects non-styled parameters (passthrough, JSON)
+		// that are safe to round-trip through url.Values.Encode().
+		queryValues := queryURL.Query()
+		// rawQueryFragments collects pre-encoded query fragments from
+		// styled parameters, preserving literal commas as delimiters
+		// per the OpenAPI spec (e.g. "color=blue,black,brown").
+		var rawQueryFragments []string
+
+		if params.Email != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "email", *params.Email, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.Status != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "status", *params.Status, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.Role != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "role", *params.Role, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.Limit != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "limit", *params.Limit, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "integer", Format: "int32"}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.Offset != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "offset", *params.Offset, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "integer", Format: "int32"}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if encoded := queryValues.Encode(); encoded != "" {
+			rawQueryFragments = append(rawQueryFragments, encoded)
+		}
+		queryURL.RawQuery = strings.Join(rawQueryFragments, "&")
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewGetUserRequest constructs an http.Request for the GetUser method
+func NewGetUserRequest(server string, id UserID) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "id", id, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/admin/v1/users/%s", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewSetUserKycLevelRequest calls the generic SetUserKycLevel builder with application/json body
+func NewSetUserKycLevelRequest(server string, id UserID, body SetUserKycLevelJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewSetUserKycLevelRequestWithBody(server, id, "application/json", bodyReader)
+}
+
+// NewSetUserKycLevelRequestWithBody constructs an http.Request for the SetUserKycLevel method, with any body, and a specified content type
+func NewSetUserKycLevelRequestWithBody(server string, id UserID, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "id", id, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/admin/v1/users/%s/kyc-level", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPut, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewSetUserStatusRequest calls the generic SetUserStatus builder with application/json body
+func NewSetUserStatusRequest(server string, id UserID, body SetUserStatusJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewSetUserStatusRequestWithBody(server, id, "application/json", bodyReader)
+}
+
+// NewSetUserStatusRequestWithBody constructs an http.Request for the SetUserStatus method, with any body, and a specified content type
+func NewSetUserStatusRequestWithBody(server string, id UserID, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "id", id, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/admin/v1/users/%s/status", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPut, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
 
 	return req, nil
 }
@@ -2999,6 +5552,53 @@ func NewReplayWebhookDeliveryRequest(server string, id WebhookEndpointID, delive
 	return req, nil
 }
 
+// NewRotateWebhookSecretRequest calls the generic RotateWebhookSecret builder with application/json body
+func NewRotateWebhookSecretRequest(server string, id WebhookEndpointID, body RotateWebhookSecretJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewRotateWebhookSecretRequestWithBody(server, id, "application/json", bodyReader)
+}
+
+// NewRotateWebhookSecretRequestWithBody constructs an http.Request for the RotateWebhookSecret method, with any body, and a specified content type
+func NewRotateWebhookSecretRequestWithBody(server string, id WebhookEndpointID, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "id", id, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/admin/v1/webhooks/%s/rotate-secret", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
 // NewSetWebhookEndpointStatusRequest calls the generic SetWebhookEndpointStatus builder with application/json body
 func NewSetWebhookEndpointStatusRequest(server string, id WebhookEndpointID, body SetWebhookEndpointStatusJSONRequestBody) (*http.Request, error) {
 	var bodyReader io.Reader
@@ -3027,6 +5627,87 @@ func NewSetWebhookEndpointStatusRequestWithBody(server string, id WebhookEndpoin
 	}
 
 	operationPath := fmt.Sprintf("/admin/v1/webhooks/%s/status", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPut, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewListWithdrawalLimitsRequest constructs an http.Request for the ListWithdrawalLimits method
+func NewListWithdrawalLimitsRequest(server string) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/admin/v1/withdrawal-limits")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewSetWithdrawalLimitRequest calls the generic SetWithdrawalLimit builder with application/json body
+func NewSetWithdrawalLimitRequest(server string, asset AssetPath, kycLevel KycLevelPath, body SetWithdrawalLimitJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewSetWithdrawalLimitRequestWithBody(server, asset, kycLevel, "application/json", bodyReader)
+}
+
+// NewSetWithdrawalLimitRequestWithBody constructs an http.Request for the SetWithdrawalLimit method, with any body, and a specified content type
+func NewSetWithdrawalLimitRequestWithBody(server string, asset AssetPath, kycLevel KycLevelPath, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "asset", asset, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithOptions("simple", false, "kyc_level", kycLevel, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "integer", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/admin/v1/withdrawal-limits/%s/%s", pathParam0, pathParam1)
 	if operationPath[0] == '/' {
 		operationPath = "." + operationPath
 	}
@@ -3291,12 +5972,135 @@ type ClientWithResponsesInterface interface {
 	// Corresponds with PUT /admin/v1/accounts/{id}/status (the `SetAccountStatus` operationId).
 	SetAccountStatusWithResponse(ctx context.Context, id AccountID, body SetAccountStatusJSONRequestBody, reqEditors ...RequestEditorFn) (*SetAccountStatusResponse, error)
 
+	// ListAssetsWithResponse Assets of the tenant
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /admin/v1/assets (the `ListAssets` operationId).
+	ListAssetsWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*ListAssetsResponse, error)
+
+	// CreateAssetWithBodyWithResponse List a new asset
+	//
+	// Publishes asset.updated with changed_fields ["created"]. A market can reference the asset from then on; deposits and withdrawals follow the two enabled flags.
+	//
+	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /admin/v1/assets (the `CreateAsset` operationId).
+	CreateAssetWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateAssetResponse, error)
+
+	// CreateAssetWithResponse List a new asset
+	//
+	// Publishes asset.updated with changed_fields ["created"]. A market can reference the asset from then on; deposits and withdrawals follow the two enabled flags.
+	//
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /admin/v1/assets (the `CreateAsset` operationId).
+	CreateAssetWithResponse(ctx context.Context, body CreateAssetJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateAssetResponse, error)
+
+	// GetAssetWithResponse Get one asset
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /admin/v1/assets/{symbol} (the `GetAsset` operationId).
+	GetAssetWithResponse(ctx context.Context, symbol AssetSymbol, reqEditors ...RequestEditorFn) (*GetAssetResponse, error)
+
+	// UpdateAssetWithBodyWithResponse Edit an asset
+	//
+	// Replaces every writable field. Publishes asset.updated naming the fields that changed; a body equal to the current row changes nothing and emits no event. The scale cannot shrink below what any market on the asset needs.
+	//
+	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with PUT /admin/v1/assets/{symbol} (the `UpdateAsset` operationId).
+	UpdateAssetWithBodyWithResponse(ctx context.Context, symbol AssetSymbol, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*UpdateAssetResponse, error)
+
+	// UpdateAssetWithResponse Edit an asset
+	//
+	// Replaces every writable field. Publishes asset.updated naming the fields that changed; a body equal to the current row changes nothing and emits no event. The scale cannot shrink below what any market on the asset needs.
+	//
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with PUT /admin/v1/assets/{symbol} (the `UpdateAsset` operationId).
+	UpdateAssetWithResponse(ctx context.Context, symbol AssetSymbol, body UpdateAssetJSONRequestBody, reqEditors ...RequestEditorFn) (*UpdateAssetResponse, error)
+
 	// ListAuditEventsWithResponse Audit trail, newest first
 	//
 	// Returns a wrapper object for the known response body format(s).
 	//
 	// Corresponds with GET /admin/v1/audit-events (the `ListAuditEvents` operationId).
 	ListAuditEventsWithResponse(ctx context.Context, params *ListAuditEventsParams, reqEditors ...RequestEditorFn) (*ListAuditEventsResponse, error)
+
+	// ListDepositsWithResponse Deposits the chain role has seen, newest first
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /admin/v1/deposits (the `ListDeposits` operationId).
+	ListDepositsWithResponse(ctx context.Context, params *ListDepositsParams, reqEditors ...RequestEditorFn) (*ListDepositsResponse, error)
+
+	// RequestReloadWithBodyWithResponse Ask every engine to reload its registry cache
+	//
+	// Publishes registry.reload with no row changed: after a seed, or when in doubt. 202: the request is in the outbox; the engine's reload consumer acts on it.
+	//
+	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /admin/v1/engine/reload (the `RequestReload` operationId).
+	RequestReloadWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*RequestReloadResponse, error)
+
+	// RequestReloadWithResponse Ask every engine to reload its registry cache
+	//
+	// Publishes registry.reload with no row changed: after a seed, or when in doubt. 202: the request is in the outbox; the engine's reload consumer acts on it.
+	//
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /admin/v1/engine/reload (the `RequestReload` operationId).
+	RequestReloadWithResponse(ctx context.Context, body RequestReloadJSONRequestBody, reqEditors ...RequestEditorFn) (*RequestReloadResponse, error)
+
+	// ListFeeSchedulesWithResponse Fee schedules of the tenant
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /admin/v1/fee-schedules (the `ListFeeSchedules` operationId).
+	ListFeeSchedulesWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*ListFeeSchedulesResponse, error)
+
+	// CreateFeeScheduleWithBodyWithResponse Add a fee schedule
+	//
+	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /admin/v1/fee-schedules (the `CreateFeeSchedule` operationId).
+	CreateFeeScheduleWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateFeeScheduleResponse, error)
+
+	// CreateFeeScheduleWithResponse Add a fee schedule
+	//
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /admin/v1/fee-schedules (the `CreateFeeSchedule` operationId).
+	CreateFeeScheduleWithResponse(ctx context.Context, body CreateFeeScheduleJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateFeeScheduleResponse, error)
+
+	// UpdateFeeScheduleWithBodyWithResponse Change a fee schedule's rates
+	//
+	// Every market on the schedule pays the new rates from the next trade. Publishes fee_schedule.updated (and no market.updated for the markets on it; the engine reloads its whole cache on either).
+	//
+	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with PUT /admin/v1/fee-schedules/{name} (the `UpdateFeeSchedule` operationId).
+	UpdateFeeScheduleWithBodyWithResponse(ctx context.Context, name FeeScheduleName, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*UpdateFeeScheduleResponse, error)
+
+	// UpdateFeeScheduleWithResponse Change a fee schedule's rates
+	//
+	// Every market on the schedule pays the new rates from the next trade. Publishes fee_schedule.updated (and no market.updated for the markets on it; the engine reloads its whole cache on either).
+	//
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with PUT /admin/v1/fee-schedules/{name} (the `UpdateFeeSchedule` operationId).
+	UpdateFeeScheduleWithResponse(ctx context.Context, name FeeScheduleName, body UpdateFeeScheduleJSONRequestBody, reqEditors ...RequestEditorFn) (*UpdateFeeScheduleResponse, error)
+
+	// GetHotWalletWithResponse The hot wallet, as the chain role keeps it
+	//
+	// Address, next nonce and the low-balance alert state from chain.hot_wallets, with the ledger's custody_hot balance per asset. The chain's own figure is what reconciliation compares that balance to. 404 until the chain role has started once against this chain.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /admin/v1/hot-wallet (the `GetHotWallet` operationId).
+	GetHotWalletWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*GetHotWalletResponse, error)
 
 	// CreateAdjustmentWithBodyWithResponse Post a manual adjustment against the external account
 	//
@@ -3399,6 +6203,49 @@ type ClientWithResponsesInterface interface {
 	// Corresponds with GET /admin/v1/markets (the `ListMarkets` operationId).
 	ListMarketsWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*ListMarketsResponse, error)
 
+	// CreateMarketWithBodyWithResponse List a new market
+	//
+	// Assets and the fee schedule are referenced by symbol and name, and must exist. Publishes market.updated with changed_fields ["created"]; the engine opens the book on reload.
+	//
+	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /admin/v1/markets (the `CreateMarket` operationId).
+	CreateMarketWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateMarketResponse, error)
+
+	// CreateMarketWithResponse List a new market
+	//
+	// Assets and the fee schedule are referenced by symbol and name, and must exist. Publishes market.updated with changed_fields ["created"]; the engine opens the book on reload.
+	//
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /admin/v1/markets (the `CreateMarket` operationId).
+	CreateMarketWithResponse(ctx context.Context, body CreateMarketJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateMarketResponse, error)
+
+	// GetMarketWithResponse Get one market
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /admin/v1/markets/{symbol} (the `GetMarket` operationId).
+	GetMarketWithResponse(ctx context.Context, symbol MarketSymbol, reqEditors ...RequestEditorFn) (*GetMarketResponse, error)
+
+	// UpdateMarketWithBodyWithResponse Edit a market
+	//
+	// Replaces every writable field, status included. Publishes market.updated naming the fields that changed; a body equal to the current row changes nothing and emits no event. Precision must still fit the assets (price_tick within the quote scale, qty_step within the base scale).
+	//
+	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with PUT /admin/v1/markets/{symbol} (the `UpdateMarket` operationId).
+	UpdateMarketWithBodyWithResponse(ctx context.Context, symbol MarketSymbol, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*UpdateMarketResponse, error)
+
+	// UpdateMarketWithResponse Edit a market
+	//
+	// Replaces every writable field, status included. Publishes market.updated naming the fields that changed; a body equal to the current row changes nothing and emits no event. Precision must still fit the assets (price_tick within the quote scale, qty_step within the base scale).
+	//
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with PUT /admin/v1/markets/{symbol} (the `UpdateMarket` operationId).
+	UpdateMarketWithResponse(ctx context.Context, symbol MarketSymbol, body UpdateMarketJSONRequestBody, reqEditors ...RequestEditorFn) (*UpdateMarketResponse, error)
+
 	// SetMarketStatusWithBodyWithResponse Halt, resume or delist a market
 	//
 	// Changes the market's trading status and publishes market.updated, which the engine consumes to reload its registry cache without a restart. Setting the status a market already has changes nothing and emits no event. The path parameter is the symbol, matching GET /v1/markets/{symbol}.
@@ -3442,6 +6289,22 @@ type ClientWithResponsesInterface interface {
 	// Corresponds with GET /admin/v1/reconciliation (the `GetReconciliation` operationId).
 	GetReconciliationWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*GetReconciliationResponse, error)
 
+	// ListReconciliationBreaksWithResponse Every break on record, both kinds, newest first
+	//
+	// Two families with different terms. A chain break is one asset of one reconciliation pass whose on-chain custody did not match the ledger's; the chain role writes it (docs/plan-v1.0.md §6.4.4). A ledger break is one asset whose debits and credits do not agree, found by the admin role checking the ledger against itself; it has an open/resolved state because the condition can end.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /admin/v1/reconciliation/breaks (the `ListReconciliationBreaks` operationId).
+	ListReconciliationBreaksWithResponse(ctx context.Context, params *ListReconciliationBreaksParams, reqEditors ...RequestEditorFn) (*ListReconciliationBreaksResponse, error)
+
+	// ListReconciliationReportsWithResponse Reconciliation passes, newest first
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /admin/v1/reconciliation/reports (the `ListReconciliationReports` operationId).
+	ListReconciliationReportsWithResponse(ctx context.Context, params *ListReconciliationReportsParams, reqEditors ...RequestEditorFn) (*ListReconciliationReportsResponse, error)
+
 	// ListSweepsWithResponse Recent collections into the hot wallet
 	//
 	// Sweeps move deposits from the per-account addresses they landed on to the hot wallet withdrawals are paid from (docs/plan-v1.0.md §6.4.3). No user balance is involved: a sweep moves the exchange's own custody between two of its own house accounts.
@@ -3452,6 +6315,70 @@ type ClientWithResponsesInterface interface {
 	//
 	// Corresponds with GET /admin/v1/sweeps (the `ListSweeps` operationId).
 	ListSweepsWithResponse(ctx context.Context, params *ListSweepsParams, reqEditors ...RequestEditorFn) (*ListSweepsResponse, error)
+
+	// GetSystemStatusWithResponse What the dashboard shows
+	//
+	// One read of the things an operator checks first thing: whether the
+	// ledger balances, what the last reconciliation found, and how much is
+	// waiting on a person. Counts are capped where noted; a tile that says
+	// "500+" has made its point.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /admin/v1/system/status (the `GetSystemStatus` operationId).
+	GetSystemStatusWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*GetSystemStatusResponse, error)
+
+	// ListUsersWithResponse List users
+	//
+	// The operator's directory. `email` is a fragment matched anywhere in the address (no wildcards). Newest first.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /admin/v1/users (the `ListUsers` operationId).
+	ListUsersWithResponse(ctx context.Context, params *ListUsersParams, reqEditors ...RequestEditorFn) (*ListUsersResponse, error)
+
+	// GetUserWithResponse Get one user
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /admin/v1/users/{id} (the `GetUser` operationId).
+	GetUserWithResponse(ctx context.Context, id UserID, reqEditors ...RequestEditorFn) (*GetUserResponse, error)
+
+	// SetUserKycLevelWithBodyWithResponse Set a user's KYC level
+	//
+	// The withdrawal policy reads the level on each request, so the next withdrawal is decided under the new limits; nothing already pending is re-decided. Publishes `user.kyc_level_updated` when the level changes.
+	//
+	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with PUT /admin/v1/users/{id}/kyc-level (the `SetUserKycLevel` operationId).
+	SetUserKycLevelWithBodyWithResponse(ctx context.Context, id UserID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*SetUserKycLevelResponse, error)
+
+	// SetUserKycLevelWithResponse Set a user's KYC level
+	//
+	// The withdrawal policy reads the level on each request, so the next withdrawal is decided under the new limits; nothing already pending is re-decided. Publishes `user.kyc_level_updated` when the level changes.
+	//
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with PUT /admin/v1/users/{id}/kyc-level (the `SetUserKycLevel` operationId).
+	SetUserKycLevelWithResponse(ctx context.Context, id UserID, body SetUserKycLevelJSONRequestBody, reqEditors ...RequestEditorFn) (*SetUserKycLevelResponse, error)
+
+	// SetUserStatusWithBodyWithResponse Freeze or release a user
+	//
+	// Frozen means the user cannot log in, refresh a token or use an API key, and their spot account is frozen in the same transaction (no orders, no withdrawals). An access token already issued lasts its fifteen minutes. Releasing reverses all of it. Refuses to freeze the last active administrator. Publishes `user.status_updated` when the status changes.
+	//
+	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with PUT /admin/v1/users/{id}/status (the `SetUserStatus` operationId).
+	SetUserStatusWithBodyWithResponse(ctx context.Context, id UserID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*SetUserStatusResponse, error)
+
+	// SetUserStatusWithResponse Freeze or release a user
+	//
+	// Frozen means the user cannot log in, refresh a token or use an API key, and their spot account is frozen in the same transaction (no orders, no withdrawals). An access token already issued lasts its fifteen minutes. Releasing reverses all of it. Refuses to freeze the last active administrator. Publishes `user.status_updated` when the status changes.
+	//
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with PUT /admin/v1/users/{id}/status (the `SetUserStatus` operationId).
+	SetUserStatusWithResponse(ctx context.Context, id UserID, body SetUserStatusJSONRequestBody, reqEditors ...RequestEditorFn) (*SetUserStatusResponse, error)
 
 	// ListWebhookEndpointsWithResponse Webhook endpoints, disabled ones included
 	//
@@ -3543,6 +6470,24 @@ type ClientWithResponsesInterface interface {
 	// Corresponds with POST /admin/v1/webhooks/{id}/deliveries/{delivery_id}/replay (the `ReplayWebhookDelivery` operationId).
 	ReplayWebhookDeliveryWithResponse(ctx context.Context, id WebhookEndpointID, deliveryID WebhookDeliveryID, reqEditors ...RequestEditorFn) (*ReplayWebhookDeliveryResponse, error)
 
+	// RotateWebhookSecretWithBodyWithResponse Issue a new signing secret and keep the old one for a grace period
+	//
+	// The new secret is in this response and nowhere else. Until previous_secret_until, every delivery carries two signatures, `v1=<new>,v1=<old>`, so a receiver that has switched and one that has not both keep verifying; after it, only the new one signs. Rotating again inside the grace period replaces the old secret: the newest two are the only ones ever valid.
+	//
+	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /admin/v1/webhooks/{id}/rotate-secret (the `RotateWebhookSecret` operationId).
+	RotateWebhookSecretWithBodyWithResponse(ctx context.Context, id WebhookEndpointID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*RotateWebhookSecretResponse, error)
+
+	// RotateWebhookSecretWithResponse Issue a new signing secret and keep the old one for a grace period
+	//
+	// The new secret is in this response and nowhere else. Until previous_secret_until, every delivery carries two signatures, `v1=<new>,v1=<old>`, so a receiver that has switched and one that has not both keep verifying; after it, only the new one signs. Rotating again inside the grace period replaces the old secret: the newest two are the only ones ever valid.
+	//
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /admin/v1/webhooks/{id}/rotate-secret (the `RotateWebhookSecret` operationId).
+	RotateWebhookSecretWithResponse(ctx context.Context, id WebhookEndpointID, body RotateWebhookSecretJSONRequestBody, reqEditors ...RequestEditorFn) (*RotateWebhookSecretResponse, error)
+
 	// SetWebhookEndpointStatusWithBodyWithResponse Enable or disable an endpoint
 	//
 	// Disabling also drops whatever is still queued for the endpoint. Queued deliveries to an inactive endpoint are not pending but unreachable, and leaving them would fire a batch of stale events at the customer whenever the integration was turned back on. The delivery history is untouched, and the number dropped is recorded in the audit trail.
@@ -3560,6 +6505,31 @@ type ClientWithResponsesInterface interface {
 	//
 	// Corresponds with PUT /admin/v1/webhooks/{id}/status (the `SetWebhookEndpointStatus` operationId).
 	SetWebhookEndpointStatusWithResponse(ctx context.Context, id WebhookEndpointID, body SetWebhookEndpointStatusJSONRequestBody, reqEditors ...RequestEditorFn) (*SetWebhookEndpointStatusResponse, error)
+
+	// ListWithdrawalLimitsWithResponse Withdrawal limits per asset and KYC level
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /admin/v1/withdrawal-limits (the `ListWithdrawalLimits` operationId).
+	ListWithdrawalLimitsWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*ListWithdrawalLimitsResponse, error)
+
+	// SetWithdrawalLimitWithBodyWithResponse Set the limits of one asset at one KYC level
+	//
+	// Creates the row when there is none. The withdrawal policy reads the limits on each request, so the next withdrawal is decided under the new ones. No event: nothing caches these.
+	//
+	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with PUT /admin/v1/withdrawal-limits/{asset}/{kyc_level} (the `SetWithdrawalLimit` operationId).
+	SetWithdrawalLimitWithBodyWithResponse(ctx context.Context, asset AssetPath, kycLevel KycLevelPath, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*SetWithdrawalLimitResponse, error)
+
+	// SetWithdrawalLimitWithResponse Set the limits of one asset at one KYC level
+	//
+	// Creates the row when there is none. The withdrawal policy reads the limits on each request, so the next withdrawal is decided under the new ones. No event: nothing caches these.
+	//
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with PUT /admin/v1/withdrawal-limits/{asset}/{kyc_level} (the `SetWithdrawalLimit` operationId).
+	SetWithdrawalLimitWithResponse(ctx context.Context, asset AssetPath, kycLevel KycLevelPath, body SetWithdrawalLimitJSONRequestBody, reqEditors ...RequestEditorFn) (*SetWithdrawalLimitResponse, error)
 
 	// ListWithdrawalsForReviewWithResponse The withdrawal review queue
 	//
@@ -3929,6 +6899,261 @@ func (r SetAccountStatusResponse) ContentType() string {
 	return ""
 }
 
+type ListAssetsResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *AssetList
+	// ApplicationProblemJSON401 the response for an HTTP 401 `application/problem+json` response
+	ApplicationProblemJSON401 *Unauthorized
+	// ApplicationProblemJSON500 the response for an HTTP 500 `application/problem+json` response
+	ApplicationProblemJSON500 *InternalError
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r ListAssetsResponse) GetJSON200() *AssetList {
+	return r.JSON200
+}
+
+// GetApplicationProblemJSON401 returns the response for an HTTP 401 `application/problem+json` response
+func (r ListAssetsResponse) GetApplicationProblemJSON401() *Unauthorized {
+	return r.ApplicationProblemJSON401
+}
+
+// GetApplicationProblemJSON500 returns the response for an HTTP 500 `application/problem+json` response
+func (r ListAssetsResponse) GetApplicationProblemJSON500() *InternalError {
+	return r.ApplicationProblemJSON500
+}
+
+// GetBody returns the raw response body bytes
+func (r ListAssetsResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r ListAssetsResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListAssetsResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r ListAssetsResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type CreateAssetResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON201 the response for an HTTP 201 `application/json` response
+	JSON201 *Asset
+	// ApplicationProblemJSON400 the response for an HTTP 400 `application/problem+json` response
+	ApplicationProblemJSON400 *BadRequest
+	// ApplicationProblemJSON401 the response for an HTTP 401 `application/problem+json` response
+	ApplicationProblemJSON401 *Unauthorized
+	// ApplicationProblemJSON409 the response for an HTTP 409 `application/problem+json` response
+	ApplicationProblemJSON409 *Conflict
+	// ApplicationProblemJSON500 the response for an HTTP 500 `application/problem+json` response
+	ApplicationProblemJSON500 *InternalError
+}
+
+// GetJSON201 returns the response for an HTTP 201 `application/json` response
+func (r CreateAssetResponse) GetJSON201() *Asset {
+	return r.JSON201
+}
+
+// GetApplicationProblemJSON400 returns the response for an HTTP 400 `application/problem+json` response
+func (r CreateAssetResponse) GetApplicationProblemJSON400() *BadRequest {
+	return r.ApplicationProblemJSON400
+}
+
+// GetApplicationProblemJSON401 returns the response for an HTTP 401 `application/problem+json` response
+func (r CreateAssetResponse) GetApplicationProblemJSON401() *Unauthorized {
+	return r.ApplicationProblemJSON401
+}
+
+// GetApplicationProblemJSON409 returns the response for an HTTP 409 `application/problem+json` response
+func (r CreateAssetResponse) GetApplicationProblemJSON409() *Conflict {
+	return r.ApplicationProblemJSON409
+}
+
+// GetApplicationProblemJSON500 returns the response for an HTTP 500 `application/problem+json` response
+func (r CreateAssetResponse) GetApplicationProblemJSON500() *InternalError {
+	return r.ApplicationProblemJSON500
+}
+
+// GetBody returns the raw response body bytes
+func (r CreateAssetResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r CreateAssetResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r CreateAssetResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r CreateAssetResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type GetAssetResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *Asset
+	// ApplicationProblemJSON401 the response for an HTTP 401 `application/problem+json` response
+	ApplicationProblemJSON401 *Unauthorized
+	// ApplicationProblemJSON404 the response for an HTTP 404 `application/problem+json` response
+	ApplicationProblemJSON404 *NotFound
+	// ApplicationProblemJSON500 the response for an HTTP 500 `application/problem+json` response
+	ApplicationProblemJSON500 *InternalError
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r GetAssetResponse) GetJSON200() *Asset {
+	return r.JSON200
+}
+
+// GetApplicationProblemJSON401 returns the response for an HTTP 401 `application/problem+json` response
+func (r GetAssetResponse) GetApplicationProblemJSON401() *Unauthorized {
+	return r.ApplicationProblemJSON401
+}
+
+// GetApplicationProblemJSON404 returns the response for an HTTP 404 `application/problem+json` response
+func (r GetAssetResponse) GetApplicationProblemJSON404() *NotFound {
+	return r.ApplicationProblemJSON404
+}
+
+// GetApplicationProblemJSON500 returns the response for an HTTP 500 `application/problem+json` response
+func (r GetAssetResponse) GetApplicationProblemJSON500() *InternalError {
+	return r.ApplicationProblemJSON500
+}
+
+// GetBody returns the raw response body bytes
+func (r GetAssetResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r GetAssetResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetAssetResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r GetAssetResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type UpdateAssetResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *Asset
+	// ApplicationProblemJSON400 the response for an HTTP 400 `application/problem+json` response
+	ApplicationProblemJSON400 *BadRequest
+	// ApplicationProblemJSON401 the response for an HTTP 401 `application/problem+json` response
+	ApplicationProblemJSON401 *Unauthorized
+	// ApplicationProblemJSON404 the response for an HTTP 404 `application/problem+json` response
+	ApplicationProblemJSON404 *NotFound
+	// ApplicationProblemJSON500 the response for an HTTP 500 `application/problem+json` response
+	ApplicationProblemJSON500 *InternalError
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r UpdateAssetResponse) GetJSON200() *Asset {
+	return r.JSON200
+}
+
+// GetApplicationProblemJSON400 returns the response for an HTTP 400 `application/problem+json` response
+func (r UpdateAssetResponse) GetApplicationProblemJSON400() *BadRequest {
+	return r.ApplicationProblemJSON400
+}
+
+// GetApplicationProblemJSON401 returns the response for an HTTP 401 `application/problem+json` response
+func (r UpdateAssetResponse) GetApplicationProblemJSON401() *Unauthorized {
+	return r.ApplicationProblemJSON401
+}
+
+// GetApplicationProblemJSON404 returns the response for an HTTP 404 `application/problem+json` response
+func (r UpdateAssetResponse) GetApplicationProblemJSON404() *NotFound {
+	return r.ApplicationProblemJSON404
+}
+
+// GetApplicationProblemJSON500 returns the response for an HTTP 500 `application/problem+json` response
+func (r UpdateAssetResponse) GetApplicationProblemJSON500() *InternalError {
+	return r.ApplicationProblemJSON500
+}
+
+// GetBody returns the raw response body bytes
+func (r UpdateAssetResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r UpdateAssetResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r UpdateAssetResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r UpdateAssetResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
 type ListAuditEventsResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -3978,6 +7203,378 @@ func (r ListAuditEventsResponse) StatusCode() int {
 
 // ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
 func (r ListAuditEventsResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type ListDepositsResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *AdminDepositList
+	// ApplicationProblemJSON401 the response for an HTTP 401 `application/problem+json` response
+	ApplicationProblemJSON401 *Unauthorized
+	// ApplicationProblemJSON500 the response for an HTTP 500 `application/problem+json` response
+	ApplicationProblemJSON500 *InternalError
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r ListDepositsResponse) GetJSON200() *AdminDepositList {
+	return r.JSON200
+}
+
+// GetApplicationProblemJSON401 returns the response for an HTTP 401 `application/problem+json` response
+func (r ListDepositsResponse) GetApplicationProblemJSON401() *Unauthorized {
+	return r.ApplicationProblemJSON401
+}
+
+// GetApplicationProblemJSON500 returns the response for an HTTP 500 `application/problem+json` response
+func (r ListDepositsResponse) GetApplicationProblemJSON500() *InternalError {
+	return r.ApplicationProblemJSON500
+}
+
+// GetBody returns the raw response body bytes
+func (r ListDepositsResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r ListDepositsResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListDepositsResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r ListDepositsResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type RequestReloadResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON202 the response for an HTTP 202 `application/json` response
+	JSON202 *ReloadAccepted
+	// ApplicationProblemJSON400 the response for an HTTP 400 `application/problem+json` response
+	ApplicationProblemJSON400 *BadRequest
+	// ApplicationProblemJSON401 the response for an HTTP 401 `application/problem+json` response
+	ApplicationProblemJSON401 *Unauthorized
+	// ApplicationProblemJSON500 the response for an HTTP 500 `application/problem+json` response
+	ApplicationProblemJSON500 *InternalError
+}
+
+// GetJSON202 returns the response for an HTTP 202 `application/json` response
+func (r RequestReloadResponse) GetJSON202() *ReloadAccepted {
+	return r.JSON202
+}
+
+// GetApplicationProblemJSON400 returns the response for an HTTP 400 `application/problem+json` response
+func (r RequestReloadResponse) GetApplicationProblemJSON400() *BadRequest {
+	return r.ApplicationProblemJSON400
+}
+
+// GetApplicationProblemJSON401 returns the response for an HTTP 401 `application/problem+json` response
+func (r RequestReloadResponse) GetApplicationProblemJSON401() *Unauthorized {
+	return r.ApplicationProblemJSON401
+}
+
+// GetApplicationProblemJSON500 returns the response for an HTTP 500 `application/problem+json` response
+func (r RequestReloadResponse) GetApplicationProblemJSON500() *InternalError {
+	return r.ApplicationProblemJSON500
+}
+
+// GetBody returns the raw response body bytes
+func (r RequestReloadResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r RequestReloadResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r RequestReloadResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r RequestReloadResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type ListFeeSchedulesResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *FeeScheduleList
+	// ApplicationProblemJSON401 the response for an HTTP 401 `application/problem+json` response
+	ApplicationProblemJSON401 *Unauthorized
+	// ApplicationProblemJSON500 the response for an HTTP 500 `application/problem+json` response
+	ApplicationProblemJSON500 *InternalError
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r ListFeeSchedulesResponse) GetJSON200() *FeeScheduleList {
+	return r.JSON200
+}
+
+// GetApplicationProblemJSON401 returns the response for an HTTP 401 `application/problem+json` response
+func (r ListFeeSchedulesResponse) GetApplicationProblemJSON401() *Unauthorized {
+	return r.ApplicationProblemJSON401
+}
+
+// GetApplicationProblemJSON500 returns the response for an HTTP 500 `application/problem+json` response
+func (r ListFeeSchedulesResponse) GetApplicationProblemJSON500() *InternalError {
+	return r.ApplicationProblemJSON500
+}
+
+// GetBody returns the raw response body bytes
+func (r ListFeeSchedulesResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r ListFeeSchedulesResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListFeeSchedulesResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r ListFeeSchedulesResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type CreateFeeScheduleResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON201 the response for an HTTP 201 `application/json` response
+	JSON201 *FeeSchedule
+	// ApplicationProblemJSON400 the response for an HTTP 400 `application/problem+json` response
+	ApplicationProblemJSON400 *BadRequest
+	// ApplicationProblemJSON401 the response for an HTTP 401 `application/problem+json` response
+	ApplicationProblemJSON401 *Unauthorized
+	// ApplicationProblemJSON409 the response for an HTTP 409 `application/problem+json` response
+	ApplicationProblemJSON409 *Conflict
+	// ApplicationProblemJSON500 the response for an HTTP 500 `application/problem+json` response
+	ApplicationProblemJSON500 *InternalError
+}
+
+// GetJSON201 returns the response for an HTTP 201 `application/json` response
+func (r CreateFeeScheduleResponse) GetJSON201() *FeeSchedule {
+	return r.JSON201
+}
+
+// GetApplicationProblemJSON400 returns the response for an HTTP 400 `application/problem+json` response
+func (r CreateFeeScheduleResponse) GetApplicationProblemJSON400() *BadRequest {
+	return r.ApplicationProblemJSON400
+}
+
+// GetApplicationProblemJSON401 returns the response for an HTTP 401 `application/problem+json` response
+func (r CreateFeeScheduleResponse) GetApplicationProblemJSON401() *Unauthorized {
+	return r.ApplicationProblemJSON401
+}
+
+// GetApplicationProblemJSON409 returns the response for an HTTP 409 `application/problem+json` response
+func (r CreateFeeScheduleResponse) GetApplicationProblemJSON409() *Conflict {
+	return r.ApplicationProblemJSON409
+}
+
+// GetApplicationProblemJSON500 returns the response for an HTTP 500 `application/problem+json` response
+func (r CreateFeeScheduleResponse) GetApplicationProblemJSON500() *InternalError {
+	return r.ApplicationProblemJSON500
+}
+
+// GetBody returns the raw response body bytes
+func (r CreateFeeScheduleResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r CreateFeeScheduleResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r CreateFeeScheduleResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r CreateFeeScheduleResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type UpdateFeeScheduleResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *FeeSchedule
+	// ApplicationProblemJSON400 the response for an HTTP 400 `application/problem+json` response
+	ApplicationProblemJSON400 *BadRequest
+	// ApplicationProblemJSON401 the response for an HTTP 401 `application/problem+json` response
+	ApplicationProblemJSON401 *Unauthorized
+	// ApplicationProblemJSON404 the response for an HTTP 404 `application/problem+json` response
+	ApplicationProblemJSON404 *NotFound
+	// ApplicationProblemJSON500 the response for an HTTP 500 `application/problem+json` response
+	ApplicationProblemJSON500 *InternalError
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r UpdateFeeScheduleResponse) GetJSON200() *FeeSchedule {
+	return r.JSON200
+}
+
+// GetApplicationProblemJSON400 returns the response for an HTTP 400 `application/problem+json` response
+func (r UpdateFeeScheduleResponse) GetApplicationProblemJSON400() *BadRequest {
+	return r.ApplicationProblemJSON400
+}
+
+// GetApplicationProblemJSON401 returns the response for an HTTP 401 `application/problem+json` response
+func (r UpdateFeeScheduleResponse) GetApplicationProblemJSON401() *Unauthorized {
+	return r.ApplicationProblemJSON401
+}
+
+// GetApplicationProblemJSON404 returns the response for an HTTP 404 `application/problem+json` response
+func (r UpdateFeeScheduleResponse) GetApplicationProblemJSON404() *NotFound {
+	return r.ApplicationProblemJSON404
+}
+
+// GetApplicationProblemJSON500 returns the response for an HTTP 500 `application/problem+json` response
+func (r UpdateFeeScheduleResponse) GetApplicationProblemJSON500() *InternalError {
+	return r.ApplicationProblemJSON500
+}
+
+// GetBody returns the raw response body bytes
+func (r UpdateFeeScheduleResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r UpdateFeeScheduleResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r UpdateFeeScheduleResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r UpdateFeeScheduleResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type GetHotWalletResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *HotWallet
+	// ApplicationProblemJSON401 the response for an HTTP 401 `application/problem+json` response
+	ApplicationProblemJSON401 *Unauthorized
+	// ApplicationProblemJSON404 the response for an HTTP 404 `application/problem+json` response
+	ApplicationProblemJSON404 *NotFound
+	// ApplicationProblemJSON500 the response for an HTTP 500 `application/problem+json` response
+	ApplicationProblemJSON500 *InternalError
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r GetHotWalletResponse) GetJSON200() *HotWallet {
+	return r.JSON200
+}
+
+// GetApplicationProblemJSON401 returns the response for an HTTP 401 `application/problem+json` response
+func (r GetHotWalletResponse) GetApplicationProblemJSON401() *Unauthorized {
+	return r.ApplicationProblemJSON401
+}
+
+// GetApplicationProblemJSON404 returns the response for an HTTP 404 `application/problem+json` response
+func (r GetHotWalletResponse) GetApplicationProblemJSON404() *NotFound {
+	return r.ApplicationProblemJSON404
+}
+
+// GetApplicationProblemJSON500 returns the response for an HTTP 500 `application/problem+json` response
+func (r GetHotWalletResponse) GetApplicationProblemJSON500() *InternalError {
+	return r.ApplicationProblemJSON500
+}
+
+// GetBody returns the raw response body bytes
+func (r GetHotWalletResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r GetHotWalletResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetHotWalletResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r GetHotWalletResponse) ContentType() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Header.Get("Content-Type")
 	}
@@ -4301,6 +7898,213 @@ func (r ListMarketsResponse) ContentType() string {
 	return ""
 }
 
+type CreateMarketResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON201 the response for an HTTP 201 `application/json` response
+	JSON201 *Market
+	// ApplicationProblemJSON400 the response for an HTTP 400 `application/problem+json` response
+	ApplicationProblemJSON400 *BadRequest
+	// ApplicationProblemJSON401 the response for an HTTP 401 `application/problem+json` response
+	ApplicationProblemJSON401 *Unauthorized
+	// ApplicationProblemJSON404 the response for an HTTP 404 `application/problem+json` response
+	ApplicationProblemJSON404 *NotFound
+	// ApplicationProblemJSON409 the response for an HTTP 409 `application/problem+json` response
+	ApplicationProblemJSON409 *Conflict
+	// ApplicationProblemJSON500 the response for an HTTP 500 `application/problem+json` response
+	ApplicationProblemJSON500 *InternalError
+}
+
+// GetJSON201 returns the response for an HTTP 201 `application/json` response
+func (r CreateMarketResponse) GetJSON201() *Market {
+	return r.JSON201
+}
+
+// GetApplicationProblemJSON400 returns the response for an HTTP 400 `application/problem+json` response
+func (r CreateMarketResponse) GetApplicationProblemJSON400() *BadRequest {
+	return r.ApplicationProblemJSON400
+}
+
+// GetApplicationProblemJSON401 returns the response for an HTTP 401 `application/problem+json` response
+func (r CreateMarketResponse) GetApplicationProblemJSON401() *Unauthorized {
+	return r.ApplicationProblemJSON401
+}
+
+// GetApplicationProblemJSON404 returns the response for an HTTP 404 `application/problem+json` response
+func (r CreateMarketResponse) GetApplicationProblemJSON404() *NotFound {
+	return r.ApplicationProblemJSON404
+}
+
+// GetApplicationProblemJSON409 returns the response for an HTTP 409 `application/problem+json` response
+func (r CreateMarketResponse) GetApplicationProblemJSON409() *Conflict {
+	return r.ApplicationProblemJSON409
+}
+
+// GetApplicationProblemJSON500 returns the response for an HTTP 500 `application/problem+json` response
+func (r CreateMarketResponse) GetApplicationProblemJSON500() *InternalError {
+	return r.ApplicationProblemJSON500
+}
+
+// GetBody returns the raw response body bytes
+func (r CreateMarketResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r CreateMarketResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r CreateMarketResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r CreateMarketResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type GetMarketResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *Market
+	// ApplicationProblemJSON401 the response for an HTTP 401 `application/problem+json` response
+	ApplicationProblemJSON401 *Unauthorized
+	// ApplicationProblemJSON404 the response for an HTTP 404 `application/problem+json` response
+	ApplicationProblemJSON404 *NotFound
+	// ApplicationProblemJSON500 the response for an HTTP 500 `application/problem+json` response
+	ApplicationProblemJSON500 *InternalError
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r GetMarketResponse) GetJSON200() *Market {
+	return r.JSON200
+}
+
+// GetApplicationProblemJSON401 returns the response for an HTTP 401 `application/problem+json` response
+func (r GetMarketResponse) GetApplicationProblemJSON401() *Unauthorized {
+	return r.ApplicationProblemJSON401
+}
+
+// GetApplicationProblemJSON404 returns the response for an HTTP 404 `application/problem+json` response
+func (r GetMarketResponse) GetApplicationProblemJSON404() *NotFound {
+	return r.ApplicationProblemJSON404
+}
+
+// GetApplicationProblemJSON500 returns the response for an HTTP 500 `application/problem+json` response
+func (r GetMarketResponse) GetApplicationProblemJSON500() *InternalError {
+	return r.ApplicationProblemJSON500
+}
+
+// GetBody returns the raw response body bytes
+func (r GetMarketResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r GetMarketResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetMarketResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r GetMarketResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type UpdateMarketResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *Market
+	// ApplicationProblemJSON400 the response for an HTTP 400 `application/problem+json` response
+	ApplicationProblemJSON400 *BadRequest
+	// ApplicationProblemJSON401 the response for an HTTP 401 `application/problem+json` response
+	ApplicationProblemJSON401 *Unauthorized
+	// ApplicationProblemJSON404 the response for an HTTP 404 `application/problem+json` response
+	ApplicationProblemJSON404 *NotFound
+	// ApplicationProblemJSON500 the response for an HTTP 500 `application/problem+json` response
+	ApplicationProblemJSON500 *InternalError
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r UpdateMarketResponse) GetJSON200() *Market {
+	return r.JSON200
+}
+
+// GetApplicationProblemJSON400 returns the response for an HTTP 400 `application/problem+json` response
+func (r UpdateMarketResponse) GetApplicationProblemJSON400() *BadRequest {
+	return r.ApplicationProblemJSON400
+}
+
+// GetApplicationProblemJSON401 returns the response for an HTTP 401 `application/problem+json` response
+func (r UpdateMarketResponse) GetApplicationProblemJSON401() *Unauthorized {
+	return r.ApplicationProblemJSON401
+}
+
+// GetApplicationProblemJSON404 returns the response for an HTTP 404 `application/problem+json` response
+func (r UpdateMarketResponse) GetApplicationProblemJSON404() *NotFound {
+	return r.ApplicationProblemJSON404
+}
+
+// GetApplicationProblemJSON500 returns the response for an HTTP 500 `application/problem+json` response
+func (r UpdateMarketResponse) GetApplicationProblemJSON500() *InternalError {
+	return r.ApplicationProblemJSON500
+}
+
+// GetBody returns the raw response body bytes
+func (r UpdateMarketResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r UpdateMarketResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r UpdateMarketResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r UpdateMarketResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
 type SetMarketStatusResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -4432,6 +8236,116 @@ func (r GetReconciliationResponse) ContentType() string {
 	return ""
 }
 
+type ListReconciliationBreaksResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *ReconciliationBreaks
+	// ApplicationProblemJSON401 the response for an HTTP 401 `application/problem+json` response
+	ApplicationProblemJSON401 *Unauthorized
+	// ApplicationProblemJSON500 the response for an HTTP 500 `application/problem+json` response
+	ApplicationProblemJSON500 *InternalError
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r ListReconciliationBreaksResponse) GetJSON200() *ReconciliationBreaks {
+	return r.JSON200
+}
+
+// GetApplicationProblemJSON401 returns the response for an HTTP 401 `application/problem+json` response
+func (r ListReconciliationBreaksResponse) GetApplicationProblemJSON401() *Unauthorized {
+	return r.ApplicationProblemJSON401
+}
+
+// GetApplicationProblemJSON500 returns the response for an HTTP 500 `application/problem+json` response
+func (r ListReconciliationBreaksResponse) GetApplicationProblemJSON500() *InternalError {
+	return r.ApplicationProblemJSON500
+}
+
+// GetBody returns the raw response body bytes
+func (r ListReconciliationBreaksResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r ListReconciliationBreaksResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListReconciliationBreaksResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r ListReconciliationBreaksResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type ListReconciliationReportsResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *ReconciliationReportList
+	// ApplicationProblemJSON401 the response for an HTTP 401 `application/problem+json` response
+	ApplicationProblemJSON401 *Unauthorized
+	// ApplicationProblemJSON500 the response for an HTTP 500 `application/problem+json` response
+	ApplicationProblemJSON500 *InternalError
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r ListReconciliationReportsResponse) GetJSON200() *ReconciliationReportList {
+	return r.JSON200
+}
+
+// GetApplicationProblemJSON401 returns the response for an HTTP 401 `application/problem+json` response
+func (r ListReconciliationReportsResponse) GetApplicationProblemJSON401() *Unauthorized {
+	return r.ApplicationProblemJSON401
+}
+
+// GetApplicationProblemJSON500 returns the response for an HTTP 500 `application/problem+json` response
+func (r ListReconciliationReportsResponse) GetApplicationProblemJSON500() *InternalError {
+	return r.ApplicationProblemJSON500
+}
+
+// GetBody returns the raw response body bytes
+func (r ListReconciliationReportsResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r ListReconciliationReportsResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListReconciliationReportsResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r ListReconciliationReportsResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
 type ListSweepsResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -4481,6 +8395,323 @@ func (r ListSweepsResponse) StatusCode() int {
 
 // ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
 func (r ListSweepsResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type GetSystemStatusResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *SystemStatus
+	// ApplicationProblemJSON401 the response for an HTTP 401 `application/problem+json` response
+	ApplicationProblemJSON401 *Unauthorized
+	// ApplicationProblemJSON500 the response for an HTTP 500 `application/problem+json` response
+	ApplicationProblemJSON500 *InternalError
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r GetSystemStatusResponse) GetJSON200() *SystemStatus {
+	return r.JSON200
+}
+
+// GetApplicationProblemJSON401 returns the response for an HTTP 401 `application/problem+json` response
+func (r GetSystemStatusResponse) GetApplicationProblemJSON401() *Unauthorized {
+	return r.ApplicationProblemJSON401
+}
+
+// GetApplicationProblemJSON500 returns the response for an HTTP 500 `application/problem+json` response
+func (r GetSystemStatusResponse) GetApplicationProblemJSON500() *InternalError {
+	return r.ApplicationProblemJSON500
+}
+
+// GetBody returns the raw response body bytes
+func (r GetSystemStatusResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r GetSystemStatusResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetSystemStatusResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r GetSystemStatusResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type ListUsersResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *UserList
+	// ApplicationProblemJSON401 the response for an HTTP 401 `application/problem+json` response
+	ApplicationProblemJSON401 *Unauthorized
+	// ApplicationProblemJSON500 the response for an HTTP 500 `application/problem+json` response
+	ApplicationProblemJSON500 *InternalError
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r ListUsersResponse) GetJSON200() *UserList {
+	return r.JSON200
+}
+
+// GetApplicationProblemJSON401 returns the response for an HTTP 401 `application/problem+json` response
+func (r ListUsersResponse) GetApplicationProblemJSON401() *Unauthorized {
+	return r.ApplicationProblemJSON401
+}
+
+// GetApplicationProblemJSON500 returns the response for an HTTP 500 `application/problem+json` response
+func (r ListUsersResponse) GetApplicationProblemJSON500() *InternalError {
+	return r.ApplicationProblemJSON500
+}
+
+// GetBody returns the raw response body bytes
+func (r ListUsersResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r ListUsersResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListUsersResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r ListUsersResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type GetUserResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *User
+	// ApplicationProblemJSON401 the response for an HTTP 401 `application/problem+json` response
+	ApplicationProblemJSON401 *Unauthorized
+	// ApplicationProblemJSON404 the response for an HTTP 404 `application/problem+json` response
+	ApplicationProblemJSON404 *NotFound
+	// ApplicationProblemJSON500 the response for an HTTP 500 `application/problem+json` response
+	ApplicationProblemJSON500 *InternalError
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r GetUserResponse) GetJSON200() *User {
+	return r.JSON200
+}
+
+// GetApplicationProblemJSON401 returns the response for an HTTP 401 `application/problem+json` response
+func (r GetUserResponse) GetApplicationProblemJSON401() *Unauthorized {
+	return r.ApplicationProblemJSON401
+}
+
+// GetApplicationProblemJSON404 returns the response for an HTTP 404 `application/problem+json` response
+func (r GetUserResponse) GetApplicationProblemJSON404() *NotFound {
+	return r.ApplicationProblemJSON404
+}
+
+// GetApplicationProblemJSON500 returns the response for an HTTP 500 `application/problem+json` response
+func (r GetUserResponse) GetApplicationProblemJSON500() *InternalError {
+	return r.ApplicationProblemJSON500
+}
+
+// GetBody returns the raw response body bytes
+func (r GetUserResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r GetUserResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetUserResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r GetUserResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type SetUserKycLevelResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *User
+	// ApplicationProblemJSON400 the response for an HTTP 400 `application/problem+json` response
+	ApplicationProblemJSON400 *BadRequest
+	// ApplicationProblemJSON401 the response for an HTTP 401 `application/problem+json` response
+	ApplicationProblemJSON401 *Unauthorized
+	// ApplicationProblemJSON404 the response for an HTTP 404 `application/problem+json` response
+	ApplicationProblemJSON404 *NotFound
+	// ApplicationProblemJSON500 the response for an HTTP 500 `application/problem+json` response
+	ApplicationProblemJSON500 *InternalError
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r SetUserKycLevelResponse) GetJSON200() *User {
+	return r.JSON200
+}
+
+// GetApplicationProblemJSON400 returns the response for an HTTP 400 `application/problem+json` response
+func (r SetUserKycLevelResponse) GetApplicationProblemJSON400() *BadRequest {
+	return r.ApplicationProblemJSON400
+}
+
+// GetApplicationProblemJSON401 returns the response for an HTTP 401 `application/problem+json` response
+func (r SetUserKycLevelResponse) GetApplicationProblemJSON401() *Unauthorized {
+	return r.ApplicationProblemJSON401
+}
+
+// GetApplicationProblemJSON404 returns the response for an HTTP 404 `application/problem+json` response
+func (r SetUserKycLevelResponse) GetApplicationProblemJSON404() *NotFound {
+	return r.ApplicationProblemJSON404
+}
+
+// GetApplicationProblemJSON500 returns the response for an HTTP 500 `application/problem+json` response
+func (r SetUserKycLevelResponse) GetApplicationProblemJSON500() *InternalError {
+	return r.ApplicationProblemJSON500
+}
+
+// GetBody returns the raw response body bytes
+func (r SetUserKycLevelResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r SetUserKycLevelResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r SetUserKycLevelResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r SetUserKycLevelResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type SetUserStatusResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *User
+	// ApplicationProblemJSON400 the response for an HTTP 400 `application/problem+json` response
+	ApplicationProblemJSON400 *BadRequest
+	// ApplicationProblemJSON401 the response for an HTTP 401 `application/problem+json` response
+	ApplicationProblemJSON401 *Unauthorized
+	// ApplicationProblemJSON404 the response for an HTTP 404 `application/problem+json` response
+	ApplicationProblemJSON404 *NotFound
+	// ApplicationProblemJSON409 the response for an HTTP 409 `application/problem+json` response
+	ApplicationProblemJSON409 *Conflict
+	// ApplicationProblemJSON500 the response for an HTTP 500 `application/problem+json` response
+	ApplicationProblemJSON500 *InternalError
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r SetUserStatusResponse) GetJSON200() *User {
+	return r.JSON200
+}
+
+// GetApplicationProblemJSON400 returns the response for an HTTP 400 `application/problem+json` response
+func (r SetUserStatusResponse) GetApplicationProblemJSON400() *BadRequest {
+	return r.ApplicationProblemJSON400
+}
+
+// GetApplicationProblemJSON401 returns the response for an HTTP 401 `application/problem+json` response
+func (r SetUserStatusResponse) GetApplicationProblemJSON401() *Unauthorized {
+	return r.ApplicationProblemJSON401
+}
+
+// GetApplicationProblemJSON404 returns the response for an HTTP 404 `application/problem+json` response
+func (r SetUserStatusResponse) GetApplicationProblemJSON404() *NotFound {
+	return r.ApplicationProblemJSON404
+}
+
+// GetApplicationProblemJSON409 returns the response for an HTTP 409 `application/problem+json` response
+func (r SetUserStatusResponse) GetApplicationProblemJSON409() *Conflict {
+	return r.ApplicationProblemJSON409
+}
+
+// GetApplicationProblemJSON500 returns the response for an HTTP 500 `application/problem+json` response
+func (r SetUserStatusResponse) GetApplicationProblemJSON500() *InternalError {
+	return r.ApplicationProblemJSON500
+}
+
+// GetBody returns the raw response body bytes
+func (r SetUserStatusResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r SetUserStatusResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r SetUserStatusResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r SetUserStatusResponse) ContentType() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Header.Get("Content-Type")
 	}
@@ -4804,6 +9035,75 @@ func (r ReplayWebhookDeliveryResponse) ContentType() string {
 	return ""
 }
 
+type RotateWebhookSecretResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *RotatedWebhookSecret
+	// ApplicationProblemJSON400 the response for an HTTP 400 `application/problem+json` response
+	ApplicationProblemJSON400 *BadRequest
+	// ApplicationProblemJSON401 the response for an HTTP 401 `application/problem+json` response
+	ApplicationProblemJSON401 *Unauthorized
+	// ApplicationProblemJSON404 the response for an HTTP 404 `application/problem+json` response
+	ApplicationProblemJSON404 *NotFound
+	// ApplicationProblemJSON500 the response for an HTTP 500 `application/problem+json` response
+	ApplicationProblemJSON500 *InternalError
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r RotateWebhookSecretResponse) GetJSON200() *RotatedWebhookSecret {
+	return r.JSON200
+}
+
+// GetApplicationProblemJSON400 returns the response for an HTTP 400 `application/problem+json` response
+func (r RotateWebhookSecretResponse) GetApplicationProblemJSON400() *BadRequest {
+	return r.ApplicationProblemJSON400
+}
+
+// GetApplicationProblemJSON401 returns the response for an HTTP 401 `application/problem+json` response
+func (r RotateWebhookSecretResponse) GetApplicationProblemJSON401() *Unauthorized {
+	return r.ApplicationProblemJSON401
+}
+
+// GetApplicationProblemJSON404 returns the response for an HTTP 404 `application/problem+json` response
+func (r RotateWebhookSecretResponse) GetApplicationProblemJSON404() *NotFound {
+	return r.ApplicationProblemJSON404
+}
+
+// GetApplicationProblemJSON500 returns the response for an HTTP 500 `application/problem+json` response
+func (r RotateWebhookSecretResponse) GetApplicationProblemJSON500() *InternalError {
+	return r.ApplicationProblemJSON500
+}
+
+// GetBody returns the raw response body bytes
+func (r RotateWebhookSecretResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r RotateWebhookSecretResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r RotateWebhookSecretResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r RotateWebhookSecretResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
 type SetWebhookEndpointStatusResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -4867,6 +9167,130 @@ func (r SetWebhookEndpointStatusResponse) StatusCode() int {
 
 // ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
 func (r SetWebhookEndpointStatusResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type ListWithdrawalLimitsResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *WithdrawalLimitList
+	// ApplicationProblemJSON401 the response for an HTTP 401 `application/problem+json` response
+	ApplicationProblemJSON401 *Unauthorized
+	// ApplicationProblemJSON500 the response for an HTTP 500 `application/problem+json` response
+	ApplicationProblemJSON500 *InternalError
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r ListWithdrawalLimitsResponse) GetJSON200() *WithdrawalLimitList {
+	return r.JSON200
+}
+
+// GetApplicationProblemJSON401 returns the response for an HTTP 401 `application/problem+json` response
+func (r ListWithdrawalLimitsResponse) GetApplicationProblemJSON401() *Unauthorized {
+	return r.ApplicationProblemJSON401
+}
+
+// GetApplicationProblemJSON500 returns the response for an HTTP 500 `application/problem+json` response
+func (r ListWithdrawalLimitsResponse) GetApplicationProblemJSON500() *InternalError {
+	return r.ApplicationProblemJSON500
+}
+
+// GetBody returns the raw response body bytes
+func (r ListWithdrawalLimitsResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r ListWithdrawalLimitsResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListWithdrawalLimitsResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r ListWithdrawalLimitsResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type SetWithdrawalLimitResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *WithdrawalLimit
+	// ApplicationProblemJSON400 the response for an HTTP 400 `application/problem+json` response
+	ApplicationProblemJSON400 *BadRequest
+	// ApplicationProblemJSON401 the response for an HTTP 401 `application/problem+json` response
+	ApplicationProblemJSON401 *Unauthorized
+	// ApplicationProblemJSON404 the response for an HTTP 404 `application/problem+json` response
+	ApplicationProblemJSON404 *NotFound
+	// ApplicationProblemJSON500 the response for an HTTP 500 `application/problem+json` response
+	ApplicationProblemJSON500 *InternalError
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r SetWithdrawalLimitResponse) GetJSON200() *WithdrawalLimit {
+	return r.JSON200
+}
+
+// GetApplicationProblemJSON400 returns the response for an HTTP 400 `application/problem+json` response
+func (r SetWithdrawalLimitResponse) GetApplicationProblemJSON400() *BadRequest {
+	return r.ApplicationProblemJSON400
+}
+
+// GetApplicationProblemJSON401 returns the response for an HTTP 401 `application/problem+json` response
+func (r SetWithdrawalLimitResponse) GetApplicationProblemJSON401() *Unauthorized {
+	return r.ApplicationProblemJSON401
+}
+
+// GetApplicationProblemJSON404 returns the response for an HTTP 404 `application/problem+json` response
+func (r SetWithdrawalLimitResponse) GetApplicationProblemJSON404() *NotFound {
+	return r.ApplicationProblemJSON404
+}
+
+// GetApplicationProblemJSON500 returns the response for an HTTP 500 `application/problem+json` response
+func (r SetWithdrawalLimitResponse) GetApplicationProblemJSON500() *InternalError {
+	return r.ApplicationProblemJSON500
+}
+
+// GetBody returns the raw response body bytes
+func (r SetWithdrawalLimitResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r SetWithdrawalLimitResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r SetWithdrawalLimitResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r SetWithdrawalLimitResponse) ContentType() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Header.Get("Content-Type")
 	}
@@ -5175,6 +9599,92 @@ func (c *ClientWithResponses) SetAccountStatusWithResponse(ctx context.Context, 
 	return ParseSetAccountStatusResponse(rsp)
 }
 
+// ListAssetsWithResponse Assets of the tenant
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /admin/v1/assets (the `ListAssets` operationId).
+func (c *ClientWithResponses) ListAssetsWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*ListAssetsResponse, error) {
+	rsp, err := c.ListAssets(ctx, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListAssetsResponse(rsp)
+}
+
+// CreateAssetWithBodyWithResponse List a new asset
+//
+// Publishes asset.updated with changed_fields ["created"]. A market can reference the asset from then on; deposits and withdrawals follow the two enabled flags.
+//
+// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /admin/v1/assets (the `CreateAsset` operationId).
+func (c *ClientWithResponses) CreateAssetWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateAssetResponse, error) {
+	rsp, err := c.CreateAssetWithBody(ctx, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCreateAssetResponse(rsp)
+}
+
+// CreateAssetWithResponse List a new asset
+//
+// Publishes asset.updated with changed_fields ["created"]. A market can reference the asset from then on; deposits and withdrawals follow the two enabled flags.
+//
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /admin/v1/assets (the `CreateAsset` operationId).
+func (c *ClientWithResponses) CreateAssetWithResponse(ctx context.Context, body CreateAssetJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateAssetResponse, error) {
+	rsp, err := c.CreateAsset(ctx, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCreateAssetResponse(rsp)
+}
+
+// GetAssetWithResponse Get one asset
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /admin/v1/assets/{symbol} (the `GetAsset` operationId).
+func (c *ClientWithResponses) GetAssetWithResponse(ctx context.Context, symbol AssetSymbol, reqEditors ...RequestEditorFn) (*GetAssetResponse, error) {
+	rsp, err := c.GetAsset(ctx, symbol, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetAssetResponse(rsp)
+}
+
+// UpdateAssetWithBodyWithResponse Edit an asset
+//
+// Replaces every writable field. Publishes asset.updated naming the fields that changed; a body equal to the current row changes nothing and emits no event. The scale cannot shrink below what any market on the asset needs.
+//
+// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with PUT /admin/v1/assets/{symbol} (the `UpdateAsset` operationId).
+func (c *ClientWithResponses) UpdateAssetWithBodyWithResponse(ctx context.Context, symbol AssetSymbol, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*UpdateAssetResponse, error) {
+	rsp, err := c.UpdateAssetWithBody(ctx, symbol, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseUpdateAssetResponse(rsp)
+}
+
+// UpdateAssetWithResponse Edit an asset
+//
+// Replaces every writable field. Publishes asset.updated naming the fields that changed; a body equal to the current row changes nothing and emits no event. The scale cannot shrink below what any market on the asset needs.
+//
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with PUT /admin/v1/assets/{symbol} (the `UpdateAsset` operationId).
+func (c *ClientWithResponses) UpdateAssetWithResponse(ctx context.Context, symbol AssetSymbol, body UpdateAssetJSONRequestBody, reqEditors ...RequestEditorFn) (*UpdateAssetResponse, error) {
+	rsp, err := c.UpdateAsset(ctx, symbol, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseUpdateAssetResponse(rsp)
+}
+
 // ListAuditEventsWithResponse Audit trail, newest first
 //
 // Returns a wrapper object for the known response body format(s).
@@ -5186,6 +9696,133 @@ func (c *ClientWithResponses) ListAuditEventsWithResponse(ctx context.Context, p
 		return nil, err
 	}
 	return ParseListAuditEventsResponse(rsp)
+}
+
+// ListDepositsWithResponse Deposits the chain role has seen, newest first
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /admin/v1/deposits (the `ListDeposits` operationId).
+func (c *ClientWithResponses) ListDepositsWithResponse(ctx context.Context, params *ListDepositsParams, reqEditors ...RequestEditorFn) (*ListDepositsResponse, error) {
+	rsp, err := c.ListDeposits(ctx, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListDepositsResponse(rsp)
+}
+
+// RequestReloadWithBodyWithResponse Ask every engine to reload its registry cache
+//
+// Publishes registry.reload with no row changed: after a seed, or when in doubt. 202: the request is in the outbox; the engine's reload consumer acts on it.
+//
+// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /admin/v1/engine/reload (the `RequestReload` operationId).
+func (c *ClientWithResponses) RequestReloadWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*RequestReloadResponse, error) {
+	rsp, err := c.RequestReloadWithBody(ctx, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseRequestReloadResponse(rsp)
+}
+
+// RequestReloadWithResponse Ask every engine to reload its registry cache
+//
+// Publishes registry.reload with no row changed: after a seed, or when in doubt. 202: the request is in the outbox; the engine's reload consumer acts on it.
+//
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /admin/v1/engine/reload (the `RequestReload` operationId).
+func (c *ClientWithResponses) RequestReloadWithResponse(ctx context.Context, body RequestReloadJSONRequestBody, reqEditors ...RequestEditorFn) (*RequestReloadResponse, error) {
+	rsp, err := c.RequestReload(ctx, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseRequestReloadResponse(rsp)
+}
+
+// ListFeeSchedulesWithResponse Fee schedules of the tenant
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /admin/v1/fee-schedules (the `ListFeeSchedules` operationId).
+func (c *ClientWithResponses) ListFeeSchedulesWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*ListFeeSchedulesResponse, error) {
+	rsp, err := c.ListFeeSchedules(ctx, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListFeeSchedulesResponse(rsp)
+}
+
+// CreateFeeScheduleWithBodyWithResponse Add a fee schedule
+//
+// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /admin/v1/fee-schedules (the `CreateFeeSchedule` operationId).
+func (c *ClientWithResponses) CreateFeeScheduleWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateFeeScheduleResponse, error) {
+	rsp, err := c.CreateFeeScheduleWithBody(ctx, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCreateFeeScheduleResponse(rsp)
+}
+
+// CreateFeeScheduleWithResponse Add a fee schedule
+//
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /admin/v1/fee-schedules (the `CreateFeeSchedule` operationId).
+func (c *ClientWithResponses) CreateFeeScheduleWithResponse(ctx context.Context, body CreateFeeScheduleJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateFeeScheduleResponse, error) {
+	rsp, err := c.CreateFeeSchedule(ctx, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCreateFeeScheduleResponse(rsp)
+}
+
+// UpdateFeeScheduleWithBodyWithResponse Change a fee schedule's rates
+//
+// Every market on the schedule pays the new rates from the next trade. Publishes fee_schedule.updated (and no market.updated for the markets on it; the engine reloads its whole cache on either).
+//
+// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with PUT /admin/v1/fee-schedules/{name} (the `UpdateFeeSchedule` operationId).
+func (c *ClientWithResponses) UpdateFeeScheduleWithBodyWithResponse(ctx context.Context, name FeeScheduleName, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*UpdateFeeScheduleResponse, error) {
+	rsp, err := c.UpdateFeeScheduleWithBody(ctx, name, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseUpdateFeeScheduleResponse(rsp)
+}
+
+// UpdateFeeScheduleWithResponse Change a fee schedule's rates
+//
+// Every market on the schedule pays the new rates from the next trade. Publishes fee_schedule.updated (and no market.updated for the markets on it; the engine reloads its whole cache on either).
+//
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with PUT /admin/v1/fee-schedules/{name} (the `UpdateFeeSchedule` operationId).
+func (c *ClientWithResponses) UpdateFeeScheduleWithResponse(ctx context.Context, name FeeScheduleName, body UpdateFeeScheduleJSONRequestBody, reqEditors ...RequestEditorFn) (*UpdateFeeScheduleResponse, error) {
+	rsp, err := c.UpdateFeeSchedule(ctx, name, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseUpdateFeeScheduleResponse(rsp)
+}
+
+// GetHotWalletWithResponse The hot wallet, as the chain role keeps it
+//
+// Address, next nonce and the low-balance alert state from chain.hot_wallets, with the ledger's custody_hot balance per asset. The chain's own figure is what reconciliation compares that balance to. 404 until the chain role has started once against this chain.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /admin/v1/hot-wallet (the `GetHotWallet` operationId).
+func (c *ClientWithResponses) GetHotWalletWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*GetHotWalletResponse, error) {
+	rsp, err := c.GetHotWallet(ctx, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetHotWalletResponse(rsp)
 }
 
 // CreateAdjustmentWithBodyWithResponse Post a manual adjustment against the external account
@@ -5331,6 +9968,79 @@ func (c *ClientWithResponses) ListMarketsWithResponse(ctx context.Context, reqEd
 	return ParseListMarketsResponse(rsp)
 }
 
+// CreateMarketWithBodyWithResponse List a new market
+//
+// Assets and the fee schedule are referenced by symbol and name, and must exist. Publishes market.updated with changed_fields ["created"]; the engine opens the book on reload.
+//
+// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /admin/v1/markets (the `CreateMarket` operationId).
+func (c *ClientWithResponses) CreateMarketWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateMarketResponse, error) {
+	rsp, err := c.CreateMarketWithBody(ctx, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCreateMarketResponse(rsp)
+}
+
+// CreateMarketWithResponse List a new market
+//
+// Assets and the fee schedule are referenced by symbol and name, and must exist. Publishes market.updated with changed_fields ["created"]; the engine opens the book on reload.
+//
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /admin/v1/markets (the `CreateMarket` operationId).
+func (c *ClientWithResponses) CreateMarketWithResponse(ctx context.Context, body CreateMarketJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateMarketResponse, error) {
+	rsp, err := c.CreateMarket(ctx, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCreateMarketResponse(rsp)
+}
+
+// GetMarketWithResponse Get one market
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /admin/v1/markets/{symbol} (the `GetMarket` operationId).
+func (c *ClientWithResponses) GetMarketWithResponse(ctx context.Context, symbol MarketSymbol, reqEditors ...RequestEditorFn) (*GetMarketResponse, error) {
+	rsp, err := c.GetMarket(ctx, symbol, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetMarketResponse(rsp)
+}
+
+// UpdateMarketWithBodyWithResponse Edit a market
+//
+// Replaces every writable field, status included. Publishes market.updated naming the fields that changed; a body equal to the current row changes nothing and emits no event. Precision must still fit the assets (price_tick within the quote scale, qty_step within the base scale).
+//
+// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with PUT /admin/v1/markets/{symbol} (the `UpdateMarket` operationId).
+func (c *ClientWithResponses) UpdateMarketWithBodyWithResponse(ctx context.Context, symbol MarketSymbol, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*UpdateMarketResponse, error) {
+	rsp, err := c.UpdateMarketWithBody(ctx, symbol, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseUpdateMarketResponse(rsp)
+}
+
+// UpdateMarketWithResponse Edit a market
+//
+// Replaces every writable field, status included. Publishes market.updated naming the fields that changed; a body equal to the current row changes nothing and emits no event. Precision must still fit the assets (price_tick within the quote scale, qty_step within the base scale).
+//
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with PUT /admin/v1/markets/{symbol} (the `UpdateMarket` operationId).
+func (c *ClientWithResponses) UpdateMarketWithResponse(ctx context.Context, symbol MarketSymbol, body UpdateMarketJSONRequestBody, reqEditors ...RequestEditorFn) (*UpdateMarketResponse, error) {
+	rsp, err := c.UpdateMarket(ctx, symbol, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseUpdateMarketResponse(rsp)
+}
+
 // SetMarketStatusWithBodyWithResponse Halt, resume or delist a market
 //
 // Changes the market's trading status and publishes market.updated, which the engine consumes to reload its registry cache without a restart. Setting the status a market already has changes nothing and emits no event. The path parameter is the symbol, matching GET /v1/markets/{symbol}.
@@ -5392,6 +10102,34 @@ func (c *ClientWithResponses) GetReconciliationWithResponse(ctx context.Context,
 	return ParseGetReconciliationResponse(rsp)
 }
 
+// ListReconciliationBreaksWithResponse Every break on record, both kinds, newest first
+//
+// Two families with different terms. A chain break is one asset of one reconciliation pass whose on-chain custody did not match the ledger's; the chain role writes it (docs/plan-v1.0.md §6.4.4). A ledger break is one asset whose debits and credits do not agree, found by the admin role checking the ledger against itself; it has an open/resolved state because the condition can end.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /admin/v1/reconciliation/breaks (the `ListReconciliationBreaks` operationId).
+func (c *ClientWithResponses) ListReconciliationBreaksWithResponse(ctx context.Context, params *ListReconciliationBreaksParams, reqEditors ...RequestEditorFn) (*ListReconciliationBreaksResponse, error) {
+	rsp, err := c.ListReconciliationBreaks(ctx, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListReconciliationBreaksResponse(rsp)
+}
+
+// ListReconciliationReportsWithResponse Reconciliation passes, newest first
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /admin/v1/reconciliation/reports (the `ListReconciliationReports` operationId).
+func (c *ClientWithResponses) ListReconciliationReportsWithResponse(ctx context.Context, params *ListReconciliationReportsParams, reqEditors ...RequestEditorFn) (*ListReconciliationReportsResponse, error) {
+	rsp, err := c.ListReconciliationReports(ctx, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListReconciliationReportsResponse(rsp)
+}
+
 // ListSweepsWithResponse Recent collections into the hot wallet
 //
 // Sweeps move deposits from the per-account addresses they landed on to the hot wallet withdrawals are paid from (docs/plan-v1.0.md §6.4.3). No user balance is involved: a sweep moves the exchange's own custody between two of its own house accounts.
@@ -5407,6 +10145,112 @@ func (c *ClientWithResponses) ListSweepsWithResponse(ctx context.Context, params
 		return nil, err
 	}
 	return ParseListSweepsResponse(rsp)
+}
+
+// GetSystemStatusWithResponse What the dashboard shows
+//
+// One read of the things an operator checks first thing: whether the
+// ledger balances, what the last reconciliation found, and how much is
+// waiting on a person. Counts are capped where noted; a tile that says
+// "500+" has made its point.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /admin/v1/system/status (the `GetSystemStatus` operationId).
+func (c *ClientWithResponses) GetSystemStatusWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*GetSystemStatusResponse, error) {
+	rsp, err := c.GetSystemStatus(ctx, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetSystemStatusResponse(rsp)
+}
+
+// ListUsersWithResponse List users
+//
+// The operator's directory. `email` is a fragment matched anywhere in the address (no wildcards). Newest first.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /admin/v1/users (the `ListUsers` operationId).
+func (c *ClientWithResponses) ListUsersWithResponse(ctx context.Context, params *ListUsersParams, reqEditors ...RequestEditorFn) (*ListUsersResponse, error) {
+	rsp, err := c.ListUsers(ctx, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListUsersResponse(rsp)
+}
+
+// GetUserWithResponse Get one user
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /admin/v1/users/{id} (the `GetUser` operationId).
+func (c *ClientWithResponses) GetUserWithResponse(ctx context.Context, id UserID, reqEditors ...RequestEditorFn) (*GetUserResponse, error) {
+	rsp, err := c.GetUser(ctx, id, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetUserResponse(rsp)
+}
+
+// SetUserKycLevelWithBodyWithResponse Set a user's KYC level
+//
+// The withdrawal policy reads the level on each request, so the next withdrawal is decided under the new limits; nothing already pending is re-decided. Publishes `user.kyc_level_updated` when the level changes.
+//
+// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with PUT /admin/v1/users/{id}/kyc-level (the `SetUserKycLevel` operationId).
+func (c *ClientWithResponses) SetUserKycLevelWithBodyWithResponse(ctx context.Context, id UserID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*SetUserKycLevelResponse, error) {
+	rsp, err := c.SetUserKycLevelWithBody(ctx, id, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseSetUserKycLevelResponse(rsp)
+}
+
+// SetUserKycLevelWithResponse Set a user's KYC level
+//
+// The withdrawal policy reads the level on each request, so the next withdrawal is decided under the new limits; nothing already pending is re-decided. Publishes `user.kyc_level_updated` when the level changes.
+//
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with PUT /admin/v1/users/{id}/kyc-level (the `SetUserKycLevel` operationId).
+func (c *ClientWithResponses) SetUserKycLevelWithResponse(ctx context.Context, id UserID, body SetUserKycLevelJSONRequestBody, reqEditors ...RequestEditorFn) (*SetUserKycLevelResponse, error) {
+	rsp, err := c.SetUserKycLevel(ctx, id, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseSetUserKycLevelResponse(rsp)
+}
+
+// SetUserStatusWithBodyWithResponse Freeze or release a user
+//
+// Frozen means the user cannot log in, refresh a token or use an API key, and their spot account is frozen in the same transaction (no orders, no withdrawals). An access token already issued lasts its fifteen minutes. Releasing reverses all of it. Refuses to freeze the last active administrator. Publishes `user.status_updated` when the status changes.
+//
+// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with PUT /admin/v1/users/{id}/status (the `SetUserStatus` operationId).
+func (c *ClientWithResponses) SetUserStatusWithBodyWithResponse(ctx context.Context, id UserID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*SetUserStatusResponse, error) {
+	rsp, err := c.SetUserStatusWithBody(ctx, id, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseSetUserStatusResponse(rsp)
+}
+
+// SetUserStatusWithResponse Freeze or release a user
+//
+// Frozen means the user cannot log in, refresh a token or use an API key, and their spot account is frozen in the same transaction (no orders, no withdrawals). An access token already issued lasts its fifteen minutes. Releasing reverses all of it. Refuses to freeze the last active administrator. Publishes `user.status_updated` when the status changes.
+//
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with PUT /admin/v1/users/{id}/status (the `SetUserStatus` operationId).
+func (c *ClientWithResponses) SetUserStatusWithResponse(ctx context.Context, id UserID, body SetUserStatusJSONRequestBody, reqEditors ...RequestEditorFn) (*SetUserStatusResponse, error) {
+	rsp, err := c.SetUserStatus(ctx, id, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseSetUserStatusResponse(rsp)
 }
 
 // ListWebhookEndpointsWithResponse Webhook endpoints, disabled ones included
@@ -5541,6 +10385,36 @@ func (c *ClientWithResponses) ReplayWebhookDeliveryWithResponse(ctx context.Cont
 	return ParseReplayWebhookDeliveryResponse(rsp)
 }
 
+// RotateWebhookSecretWithBodyWithResponse Issue a new signing secret and keep the old one for a grace period
+//
+// The new secret is in this response and nowhere else. Until previous_secret_until, every delivery carries two signatures, `v1=<new>,v1=<old>`, so a receiver that has switched and one that has not both keep verifying; after it, only the new one signs. Rotating again inside the grace period replaces the old secret: the newest two are the only ones ever valid.
+//
+// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /admin/v1/webhooks/{id}/rotate-secret (the `RotateWebhookSecret` operationId).
+func (c *ClientWithResponses) RotateWebhookSecretWithBodyWithResponse(ctx context.Context, id WebhookEndpointID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*RotateWebhookSecretResponse, error) {
+	rsp, err := c.RotateWebhookSecretWithBody(ctx, id, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseRotateWebhookSecretResponse(rsp)
+}
+
+// RotateWebhookSecretWithResponse Issue a new signing secret and keep the old one for a grace period
+//
+// The new secret is in this response and nowhere else. Until previous_secret_until, every delivery carries two signatures, `v1=<new>,v1=<old>`, so a receiver that has switched and one that has not both keep verifying; after it, only the new one signs. Rotating again inside the grace period replaces the old secret: the newest two are the only ones ever valid.
+//
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /admin/v1/webhooks/{id}/rotate-secret (the `RotateWebhookSecret` operationId).
+func (c *ClientWithResponses) RotateWebhookSecretWithResponse(ctx context.Context, id WebhookEndpointID, body RotateWebhookSecretJSONRequestBody, reqEditors ...RequestEditorFn) (*RotateWebhookSecretResponse, error) {
+	rsp, err := c.RotateWebhookSecret(ctx, id, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseRotateWebhookSecretResponse(rsp)
+}
+
 // SetWebhookEndpointStatusWithBodyWithResponse Enable or disable an endpoint
 //
 // Disabling also drops whatever is still queued for the endpoint. Queued deliveries to an inactive endpoint are not pending but unreachable, and leaving them would fire a batch of stale events at the customer whenever the integration was turned back on. The delivery history is untouched, and the number dropped is recorded in the audit trail.
@@ -5569,6 +10443,49 @@ func (c *ClientWithResponses) SetWebhookEndpointStatusWithResponse(ctx context.C
 		return nil, err
 	}
 	return ParseSetWebhookEndpointStatusResponse(rsp)
+}
+
+// ListWithdrawalLimitsWithResponse Withdrawal limits per asset and KYC level
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /admin/v1/withdrawal-limits (the `ListWithdrawalLimits` operationId).
+func (c *ClientWithResponses) ListWithdrawalLimitsWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*ListWithdrawalLimitsResponse, error) {
+	rsp, err := c.ListWithdrawalLimits(ctx, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListWithdrawalLimitsResponse(rsp)
+}
+
+// SetWithdrawalLimitWithBodyWithResponse Set the limits of one asset at one KYC level
+//
+// Creates the row when there is none. The withdrawal policy reads the limits on each request, so the next withdrawal is decided under the new ones. No event: nothing caches these.
+//
+// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with PUT /admin/v1/withdrawal-limits/{asset}/{kyc_level} (the `SetWithdrawalLimit` operationId).
+func (c *ClientWithResponses) SetWithdrawalLimitWithBodyWithResponse(ctx context.Context, asset AssetPath, kycLevel KycLevelPath, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*SetWithdrawalLimitResponse, error) {
+	rsp, err := c.SetWithdrawalLimitWithBody(ctx, asset, kycLevel, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseSetWithdrawalLimitResponse(rsp)
+}
+
+// SetWithdrawalLimitWithResponse Set the limits of one asset at one KYC level
+//
+// Creates the row when there is none. The withdrawal policy reads the limits on each request, so the next withdrawal is decided under the new ones. No event: nothing caches these.
+//
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with PUT /admin/v1/withdrawal-limits/{asset}/{kyc_level} (the `SetWithdrawalLimit` operationId).
+func (c *ClientWithResponses) SetWithdrawalLimitWithResponse(ctx context.Context, asset AssetPath, kycLevel KycLevelPath, body SetWithdrawalLimitJSONRequestBody, reqEditors ...RequestEditorFn) (*SetWithdrawalLimitResponse, error) {
+	rsp, err := c.SetWithdrawalLimit(ctx, asset, kycLevel, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseSetWithdrawalLimitResponse(rsp)
 }
 
 // ListWithdrawalsForReviewWithResponse The withdrawal review queue
@@ -5893,6 +10810,201 @@ func ParseSetAccountStatusResponse(rsp *http.Response) (*SetAccountStatusRespons
 	return response, nil
 }
 
+// ParseListAssetsResponse parses an HTTP response from a ListAssetsWithResponse call
+func ParseListAssetsResponse(rsp *http.Response) (*ListAssetsResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListAssetsResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest AssetList
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON500 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseCreateAssetResponse parses an HTTP response from a CreateAssetWithResponse call
+func ParseCreateAssetResponse(rsp *http.Response) (*CreateAssetResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &CreateAssetResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 201:
+		var dest Asset
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON201 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest BadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest Conflict
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON409 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON500 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetAssetResponse parses an HTTP response from a GetAssetWithResponse call
+func ParseGetAssetResponse(rsp *http.Response) (*GetAssetResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetAssetResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest Asset
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON500 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseUpdateAssetResponse parses an HTTP response from a UpdateAssetWithResponse call
+func ParseUpdateAssetResponse(rsp *http.Response) (*UpdateAssetResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &UpdateAssetResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest Asset
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest BadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON500 = &dest
+
+	}
+
+	return response, nil
+}
+
 // ParseListAuditEventsResponse parses an HTTP response from a ListAuditEventsWithResponse call
 func ParseListAuditEventsResponse(rsp *http.Response) (*ListAuditEventsResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
@@ -5920,6 +11032,288 @@ func ParseListAuditEventsResponse(rsp *http.Response) (*ListAuditEventsResponse,
 			return nil, err
 		}
 		response.ApplicationProblemJSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON500 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseListDepositsResponse parses an HTTP response from a ListDepositsWithResponse call
+func ParseListDepositsResponse(rsp *http.Response) (*ListDepositsResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListDepositsResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest AdminDepositList
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON500 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseRequestReloadResponse parses an HTTP response from a RequestReloadWithResponse call
+func ParseRequestReloadResponse(rsp *http.Response) (*RequestReloadResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &RequestReloadResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 202:
+		var dest ReloadAccepted
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON202 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest BadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON500 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseListFeeSchedulesResponse parses an HTTP response from a ListFeeSchedulesWithResponse call
+func ParseListFeeSchedulesResponse(rsp *http.Response) (*ListFeeSchedulesResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListFeeSchedulesResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest FeeScheduleList
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON500 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseCreateFeeScheduleResponse parses an HTTP response from a CreateFeeScheduleWithResponse call
+func ParseCreateFeeScheduleResponse(rsp *http.Response) (*CreateFeeScheduleResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &CreateFeeScheduleResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 201:
+		var dest FeeSchedule
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON201 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest BadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest Conflict
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON409 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON500 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseUpdateFeeScheduleResponse parses an HTTP response from a UpdateFeeScheduleWithResponse call
+func ParseUpdateFeeScheduleResponse(rsp *http.Response) (*UpdateFeeScheduleResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &UpdateFeeScheduleResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest FeeSchedule
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest BadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON500 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetHotWalletResponse parses an HTTP response from a GetHotWalletWithResponse call
+func ParseGetHotWalletResponse(rsp *http.Response) (*GetHotWalletResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetHotWalletResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest HotWallet
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON404 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
 		var dest InternalError
@@ -6175,6 +11569,168 @@ func ParseListMarketsResponse(rsp *http.Response) (*ListMarketsResponse, error) 
 	return response, nil
 }
 
+// ParseCreateMarketResponse parses an HTTP response from a CreateMarketWithResponse call
+func ParseCreateMarketResponse(rsp *http.Response) (*CreateMarketResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &CreateMarketResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 201:
+		var dest Market
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON201 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest BadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest Conflict
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON409 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON500 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetMarketResponse parses an HTTP response from a GetMarketWithResponse call
+func ParseGetMarketResponse(rsp *http.Response) (*GetMarketResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetMarketResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest Market
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON500 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseUpdateMarketResponse parses an HTTP response from a UpdateMarketWithResponse call
+func ParseUpdateMarketResponse(rsp *http.Response) (*UpdateMarketResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &UpdateMarketResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest Market
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest BadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON500 = &dest
+
+	}
+
+	return response, nil
+}
+
 // ParseSetMarketStatusResponse parses an HTTP response from a SetMarketStatusWithResponse call
 func ParseSetMarketStatusResponse(rsp *http.Response) (*SetMarketStatusResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
@@ -6276,6 +11832,86 @@ func ParseGetReconciliationResponse(rsp *http.Response) (*GetReconciliationRespo
 	return response, nil
 }
 
+// ParseListReconciliationBreaksResponse parses an HTTP response from a ListReconciliationBreaksWithResponse call
+func ParseListReconciliationBreaksResponse(rsp *http.Response) (*ListReconciliationBreaksResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListReconciliationBreaksResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest ReconciliationBreaks
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON500 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseListReconciliationReportsResponse parses an HTTP response from a ListReconciliationReportsWithResponse call
+func ParseListReconciliationReportsResponse(rsp *http.Response) (*ListReconciliationReportsResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListReconciliationReportsResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest ReconciliationReportList
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON500 = &dest
+
+	}
+
+	return response, nil
+}
+
 // ParseListSweepsResponse parses an HTTP response from a ListSweepsWithResponse call
 func ParseListSweepsResponse(rsp *http.Response) (*ListSweepsResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
@@ -6303,6 +11939,248 @@ func ParseListSweepsResponse(rsp *http.Response) (*ListSweepsResponse, error) {
 			return nil, err
 		}
 		response.ApplicationProblemJSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON500 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetSystemStatusResponse parses an HTTP response from a GetSystemStatusWithResponse call
+func ParseGetSystemStatusResponse(rsp *http.Response) (*GetSystemStatusResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetSystemStatusResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest SystemStatus
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON500 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseListUsersResponse parses an HTTP response from a ListUsersWithResponse call
+func ParseListUsersResponse(rsp *http.Response) (*ListUsersResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListUsersResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest UserList
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON500 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetUserResponse parses an HTTP response from a GetUserWithResponse call
+func ParseGetUserResponse(rsp *http.Response) (*GetUserResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetUserResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest User
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON500 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseSetUserKycLevelResponse parses an HTTP response from a SetUserKycLevelWithResponse call
+func ParseSetUserKycLevelResponse(rsp *http.Response) (*SetUserKycLevelResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &SetUserKycLevelResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest User
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest BadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON500 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseSetUserStatusResponse parses an HTTP response from a SetUserStatusWithResponse call
+func ParseSetUserStatusResponse(rsp *http.Response) (*SetUserStatusResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &SetUserStatusResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest User
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest BadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest Conflict
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON409 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
 		var dest InternalError
@@ -6558,6 +12436,60 @@ func ParseReplayWebhookDeliveryResponse(rsp *http.Response) (*ReplayWebhookDeliv
 	return response, nil
 }
 
+// ParseRotateWebhookSecretResponse parses an HTTP response from a RotateWebhookSecretWithResponse call
+func ParseRotateWebhookSecretResponse(rsp *http.Response) (*RotateWebhookSecretResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &RotateWebhookSecretResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest RotatedWebhookSecret
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest BadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON500 = &dest
+
+	}
+
+	return response, nil
+}
+
 // ParseSetWebhookEndpointStatusResponse parses an HTTP response from a SetWebhookEndpointStatusWithResponse call
 func ParseSetWebhookEndpointStatusResponse(rsp *http.Response) (*SetWebhookEndpointStatusResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
@@ -6574,6 +12506,100 @@ func ParseSetWebhookEndpointStatusResponse(rsp *http.Response) (*SetWebhookEndpo
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
 		var dest WebhookEndpoint
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest BadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON500 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseListWithdrawalLimitsResponse parses an HTTP response from a ListWithdrawalLimitsWithResponse call
+func ParseListWithdrawalLimitsResponse(rsp *http.Response) (*ListWithdrawalLimitsResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListWithdrawalLimitsResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest WithdrawalLimitList
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON500 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseSetWithdrawalLimitResponse parses an HTTP response from a SetWithdrawalLimitWithResponse call
+func ParseSetWithdrawalLimitResponse(rsp *http.Response) (*SetWithdrawalLimitResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &SetWithdrawalLimitResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest WithdrawalLimit
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}

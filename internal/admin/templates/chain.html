@@ -1,0 +1,72 @@
+{{define "content"}}
+<h1>Chain</h1>
+{{with .Data}}
+<section class="card">
+  <h2>Hot wallet</h2>
+  {{with .HotWallet}}
+  <dl class="kv">
+    <dt>Address</dt><dd class="mono">{{.Address}}</dd>
+    <dt>Chain</dt><dd>{{.ChainID}}</dd>
+    <dt>Next nonce</dt><dd>{{.NextNonce}}</dd>
+    <dt>Balance</dt><dd>{{if .Low}}<span class="badge bad">low since {{whenp .LowAlertedAt}}</span>{{else}}<span class="badge ok">above the line</span>{{end}}</dd>
+    <dt>Holds (ledger)</dt><dd>{{range .Balances}}<div>{{amount .Balance}} {{.Asset}}</div>{{else}}<span class="muted">nothing booked to custody_hot yet</span>{{end}}</dd>
+    <dt>Updated</dt><dd>{{when .UpdatedAt}}</dd>
+  </dl>
+  {{else}}
+  <p class="muted">No hot wallet recorded: the chain role writes it on its first start.</p>
+  {{end}}
+</section>
+<section class="card">
+  <h2>Deposits</h2>
+  <form method="get" action="/admin/chain" class="row">
+    <label>Status <select name="status"><option value="">any</option>{{$s := .Status}}{{range .Statuses}}<option value="{{.}}"{{if eq . $s}} selected{{end}}>{{.}}</option>{{end}}</select></label>
+    <label>Asset <input type="text" name="asset" value="{{.Asset}}" placeholder="ETH"></label>
+    <button type="submit" class="quiet">Filter</button>
+  </form>
+</section>
+<section id="list">
+<table>
+  <thead><tr><th>Seen</th><th>Account</th><th class="num">Amount</th><th>Address</th><th>Transaction</th><th class="num">Block</th><th class="num">Confs</th><th>Status</th><th>Credited</th></tr></thead>
+  <tbody>
+  {{range .Deposits}}
+  <tr>
+    <td>{{when .CreatedAt}}</td>
+    <td><a class="mono" href="/admin/ledger?account_id={{.AccountID}}">{{.AccountID}}</a></td>
+    <td class="num">{{amount .Amount}} {{.Asset}}</td>
+    <td class="mono">{{.Address}}</td>
+    <td class="mono">{{.TxHash}}{{if .LogIndex}} #{{.LogIndex}}{{end}}</td>
+    <td class="num">{{.BlockNumber}}</td>
+    <td class="num">{{.Confirmations}}</td>
+    <td><span class="badge {{badge .Status}}">{{.Status}}</span></td>
+    <td>{{whenp .CreditedAt}}</td>
+  </tr>
+  {{else}}
+  <tr><td colspan="9" class="muted">No deposits match.</td></tr>
+  {{end}}
+  </tbody>
+</table>
+{{template "pager" .Pager}}
+</section>
+<section class="card">
+  <h2>Sweeps</h2>
+  <p class="muted">The exchange moving its own custody from deposit addresses to the hot wallet. The latest fifty.</p>
+  <table>
+    <thead><tr><th>Started</th><th>From</th><th class="num">Amount</th><th>Transaction</th><th class="num">Gas</th><th>Status</th></tr></thead>
+    <tbody>
+    {{range .Sweeps}}
+    <tr>
+      <td>{{when .CreatedAt}}</td>
+      <td class="mono">{{.FromAddress}}</td>
+      <td class="num">{{amount .Amount}} {{.Asset}}</td>
+      <td class="mono">{{.TxHash}}{{if .GasFundingTxHash}}<br><span class="muted">gas: {{.GasFundingTxHash}}</span>{{end}}</td>
+      <td class="num">{{if .GasCost.IsPositive}}{{amount .GasCost}}{{end}}</td>
+      <td><span class="badge {{badge .Status}}">{{.Status}}</span>{{if .FailureReason}} <span class="muted">{{.FailureReason}}</span>{{end}}</td>
+    </tr>
+    {{else}}
+    <tr><td colspan="6" class="muted">No sweeps yet.</td></tr>
+    {{end}}
+    </tbody>
+  </table>
+</section>
+{{end}}
+{{end}}

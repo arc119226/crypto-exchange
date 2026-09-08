@@ -10,6 +10,17 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+type AdminLedgerBreak struct {
+	ID         string
+	TenantID   string
+	Asset      string
+	Debits     pgtype.Numeric
+	Credits    pgtype.Numeric
+	Diff       pgtype.Numeric
+	DetectedAt time.Time
+	ResolvedAt pgtype.Timestamptz
+}
+
 type LedgerAccount struct {
 	ID          string
 	TenantID    string

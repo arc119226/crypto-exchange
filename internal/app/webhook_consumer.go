@@ -34,7 +34,7 @@ func (s webhookSubs) Stop() {
 var webhookStreamDomains = map[string][]string{
 	eventbus.StreamTrading:  {"order", "trade", "ledger", "balance"},
 	eventbus.StreamChain:    {"deposit", "withdrawal", "sweep", "alert"},
-	eventbus.StreamRegistry: {"market", "asset", "fee_schedule", "user", "reconciliation"},
+	eventbus.StreamRegistry: {"market", "asset", "fee_schedule", "registry", "user", "reconciliation"},
 }
 
 // consumeForWebhooks subscribes the dispatcher to every stream.

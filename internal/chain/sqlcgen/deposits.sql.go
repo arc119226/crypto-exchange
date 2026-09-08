@@ -51,6 +51,24 @@ func (q *Queries) CountDepositsByStatus(ctx context.Context, arg CountDepositsBy
 	return items, nil
 }
 
+const countDepositsInStatus = `-- name: CountDepositsInStatus :one
+SELECT count(*) FROM chain.deposits
+WHERE tenant_id = $1 AND status = ANY($2::text[])
+`
+
+type CountDepositsInStatusParams struct {
+	TenantID string
+	Statuses []string
+}
+
+// The dashboard's "deposits still confirming" tile.
+func (q *Queries) CountDepositsInStatus(ctx context.Context, arg CountDepositsInStatusParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countDepositsInStatus, arg.TenantID, arg.Statuses)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const deleteBlocksFrom = `-- name: DeleteBlocksFrom :execrows
 DELETE FROM chain.blocks WHERE tenant_id = $1 AND chain_id = $2 AND number >= $3
 `

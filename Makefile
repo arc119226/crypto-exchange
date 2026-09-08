@@ -24,7 +24,7 @@ FOUNDRY_TAG   ?= $(shell sed -n 's/^FOUNDRY_TAG=//p' .env.example)
 FOUNDRY_IMAGE := ghcr.io/foundry-rs/foundry:$(FOUNDRY_TAG)
 ALL_PROFILES  := --profile infra --profile observability --profile app --profile single
 
-.PHONY: help tools gen gen-check fmt tidy lint test test-fuzz test-integration e2e cover-money build image \
+.PHONY: help tools gen gen-check fmt tidy lint secrets-scan test test-fuzz test-integration e2e cover-money build image \
 	    up up-single up-sepolia down down-sepolia logs-sepolia ps-sepolia reset infra-up run migrate seed artifacts compose-config contracts-test \
 	    gen-dev-secrets demo trace loadgen
 
@@ -35,6 +35,8 @@ tools: ## Show pinned tool versions (tools/go.mod)
 	$(GOTOOL) oapi-codegen -version
 	$(GOTOOL) sqlc version
 	$(GOTOOL) golangci-lint version
+	@# gitleaks under `go tool` has no version stamped in, so read the pin.
+	@printf 'gitleaks %s\n' "$$(sed -n 's|.*zricethezav/gitleaks/v8 \(v[0-9.]*\).*|\1|p' $(TOOLS_MOD) | head -1)"
 
 GEN_DIRS := internal/api/gen internal/admin/gen cmd/exchangectl/internal/apiclient cmd/exchangectl/internal/adminclient \
             internal/registry/sqlcgen internal/ledger/sqlcgen internal/audit/sqlcgen \
@@ -60,9 +62,22 @@ tidy: ## go mod tidy for main and tools modules
 	go mod tidy
 	cd tools && go mod tidy
 
-lint: ## go vet + golangci-lint (pinned in tools/go.mod)
+lint: ## go vet + golangci-lint + gitleaks (all pinned in tools/go.mod)
 	go vet ./...
 	$(GOTOOL) golangci-lint run ./...
+	$(MAKE) --no-print-directory secrets-scan
+
+# Scans git history, not the working tree. A --no-git scan walks everything on
+# disk, which means a developer's own .env and secrets/jwt/ed25519.pem -- real
+# keys, correctly gitignored, that can never reach the repo. Reporting those on
+# every run is how a scanner teaches people to ignore it. What is in git is what
+# CI enforces and what a push can leak, so that is what this scans.
+#
+# The whole history, not a range: no branch assumptions, nothing to get wrong,
+# and go-re2 does 116 commits in under a second. If that stops being true, add
+# a range here rather than reaching for --no-git.
+secrets-scan: ## gitleaks over the git history (.gitleaks.toml)
+	$(GOTOOL) gitleaks detect --source . --config .gitleaks.toml --redact --no-banner
 
 test: ## Unit + property tests with the race detector
 	go test -race -short -count=1 ./...
@@ -144,8 +159,7 @@ run: ## Run one role on the host against infra-up (make run ROLE=api)
 	set -a; . ./$(ENV_FILE); set +a; \
 	export DATABASE_URL="postgres://ex_all:$${POSTGRES_PASSWORD}@localhost:5432/exchange?sslmode=disable" \
 	       NATS_URL=nats://localhost:4222 REDIS_ADDR=localhost:6379 ETH_RPC_URL=http://localhost:8545 \
-	       JWT_JWKS_URL=http://127.0.0.1:8080/.well-known/jwks.json \
-	       EXCHANGE_ADMIN_API_KEY="$${ADMIN_API_KEY}"; \
+	       JWT_JWKS_URL=http://127.0.0.1:8080/.well-known/jwks.json; \
 	go run -ldflags '$(LDFLAGS)' ./cmd/exchange serve --role=$(ROLE)
 
 migrate: ## Apply migrations to the local Postgres started by infra-up
@@ -178,6 +192,9 @@ contracts-test: ## forge build + test inside the pinned foundry image (no local 
 
 gen-dev-secrets: ## Create .env and dev secrets (idempotent; FORCE=1 to regenerate)
 	scripts/gen-dev-secrets.sh
+
+screenshots: ## Screenshot every back-office page into docs/screenshots (needs a running admin role; ADMIN_URL ADMIN_EMAIL ADMIN_PASSWORD ADMIN_TOTP_SECRET)
+	NODE_PATH=$$(npm root -g) node scripts/screenshots.mjs
 
 demo: ## Run the Phase demo script
 	go run ./cmd/exchangectl demo

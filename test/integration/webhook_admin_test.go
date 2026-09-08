@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -429,4 +430,84 @@ func (h webhookAdminHarness) queued(t *testing.T, ctx context.Context) int {
 	var n int
 	require.NoError(t, h.all.QueryRow(ctx, `SELECT count(*) FROM webhook.queue`).Scan(&n))
 	return n
+}
+
+// 5c: a rotation keeps the old secret signing for a grace period, so the
+// receiver switches at its own pace and never drops a delivery.
+func TestWebhookSecretRotationSignsWithBothUntilTheGraceEnds(t *testing.T) {
+	ctx := context.Background()
+	h := setupWebhookAdmin(t, fast(), 200)
+	rotate := func(body any) adminResp {
+		return call(t, h.srv, http.MethodPost, "/admin/v1/webhooks/"+h.endpointID+"/rotate-secret", adminKey, body)
+	}
+	now := time.Now().UTC()
+	h.dispatcher.WithClock(func() time.Time { return now })
+
+	r := rotate(map[string]any{"grace_hours": 1, "reason": "quarterly rotation"})
+	require.Equal(t, http.StatusOK, r.status, string(r.body))
+	rotated := decode[gen.RotatedWebhookSecret](t, r)
+	assert.NotEqual(t, h.secret, rotated.Secret)
+	assert.WithinDuration(t, now.Add(time.Hour), rotated.PreviousSecretUntil, 5*time.Second)
+
+	t.Run("inside the grace period a delivery carries both signatures", func(t *testing.T) {
+		require.NoError(t, h.dispatcher.Enqueue(ctx, event("rotate-1")))
+		h.deliver(t, ctx)
+		got := h.received.got()
+		require.Len(t, got, 1)
+		assert.Equal(t, 2, strings.Count(got[0].signature, "v1="), got[0].signature)
+		assert.NoError(t, webhook.Verify(rotated.Secret, got[0].signature, got[0].timestamp, got[0].body, now, time.Minute), "a receiver that switched")
+		assert.NoError(t, webhook.Verify(h.secret, got[0].signature, got[0].timestamp, got[0].body, now, time.Minute), "one that has not")
+		assert.True(t, verifyIndependently(h.secret, got[0]), "the doc's own snippet still verifies with the old secret")
+	})
+
+	t.Run("after it only the new secret signs", func(t *testing.T) {
+		later := now.Add(2 * time.Hour)
+		h.dispatcher.WithClock(func() time.Time { return later })
+		require.NoError(t, h.dispatcher.Enqueue(ctx, event("rotate-2")))
+		h.deliver(t, ctx)
+		got := h.received.got()
+		require.Len(t, got, 2)
+		assert.Equal(t, 1, strings.Count(got[1].signature, "v1="), got[1].signature)
+		assert.NoError(t, webhook.Verify(rotated.Secret, got[1].signature, got[1].timestamp, got[1].body, later, time.Minute))
+		assert.ErrorIs(t, webhook.Verify(h.secret, got[1].signature, got[1].timestamp, got[1].body, later, time.Minute), webhook.ErrBadSignature)
+	})
+
+	t.Run("rotating again replaces the old secret; the newest two sign", func(t *testing.T) {
+		h.dispatcher.WithClock(func() time.Time { return now })
+		r := rotate(map[string]any{"grace_hours": 2, "reason": "rotated again"})
+		require.Equal(t, http.StatusOK, r.status, string(r.body))
+		second := decode[gen.RotatedWebhookSecret](t, r)
+		require.NoError(t, h.dispatcher.Enqueue(ctx, event("rotate-3")))
+		h.deliver(t, ctx)
+		got := h.received.got()
+		require.Len(t, got, 3)
+		assert.Equal(t, 2, strings.Count(got[2].signature, "v1="))
+		assert.NoError(t, webhook.Verify(second.Secret, got[2].signature, got[2].timestamp, got[2].body, now, time.Minute))
+		assert.NoError(t, webhook.Verify(rotated.Secret, got[2].signature, got[2].timestamp, got[2].body, now, time.Minute))
+		assert.ErrorIs(t, webhook.Verify(h.secret, got[2].signature, got[2].timestamp, got[2].body, now, time.Minute), webhook.ErrBadSignature, "the first secret is gone for good")
+		rotated = second
+	})
+
+	t.Run("the audit trail says when, never what", func(t *testing.T) {
+		rows, err := h.all.Query(ctx, `SELECT after::text FROM audit.audit_events WHERE action = 'webhook.endpoint.rotate_secret' ORDER BY id`)
+		require.NoError(t, err)
+		defer rows.Close()
+		var n int
+		for rows.Next() {
+			var after string
+			require.NoError(t, rows.Scan(&after))
+			assert.Contains(t, after, "previous_secret_until")
+			assert.NotContains(t, after, rotated.Secret)
+			assert.NotContains(t, after, h.secret)
+			n++
+		}
+		assert.Equal(t, 2, n)
+	})
+
+	t.Run("refusals", func(t *testing.T) {
+		assert.Equal(t, http.StatusBadRequest, rotate(map[string]any{"grace_hours": 0, "reason": "x"}).status)
+		assert.Equal(t, http.StatusBadRequest, rotate(map[string]any{"grace_hours": 200, "reason": "x"}).status, "a week is the most")
+		assert.Equal(t, http.StatusBadRequest, rotate(map[string]any{"grace_hours": 1}).status, "no reason, no rotation")
+		assert.Equal(t, http.StatusNotFound, call(t, h.srv, http.MethodPost, "/admin/v1/webhooks/00000000-0000-0000-0000-000000000000/rotate-secret", adminKey, map[string]any{"reason": "x"}).status)
+	})
 }

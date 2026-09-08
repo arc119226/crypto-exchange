@@ -161,3 +161,6 @@ WHERE (registry.withdrawal_limits.auto_approve_limit, registry.withdrawal_limits
        registry.withdrawal_limits.require_manual_review)
       IS DISTINCT FROM
       (EXCLUDED.auto_approve_limit, EXCLUDED.daily_limit, EXCLUDED.require_manual_review);
+
+-- name: ListFeeSchedules :many
+SELECT * FROM registry.fee_schedules WHERE tenant_id = $1 ORDER BY name;

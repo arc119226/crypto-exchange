@@ -53,6 +53,8 @@ WHERE tenant_id = $1
   AND ($4::text = '' OR action = $4::text)
   AND ($5::text = '' OR target_type = $5::text)
   AND ($6::text = '' OR target_id = $6::text)
+  AND ($7::text = '' OR actor_type = $7::text)
+  AND ($8::text = '' OR actor_id = $8::text)
 ORDER BY id DESC
 LIMIT $2 OFFSET $3
 `
@@ -64,6 +66,8 @@ type ListAuditEventsParams struct {
 	Action     string
 	TargetType string
 	TargetID   string
+	ActorType  string
+	ActorID    string
 }
 
 func (q *Queries) ListAuditEvents(ctx context.Context, arg ListAuditEventsParams) ([]AuditAuditEvent, error) {
@@ -74,6 +78,8 @@ func (q *Queries) ListAuditEvents(ctx context.Context, arg ListAuditEventsParams
 		arg.Action,
 		arg.TargetType,
 		arg.TargetID,
+		arg.ActorType,
+		arg.ActorID,
 	)
 	if err != nil {
 		return nil, err

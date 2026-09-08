@@ -14,15 +14,13 @@ import (
 
 	"github.com/arc119226/crypto-exchange/internal/admin/gen"
 	"github.com/arc119226/crypto-exchange/internal/audit"
+	"github.com/arc119226/crypto-exchange/internal/auth"
+	"github.com/arc119226/crypto-exchange/internal/chain/deposit"
 	"github.com/arc119226/crypto-exchange/internal/chain/withdrawal"
 	"github.com/arc119226/crypto-exchange/internal/ledger"
 	"github.com/arc119226/crypto-exchange/internal/registry"
-	"github.com/arc119226/crypto-exchange/internal/telemetry"
 	"github.com/arc119226/crypto-exchange/internal/webhook"
 )
-
-// actorID is recorded on audit events for the static admin API key.
-const actorID = "admin-api-key"
 
 // Handler implements gen.StrictServerInterface.
 type Handler struct {
@@ -43,6 +41,12 @@ type Handler struct {
 	// without the webhook tables, which turns those endpoints into 500s
 	// rather than reporting that no customer has subscribed to anything.
 	webhooks *webhook.Store
+	// deposits reads chain.deposits; nil without a chain.
+	deposits *deposit.Reader
+	// users is the directory and the two edits an operator makes to a
+	// person: KYC level and status. The same auth.Service the pages log in
+	// with; nil turns the user endpoints into 500s.
+	users *auth.Service
 }
 
 var _ gen.StrictServerInterface = (*Handler)(nil)
@@ -69,6 +73,18 @@ func (h *Handler) WithWithdrawals(r *withdrawal.Reviewer) *Handler {
 // WithWebhooks enables the outbound-webhook endpoints.
 func (h *Handler) WithWebhooks(s *webhook.Store) *Handler {
 	h.webhooks = s
+	return h
+}
+
+// WithDeposits enables the deposit list and the dashboard's deposit count.
+func (h *Handler) WithDeposits(r *deposit.Reader) *Handler {
+	h.deposits = r
+	return h
+}
+
+// WithUsers enables the user directory and edits.
+func (h *Handler) WithUsers(s *auth.Service) *Handler {
+	h.users = s
 	return h
 }
 
@@ -126,19 +142,7 @@ func (h *Handler) CreateAccount(ctx context.Context, req gen.CreateAccountReques
 	if req.Body == nil {
 		return gen.CreateAccount400ApplicationProblemPlusJSONResponse{BadRequestApplicationProblemPlusJSONResponse: badRequest(ctx, "/admin/v1/accounts", "missing body")}, nil
 	}
-	var created ledger.Account
-	err := h.inTx(ctx, func(tx pgx.Tx) error {
-		a, err := h.ledger.CreateSpotAccount(ctx, tx, req.Body.OwnerUserID)
-		if err != nil {
-			return err
-		}
-		created = a
-		err = h.audit.Record(ctx, tx, audit.Event{
-			ActorType: audit.ActorAPIKey, ActorID: actorID, Action: "account.create", TargetType: "account", TargetID: a.ID,
-			After: toAccount(a), CorrelationID: telemetry.CorrelationID(ctx),
-		})
-		return err
-	})
+	created, err := h.createAccount(ctx, req.Body.OwnerUserID)
 	if err != nil {
 		return nil, err
 	}
@@ -163,24 +167,7 @@ func (h *Handler) SetAccountStatus(ctx context.Context, req gen.SetAccountStatus
 	if req.Body == nil || req.Body.Reason == "" {
 		return gen.SetAccountStatus400ApplicationProblemPlusJSONResponse{BadRequestApplicationProblemPlusJSONResponse: badRequest(ctx, instance, "status and reason are required")}, nil
 	}
-	var before, after ledger.Account
-	err := h.inTx(ctx, func(tx pgx.Tx) error {
-		var err error
-		before, err = h.ledger.Account(ctx, req.ID)
-		if err != nil {
-			return err
-		}
-		after, err = h.ledger.SetAccountStatus(ctx, tx, req.ID, ledger.AccountStatus(req.Body.Status))
-		if err != nil {
-			return err
-		}
-		err = h.audit.Record(ctx, tx, audit.Event{
-			ActorType: audit.ActorAPIKey, ActorID: actorID, Action: "account.status.update", TargetType: "account", TargetID: req.ID,
-			Before: map[string]any{"status": before.Status, "reason": nil}, After: map[string]any{"status": after.Status, "reason": req.Body.Reason},
-			CorrelationID: telemetry.CorrelationID(ctx),
-		})
-		return err
-	})
+	after, err := h.setAccountStatus(ctx, req.ID, string(req.Body.Status), req.Body.Reason)
 	switch {
 	case errors.Is(err, ledger.ErrAccountNotFound):
 		return gen.SetAccountStatus404ApplicationProblemPlusJSONResponse{NotFoundApplicationProblemPlusJSONResponse: notFound(ctx, instance, "account "+req.ID+" does not exist")}, nil
@@ -263,25 +250,9 @@ func (h *Handler) CreateAdjustment(ctx context.Context, req gen.CreateAdjustment
 	if key == "" {
 		key = "adjust:" + randomID()
 	}
-	var (
-		entry    ledger.JournalEntry
-		replayed bool
-	)
-	err := h.inTx(ctx, func(tx pgx.Tx) error {
-		var err error
-		entry, replayed, err = h.ledger.Adjust(ctx, tx, ledger.AdjustParams{
-			AccountID: b.AccountID, Asset: b.Asset, Amount: b.Amount, Direction: ledger.Direction(b.Direction),
-			Reason: b.Reason, IdempotencyKey: key, CorrelationID: telemetry.CorrelationID(ctx),
-		})
-		if err != nil || replayed {
-			return err
-		}
-		err = h.audit.Record(ctx, tx, audit.Event{
-			ActorType: audit.ActorAPIKey, ActorID: actorID, Action: "ledger.adjustment.create", TargetType: "journal_entry", TargetID: fmt.Sprint(entry.ID),
-			After:         map[string]any{"account_id": b.AccountID, "asset": b.Asset, "amount": b.Amount, "direction": b.Direction, "reason": b.Reason, "idempotency_key": key},
-			CorrelationID: telemetry.CorrelationID(ctx),
-		})
-		return err
+	entry, replayed, err := h.createAdjustment(ctx, ledger.AdjustParams{
+		AccountID: b.AccountID, Asset: b.Asset, Amount: b.Amount, Direction: ledger.Direction(b.Direction),
+		Reason: b.Reason, IdempotencyKey: key,
 	})
 	switch {
 	case errors.Is(err, ledger.ErrAccountNotFound):
@@ -302,7 +273,14 @@ func (h *Handler) CreateAdjustment(ctx context.Context, req gen.CreateAdjustment
 // ListAuditEvents implements GET /admin/v1/audit-events.
 func (h *Handler) ListAuditEvents(ctx context.Context, req gen.ListAuditEventsRequestObject) (gen.ListAuditEventsResponseObject, error) {
 	limit, offset := page(req.Params.Limit, req.Params.Offset)
-	events, err := h.audit.List(ctx, h.pool, audit.Filter{Action: deref(req.Params.Action), TargetType: deref(req.Params.TargetType), TargetID: deref(req.Params.TargetID), Limit: limit, Offset: offset})
+	actorType := ""
+	if req.Params.ActorType != nil {
+		actorType = string(*req.Params.ActorType)
+	}
+	events, err := h.audit.List(ctx, h.pool, audit.Filter{
+		Action: deref(req.Params.Action), TargetType: deref(req.Params.TargetType), TargetID: deref(req.Params.TargetID),
+		ActorType: actorType, ActorID: deref(req.Params.ActorID), Limit: limit, Offset: offset,
+	})
 	if err != nil {
 		return nil, err
 	}

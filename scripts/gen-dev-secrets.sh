@@ -50,6 +50,14 @@ if [[ -f .env && "$FORCE" != 1 ]]; then
     set_var .env WEBHOOK_SIGNING_KEY "$(openssl rand -hex 32)"
     log "WEBHOOK_SIGNING_KEY was not 32 bytes hex; regenerated it (it now encrypts webhook endpoint secrets)"
   fi
+  # Phase 5 added ADMIN_TOTP_KEY, and the admin role refuses to start without
+  # it. Same in-place upgrade as above, so `make up` keeps working for a .env
+  # written before it existed.
+  totp_key="$(sed -n 's/^ADMIN_TOTP_KEY=//p' .env | tr -d '[:space:]')"
+  if [[ ! "$totp_key" =~ ^[0-9a-fA-F]{64}$ ]]; then
+    set_var .env ADMIN_TOTP_KEY "$(openssl rand -hex 32)"
+    log "ADMIN_TOTP_KEY was missing; generated it (it encrypts administrators' TOTP secrets)"
+  fi
 else
   cp .env.example .env
   chmod 600 .env
@@ -58,6 +66,7 @@ else
   done
   set_var .env API_KEY_MASTER_KEY "$(openssl rand -hex 32)"    # AES-256 key: 32 bytes
   set_var .env WEBHOOK_SIGNING_KEY "$(openssl rand -hex 32)"   # AES-256 key: 32 bytes
+  set_var .env ADMIN_TOTP_KEY "$(openssl rand -hex 32)"        # AES-256 key: 32 bytes
   log "wrote .env"
 fi
 

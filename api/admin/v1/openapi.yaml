@@ -1,15 +1,25 @@
 openapi: 3.0.3
 info:
   title: Exchange Admin API
-  version: 1.0.0-phase2
+  version: 1.0.0-phase5
   description: |
     Operator API of the white-label exchange engine (docs/plan-v1.0.md §7.4).
-    Every write is recorded in the audit trail.
+    Every write is recorded in the audit trail with who made it, and every
+    change the engine or a customer has to know about is published from the
+    same transaction (docs/events.md).
 
-    Phase 2 scope: ledger accounts, balances, journal entries, trial balance,
-    administrator adjustments and the audit log. Authentication is a static
-    admin API key (`X-Admin-Api-Key`, `ADMIN_API_KEY`) until Phase 5 adds
-    admin sessions with TOTP and scoped admin API keys.
+    Scope: the ledger (accounts, balances, entries, trial balance,
+    adjustments), the registry (assets, markets, fee schedules, withdrawal
+    limits, engine reload), users (KYC level, freeze), the withdrawal review
+    queue, what the chain role has seen (deposits, sweeps, hot wallet),
+    reconciliation reports and breaks of both kinds, outbound webhooks
+    (endpoints, deliveries, replay, secret rotation), the audit trail and a
+    system status for the dashboard.
+
+    Authentication is a static admin API key (`X-Admin-Api-Key`,
+    `ADMIN_API_KEY`) for machine integrations. People use the back office at
+    /admin instead, with a password, a TOTP code and a session cookie; the
+    same writes serve both.
 
     Conventions are those of the public API: decimal strings for money,
     RFC 7807 problems with `correlation_id`, `X-Request-Id` echo.
@@ -20,6 +30,7 @@ security:
   - AdminApiKey: []
 tags:
   - name: accounts
+  - name: users
   - name: ledger
   - name: registry
   - name: audit
@@ -27,8 +38,136 @@ tags:
   - name: chain
   - name: reconciliation
   - name: webhooks
+  - name: system
 
 paths:
+  /admin/v1/users:
+    get:
+      tags: [users]
+      operationId: listUsers
+      summary: List users
+      description: >
+        The operator's directory. `email` is a fragment matched anywhere in
+        the address (no wildcards). Newest first.
+      parameters:
+        - name: email
+          in: query
+          schema:
+            type: string
+        - name: status
+          in: query
+          schema:
+            $ref: "#/components/schemas/UserStatus"
+        - name: role
+          in: query
+          schema:
+            $ref: "#/components/schemas/UserRole"
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+      responses:
+        "200":
+          description: Users
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /admin/v1/users/{id}:
+    get:
+      tags: [users]
+      operationId: getUser
+      summary: Get one user
+      parameters:
+        - $ref: "#/components/parameters/UserID"
+      responses:
+        "200":
+          description: User
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /admin/v1/users/{id}/kyc-level:
+    put:
+      tags: [users]
+      operationId: setUserKycLevel
+      summary: Set a user's KYC level
+      description: >
+        The withdrawal policy reads the level on each request, so the next
+        withdrawal is decided under the new limits; nothing already pending is
+        re-decided. Publishes `user.kyc_level_updated` when the level changes.
+      parameters:
+        - $ref: "#/components/parameters/UserID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/KycLevelRequest"
+      responses:
+        "200":
+          description: Updated user (unchanged when already at that level)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /admin/v1/users/{id}/status:
+    put:
+      tags: [users]
+      operationId: setUserStatus
+      summary: Freeze or release a user
+      description: >
+        Frozen means the user cannot log in, refresh a token or use an API
+        key, and their spot account is frozen in the same transaction (no
+        orders, no withdrawals). An access token already issued lasts its
+        fifteen minutes. Releasing reverses all of it. Refuses to freeze the
+        last active administrator. Publishes `user.status_updated` when the
+        status changes.
+      parameters:
+        - $ref: "#/components/parameters/UserID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UserStatusRequest"
+      responses:
+        "200":
+          description: Updated user (unchanged when already in that status)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
   /admin/v1/accounts:
     get:
       tags: [accounts]
@@ -148,6 +287,260 @@ paths:
         "500":
           $ref: "#/components/responses/InternalError"
 
+  /admin/v1/assets:
+    get:
+      tags: [registry]
+      operationId: listAssets
+      summary: Assets of the tenant
+      responses:
+        "200":
+          description: Assets
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AssetList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    post:
+      tags: [registry]
+      operationId: createAsset
+      summary: List a new asset
+      description: >
+        Publishes asset.updated with changed_fields ["created"]. A market can
+        reference the asset from then on; deposits and withdrawals follow the
+        two enabled flags.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateAssetRequest"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Asset"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /admin/v1/assets/{symbol}:
+    get:
+      tags: [registry]
+      operationId: getAsset
+      summary: Get one asset
+      parameters:
+        - $ref: "#/components/parameters/AssetSymbol"
+      responses:
+        "200":
+          description: Asset
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Asset"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    put:
+      tags: [registry]
+      operationId: updateAsset
+      summary: Edit an asset
+      description: >
+        Replaces every writable field. Publishes asset.updated naming the
+        fields that changed; a body equal to the current row changes nothing
+        and emits no event. The scale cannot shrink below what any market on
+        the asset needs.
+      parameters:
+        - $ref: "#/components/parameters/AssetSymbol"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AssetRequest"
+      responses:
+        "200":
+          description: Updated asset
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Asset"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /admin/v1/fee-schedules:
+    get:
+      tags: [registry]
+      operationId: listFeeSchedules
+      summary: Fee schedules of the tenant
+      responses:
+        "200":
+          description: Fee schedules
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FeeScheduleList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    post:
+      tags: [registry]
+      operationId: createFeeSchedule
+      summary: Add a fee schedule
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateFeeScheduleRequest"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FeeSchedule"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /admin/v1/fee-schedules/{name}:
+    put:
+      tags: [registry]
+      operationId: updateFeeSchedule
+      summary: Change a fee schedule's rates
+      description: >
+        Every market on the schedule pays the new rates from the next trade.
+        Publishes fee_schedule.updated (and no market.updated for the markets
+        on it; the engine reloads its whole cache on either).
+      parameters:
+        - $ref: "#/components/parameters/FeeScheduleName"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FeeScheduleRequest"
+      responses:
+        "200":
+          description: Updated fee schedule
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FeeSchedule"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /admin/v1/withdrawal-limits:
+    get:
+      tags: [registry]
+      operationId: listWithdrawalLimits
+      summary: Withdrawal limits per asset and KYC level
+      responses:
+        "200":
+          description: Withdrawal limits
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WithdrawalLimitList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /admin/v1/withdrawal-limits/{asset}/{kyc_level}:
+    put:
+      tags: [registry]
+      operationId: setWithdrawalLimit
+      summary: Set the limits of one asset at one KYC level
+      description: >
+        Creates the row when there is none. The withdrawal policy reads the
+        limits on each request, so the next withdrawal is decided under the
+        new ones. No event: nothing caches these.
+      parameters:
+        - $ref: "#/components/parameters/AssetPath"
+        - $ref: "#/components/parameters/KycLevelPath"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WithdrawalLimitRequest"
+      responses:
+        "200":
+          description: The limits now in force
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WithdrawalLimit"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /admin/v1/engine/reload:
+    post:
+      tags: [registry]
+      operationId: requestReload
+      summary: Ask every engine to reload its registry cache
+      description: >
+        Publishes registry.reload with no row changed: after a seed, or when in
+        doubt. 202: the request is in the outbox; the engine's reload consumer
+        acts on it.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReloadRequest"
+      responses:
+        "202":
+          description: Accepted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReloadAccepted"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
   /admin/v1/markets:
     get:
       tags: [registry]
@@ -162,6 +555,91 @@ paths:
                 $ref: "#/components/schemas/MarketList"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    post:
+      tags: [registry]
+      operationId: createMarket
+      summary: List a new market
+      description: >
+        Assets and the fee schedule are referenced by symbol and name, and
+        must exist. Publishes market.updated with changed_fields ["created"];
+        the engine opens the book on reload.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateMarketRequest"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Market"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /admin/v1/markets/{symbol}:
+    get:
+      tags: [registry]
+      operationId: getMarket
+      summary: Get one market
+      parameters:
+        - $ref: "#/components/parameters/MarketSymbol"
+      responses:
+        "200":
+          description: Market
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Market"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    put:
+      tags: [registry]
+      operationId: updateMarket
+      summary: Edit a market
+      description: >
+        Replaces every writable field, status included. Publishes
+        market.updated naming the fields that changed; a body equal to the
+        current row changes nothing and emits no event. Precision must still
+        fit the assets (price_tick within the quote scale, qty_step within the
+        base scale).
+      parameters:
+        - $ref: "#/components/parameters/MarketSymbol"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MarketRequest"
+      responses:
+        "200":
+          description: Updated market
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Market"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
         "500":
           $ref: "#/components/responses/InternalError"
 
@@ -487,6 +965,106 @@ paths:
         "500":
           $ref: "#/components/responses/InternalError"
 
+  /admin/v1/deposits:
+    get:
+      tags: [chain]
+      operationId: listDeposits
+      summary: Deposits the chain role has seen, newest first
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [detected, confirming, credited, orphaned, dropped, reversed]
+        - name: asset
+          in: query
+          schema:
+            type: string
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+      responses:
+        "200":
+          description: Deposits
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminDepositList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /admin/v1/hot-wallet:
+    get:
+      tags: [chain]
+      operationId: getHotWallet
+      summary: The hot wallet, as the chain role keeps it
+      description: >
+        Address, next nonce and the low-balance alert state from
+        chain.hot_wallets, with the ledger's custody_hot balance per asset. The
+        chain's own figure is what reconciliation compares that balance to.
+        404 until the chain role has started once against this chain.
+      responses:
+        "200":
+          description: Hot wallet
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HotWallet"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /admin/v1/reconciliation/reports:
+    get:
+      tags: [reconciliation]
+      operationId: listReconciliationReports
+      summary: Reconciliation passes, newest first
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+      responses:
+        "200":
+          description: Reports
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReconciliationReportList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /admin/v1/reconciliation/breaks:
+    get:
+      tags: [reconciliation]
+      operationId: listReconciliationBreaks
+      summary: Every break on record, both kinds, newest first
+      description: >
+        Two families with different terms. A chain break is one asset of one
+        reconciliation pass whose on-chain custody did not match the ledger's;
+        the chain role writes it (docs/plan-v1.0.md §6.4.4). A ledger break is
+        one asset whose debits and credits do not agree, found by the admin
+        role checking the ledger against itself; it has an open/resolved state
+        because the condition can end.
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+      responses:
+        "200":
+          description: Breaks
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReconciliationBreaks"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
   /admin/v1/reconciliation:
     get:
       tags: [reconciliation]
@@ -539,6 +1117,15 @@ paths:
           schema:
             type: string
         - name: target_id
+          in: query
+          schema:
+            type: string
+        - name: actor_type
+          in: query
+          schema:
+            type: string
+            enum: [user, admin, system, api_key]
+        - name: actor_id
           in: query
           schema:
             type: string
@@ -675,6 +1262,42 @@ paths:
         "500":
           $ref: "#/components/responses/InternalError"
 
+  /admin/v1/webhooks/{id}/rotate-secret:
+    post:
+      tags: [webhooks]
+      operationId: rotateWebhookSecret
+      summary: Issue a new signing secret and keep the old one for a grace period
+      description: >
+        The new secret is in this response and nowhere else. Until
+        previous_secret_until, every delivery carries two signatures,
+        `v1=<new>,v1=<old>`, so a receiver that has switched and one that has
+        not both keep verifying; after it, only the new one signs. Rotating
+        again inside the grace period replaces the old secret: the newest two
+        are the only ones ever valid.
+      parameters:
+        - $ref: "#/components/parameters/WebhookEndpointID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RotateSecretRequest"
+      responses:
+        "200":
+          description: The new secret, shown once
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RotatedWebhookSecret"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
   /admin/v1/webhooks/{id}/deliveries:
     get:
       tags: [webhooks]
@@ -746,6 +1369,28 @@ paths:
         "500":
           $ref: "#/components/responses/InternalError"
 
+  /admin/v1/system/status:
+    get:
+      tags: [system]
+      operationId: getSystemStatus
+      summary: What the dashboard shows
+      description: |
+        One read of the things an operator checks first thing: whether the
+        ledger balances, what the last reconciliation found, and how much is
+        waiting on a person. Counts are capped where noted; a tile that says
+        "500+" has made its point.
+      responses:
+        "200":
+          description: Status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SystemStatus"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
 components:
   securitySchemes:
     AdminApiKey:
@@ -760,6 +1405,41 @@ components:
       required: true
       schema:
         type: string
+    UserID:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+    AssetSymbol:
+      name: symbol
+      in: path
+      required: true
+      schema:
+        type: string
+        example: USDC
+    AssetPath:
+      name: asset
+      in: path
+      required: true
+      schema:
+        type: string
+        example: ETH
+    KycLevelPath:
+      name: kyc_level
+      in: path
+      required: true
+      schema:
+        type: integer
+        minimum: 0
+        maximum: 2
+    FeeScheduleName:
+      name: name
+      in: path
+      required: true
+      schema:
+        type: string
+        example: default
     MarketSymbol:
       name: symbol
       in: path
@@ -1008,6 +1688,75 @@ components:
           type: string
           minLength: 1
 
+    UserStatus:
+      type: string
+      enum: [active, frozen]
+
+    UserRole:
+      type: string
+      enum: [user, admin]
+
+    User:
+      type: object
+      required: [id, email, role, kyc_level, status, totp_enabled, version, created_at, updated_at]
+      properties:
+        id:
+          type: string
+        email:
+          type: string
+        role:
+          $ref: "#/components/schemas/UserRole"
+        kyc_level:
+          type: integer
+          minimum: 0
+          maximum: 2
+        status:
+          $ref: "#/components/schemas/UserStatus"
+        totp_enabled:
+          type: boolean
+          description: Only ever true for administrators.
+        version:
+          type: integer
+          format: int32
+          description: Increases on every edit.
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    UserList:
+      type: object
+      required: [users]
+      properties:
+        users:
+          type: array
+          items:
+            $ref: "#/components/schemas/User"
+
+    KycLevelRequest:
+      type: object
+      required: [kyc_level, reason]
+      properties:
+        kyc_level:
+          type: integer
+          minimum: 0
+          maximum: 2
+        reason:
+          type: string
+          minLength: 1
+
+    UserStatusRequest:
+      type: object
+      required: [status, reason]
+      properties:
+        status:
+          $ref: "#/components/schemas/UserStatus"
+        reason:
+          type: string
+          minLength: 1
+
     MarketStatus:
       type: string
       enum: [active, halted, cancel_only, delisted]
@@ -1052,11 +1801,306 @@ components:
           format: int32
         self_trade_policy:
           type: string
+        fee_schedule:
+          type: string
+          description: Name of the fee schedule the bps come from.
+        max_qty:
+          allOf:
+            - $ref: "#/components/schemas/Amount"
+          description: Largest single order; absent means no cap.
+        max_slippage_bps:
+          type: integer
+          format: int32
+          description: Market-order price protection band; absent means none.
         status:
           $ref: "#/components/schemas/MarketStatus"
         version:
           type: integer
           format: int32
+
+    MarketRequest:
+      type: object
+      required: [base_asset, quote_asset, price_tick, qty_step, min_notional, fee_schedule, self_trade_policy, status, reason]
+      properties:
+        base_asset:
+          type: string
+        quote_asset:
+          type: string
+        price_tick:
+          $ref: "#/components/schemas/Amount"
+        qty_step:
+          $ref: "#/components/schemas/Amount"
+        min_notional:
+          $ref: "#/components/schemas/Amount"
+        max_qty:
+          allOf:
+            - $ref: "#/components/schemas/Amount"
+        max_slippage_bps:
+          type: integer
+          format: int32
+        fee_schedule:
+          type: string
+        self_trade_policy:
+          type: string
+        status:
+          $ref: "#/components/schemas/MarketStatus"
+        reason:
+          type: string
+          minLength: 1
+
+    CreateMarketRequest:
+      allOf:
+        - $ref: "#/components/schemas/MarketRequest"
+        - type: object
+          required: [symbol]
+          properties:
+            symbol:
+              type: string
+              example: ETH-USDC
+
+    AssetStatus:
+      type: string
+      enum: [active, disabled]
+
+    Asset:
+      type: object
+      required: [id, symbol, name, chain_id, is_native, scale, display_scale, required_confirmations, min_deposit, min_withdrawal, withdrawal_fee, sweep_threshold, deposit_enabled, withdraw_enabled, status, version, created_at, updated_at]
+      properties:
+        id:
+          type: string
+        symbol:
+          type: string
+        name:
+          type: string
+        chain_id:
+          type: integer
+          format: int64
+        contract_address:
+          type: string
+          nullable: true
+          description: Absent for the native coin.
+        is_native:
+          type: boolean
+        scale:
+          type: integer
+          format: int32
+        display_scale:
+          type: integer
+          format: int32
+        required_confirmations:
+          type: integer
+          format: int32
+        min_deposit:
+          $ref: "#/components/schemas/Amount"
+        min_withdrawal:
+          $ref: "#/components/schemas/Amount"
+        withdrawal_fee:
+          $ref: "#/components/schemas/Amount"
+        sweep_threshold:
+          $ref: "#/components/schemas/Amount"
+        deposit_enabled:
+          type: boolean
+        withdraw_enabled:
+          type: boolean
+        status:
+          $ref: "#/components/schemas/AssetStatus"
+        version:
+          type: integer
+          format: int32
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    AssetList:
+      type: object
+      required: [assets]
+      properties:
+        assets:
+          type: array
+          items:
+            $ref: "#/components/schemas/Asset"
+
+    AssetRequest:
+      type: object
+      required: [name, chain_id, is_native, scale, display_scale, required_confirmations, min_deposit, min_withdrawal, withdrawal_fee, sweep_threshold, deposit_enabled, withdraw_enabled, status, reason]
+      properties:
+        name:
+          type: string
+        chain_id:
+          type: integer
+          format: int64
+        contract_address:
+          type: string
+          nullable: true
+        is_native:
+          type: boolean
+        scale:
+          type: integer
+          format: int32
+        display_scale:
+          type: integer
+          format: int32
+        required_confirmations:
+          type: integer
+          format: int32
+        min_deposit:
+          $ref: "#/components/schemas/Amount"
+        min_withdrawal:
+          $ref: "#/components/schemas/Amount"
+        withdrawal_fee:
+          $ref: "#/components/schemas/Amount"
+        sweep_threshold:
+          $ref: "#/components/schemas/Amount"
+        deposit_enabled:
+          type: boolean
+        withdraw_enabled:
+          type: boolean
+        status:
+          $ref: "#/components/schemas/AssetStatus"
+        reason:
+          type: string
+          minLength: 1
+
+    CreateAssetRequest:
+      allOf:
+        - $ref: "#/components/schemas/AssetRequest"
+        - type: object
+          required: [symbol]
+          properties:
+            symbol:
+              type: string
+              example: USDC
+
+    FeeSchedule:
+      type: object
+      required: [id, name, maker_bps, taker_bps, effective_from, version, created_at, updated_at]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        maker_bps:
+          type: integer
+          format: int32
+        taker_bps:
+          type: integer
+          format: int32
+        effective_from:
+          type: string
+          format: date-time
+        version:
+          type: integer
+          format: int32
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    FeeScheduleList:
+      type: object
+      required: [fee_schedules]
+      properties:
+        fee_schedules:
+          type: array
+          items:
+            $ref: "#/components/schemas/FeeSchedule"
+
+    FeeScheduleRequest:
+      type: object
+      required: [maker_bps, taker_bps, reason]
+      properties:
+        maker_bps:
+          type: integer
+          format: int32
+          minimum: 0
+          maximum: 10000
+        taker_bps:
+          type: integer
+          format: int32
+          minimum: 0
+          maximum: 10000
+        reason:
+          type: string
+          minLength: 1
+
+    CreateFeeScheduleRequest:
+      allOf:
+        - $ref: "#/components/schemas/FeeScheduleRequest"
+        - type: object
+          required: [name]
+          properties:
+            name:
+              type: string
+              example: vip
+
+    WithdrawalLimit:
+      type: object
+      required: [asset, kyc_level, auto_approve_limit, daily_limit, require_manual_review, version, updated_at]
+      properties:
+        asset:
+          type: string
+        kyc_level:
+          type: integer
+          minimum: 0
+          maximum: 2
+        auto_approve_limit:
+          $ref: "#/components/schemas/Amount"
+        daily_limit:
+          $ref: "#/components/schemas/Amount"
+        require_manual_review:
+          type: boolean
+        version:
+          type: integer
+          format: int32
+        updated_at:
+          type: string
+          format: date-time
+
+    WithdrawalLimitList:
+      type: object
+      required: [withdrawal_limits]
+      properties:
+        withdrawal_limits:
+          type: array
+          items:
+            $ref: "#/components/schemas/WithdrawalLimit"
+
+    WithdrawalLimitRequest:
+      type: object
+      required: [auto_approve_limit, daily_limit, require_manual_review, reason]
+      properties:
+        auto_approve_limit:
+          $ref: "#/components/schemas/Amount"
+        daily_limit:
+          $ref: "#/components/schemas/Amount"
+        require_manual_review:
+          type: boolean
+        reason:
+          type: string
+          minLength: 1
+
+    ReloadRequest:
+      type: object
+      required: [reason]
+      properties:
+        reason:
+          type: string
+          minLength: 1
+
+    ReloadAccepted:
+      type: object
+      required: [event_id, occurred_at]
+      properties:
+        event_id:
+          type: string
+        occurred_at:
+          type: string
+          format: date-time
 
     MarketList:
       type: object
@@ -1350,6 +2394,190 @@ components:
           items:
             $ref: "#/components/schemas/AuditEvent"
 
+    AdminDeposit:
+      type: object
+      required: [id, account_id, asset, amount, address, tx_hash, log_index, block_number, confirmations, status, created_at]
+      properties:
+        id:
+          type: string
+        account_id:
+          type: string
+        asset:
+          type: string
+        amount:
+          $ref: "#/components/schemas/Amount"
+        address:
+          type: string
+        tx_hash:
+          type: string
+        log_index:
+          type: integer
+          format: int32
+        block_number:
+          type: integer
+          format: int64
+        confirmations:
+          type: integer
+          format: int32
+        status:
+          type: string
+          enum: [detected, confirming, credited, orphaned, dropped, reversed]
+        credited_at:
+          type: string
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+
+    AdminDepositList:
+      type: object
+      required: [deposits]
+      properties:
+        deposits:
+          type: array
+          items:
+            $ref: "#/components/schemas/AdminDeposit"
+
+    HotWalletBalance:
+      type: object
+      required: [asset, balance]
+      properties:
+        asset:
+          type: string
+        balance:
+          $ref: "#/components/schemas/Amount"
+
+    HotWallet:
+      type: object
+      required: [chain_id, address, next_nonce, low, balances, updated_at]
+      properties:
+        chain_id:
+          type: integer
+          format: int64
+        address:
+          type: string
+        next_nonce:
+          type: integer
+          format: int64
+        low:
+          type: boolean
+          description: alert.hot_wallet_low has been raised and not cleared.
+        low_alerted_at:
+          type: string
+          format: date-time
+        balances:
+          type: array
+          description: The ledger's custody_hot balance per asset.
+          items:
+            $ref: "#/components/schemas/HotWalletBalance"
+        updated_at:
+          type: string
+          format: date-time
+
+    ReconciliationReportList:
+      type: object
+      required: [reports]
+      properties:
+        reports:
+          type: array
+          items:
+            $ref: "#/components/schemas/ReconciliationReport"
+
+    ChainBreak:
+      type: object
+      required: [id, report_id, chain_id, asset, block_height, ledger_total, chain_total, uncredited, above_frontier, in_flight, diff, detected_at]
+      properties:
+        id:
+          type: string
+        report_id:
+          type: string
+        chain_id:
+          type: integer
+          format: int64
+        asset:
+          type: string
+        block_height:
+          type: integer
+          format: int64
+        ledger_total:
+          $ref: "#/components/schemas/Amount"
+        chain_total:
+          $ref: "#/components/schemas/Amount"
+        uncredited:
+          $ref: "#/components/schemas/Amount"
+        above_frontier:
+          $ref: "#/components/schemas/Amount"
+        in_flight:
+          $ref: "#/components/schemas/Amount"
+        diff:
+          $ref: "#/components/schemas/Amount"
+        detected_at:
+          type: string
+          format: date-time
+
+    LedgerBreak:
+      type: object
+      required: [id, asset, debits, credits, diff, detected_at]
+      properties:
+        id:
+          type: string
+        asset:
+          type: string
+        debits:
+          $ref: "#/components/schemas/Amount"
+        credits:
+          $ref: "#/components/schemas/Amount"
+        diff:
+          $ref: "#/components/schemas/Amount"
+        detected_at:
+          type: string
+          format: date-time
+        resolved_at:
+          type: string
+          format: date-time
+
+    ReconciliationBreaks:
+      type: object
+      required: [chain_breaks, ledger_breaks]
+      properties:
+        chain_breaks:
+          type: array
+          items:
+            $ref: "#/components/schemas/ChainBreak"
+        ledger_breaks:
+          type: array
+          items:
+            $ref: "#/components/schemas/LedgerBreak"
+
+    RotateSecretRequest:
+      type: object
+      required: [reason]
+      properties:
+        grace_hours:
+          type: integer
+          format: int32
+          minimum: 1
+          maximum: 168
+          default: 24
+          description: How long the old secret keeps signing alongside the new one.
+        reason:
+          type: string
+          minLength: 1
+
+    RotatedWebhookSecret:
+      type: object
+      required: [id, secret, previous_secret_until]
+      properties:
+        id:
+          type: string
+        secret:
+          type: string
+          description: The new HMAC signing secret, shown exactly once
+        previous_secret_until:
+          type: string
+          format: date-time
+          description: Until when deliveries also carry the old secret's signature
+
     WebhookEndpoint:
       type: object
       required: [id, url, events, label, status, created_at, updated_at]
@@ -1497,6 +2725,46 @@ components:
         next_attempt_at:
           type: string
           format: date-time
+
+    SystemStatus:
+      type: object
+      required: [database, ledger_balanced, open_ledger_breaks, pending_withdrawals, confirming_deposits, dead_webhook_deliveries_24h, now]
+      properties:
+        database:
+          type: string
+          enum: [ok, error]
+        ledger_balanced:
+          type: boolean
+          description: Every asset's debits equal its credits right now.
+        open_ledger_breaks:
+          type: integer
+          description: Assets currently out of balance and recorded as such.
+        last_reconciliation:
+          $ref: "#/components/schemas/ReconciliationSummary"
+        pending_withdrawals:
+          type: integer
+          description: Withdrawals waiting for a person (pending_review).
+        confirming_deposits:
+          type: integer
+          description: Deposits seen on chain and not yet credited.
+        dead_webhook_deliveries_24h:
+          type: integer
+        now:
+          type: string
+          format: date-time
+
+    ReconciliationSummary:
+      type: object
+      nullable: true
+      required: [id, finished_at, balanced]
+      properties:
+        id:
+          type: string
+        finished_at:
+          type: string
+          format: date-time
+        balanced:
+          type: boolean
 
     Problem:
       type: object

@@ -1,0 +1,44 @@
+{{define "content"}}
+{{with .Data}}
+<p class="muted"><a href="/admin/users">‹ Users</a></p>
+<h1>{{.User.Email}} <span class="badge {{badge .User.Status}}">{{.User.Status}}</span></h1>
+<section class="card">
+  <dl class="kv">
+    <dt>ID</dt><dd class="mono">{{.User.ID}}</dd>
+    <dt>Role</dt><dd>{{.User.Role}}{{if .User.TOTPEnabled}} (authenticator enrolled){{end}}</dd>
+    <dt>KYC level</dt><dd>{{.User.KYCLevel}}</dd>
+    <dt>Spot account</dt><dd>{{if .Account}}<a class="mono" href="/admin/ledger?account_id={{.Account.ID}}">{{.Account.ID}}</a> <span class="badge {{badge .Account.Status}}">{{.Account.Status}}</span>{{else}}<span class="muted">none</span>{{end}}</dd>
+    <dt>Created</dt><dd>{{when .User.CreatedAt}}</dd>
+    <dt>Updated</dt><dd>{{when .User.UpdatedAt}} <span class="muted">(version {{.User.Version}})</span></dd>
+  </dl>
+</section>
+<section class="card">
+  <h2>KYC level</h2>
+  <p class="muted">The next withdrawal is decided under the new level's limits; nothing already pending is re-decided.</p>
+  <form method="post" action="/admin/users/{{.User.ID}}/kyc-level" class="row">
+    <label>Level
+      <select name="kyc_level">
+        {{$cur := .User.KYCLevel}}{{range .Levels}}<option value="{{.}}"{{if eq . $cur}} selected{{end}}>{{.}}</option>{{end}}
+      </select>
+    </label>
+    <label>Reason <input type="text" name="reason" required placeholder="recorded in the audit trail"></label>
+    <button type="submit">Set level</button>
+  </form>
+</section>
+<section class="card">
+  <h2>Status</h2>
+  <p class="muted">Frozen: no login, no token refresh, no API key, and the spot account takes no orders and no withdrawals. An access token already issued lasts its fifteen minutes.</p>
+  <form method="post" action="/admin/users/{{.User.ID}}/status" class="row">
+    {{if eq .User.Status "frozen"}}
+    <input type="hidden" name="status" value="active">
+    <label>Reason <input type="text" name="reason" required placeholder="recorded in the audit trail"></label>
+    <button type="submit">Release</button>
+    {{else}}
+    <input type="hidden" name="status" value="frozen">
+    <label>Reason <input type="text" name="reason" required placeholder="recorded in the audit trail"></label>
+    <button type="submit" class="danger">Freeze</button>
+    {{end}}
+  </form>
+</section>
+{{end}}
+{{end}}

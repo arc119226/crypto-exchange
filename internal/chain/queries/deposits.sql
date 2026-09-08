@@ -116,3 +116,8 @@ SELECT asset, status, count(*) AS total
 FROM chain.deposits
 WHERE tenant_id = $1 AND chain_id = $2
 GROUP BY asset, status;
+
+-- name: CountDepositsInStatus :one
+-- The dashboard's "deposits still confirming" tile.
+SELECT count(*) FROM chain.deposits
+WHERE tenant_id = $1 AND status = ANY(@statuses::text[]);

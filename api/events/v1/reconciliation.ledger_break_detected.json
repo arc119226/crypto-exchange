@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/arc119226/crypto-exchange/api/events/v1/reconciliation.ledger_break_detected.json",
+  "title": "reconciliation.ledger_break_detected",
+  "description": "The ledger failed to balance with itself: one asset whose debits and credits disagree, found by the admin role checking the trial balance every thirty seconds. Different from reconciliation.break_detected, which compares the ledger against the chain; this one needs no node and fires when the books themselves are wrong. Edge-triggered: sent when a break appears or its size changes, never for one that merely stays open. The break closes on its own when the asset balances again; GET /admin/v1/reconciliation/breaks shows the current state.",
+  "type": "object",
+  "required": [
+    "break_id",
+    "asset",
+    "debits",
+    "credits",
+    "diff",
+    "detected_at"
+  ],
+  "properties": {
+    "break_id": {
+      "type": "string",
+      "description": "The admin.ledger_breaks row."
+    },
+    "asset": {
+      "type": "string"
+    },
+    "debits": {
+      "type": "string",
+      "pattern": "^-?\\d{1,18}(\\.\\d{1,18})?$",
+      "description": "Sum of every debit posting of the asset."
+    },
+    "credits": {
+      "type": "string",
+      "pattern": "^-?\\d{1,18}(\\.\\d{1,18})?$",
+      "description": "Sum of every credit posting of the asset."
+    },
+    "diff": {
+      "type": "string",
+      "pattern": "^-?\\d{1,18}(\\.\\d{1,18})?$",
+      "description": "debits - credits; never zero."
+    },
+    "detected_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  }
+}

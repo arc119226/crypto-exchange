@@ -1,0 +1,6 @@
+{{define "pager"}}{{/* a pager: .Prev .Next are URLs or empty */}}
+{{if or .Prev .Next}}<nav class="pager">
+  {{if .Prev}}<a hx-get="{{.Prev}}" hx-target="#list" hx-select="#list" hx-swap="outerHTML" hx-push-url="true" href="{{.Prev}}">‹ newer</a>{{end}}
+  {{if .Next}}<a hx-get="{{.Next}}" hx-target="#list" hx-select="#list" hx-swap="outerHTML" hx-push-url="true" href="{{.Next}}">older ›</a>{{end}}
+</nav>{{end}}
+{{end}}
