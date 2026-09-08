@@ -21,6 +21,7 @@ import (
 	"github.com/arc119226/crypto-exchange/internal/chain/withdrawal"
 	"github.com/arc119226/crypto-exchange/internal/cmdbus"
 	"github.com/arc119226/crypto-exchange/internal/ledger"
+	"github.com/arc119226/crypto-exchange/internal/marketdata"
 	"github.com/arc119226/crypto-exchange/internal/ratelimit"
 	"github.com/arc119226/crypto-exchange/internal/registry"
 	"github.com/arc119226/crypto-exchange/internal/telemetry"
@@ -89,8 +90,15 @@ func newAPIServer(ctx context.Context, cfg Config, log *slog.Logger, m *telemetr
 		}
 	}
 
+	var depthCache marketdata.DepthCache
+	if d.rdb != nil {
+		depthCache = marketdata.NewSnapshotCache(d.rdb, cfg.TenantID, cfg.MarketData.SnapshotTTL)
+	}
 	handler := newAPIRouter(log, m, api.Deps{
 		Tenant: cfg.TenantID, Registry: store, Auth: authSvc, Ledger: l, Trading: tradingSvc, Limiter: limiter, Limits: limits,
+		// klines and the ticker come from what the worker persisted; the depth
+		// snapshot from what the stream role caches (docs/plan-v1.0.md §12 Phase 6)
+		MarketData: marketdata.NewStore(d.pool, cfg.TenantID), DepthCache: depthCache, DepthFreshness: cfg.MarketData.SnapshotTTL,
 		// assignment only: the pool is filled by the signer role, which is the
 		// only process that holds the seed (docs/plan-v1.0.md §6.4.1)
 		Chain:    chain.NewAddresses(d.pool, cfg.TenantID, cfg.Chain.ChainID),

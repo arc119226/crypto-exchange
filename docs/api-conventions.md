@@ -132,4 +132,19 @@ incident.
 page with `limit` (default 100, max 1000) and `offset`, newest first.
 `GET /v1/ledger/entries` returns only the caller's postings of each entry.
 `GET /v1/markets/{symbol}/depth` returns aggregated levels and `last_seq`; a
-`limit` outside 1..200 falls back to the default of 20.
+`limit` outside 1..200 falls back to the default of 20. In a deployment with
+Redis the snapshot may come from the stream role's cache rather than the
+engine -- at most a few hundred milliseconds behind, and always consistent
+with its own `last_seq`, which is what WebSocket deltas continue from
+(`docs/ws-api.md`).
+
+`GET /v1/markets/{symbol}/ticker` is the rolling 24-hour summary; the price
+fields are omitted when the window holds no trade.
+
+`GET /v1/markets/{symbol}/klines?interval=1m&from=&to=&limit=` returns one
+candle per bucket of `[from, to)`, oldest first, at most `limit` (default
+500, max 1000) buckets counted from `from`; `to` defaults to now and `from`
+to `to − limit × interval`. Buckets align to UTC. Empty buckets are filled
+with a flat candle carrying the previous close and `trades: 0`. Candles are
+persisted by the worker about a second behind the engine; the WebSocket
+`kline.*` channels push the live candle.

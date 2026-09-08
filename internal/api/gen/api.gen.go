@@ -72,6 +72,33 @@ func (e AssetStatus) Valid() bool {
 	}
 }
 
+// Defines values for KlineInterval.
+const (
+	KlineIntervalN15M KlineInterval = "15m"
+	KlineIntervalN1D  KlineInterval = "1d"
+	KlineIntervalN1H  KlineInterval = "1h"
+	KlineIntervalN1M  KlineInterval = "1m"
+	KlineIntervalN5M  KlineInterval = "5m"
+)
+
+// Valid indicates whether the value is a known member of the KlineInterval enum.
+func (e KlineInterval) Valid() bool {
+	switch e {
+	case KlineIntervalN15M:
+		return true
+	case KlineIntervalN1D:
+		return true
+	case KlineIntervalN1H:
+		return true
+	case KlineIntervalN1M:
+		return true
+	case KlineIntervalN5M:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for MarketStatus.
 const (
 	MarketStatusActive     MarketStatus = "active"
@@ -523,7 +550,10 @@ type Depth struct {
 	// Bids Best (highest) bid first
 	Bids []Level `json:"bids"`
 
-	// LastSeq Engine sequence the snapshot reflects (WebSocket deltas resume from it, Phase 6)
+	// LastSeq Engine sequence the snapshot reflects; WebSocket depth deltas
+	// continue from it (docs/ws-api.md). The snapshot may come from the
+	// stream role's cache rather than the engine, at most a few hundred
+	// milliseconds behind, and is always consistent with its levels.
 	LastSeq int64  `json:"last_seq"`
 	Market  string `json:"market"`
 }
@@ -577,6 +607,72 @@ type FillList struct {
 // JWKS RFC 7517 key set; keys are OKP/Ed25519 with `use: sig`
 type JWKS struct {
 	Keys []map[string]interface{} `json:"keys"`
+}
+
+// Kline One OHLCV bucket. `trades` is 0 on a synthesized candle that carries the previous close through an empty bucket.
+type Kline struct {
+	// Close Arbitrary-precision decimal serialized as a string, at most 18 integer
+	// and 18 fractional digits (Postgres NUMERIC(36,18)). Never a JSON number.
+	//
+	//
+	// Example: 1990.00
+	Close Amount `json:"close"`
+
+	// High Arbitrary-precision decimal serialized as a string, at most 18 integer
+	// and 18 fractional digits (Postgres NUMERIC(36,18)). Never a JSON number.
+	//
+	//
+	// Example: 1990.00
+	High Amount `json:"high"`
+
+	// Interval Candle width; buckets are aligned to UTC
+	Interval KlineInterval `json:"interval"`
+
+	// Low Arbitrary-precision decimal serialized as a string, at most 18 integer
+	// and 18 fractional digits (Postgres NUMERIC(36,18)). Never a JSON number.
+	//
+	//
+	// Example: 1990.00
+	Low    Amount `json:"low"`
+	Market string `json:"market"`
+
+	// Open Arbitrary-precision decimal serialized as a string, at most 18 integer
+	// and 18 fractional digits (Postgres NUMERIC(36,18)). Never a JSON number.
+	//
+	//
+	// Example: 1990.00
+	Open Amount `json:"open"`
+
+	// QuoteVolume Arbitrary-precision decimal serialized as a string, at most 18 integer
+	// and 18 fractional digits (Postgres NUMERIC(36,18)). Never a JSON number.
+	//
+	//
+	// Example: 1990.00
+	QuoteVolume Amount `json:"quote_volume"`
+
+	// Start Bucket start (UTC)
+	Start  time.Time `json:"start"`
+	Trades int64     `json:"trades"`
+
+	// Volume Arbitrary-precision decimal serialized as a string, at most 18 integer
+	// and 18 fractional digits (Postgres NUMERIC(36,18)). Never a JSON number.
+	//
+	//
+	// Example: 1990.00
+	Volume Amount `json:"volume"`
+}
+
+// KlineInterval Candle width; buckets are aligned to UTC
+type KlineInterval string
+
+// KlineList defines model for KlineList.
+type KlineList struct {
+	// Interval Candle width; buckets are aligned to UTC
+	Interval KlineInterval `json:"interval"`
+
+	// Klines Oldest first, one per bucket
+	Klines []Kline `json:"klines"`
+	Market string  `json:"market"`
 }
 
 // LedgerEntry defines model for LedgerEntry.
@@ -904,6 +1000,70 @@ type SessionRole string
 // Side defines model for Side.
 type Side string
 
+// Ticker Rolling 24-hour summary. Price fields are null when the window holds no trade.
+type Ticker struct {
+	// At When the summary was computed
+	At time.Time `json:"at"`
+
+	// Change Arbitrary-precision decimal serialized as a string, at most 18 integer
+	// and 18 fractional digits (Postgres NUMERIC(36,18)). Never a JSON number.
+	//
+	//
+	// Example: 1990.00
+	Change *Amount `json:"change,omitempty"`
+
+	// ChangePct Arbitrary-precision decimal serialized as a string, at most 18 integer
+	// and 18 fractional digits (Postgres NUMERIC(36,18)). Never a JSON number.
+	//
+	//
+	// Example: 1990.00
+	ChangePct *Amount `json:"change_pct,omitempty"`
+
+	// High Arbitrary-precision decimal serialized as a string, at most 18 integer
+	// and 18 fractional digits (Postgres NUMERIC(36,18)). Never a JSON number.
+	//
+	//
+	// Example: 1990.00
+	High *Amount `json:"high,omitempty"`
+
+	// LastPrice Arbitrary-precision decimal serialized as a string, at most 18 integer
+	// and 18 fractional digits (Postgres NUMERIC(36,18)). Never a JSON number.
+	//
+	//
+	// Example: 1990.00
+	LastPrice *Amount `json:"last_price,omitempty"`
+
+	// Low Arbitrary-precision decimal serialized as a string, at most 18 integer
+	// and 18 fractional digits (Postgres NUMERIC(36,18)). Never a JSON number.
+	//
+	//
+	// Example: 1990.00
+	Low    *Amount `json:"low,omitempty"`
+	Market string  `json:"market"`
+
+	// Open Arbitrary-precision decimal serialized as a string, at most 18 integer
+	// and 18 fractional digits (Postgres NUMERIC(36,18)). Never a JSON number.
+	//
+	//
+	// Example: 1990.00
+	Open *Amount `json:"open,omitempty"`
+
+	// QuoteVolume Arbitrary-precision decimal serialized as a string, at most 18 integer
+	// and 18 fractional digits (Postgres NUMERIC(36,18)). Never a JSON number.
+	//
+	//
+	// Example: 1990.00
+	QuoteVolume Amount `json:"quote_volume"`
+	Trades      int64  `json:"trades"`
+
+	// Volume Arbitrary-precision decimal serialized as a string, at most 18 integer
+	// and 18 fractional digits (Postgres NUMERIC(36,18)). Never a JSON number.
+	//
+	//
+	// Example: 1990.00
+	Volume Amount `json:"volume"`
+}
+
 // TimeInForce `gtc` rests the unfilled remainder in the book; `ioc` cancels it. Market orders are always `ioc`.
 type TimeInForce string
 
@@ -1057,6 +1217,20 @@ type GetDepthParams struct {
 	Limit *int32 `form:"limit,omitempty" json:"limit,omitempty"`
 }
 
+// ListKlinesParams defines parameters for ListKlines.
+type ListKlinesParams struct {
+	Interval KlineInterval `form:"interval" json:"interval"`
+
+	// From Start of the range (inclusive), aligned down to a bucket
+	From *time.Time `form:"from,omitempty" json:"from,omitempty"`
+
+	// To End of the range (exclusive); default now
+	To *time.Time `form:"to,omitempty" json:"to,omitempty"`
+
+	// Limit Maximum candles returned (default 500, max 1000)
+	Limit *int32 `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
 // ListTradesParams defines parameters for ListTrades.
 type ListTradesParams struct {
 	// Limit Page size (default 100, max 500)
@@ -1166,6 +1340,12 @@ type ServerInterface interface {
 	// GetDepth Aggregated order book
 	// (GET /v1/markets/{symbol}/depth)
 	GetDepth(w http.ResponseWriter, r *http.Request, symbol MarketSymbol, params GetDepthParams)
+	// ListKlines Candles (OHLCV)
+	// (GET /v1/markets/{symbol}/klines)
+	ListKlines(w http.ResponseWriter, r *http.Request, symbol MarketSymbol, params ListKlinesParams)
+	// GetTicker 24-hour ticker
+	// (GET /v1/markets/{symbol}/ticker)
+	GetTicker(w http.ResponseWriter, r *http.Request, symbol MarketSymbol)
 	// ListTrades Recent public trades
 	// (GET /v1/markets/{symbol}/trades)
 	ListTrades(w http.ResponseWriter, r *http.Request, symbol MarketSymbol, params ListTradesParams)
@@ -1298,6 +1478,18 @@ func (_ Unimplemented) GetMarket(w http.ResponseWriter, r *http.Request, symbol 
 // GetDepth Aggregated order book
 // (GET /v1/markets/{symbol}/depth)
 func (_ Unimplemented) GetDepth(w http.ResponseWriter, r *http.Request, symbol MarketSymbol, params GetDepthParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ListKlines Candles (OHLCV)
+// (GET /v1/markets/{symbol}/klines)
+func (_ Unimplemented) ListKlines(w http.ResponseWriter, r *http.Request, symbol MarketSymbol, params ListKlinesParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetTicker 24-hour ticker
+// (GET /v1/markets/{symbol}/ticker)
+func (_ Unimplemented) GetTicker(w http.ResponseWriter, r *http.Request, symbol MarketSymbol) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -1797,6 +1989,113 @@ func (siw *ServerInterfaceWrapper) GetDepth(w http.ResponseWriter, r *http.Reque
 	handler.ServeHTTP(w, r)
 }
 
+// ListKlines operation middleware
+func (siw *ServerInterfaceWrapper) ListKlines(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "symbol" -------------
+	var symbol MarketSymbol
+
+	err = runtime.BindStyledParameterWithOptions("simple", "symbol", chi.URLParam(r, "symbol"), &symbol, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "symbol", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListKlinesParams
+
+	// ------------- Required query parameter "interval" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "interval", r.URL.Query(), &params.Interval, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "interval"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "interval", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "from" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "from", r.URL.Query(), &params.From, runtime.BindQueryParameterOptions{Type: "string", Format: "date-time"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "from"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "from", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "to" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "to", r.URL.Query(), &params.To, runtime.BindQueryParameterOptions{Type: "string", Format: "date-time"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "to"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "to", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: "int32"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListKlines(w, r, symbol, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetTicker operation middleware
+func (siw *ServerInterfaceWrapper) GetTicker(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "symbol" -------------
+	var symbol MarketSymbol
+
+	err = runtime.BindStyledParameterWithOptions("simple", "symbol", chi.URLParam(r, "symbol"), &symbol, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "symbol", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetTicker(w, r, symbol)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ListTrades operation middleware
 func (siw *ServerInterfaceWrapper) ListTrades(w http.ResponseWriter, r *http.Request) {
 
@@ -2253,6 +2552,12 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/v1/markets/{symbol}/trades", wrapper.ListTrades)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/v1/markets/{symbol}/ticker", wrapper.GetTicker)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/v1/markets/{symbol}/klines", wrapper.ListKlines)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/v1/orders", wrapper.ListOrders)
@@ -3467,6 +3772,163 @@ func (response GetDepth503ApplicationProblemPlusJSONResponse) VisitGetDepthRespo
 	return err
 }
 
+type ListKlinesRequestObject struct {
+	Symbol MarketSymbol `json:"symbol"`
+	Params ListKlinesParams
+}
+
+type ListKlinesResponseObject interface {
+	VisitListKlinesResponse(w http.ResponseWriter) error
+}
+
+type ListKlines200JSONResponse KlineList
+
+func (response ListKlines200JSONResponse) VisitListKlinesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListKlines400ApplicationProblemPlusJSONResponse struct {
+	BadRequestApplicationProblemPlusJSONResponse
+}
+
+func (response ListKlines400ApplicationProblemPlusJSONResponse) VisitListKlinesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListKlines404ApplicationProblemPlusJSONResponse struct {
+	NotFoundApplicationProblemPlusJSONResponse
+}
+
+func (response ListKlines404ApplicationProblemPlusJSONResponse) VisitListKlinesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListKlines500ApplicationProblemPlusJSONResponse struct {
+	InternalErrorApplicationProblemPlusJSONResponse
+}
+
+func (response ListKlines500ApplicationProblemPlusJSONResponse) VisitListKlinesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListKlines503ApplicationProblemPlusJSONResponse struct {
+	ServiceUnavailableApplicationProblemPlusJSONResponse
+}
+
+func (response ListKlines503ApplicationProblemPlusJSONResponse) VisitListKlinesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(503)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetTickerRequestObject struct {
+	Symbol MarketSymbol `json:"symbol"`
+}
+
+type GetTickerResponseObject interface {
+	VisitGetTickerResponse(w http.ResponseWriter) error
+}
+
+type GetTicker200JSONResponse Ticker
+
+func (response GetTicker200JSONResponse) VisitGetTickerResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetTicker404ApplicationProblemPlusJSONResponse struct {
+	NotFoundApplicationProblemPlusJSONResponse
+}
+
+func (response GetTicker404ApplicationProblemPlusJSONResponse) VisitGetTickerResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetTicker500ApplicationProblemPlusJSONResponse struct {
+	InternalErrorApplicationProblemPlusJSONResponse
+}
+
+func (response GetTicker500ApplicationProblemPlusJSONResponse) VisitGetTickerResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetTicker503ApplicationProblemPlusJSONResponse struct {
+	ServiceUnavailableApplicationProblemPlusJSONResponse
+}
+
+func (response GetTicker503ApplicationProblemPlusJSONResponse) VisitGetTickerResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(503)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type ListTradesRequestObject struct {
 	Symbol MarketSymbol `json:"symbol"`
 	Params ListTradesParams
@@ -4209,6 +4671,12 @@ type StrictServerInterface interface {
 	// GetDepth Aggregated order book
 	// (GET /v1/markets/{symbol}/depth)
 	GetDepth(ctx context.Context, request GetDepthRequestObject) (GetDepthResponseObject, error)
+	// ListKlines Candles (OHLCV)
+	// (GET /v1/markets/{symbol}/klines)
+	ListKlines(ctx context.Context, request ListKlinesRequestObject) (ListKlinesResponseObject, error)
+	// GetTicker 24-hour ticker
+	// (GET /v1/markets/{symbol}/ticker)
+	GetTicker(ctx context.Context, request GetTickerRequestObject) (GetTickerResponseObject, error)
 	// ListTrades Recent public trades
 	// (GET /v1/markets/{symbol}/trades)
 	ListTrades(ctx context.Context, request ListTradesRequestObject) (ListTradesResponseObject, error)
@@ -4746,6 +5214,59 @@ func (sh *strictHandler) GetDepth(w http.ResponseWriter, r *http.Request, symbol
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(GetDepthResponseObject); ok {
 		if err := validResponse.VisitGetDepthResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListKlines operation middleware
+func (sh *strictHandler) ListKlines(w http.ResponseWriter, r *http.Request, symbol MarketSymbol, params ListKlinesParams) {
+	var request ListKlinesRequestObject
+
+	request.Symbol = symbol
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListKlines(ctx, request.(ListKlinesRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListKlines")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListKlinesResponseObject); ok {
+		if err := validResponse.VisitListKlinesResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetTicker operation middleware
+func (sh *strictHandler) GetTicker(w http.ResponseWriter, r *http.Request, symbol MarketSymbol) {
+	var request GetTickerRequestObject
+
+	request.Symbol = symbol
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetTicker(ctx, request.(GetTickerRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetTicker")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetTickerResponseObject); ok {
+		if err := validResponse.VisitGetTickerResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

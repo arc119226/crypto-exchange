@@ -73,6 +73,33 @@ func (e AssetStatus) Valid() bool {
 	}
 }
 
+// Defines values for KlineInterval.
+const (
+	KlineIntervalN15M KlineInterval = "15m"
+	KlineIntervalN1D  KlineInterval = "1d"
+	KlineIntervalN1H  KlineInterval = "1h"
+	KlineIntervalN1M  KlineInterval = "1m"
+	KlineIntervalN5M  KlineInterval = "5m"
+)
+
+// Valid indicates whether the value is a known member of the KlineInterval enum.
+func (e KlineInterval) Valid() bool {
+	switch e {
+	case KlineIntervalN15M:
+		return true
+	case KlineIntervalN1D:
+		return true
+	case KlineIntervalN1H:
+		return true
+	case KlineIntervalN1M:
+		return true
+	case KlineIntervalN5M:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for MarketStatus.
 const (
 	MarketStatusActive     MarketStatus = "active"
@@ -524,7 +551,10 @@ type Depth struct {
 	// Bids Best (highest) bid first
 	Bids []Level `json:"bids"`
 
-	// LastSeq Engine sequence the snapshot reflects (WebSocket deltas resume from it, Phase 6)
+	// LastSeq Engine sequence the snapshot reflects; WebSocket depth deltas
+	// continue from it (docs/ws-api.md). The snapshot may come from the
+	// stream role's cache rather than the engine, at most a few hundred
+	// milliseconds behind, and is always consistent with its levels.
 	LastSeq int64  `json:"last_seq"`
 	Market  string `json:"market"`
 }
@@ -578,6 +608,72 @@ type FillList struct {
 // JWKS RFC 7517 key set; keys are OKP/Ed25519 with `use: sig`
 type JWKS struct {
 	Keys []map[string]interface{} `json:"keys"`
+}
+
+// Kline One OHLCV bucket. `trades` is 0 on a synthesized candle that carries the previous close through an empty bucket.
+type Kline struct {
+	// Close Arbitrary-precision decimal serialized as a string, at most 18 integer
+	// and 18 fractional digits (Postgres NUMERIC(36,18)). Never a JSON number.
+	//
+	//
+	// Example: 1990.00
+	Close Amount `json:"close"`
+
+	// High Arbitrary-precision decimal serialized as a string, at most 18 integer
+	// and 18 fractional digits (Postgres NUMERIC(36,18)). Never a JSON number.
+	//
+	//
+	// Example: 1990.00
+	High Amount `json:"high"`
+
+	// Interval Candle width; buckets are aligned to UTC
+	Interval KlineInterval `json:"interval"`
+
+	// Low Arbitrary-precision decimal serialized as a string, at most 18 integer
+	// and 18 fractional digits (Postgres NUMERIC(36,18)). Never a JSON number.
+	//
+	//
+	// Example: 1990.00
+	Low    Amount `json:"low"`
+	Market string `json:"market"`
+
+	// Open Arbitrary-precision decimal serialized as a string, at most 18 integer
+	// and 18 fractional digits (Postgres NUMERIC(36,18)). Never a JSON number.
+	//
+	//
+	// Example: 1990.00
+	Open Amount `json:"open"`
+
+	// QuoteVolume Arbitrary-precision decimal serialized as a string, at most 18 integer
+	// and 18 fractional digits (Postgres NUMERIC(36,18)). Never a JSON number.
+	//
+	//
+	// Example: 1990.00
+	QuoteVolume Amount `json:"quote_volume"`
+
+	// Start Bucket start (UTC)
+	Start  time.Time `json:"start"`
+	Trades int64     `json:"trades"`
+
+	// Volume Arbitrary-precision decimal serialized as a string, at most 18 integer
+	// and 18 fractional digits (Postgres NUMERIC(36,18)). Never a JSON number.
+	//
+	//
+	// Example: 1990.00
+	Volume Amount `json:"volume"`
+}
+
+// KlineInterval Candle width; buckets are aligned to UTC
+type KlineInterval string
+
+// KlineList defines model for KlineList.
+type KlineList struct {
+	// Interval Candle width; buckets are aligned to UTC
+	Interval KlineInterval `json:"interval"`
+
+	// Klines Oldest first, one per bucket
+	Klines []Kline `json:"klines"`
+	Market string  `json:"market"`
 }
 
 // LedgerEntry defines model for LedgerEntry.
@@ -905,6 +1001,70 @@ type SessionRole string
 // Side defines model for Side.
 type Side string
 
+// Ticker Rolling 24-hour summary. Price fields are null when the window holds no trade.
+type Ticker struct {
+	// At When the summary was computed
+	At time.Time `json:"at"`
+
+	// Change Arbitrary-precision decimal serialized as a string, at most 18 integer
+	// and 18 fractional digits (Postgres NUMERIC(36,18)). Never a JSON number.
+	//
+	//
+	// Example: 1990.00
+	Change *Amount `json:"change,omitempty"`
+
+	// ChangePct Arbitrary-precision decimal serialized as a string, at most 18 integer
+	// and 18 fractional digits (Postgres NUMERIC(36,18)). Never a JSON number.
+	//
+	//
+	// Example: 1990.00
+	ChangePct *Amount `json:"change_pct,omitempty"`
+
+	// High Arbitrary-precision decimal serialized as a string, at most 18 integer
+	// and 18 fractional digits (Postgres NUMERIC(36,18)). Never a JSON number.
+	//
+	//
+	// Example: 1990.00
+	High *Amount `json:"high,omitempty"`
+
+	// LastPrice Arbitrary-precision decimal serialized as a string, at most 18 integer
+	// and 18 fractional digits (Postgres NUMERIC(36,18)). Never a JSON number.
+	//
+	//
+	// Example: 1990.00
+	LastPrice *Amount `json:"last_price,omitempty"`
+
+	// Low Arbitrary-precision decimal serialized as a string, at most 18 integer
+	// and 18 fractional digits (Postgres NUMERIC(36,18)). Never a JSON number.
+	//
+	//
+	// Example: 1990.00
+	Low    *Amount `json:"low,omitempty"`
+	Market string  `json:"market"`
+
+	// Open Arbitrary-precision decimal serialized as a string, at most 18 integer
+	// and 18 fractional digits (Postgres NUMERIC(36,18)). Never a JSON number.
+	//
+	//
+	// Example: 1990.00
+	Open *Amount `json:"open,omitempty"`
+
+	// QuoteVolume Arbitrary-precision decimal serialized as a string, at most 18 integer
+	// and 18 fractional digits (Postgres NUMERIC(36,18)). Never a JSON number.
+	//
+	//
+	// Example: 1990.00
+	QuoteVolume Amount `json:"quote_volume"`
+	Trades      int64  `json:"trades"`
+
+	// Volume Arbitrary-precision decimal serialized as a string, at most 18 integer
+	// and 18 fractional digits (Postgres NUMERIC(36,18)). Never a JSON number.
+	//
+	//
+	// Example: 1990.00
+	Volume Amount `json:"volume"`
+}
+
 // TimeInForce `gtc` rests the unfilled remainder in the book; `ioc` cancels it. Market orders are always `ioc`.
 type TimeInForce string
 
@@ -1055,6 +1215,20 @@ type ListLedgerEntriesParams struct {
 // GetDepthParams defines parameters for GetDepth.
 type GetDepthParams struct {
 	// Limit Levels per side (default 20, max 200)
+	Limit *int32 `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// ListKlinesParams defines parameters for ListKlines.
+type ListKlinesParams struct {
+	Interval KlineInterval `form:"interval" json:"interval"`
+
+	// From Start of the range (inclusive), aligned down to a bucket
+	From *time.Time `form:"from,omitempty" json:"from,omitempty"`
+
+	// To End of the range (exclusive); default now
+	To *time.Time `form:"to,omitempty" json:"to,omitempty"`
+
+	// Limit Maximum candles returned (default 500, max 1000)
 	Limit *int32 `form:"limit,omitempty" json:"limit,omitempty"`
 }
 
@@ -1339,6 +1513,28 @@ type ClientInterface interface {
 	//
 	// Corresponds with GET /v1/markets/{symbol}/depth (the `GetDepth` operationId).
 	GetDepth(ctx context.Context, symbol MarketSymbol, params *GetDepthParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ListKlines Candles (OHLCV)
+	//
+	// One candle per bucket of `[from, to)`, oldest first, gaps filled with
+	// flat candles that carry the previous close (`trades` is `0` on those).
+	// Buckets are aligned to UTC; a day starts at 00:00 UTC. `to` defaults
+	// to now and `from` to `to − limit × interval`; a range wider than
+	// `limit` buckets is cut at `limit` from `from`.
+	//
+	// Corresponds with GET /v1/markets/{symbol}/klines (the `ListKlines` operationId).
+	ListKlines(ctx context.Context, symbol MarketSymbol, params *ListKlinesParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetTicker 24-hour ticker
+	//
+	// Rolling 24-hour summary folded from the market's 1-minute candles:
+	// last price, the open 24 hours ago, high, low, base and quote volume,
+	// trade count and the change. Price fields are `null` when the window
+	// holds no trade. Served from persisted candles, so it lags the last
+	// trade by up to the worker's poll interval (about a second).
+	//
+	// Corresponds with GET /v1/markets/{symbol}/ticker (the `GetTicker` operationId).
+	GetTicker(ctx context.Context, symbol MarketSymbol, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// ListTrades Recent public trades
 	//
@@ -1821,6 +2017,48 @@ func (c *Client) GetMarket(ctx context.Context, symbol MarketSymbol, reqEditors 
 // Corresponds with GET /v1/markets/{symbol}/depth (the `GetDepth` operationId).
 func (c *Client) GetDepth(ctx context.Context, symbol MarketSymbol, params *GetDepthParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewGetDepthRequest(c.Server, symbol, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// ListKlines Candles (OHLCV)
+//
+// One candle per bucket of `[from, to)`, oldest first, gaps filled with
+// flat candles that carry the previous close (`trades` is `0` on those).
+// Buckets are aligned to UTC; a day starts at 00:00 UTC. `to` defaults
+// to now and `from` to `to − limit × interval`; a range wider than
+// `limit` buckets is cut at `limit` from `from`.
+//
+// Corresponds with GET /v1/markets/{symbol}/klines (the `ListKlines` operationId).
+func (c *Client) ListKlines(ctx context.Context, symbol MarketSymbol, params *ListKlinesParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListKlinesRequest(c.Server, symbol, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// GetTicker 24-hour ticker
+//
+// Rolling 24-hour summary folded from the market's 1-minute candles:
+// last price, the open 24 hours ago, high, low, base and quote volume,
+// trade count and the change. Price fields are `null` when the window
+// holds no trade. Served from persisted candles, so it lags the last
+// trade by up to the worker's poll interval (about a second).
+//
+// Corresponds with GET /v1/markets/{symbol}/ticker (the `GetTicker` operationId).
+func (c *Client) GetTicker(ctx context.Context, symbol MarketSymbol, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetTickerRequest(c.Server, symbol)
 	if err != nil {
 		return nil, err
 	}
@@ -2789,6 +3027,133 @@ func NewGetDepthRequest(server string, symbol MarketSymbol, params *GetDepthPara
 	return req, nil
 }
 
+// NewListKlinesRequest constructs an http.Request for the ListKlines method
+func NewListKlinesRequest(server string, symbol MarketSymbol, params *ListKlinesParams) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "symbol", symbol, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/markets/%s/klines", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		// queryValues collects non-styled parameters (passthrough, JSON)
+		// that are safe to round-trip through url.Values.Encode().
+		queryValues := queryURL.Query()
+		// rawQueryFragments collects pre-encoded query fragments from
+		// styled parameters, preserving literal commas as delimiters
+		// per the OpenAPI spec (e.g. "color=blue,black,brown").
+		var rawQueryFragments []string
+
+		if queryFrag, err := runtime.StyleParamWithOptions("form", true, "interval", params.Interval, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+			return nil, err
+		} else {
+			for _, qp := range strings.Split(queryFrag, "&") {
+				rawQueryFragments = append(rawQueryFragments, qp)
+			}
+		}
+
+		if params.From != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "from", *params.From, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: "date-time"}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.To != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "to", *params.To, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: "date-time"}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.Limit != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "limit", *params.Limit, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "integer", Format: "int32"}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if encoded := queryValues.Encode(); encoded != "" {
+			rawQueryFragments = append(rawQueryFragments, encoded)
+		}
+		queryURL.RawQuery = strings.Join(rawQueryFragments, "&")
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewGetTickerRequest constructs an http.Request for the GetTicker method
+func NewGetTickerRequest(server string, symbol MarketSymbol) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "symbol", symbol, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/markets/%s/ticker", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
 // NewListTradesRequest constructs an http.Request for the ListTrades method
 func NewListTradesRequest(server string, symbol MarketSymbol, params *ListTradesParams) (*http.Request, error) {
 	var err error
@@ -3403,6 +3768,32 @@ type ClientWithResponsesInterface interface {
 	//
 	// Corresponds with GET /v1/markets/{symbol}/depth (the `GetDepth` operationId).
 	GetDepthWithResponse(ctx context.Context, symbol MarketSymbol, params *GetDepthParams, reqEditors ...RequestEditorFn) (*GetDepthResponse, error)
+
+	// ListKlinesWithResponse Candles (OHLCV)
+	//
+	// One candle per bucket of `[from, to)`, oldest first, gaps filled with
+	// flat candles that carry the previous close (`trades` is `0` on those).
+	// Buckets are aligned to UTC; a day starts at 00:00 UTC. `to` defaults
+	// to now and `from` to `to − limit × interval`; a range wider than
+	// `limit` buckets is cut at `limit` from `from`.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /v1/markets/{symbol}/klines (the `ListKlines` operationId).
+	ListKlinesWithResponse(ctx context.Context, symbol MarketSymbol, params *ListKlinesParams, reqEditors ...RequestEditorFn) (*ListKlinesResponse, error)
+
+	// GetTickerWithResponse 24-hour ticker
+	//
+	// Rolling 24-hour summary folded from the market's 1-minute candles:
+	// last price, the open 24 hours ago, high, low, base and quote volume,
+	// trade count and the change. Price fields are `null` when the window
+	// holds no trade. Served from persisted candles, so it lags the last
+	// trade by up to the worker's poll interval (about a second).
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /v1/markets/{symbol}/ticker (the `GetTicker` operationId).
+	GetTickerWithResponse(ctx context.Context, symbol MarketSymbol, reqEditors ...RequestEditorFn) (*GetTickerResponse, error)
 
 	// ListTradesWithResponse Recent public trades
 	//
@@ -4601,6 +4992,137 @@ func (r GetDepthResponse) ContentType() string {
 	return ""
 }
 
+type ListKlinesResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *KlineList
+	// ApplicationProblemJSON400 the response for an HTTP 400 `application/problem+json` response
+	ApplicationProblemJSON400 *BadRequest
+	// ApplicationProblemJSON404 the response for an HTTP 404 `application/problem+json` response
+	ApplicationProblemJSON404 *NotFound
+	// ApplicationProblemJSON500 the response for an HTTP 500 `application/problem+json` response
+	ApplicationProblemJSON500 *InternalError
+	// ApplicationProblemJSON503 the response for an HTTP 503 `application/problem+json` response
+	ApplicationProblemJSON503 *ServiceUnavailable
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r ListKlinesResponse) GetJSON200() *KlineList {
+	return r.JSON200
+}
+
+// GetApplicationProblemJSON400 returns the response for an HTTP 400 `application/problem+json` response
+func (r ListKlinesResponse) GetApplicationProblemJSON400() *BadRequest {
+	return r.ApplicationProblemJSON400
+}
+
+// GetApplicationProblemJSON404 returns the response for an HTTP 404 `application/problem+json` response
+func (r ListKlinesResponse) GetApplicationProblemJSON404() *NotFound {
+	return r.ApplicationProblemJSON404
+}
+
+// GetApplicationProblemJSON500 returns the response for an HTTP 500 `application/problem+json` response
+func (r ListKlinesResponse) GetApplicationProblemJSON500() *InternalError {
+	return r.ApplicationProblemJSON500
+}
+
+// GetApplicationProblemJSON503 returns the response for an HTTP 503 `application/problem+json` response
+func (r ListKlinesResponse) GetApplicationProblemJSON503() *ServiceUnavailable {
+	return r.ApplicationProblemJSON503
+}
+
+// GetBody returns the raw response body bytes
+func (r ListKlinesResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r ListKlinesResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListKlinesResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r ListKlinesResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type GetTickerResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *Ticker
+	// ApplicationProblemJSON404 the response for an HTTP 404 `application/problem+json` response
+	ApplicationProblemJSON404 *NotFound
+	// ApplicationProblemJSON500 the response for an HTTP 500 `application/problem+json` response
+	ApplicationProblemJSON500 *InternalError
+	// ApplicationProblemJSON503 the response for an HTTP 503 `application/problem+json` response
+	ApplicationProblemJSON503 *ServiceUnavailable
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r GetTickerResponse) GetJSON200() *Ticker {
+	return r.JSON200
+}
+
+// GetApplicationProblemJSON404 returns the response for an HTTP 404 `application/problem+json` response
+func (r GetTickerResponse) GetApplicationProblemJSON404() *NotFound {
+	return r.ApplicationProblemJSON404
+}
+
+// GetApplicationProblemJSON500 returns the response for an HTTP 500 `application/problem+json` response
+func (r GetTickerResponse) GetApplicationProblemJSON500() *InternalError {
+	return r.ApplicationProblemJSON500
+}
+
+// GetApplicationProblemJSON503 returns the response for an HTTP 503 `application/problem+json` response
+func (r GetTickerResponse) GetApplicationProblemJSON503() *ServiceUnavailable {
+	return r.ApplicationProblemJSON503
+}
+
+// GetBody returns the raw response body bytes
+func (r GetTickerResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r GetTickerResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetTickerResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r GetTickerResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
 type ListTradesResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -5450,6 +5972,44 @@ func (c *ClientWithResponses) GetDepthWithResponse(ctx context.Context, symbol M
 		return nil, err
 	}
 	return ParseGetDepthResponse(rsp)
+}
+
+// ListKlinesWithResponse Candles (OHLCV)
+//
+// One candle per bucket of `[from, to)`, oldest first, gaps filled with
+// flat candles that carry the previous close (`trades` is `0` on those).
+// Buckets are aligned to UTC; a day starts at 00:00 UTC. `to` defaults
+// to now and `from` to `to − limit × interval`; a range wider than
+// `limit` buckets is cut at `limit` from `from`.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /v1/markets/{symbol}/klines (the `ListKlines` operationId).
+func (c *ClientWithResponses) ListKlinesWithResponse(ctx context.Context, symbol MarketSymbol, params *ListKlinesParams, reqEditors ...RequestEditorFn) (*ListKlinesResponse, error) {
+	rsp, err := c.ListKlines(ctx, symbol, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListKlinesResponse(rsp)
+}
+
+// GetTickerWithResponse 24-hour ticker
+//
+// Rolling 24-hour summary folded from the market's 1-minute candles:
+// last price, the open 24 hours ago, high, low, base and quote volume,
+// trade count and the change. Price fields are `null` when the window
+// holds no trade. Served from persisted candles, so it lags the last
+// trade by up to the worker's poll interval (about a second).
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /v1/markets/{symbol}/ticker (the `GetTicker` operationId).
+func (c *ClientWithResponses) GetTickerWithResponse(ctx context.Context, symbol MarketSymbol, reqEditors ...RequestEditorFn) (*GetTickerResponse, error) {
+	rsp, err := c.GetTicker(ctx, symbol, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetTickerResponse(rsp)
 }
 
 // ListTradesWithResponse Recent public trades
@@ -6419,6 +6979,107 @@ func ParseGetDepthResponse(rsp *http.Response) (*GetDepthResponse, error) {
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
 		var dest Depth
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON500 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest ServiceUnavailable
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON503 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseListKlinesResponse parses an HTTP response from a ListKlinesWithResponse call
+func ParseListKlinesResponse(rsp *http.Response) (*ListKlinesResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListKlinesResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest KlineList
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest BadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON500 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest ServiceUnavailable
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON503 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetTickerResponse parses an HTTP response from a GetTickerWithResponse call
+func ParseGetTickerResponse(rsp *http.Response) (*GetTickerResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetTickerResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest Ticker
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}

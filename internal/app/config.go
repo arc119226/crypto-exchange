@@ -61,6 +61,9 @@ type MarketDataConfig struct {
 	// RebuildBuffer caps the events the stream holds while it reads a
 	// book snapshot; overflowing it restarts the rebuild.
 	RebuildBuffer int `env:"REBUILD_BUFFER" envDefault:"10000"`
+	// SnapshotTTL is how long a cached depth snapshot stays acceptable to
+	// the api role; the stream refreshes it far more often while it runs.
+	SnapshotTTL time.Duration `env:"SNAPSHOT_TTL" envDefault:"10s"`
 }
 
 // EngineConfig tunes the trading engine (engine role) and the command bus
@@ -453,8 +456,8 @@ func (c Config) Validate() error {
 	if c.Webhook.BatchSize <= 0 {
 		return fmt.Errorf("config: WEBHOOK_BATCH_SIZE must be positive")
 	}
-	if c.MarketData.KlinePollInterval <= 0 || c.MarketData.KlineBatchSeqs <= 0 || c.MarketData.RebuildBuffer <= 0 {
-		return fmt.Errorf("config: MARKETDATA_KLINE_POLL_INTERVAL, MARKETDATA_KLINE_BATCH_SEQS and MARKETDATA_REBUILD_BUFFER must be positive")
+	if c.MarketData.KlinePollInterval <= 0 || c.MarketData.KlineBatchSeqs <= 0 || c.MarketData.RebuildBuffer <= 0 || c.MarketData.SnapshotTTL <= 0 {
+		return fmt.Errorf("config: MARKETDATA_KLINE_POLL_INTERVAL, MARKETDATA_KLINE_BATCH_SEQS, MARKETDATA_REBUILD_BUFFER and MARKETDATA_SNAPSHOT_TTL must be positive")
 	}
 	if _, err := c.Webhook.Master(); err != nil {
 		return err
@@ -524,6 +527,7 @@ func (c Config) LogValue() slog.Value {
 		slog.Duration("marketdata_kline_poll_interval", c.MarketData.KlinePollInterval),
 		slog.Int64("marketdata_kline_batch_seqs", c.MarketData.KlineBatchSeqs),
 		slog.Int("marketdata_rebuild_buffer", c.MarketData.RebuildBuffer),
+		slog.Duration("marketdata_snapshot_ttl", c.MarketData.SnapshotTTL),
 		slog.String("ratelimit_login_per_ip", c.RateLimit.LoginPerIP),
 		slog.String("ratelimit_login_per_account", c.RateLimit.LoginPerAccount),
 		slog.String("ratelimit_orders_per_account", c.RateLimit.OrdersPerAccount),
