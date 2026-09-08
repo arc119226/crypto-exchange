@@ -14,7 +14,6 @@ const API_URL = process.env.API_URL ?? 'http://localhost:8080'
 const ADMIN_URL = process.env.ADMIN_URL ?? 'http://localhost:8082'
 const ADMIN_API_KEY = process.env.ADMIN_API_KEY ?? ''
 const MARKET = process.env.SMOKE_MARKET ?? 'ETH-USDC'
-const PRICE = process.env.SMOKE_PRICE ?? '1234.5'
 
 interface Session {
   account_id: string
@@ -57,6 +56,40 @@ async function placeViaAPI(api: APIRequestContext, s: Session, body: Record<stri
   return (await r.json()) as Record<string, unknown>
 }
 
+async function getJSON<T>(api: APIRequestContext, url: string): Promise<T> {
+  const r = await api.get(url)
+  expect(r.status(), await r.text()).toBe(200)
+  return (await r.json()) as T
+}
+
+// trimZeros formats a price the way the API does (money.Amount drops
+// trailing zeros), so the data-price prefix locators below match.
+function trimZeros(v: string): string {
+  return v.includes('.') ? v.replace(/\.?0+$/, '') : v
+}
+
+// bidPrice picks where the resting bid goes: SMOKE_PRICE when set, else one
+// tick above the current best bid. That makes the order the best bid, so it
+// is in the fifteen rows the book renders whatever else rests there (in CI
+// the stack has just run a loadgen burst that leaves ~150 orders around
+// 2000), its level is unique (nothing rests above the best bid), and the
+// taker's sell at the same price fills it first. An empty book takes 1234.5.
+async function bidPrice(api: APIRequestContext): Promise<string> {
+  if (process.env.SMOKE_PRICE) return process.env.SMOKE_PRICE
+  type Level = { price: string }
+  const depth = await getJSON<{ bids: Level[]; asks: Level[] }>(api, `${API_URL}/v1/markets/${MARKET}/depth?limit=1`)
+  const best = depth.bids[0]?.price
+  if (!best) return '1234.5'
+  const { markets } = await getJSON<{ markets: { symbol: string; price_tick: string }[] }>(api, `${API_URL}/v1/markets`)
+  const tick = markets.find((m) => m.symbol === MARKET)?.price_tick ?? '0.01'
+  const scale = (tick.split('.')[1] ?? '').length
+  const units = (v: string): number => Math.round(Number(v) * 10 ** scale)
+  const price = trimZeros(((units(best) + units(tick)) / 10 ** scale).toFixed(scale))
+  const ask = depth.asks[0]?.price
+  expect(!ask || units(price) < units(ask), `a one-tick spread (${best} / ${ask}) leaves no room for a resting best bid`).toBe(true)
+  return price
+}
+
 async function available(page: Page, asset: string): Promise<string> {
   return (await page.getByTestId(`balance-${asset}`).getAttribute('data-available')) ?? ''
 }
@@ -82,6 +115,9 @@ test('register, place a bid, see it in the book, get filled, balances move', asy
   await fund(request, maker.account_id, 'USDC', '100000')
   await fund(request, maker.account_id, 'ETH', '10')
 
+  // ... pick the bid's price from the book as it is ...
+  const PRICE = await bidPrice(request)
+
   // ... and open the market
   await page.getByTestId(`market-${MARKET}`).click()
   await expect(page).toHaveURL(new RegExp(`/trade/${MARKET}$`))
@@ -91,7 +127,7 @@ test('register, place a bid, see it in the book, get filled, balances move', asy
   await expect(page.getByTestId('balance-USDC')).toHaveAttribute('data-available', /^100000/)
   const ethBefore = await available(page, 'ETH')
 
-  // a resting bid at a price nobody else uses
+  // a resting bid that becomes the best bid (see bidPrice)
   await page.getByTestId('side-buy').click()
   await page.getByTestId('price').fill(PRICE)
   await page.getByTestId('qty').fill('0.5')
