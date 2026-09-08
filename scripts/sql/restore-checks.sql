@@ -34,12 +34,21 @@ BEGIN
         RAISE EXCEPTION '% balance rows disagree with their postings', bad;
     END IF;
 
-    -- 3. every market's sequence is its last order's
-    SELECT string_agg(market_id::text || ' ' || last_seq, ', ') INTO bad
-    FROM trading.market_sequences s
-    WHERE last_seq <> coalesce((SELECT max(o.seq) FROM trading.orders o WHERE o.market_id = s.market_id), 0);
+    -- 3. every market's sequence is the last command it committed. An order
+    -- row carries the seq of the command that accepted or rejected it, but a
+    -- cancel consumes a seq without writing an order row, so the newest
+    -- outbox event of the market (kept 30 days by retention) is the exact
+    -- witness while there is one; the orders alone only bound it from below.
+    SELECT string_agg(market_id::text || ' last_seq ' || last_seq || ' orders ' || o_max || ' events ' || coalesce(e_max::text, 'none'), ', ') INTO bad
+    FROM (
+        SELECT s.market_id, s.last_seq,
+               coalesce((SELECT max(o.seq) FROM trading.orders o WHERE o.market_id = s.market_id), 0) AS o_max,
+               (SELECT max(e.seq) FROM eventbus.outbox e JOIN registry.markets m ON m.id = s.market_id WHERE e.market_id = m.symbol) AS e_max
+        FROM trading.market_sequences s
+    ) x
+    WHERE last_seq < o_max OR (e_max IS NOT NULL AND last_seq <> greatest(o_max, e_max));
     IF bad IS NOT NULL THEN
-        RAISE EXCEPTION 'market sequence does not match the orders: %', bad;
+        RAISE EXCEPTION 'market sequence does not match the orders and events: %', bad;
     END IF;
 
     -- 4. trades: the fills of one command are numbered 0..n-1 without a hole
