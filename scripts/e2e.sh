@@ -75,7 +75,11 @@ log "starting infra + one container per role"
 "${COMPOSE[@]}" ps
 
 log "the engine serves the command bus"
-"${COMPOSE[@]}" logs --no-color exchange-engine | grep -q "command bus listening" \
+# Read the log into a variable before testing it: under pipefail, a pipeline
+# whose reader exits early (grep -q, head) fails with 141 when the writer is
+# still writing, and `docker compose logs` writes line by line.
+engine_logs=$("${COMPOSE[@]}" logs --no-color exchange-engine)
+grep -q "command bus listening" <<<"$engine_logs" \
   || { echo "engine did not start the command bus"; exit 1; }
 
 # Two independent BIP-44 implementations must agree on m/44'/60'/1'/0/0: the
@@ -207,7 +211,7 @@ usdc_contract=$("$CTL" assets list --output json \
 [ -n "$usdc_contract" ] && [ "$usdc_contract" != "null" ] \
   || { echo "the registry has no USDC contract address"; exit 1; }
 
-balance_of() { "$CTL" balances --output json | jq -r --arg a "$1" '.balances[] | select(.asset==$a) | .available' | head -1; }
+balance_of() { "$CTL" balances --output json | jq -r --arg a "$1" '[.balances[] | select(.asset==$a) | .available][0] // empty'; }
 
 # wait_for_credit ASSET BEFORE — polls until the balance moves
 wait_for_credit() {
@@ -493,7 +497,10 @@ all_logs=$("${COMPOSE[@]}" logs --no-color)
 leaked=0
 check_absent() { # name value
   [ -n "$2" ] || return 0
-  if printf '%s' "$all_logs" | grep -qF -- "$2"; then echo "LEAK: $1 appears in a container log"; leaked=1; fi
+  # a here-string, not a pipeline: `printf | grep -q` has the same shape as
+  # the race above (a found leak could read as "no leak" if printf were
+  # still writing when grep exits), so it is written the safe way too
+  if grep -qF -- "$2" <<<"$all_logs"; then echo "LEAK: $1 appears in a container log"; leaked=1; fi
 }
 check_absent WALLET_KEYSTORE_PASSPHRASE "$WALLET_KEYSTORE_PASSPHRASE"
 check_absent API_KEY_MASTER_KEY "$API_KEY_MASTER_KEY"
