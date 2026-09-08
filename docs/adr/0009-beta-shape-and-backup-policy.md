@@ -22,6 +22,8 @@ Phase 7 要把系統交給營運方,四件事沒有計畫書上的唯一答案:(
 
 理由:subchart 的版本、values 結構、安全預設都是別人的,而我們只需要「CI 上有一個能用的 Postgres」;內建的 Deployment 幾十行,而且 image tag 與 compose 同一份(`helm_test.go` 核對)。做成 hook 不是選擇而是必要:migrate 是 pre-install hook,它跑在一般資源建立之前,等同 chart 的 Postgres 若是一般資源就永遠等不到。後果是每次 `helm upgrade` 重建 dev 依賴,資料歸零——對 CI 與 kind 這正是要的(§16「每次乾淨部署」);`helm uninstall` 不刪 hook 資源,CI 直接刪叢集,人用 `kubectl delete -l app.kubernetes.io/instance=<rel>`(NOTES.txt)。另一條路(獨立的 `exchange-dev-deps` chart 先裝)少了 hook 的怪異但多了一個要維護、要對版本的 chart,不選。
 
+同一條規則的另一半:**hook 只能引用其他 hook,或 release 之前就存在的物件**(`existingSecret`、`scripts/kind-secrets.sh` 先 apply 的 ConfigMap)。第一次在 kind 上真裝就抓到兩處違反——migrate Job 掛了 chart 自己的 ServiceAccount,bootstrap Job 以 `envFrom` 讀 chart 自己的 ConfigMap——兩個都是一般資源,Helm 要等所有 pre-install hook 成功才建,hook 就一直等到逾時。現在 migrate Job 不指定 ServiceAccount(它本來就 `automountServiceAccountToken: false`),bootstrap Job 的設定值由 `exchange.configData` 內嵌成 env;`TestChartHooksReferenceOnlyHooks` 掃每個 hook 的 pod template,引用到 release 自己的一般資源就紅。
+
 ### 3. Group commit:一組 ≤ 50 個命令一筆交易,商業失敗在 savepoint 裡,基礎設施失敗整組退回逐筆
 
 runner 一次撈最多 `ENGINE_BATCH_SIZE`(預設與上限 50)個命令放進同一筆 Postgres 交易;每個命令一個 `SAVEPOINT`,餘額不足、進簿後拒絕、replay、終態取消這些**商業結果**是那個命令自己的回覆,交易繼續;DB 錯誤、deadlock、序號衝突、簿不一致這些**基礎設施失敗**讓整組 ROLLBACK、簿標髒重建,然後**用同一份程式碼一次一個命令重跑這一組**。回覆一律在 COMMIT 之後送。撈取遇到查詢、或同帳戶同 `client_order_id` 的第二張單就停,那個請求下一組再處理;同一組內「先成交後取消」用記憶體裡的列回覆,不消耗序號。

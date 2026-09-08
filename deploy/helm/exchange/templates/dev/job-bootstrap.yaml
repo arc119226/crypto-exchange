@@ -76,10 +76,13 @@ spec:
           args: ["admin", "bootstrap"]
           securityContext:
             {{- toYaml .Values.containerSecurityContext | nindent 12 }}
-          envFrom:
-            - configMapRef:
-                name: {{ include "exchange.fullname" . }}
+          # The ConfigMap's variables inline: this Job is a hook, and the
+          # ConfigMap is a regular resource that does not exist yet.
           env:
+            {{- range $k, $v := (include "exchange.configData" . | fromYaml) }}
+            - name: {{ $k }}
+              value: {{ $v | quote }}
+            {{- end }}
             - name: DATABASE_URL_FILE
               value: {{ $dir }}/db/DATABASE_URL_ADMIN
             - name: ADMIN_BOOTSTRAP_PASSWORD_FILE

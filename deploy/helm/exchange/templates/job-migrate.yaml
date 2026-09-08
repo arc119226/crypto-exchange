@@ -22,7 +22,10 @@ spec:
         app.kubernetes.io/component: migrate
     spec:
       restartPolicy: OnFailure
-      serviceAccountName: {{ include "exchange.serviceAccountName" . }}
+      # No serviceAccountName: a hook runs before Helm creates the release's
+      # regular resources, the chart's ServiceAccount among them, so a hook
+      # may only reference other hooks or objects that exist before the
+      # release (the existing Secrets). The pod mounts no token anyway.
       automountServiceAccountToken: false
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:

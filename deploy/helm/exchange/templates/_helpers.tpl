@@ -68,3 +68,29 @@ a margin.
 
 {{/* Where the mounted secrets live inside a pod. */}}
 {{- define "exchange.secretsDir" -}}/var/run/exchange{{- end -}}
+
+{{/*
+Non-secret environment for every role: the ConfigMap's data. Also rendered
+inline into the dev bootstrap hook, which runs before the ConfigMap exists.
+Secrets never go here: the roles read them from mounted files through the
+*_FILE variables (deployment.yaml).
+*/}}
+{{- define "exchange.configData" -}}
+OPS_ADDR: ":9100"
+JWT_JWKS_URL: "http://{{ include "exchange.roleService" (dict "root" . "role" "api") }}:8080/.well-known/jwks.json"
+SHUTDOWN_DRAIN_DELAY: "{{ .Values.shutdown.drainDelaySeconds }}s"
+SHUTDOWN_TIMEOUT: "{{ .Values.shutdown.timeoutSeconds }}s"
+{{- if .Values.dev.enabled }}
+REDIS_ADDR: "{{ include "exchange.fullname" . }}-redis:6379"
+ETH_RPC_URL: "http://{{ include "exchange.fullname" . }}-anvil:8545"
+{{- end }}
+{{- range $k, $v := .Values.config }}
+{{- if and $.Values.dev.enabled (or (eq $k "REDIS_ADDR") (eq $k "ETH_RPC_URL")) }}
+{{- else if ne (toString $v) "" }}
+{{ $k }}: {{ toString $v | quote }}
+{{- end }}
+{{- end }}
+{{- range $k, $v := .Values.extraEnv }}
+{{ $k }}: {{ toString $v | quote }}
+{{- end }}
+{{- end -}}

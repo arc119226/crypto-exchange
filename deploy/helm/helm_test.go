@@ -268,3 +268,77 @@ func TestChartPinsTheSameImagesAsCompose(t *testing.T) {
 	require.Len(t, tag, 2)
 	assert.Equal(t, "ghcr.io/foundry-rs/foundry:"+tag[1], path(values, "dev", "anvil", "image"), "FOUNDRY_TAG in .env.example")
 }
+
+// TestChartHooksReferenceOnlyHooks: Helm creates the release's regular
+// resources only after every pre-install hook has succeeded, so a hook that
+// mounts the release's own ConfigMap or runs under its ServiceAccount waits
+// forever (the first kind install timed out on exactly that). A hook may
+// reference other hooks, or objects that exist before the release (the
+// existing Secrets, the ConfigMaps kind-secrets.sh applies).
+func TestChartHooksReferenceOnlyHooks(t *testing.T) {
+	helm := helmBinary(t)
+	for _, tc := range []struct {
+		name string
+		args []string
+	}{
+		{"defaults", nil},
+		{"kind", []string{"-f", filepath.Join(chartDir, "values-kind.yaml")}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			docs := render(t, helm, tc.args...)
+			regular := map[string]bool{} // "Kind/name" of every non-hook document
+			for _, d := range docs {
+				if path(d, "metadata", "annotations", "helm.sh/hook") == nil {
+					regular[kind(d)+"/"+name(d)] = true
+				}
+			}
+			checked := 0
+			for _, d := range docs {
+				if path(d, "metadata", "annotations", "helm.sh/hook") == nil {
+					continue
+				}
+				spec, ok := path(d, "spec", "template", "spec").(map[string]any)
+				if !ok {
+					continue // a Service or similar: no pod
+				}
+				checked++
+				hook := kind(d) + "/" + name(d)
+				refuse := func(k, n string) {
+					if n != "" && regular[k+"/"+n] {
+						t.Errorf("hook %s references %s/%s, which Helm creates only after the hooks", hook, k, n)
+					}
+				}
+				if sa, _ := spec["serviceAccountName"].(string); sa != "" {
+					refuse("ServiceAccount", sa)
+				}
+				for _, v := range list(spec["volumes"]) {
+					refuse("ConfigMap", str(path(v, "configMap", "name")))
+					refuse("Secret", str(path(v, "secret", "secretName")))
+				}
+				for _, field := range []string{"containers", "initContainers"} {
+					for _, c := range list(spec[field]) {
+						for _, e := range list(path(c, "envFrom")) {
+							refuse("ConfigMap", str(path(e, "configMapRef", "name")))
+							refuse("Secret", str(path(e, "secretRef", "name")))
+						}
+						for _, e := range list(path(c, "env")) {
+							refuse("ConfigMap", str(path(e, "valueFrom", "configMapKeyRef", "name")))
+							refuse("Secret", str(path(e, "valueFrom", "secretKeyRef", "name")))
+						}
+					}
+				}
+			}
+			assert.Positive(t, checked, "at least the migrate hook has a pod template")
+		})
+	}
+}
+
+func list(v any) []any {
+	l, _ := v.([]any)
+	return l
+}
+
+func str(v any) string {
+	s, _ := v.(string)
+	return s
+}

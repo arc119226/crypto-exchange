@@ -1096,6 +1096,8 @@ Phase 7 是把系統交給營運方:一份在 kind 上每個 PR 都裝一次的 
 - **同一個 batch 裡誰能失敗,決定批次怎麼切。** 這條鐵律讓 `Post` 天然分成兩批,也讓 `LockBalances` 必須用 `WHERE EXISTS` 跳過不存在的帳戶:FK 在批裡炸掉的是整筆交易,而呼叫者期待的是一個 404。
 - **等價測試要比投影,不比列。** faucet 的 postings 順序來自 Go map、outbox 的交錯來自 uuid 排序;逐列比對在 N=1 與 N=50 之間永遠有差,但簿、成交、每 entry 的 postings 集合、每帳戶的序號序列必須一樣。
 - **hook 的語意是「一般資源之前」,不是「排在前面」。** migrate Job 等 Postgres 的死鎖只在 kind 上會發生——本機 compose 的 `depends_on` 把這個順序藏起來了。
+- **hook 的另一半規則:它不能引用 release 自己的一般資源。** 第一次在 kind 上真裝,migrate Job 卡在 `serviceaccount "exchange" not found`(ServiceAccount 是一般資源),bootstrap Job 的 `envFrom: configMapRef` 會是下一個。`helm template` + kubeconform 對這種錯完全沒感覺,所以 `TestChartHooksReferenceOnlyHooks` 直接掃 hook 的 pod template;修法是 migrate Job 不指定 ServiceAccount、bootstrap Job 的設定值由 `exchange.configData` 內嵌成 env(ADR-0009 §2)。
+- **測試對環境的假設要寫進測試,不要寫在註解裡。** Playwright smoke 的「a price nobody else uses」(1234.5)只在空簿上成立;e2e 多了 loadgen burst 之後簿上有 159 張單,1234.5 排不進 `OrderBook` 的 15 列,單本身、私有串流、餘額全對,斷言卻紅。現在 smoke 先讀 `/v1/markets/{symbol}/depth`,掛在最佳買價上一個 tick——它一定是最佳買價、價位唯一、taker 先吃到它。
 - **bind mount 的 secret 檔,主機上的 owner/mode 就是容器裡的。** distroless 是 uid 65532、postgres 是 999,同一份 `gen-prod-secrets.sh` 要分兩個 group 寫檔;compose 的 `uid`/`gid`/`mode` 只在 swarm 有效。
 - **靜默 skip 的測試等於沒有測試。** chart 測試在沒有 helm 的機器上 skip 是對的,但 CI 沒有 helm 也 skip 就永遠不會紅——`CI=true` 時改成 fail,`unit` job 裝 helm 與 kubeconform。
 - **文件也能有測試,而且抓得到東西。** runbooks 測試第一次跑就抓到三個引用了不存在指標的名字(`sweeps_total`、`withdrawals_total`、`webhook_deliveries_total`)——都是「聽起來應該有」的名字。
