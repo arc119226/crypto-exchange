@@ -29,9 +29,18 @@ FUZZ_TIME     ?= 30s
 GOTOOL        := go tool -modfile=$(TOOLS_MOD)
 FOUNDRY_TAG   ?= $(shell sed -n 's/^FOUNDRY_TAG=//p' .env.example)
 FOUNDRY_IMAGE := ghcr.io/foundry-rs/foundry:$(FOUNDRY_TAG)
-ALL_PROFILES  := --profile infra --profile observability --profile app --profile single --profile backup
+ALL_PROFILES  := --profile infra --profile observability --profile app --profile single --profile backup --profile web
 BACKUP        ?= 0
 BACKUP_PROFILE := $(if $(filter 1,$(BACKUP)),--profile backup,)
+WEB           ?= 1
+WEB_PROFILE   := $(if $(filter 1,$(WEB)),--profile web,)
+# The container that carries exchangectl and the admin role in the running
+# stack: the all-in-one one when `make up-single` is up, else the admin role.
+STACK_SERVICE  = $(if $(shell $(COMPOSE) $(ALL_PROFILES) ps -q exchange-all 2>/dev/null),exchange-all,exchange-admin)
+ACCOUNT       ?=
+ASSET         ?= USDC
+AMOUNT        ?= 10000
+EMAIL         ?=
 LATEST_MIGRATION := $(shell ls migrations | sed -n 's/^0*\([0-9]*\)_.*\.sql$$/\1/p' | sort -n | tail -1)
 HELM          ?= helm
 HELM_CHART    := deploy/helm/exchange
@@ -40,8 +49,8 @@ KIND_CLUSTER  ?= exchange
 KIND_IMAGE    := crypto-exchange:ci
 
 .PHONY: help tools gen gen-check fmt tidy lint secrets-scan test test-fuzz test-integration e2e cover-money build image \
-	    up up-single up-sepolia down down-sepolia logs-sepolia ps-sepolia reset infra-up run migrate seed artifacts compose-config contracts-test \
-	    gen-dev-secrets demo trace loadgen web-gen web-check web-build web-e2e \
+	    up up-single up-sepolia down down-sepolia logs logs-sepolia ps ps-sepolia reset infra-up run migrate seed artifacts compose-config contracts-test \
+	    gen-dev-secrets faucet totp-enroll trace loadgen web-gen web-check web-build web-e2e \
 	    helm-lint helm-template kind-up helm-e2e kind-down backup-drill \
 	    image-edge image-backup images up-prod down-prod logs-prod ps-prod gen-prod-secrets release-check
 
@@ -145,11 +154,11 @@ image-backup: ## Build the backup sidecar image (postgres client tools + mc)
 
 images: image image-edge image-backup ## Build all three images
 
-up: ## Start infra + all roles as separate containers (+observability unless OBS=0)
-	$(COMPOSE) --profile infra $(OBS_PROFILE) --profile app up -d --build --wait
+up: ## Start infra + all roles as separate containers (+observability unless OBS=0, +the front end on :8088 unless WEB=0)
+	$(COMPOSE) --profile infra $(OBS_PROFILE) $(WEB_PROFILE) --profile app up -d --build --wait
 
-up-single: ## Start infra + single all-in-one container (+observability unless OBS=0)
-	$(COMPOSE) --profile infra $(OBS_PROFILE) --profile single up -d --build --wait
+up-single: ## Start infra + single all-in-one container (+observability unless OBS=0, +the front end on :8088 unless WEB=0)
+	$(COMPOSE) --profile infra $(OBS_PROFILE) $(WEB_PROFILE) --profile single up -d --build --wait
 
 up-sepolia: ## Start the all-in-one container against Sepolia (see docs/guides/sepolia.md)
 	@test -f deploy/compose/sepolia/sepolia-addresses.json || 	  (echo "missing deploy/compose/sepolia/sepolia-addresses.json — see deploy/compose/sepolia/README.md" && exit 2)
@@ -189,6 +198,22 @@ ps-prod: ## Show what is running in the beta stack
 
 gen-prod-secrets: ## Create .env.prod and secrets/prod/ (run with sudo; idempotent, FORCE=1 to regenerate)
 	scripts/gen-prod-secrets.sh
+
+# See logs-sepolia for why every profile is named here.
+logs: ## Read the dev stack's logs (SERVICE=exchange-all TAIL=100; FOLLOW=1 to keep watching)
+	$(COMPOSE) $(ALL_PROFILES) logs --tail $(TAIL) $(if $(FOLLOW),-f,) $(SERVICE)
+
+ps: ## Show what is running in the dev stack
+	$(COMPOSE) $(ALL_PROFILES) ps
+
+faucet: ## Credit a dev account from inside the stack (make faucet ACCOUNT=<id> ASSET=USDC AMOUNT=10000); the admin key stays in the container
+	@test -n "$(ACCOUNT)" || (echo "usage: make faucet ACCOUNT=<account id from the wallet page> [ASSET=USDC] [AMOUNT=10000]" && exit 2)
+	$(COMPOSE) $(ALL_PROFILES) exec -e EXCHANGE_ADMIN_URL=http://127.0.0.1:8082 -e EXCHANGE_ADMIN_API_KEY="$$(sed -n 's/^ADMIN_API_KEY=//p' $(ENV_FILE))" \
+	  $(STACK_SERVICE) /exchangectl admin fund --account "$(ACCOUNT)" --asset "$(ASSET)" --amount "$(AMOUNT)" --reason "dev faucet"
+
+totp-enroll: ## Issue the back-office authenticator secret for an administrator (make totp-enroll EMAIL=admin@example.com); printed once
+	@test -n "$(EMAIL)" || (echo "usage: make totp-enroll EMAIL=<administrator email>" && exit 2)
+	$(COMPOSE) $(ALL_PROFILES) exec $(STACK_SERVICE) /exchange admin totp enroll --email "$(EMAIL)"
 
 down: ## Stop everything (keeps volumes)
 	$(COMPOSE) $(ALL_PROFILES) down
@@ -287,9 +312,6 @@ gen-dev-secrets: ## Create .env and dev secrets (idempotent; FORCE=1 to regenera
 
 screenshots: ## Screenshot every back-office page into docs/screenshots (needs a running admin role; ADMIN_URL ADMIN_EMAIL ADMIN_PASSWORD ADMIN_TOTP_SECRET)
 	NODE_PATH=$$(npm root -g) node scripts/screenshots.mjs
-
-demo: ## Run the Phase demo script
-	go run ./cmd/exchangectl demo
 
 trace: ## Grep all container logs for a correlation id (make trace ID=...)
 	@test -n "$(ID)" || (echo "usage: make trace ID=<correlation_id>" && exit 2)

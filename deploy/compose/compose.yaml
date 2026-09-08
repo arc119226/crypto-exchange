@@ -5,6 +5,7 @@
 #   app            one container per role (api, engine, chain, signer, stream, admin, worker) + migrate/seed jobs
 #   single         one all-in-one container + migrate/seed jobs
 #   observability  prometheus + grafana (make up adds it unless OBS=0)
+#   web            the trade front end on http://localhost:8088 (make up adds it unless WEB=0)
 #   backup         minio (an S3-compatible store) + the backup sidecar (make up BACKUP=1; make backup-drill)
 #
 # Run through the Makefile (`make up`, `make up-single`, `make reset`); it passes
@@ -406,7 +407,14 @@ services:
       - artifacts:/artifacts:ro
       - ../../secrets/jwt:/secrets/jwt:ro
       - ../../secrets/keystore:/secrets/keystore:ro
-    ports: ["8080:8080", "8081:8081", "127.0.0.1:8082:8082"]
+    # 9100 is the ops listener (/readyz, /metrics), on the loopback only
+    ports: ["8080:8080", "8081:8081", "127.0.0.1:8082:8082", "127.0.0.1:9100:9100"]
+    # The web edge proxies to exchange-api and exchange-stream by name; in
+    # this profile they are all this one container. The Makefile never
+    # starts single together with app, so the names are never ambiguous.
+    networks:
+      exchange-net:
+        aliases: [exchange-api, exchange-stream]
     depends_on:
       <<: *app-deps
       anvil: { condition: service_healthy }
@@ -445,6 +453,19 @@ services:
     depends_on: [prometheus]
     restart: unless-stopped
     networks: [exchange-net]
+
+  # --- the trade front end, served the way a deployment serves it: static
+  # files behind Caddy, /v1 and /ws proxied to the roles on the compose
+  # network, one origin. No depends_on: Caddy dials the upstream per request,
+  # so the page loads before the roles are ready and works once they are.
+  web:
+    image: ghcr.io/arc119226/crypto-exchange-edge:${EXCHANGE_TAG:-dev}
+    build: { context: ../.., dockerfile: build/edge/Dockerfile }
+    profiles: [web]
+    command: ["caddy", "run", "--config", "/etc/caddy/Caddyfile.dev"]
+    restart: unless-stopped
+    networks: [exchange-net]
+    ports: ["127.0.0.1:8088:8088"]
 
 networks:
   exchange-net: {}
