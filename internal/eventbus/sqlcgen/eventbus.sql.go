@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-const insertOutbox = `-- name: InsertOutbox :one
+const InsertOutbox = `-- name: InsertOutbox :one
 
 INSERT INTO eventbus.outbox (
     event_id, event_type, schema_version, tenant_id, market_id, account_id, seq, account_seq,
@@ -39,7 +39,7 @@ type InsertOutboxParams struct {
 // Event bus queries: the outbox (producers INSERT in their own transaction,
 // the relay reads and stamps published_at) and consumer idempotency.
 func (q *Queries) InsertOutbox(ctx context.Context, arg InsertOutboxParams) (int64, error) {
-	row := q.db.QueryRow(ctx, insertOutbox,
+	row := q.db.QueryRow(ctx, InsertOutbox,
 		arg.EventID,
 		arg.EventType,
 		arg.SchemaVersion,
@@ -60,7 +60,7 @@ func (q *Queries) InsertOutbox(ctx context.Context, arg InsertOutboxParams) (int
 	return id, err
 }
 
-const listOutboxByAccountSince = `-- name: ListOutboxByAccountSince :many
+const ListOutboxByAccountSince = `-- name: ListOutboxByAccountSince :many
 SELECT id, event_id, event_type, schema_version, tenant_id, market_id, account_id, seq, account_seq, subject, headers, payload, occurred_at, correlation_id, causation_id, published_at FROM eventbus.outbox
 WHERE tenant_id = $1 AND account_id = $2 AND account_seq > $3
 ORDER BY account_seq
@@ -76,7 +76,7 @@ type ListOutboxByAccountSinceParams struct {
 
 // Private-stream resume: every event of one account after account_seq.
 func (q *Queries) ListOutboxByAccountSince(ctx context.Context, arg ListOutboxByAccountSinceParams) ([]EventbusOutbox, error) {
-	rows, err := q.db.Query(ctx, listOutboxByAccountSince,
+	rows, err := q.db.Query(ctx, ListOutboxByAccountSince,
 		arg.TenantID,
 		arg.AccountID,
 		arg.AccountSeq,
@@ -117,7 +117,7 @@ func (q *Queries) ListOutboxByAccountSince(ctx context.Context, arg ListOutboxBy
 	return items, nil
 }
 
-const listOutboxByMarket = `-- name: ListOutboxByMarket :many
+const ListOutboxByMarket = `-- name: ListOutboxByMarket :many
 SELECT id, event_id, event_type, schema_version, tenant_id, market_id, account_id, seq, account_seq, subject, headers, payload, occurred_at, correlation_id, causation_id, published_at FROM eventbus.outbox
 WHERE tenant_id = $1 AND market_id = $2
 ORDER BY id
@@ -132,7 +132,7 @@ type ListOutboxByMarketParams struct {
 }
 
 func (q *Queries) ListOutboxByMarket(ctx context.Context, arg ListOutboxByMarketParams) ([]EventbusOutbox, error) {
-	rows, err := q.db.Query(ctx, listOutboxByMarket,
+	rows, err := q.db.Query(ctx, ListOutboxByMarket,
 		arg.TenantID,
 		arg.MarketID,
 		arg.Limit,
@@ -173,7 +173,7 @@ func (q *Queries) ListOutboxByMarket(ctx context.Context, arg ListOutboxByMarket
 	return items, nil
 }
 
-const listUnpublished = `-- name: ListUnpublished :many
+const ListUnpublished = `-- name: ListUnpublished :many
 SELECT id, event_id, event_type, schema_version, tenant_id, market_id, account_id, seq, account_seq, subject, headers, payload, occurred_at, correlation_id, causation_id, published_at FROM eventbus.outbox
 WHERE published_at IS NULL
 ORDER BY id
@@ -181,7 +181,7 @@ LIMIT $1
 `
 
 func (q *Queries) ListUnpublished(ctx context.Context, limit int32) ([]EventbusOutbox, error) {
-	rows, err := q.db.Query(ctx, listUnpublished, limit)
+	rows, err := q.db.Query(ctx, ListUnpublished, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -217,7 +217,7 @@ func (q *Queries) ListUnpublished(ctx context.Context, limit int32) ([]EventbusO
 	return items, nil
 }
 
-const markProcessed = `-- name: MarkProcessed :execrows
+const MarkProcessed = `-- name: MarkProcessed :execrows
 INSERT INTO eventbus.processed_events (consumer, event_id)
 VALUES ($1, $2)
 ON CONFLICT (consumer, event_id) DO NOTHING
@@ -230,23 +230,23 @@ type MarkProcessedParams struct {
 
 // 0 rows affected means the consumer already processed this event.
 func (q *Queries) MarkProcessed(ctx context.Context, arg MarkProcessedParams) (int64, error) {
-	result, err := q.db.Exec(ctx, markProcessed, arg.Consumer, arg.EventID)
+	result, err := q.db.Exec(ctx, MarkProcessed, arg.Consumer, arg.EventID)
 	if err != nil {
 		return 0, err
 	}
 	return result.RowsAffected(), nil
 }
 
-const markPublished = `-- name: MarkPublished :exec
+const MarkPublished = `-- name: MarkPublished :exec
 UPDATE eventbus.outbox SET published_at = now() WHERE id = ANY($1::bigint[]) AND published_at IS NULL
 `
 
 func (q *Queries) MarkPublished(ctx context.Context, dollar_1 []int64) error {
-	_, err := q.db.Exec(ctx, markPublished, dollar_1)
+	_, err := q.db.Exec(ctx, MarkPublished, dollar_1)
 	return err
 }
 
-const outboxBacklog = `-- name: OutboxBacklog :one
+const OutboxBacklog = `-- name: OutboxBacklog :one
 SELECT count(*)::bigint AS backlog,
        COALESCE(EXTRACT(EPOCH FROM (now() - min(occurred_at))), 0)::double precision AS oldest_age_seconds
   FROM eventbus.outbox
@@ -259,7 +259,7 @@ type OutboxBacklogRow struct {
 }
 
 func (q *Queries) OutboxBacklog(ctx context.Context) (OutboxBacklogRow, error) {
-	row := q.db.QueryRow(ctx, outboxBacklog)
+	row := q.db.QueryRow(ctx, OutboxBacklog)
 	var i OutboxBacklogRow
 	err := row.Scan(&i.Backlog, &i.OldestAgeSeconds)
 	return i, err

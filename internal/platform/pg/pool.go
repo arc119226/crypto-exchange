@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -19,6 +20,9 @@ type PoolConfig struct {
 	// Tracing attaches the query tracer (one client span per statement
 	// under a sampled span). Off, pgx never calls into it.
 	Tracing bool
+	// Tracer, when set, is attached instead of the query tracer (tests count
+	// round trips with a CountingTracer).
+	Tracer pgx.QueryTracer
 }
 
 // Open parses the DSN, applies the pool settings and pings once. Retrying on
@@ -40,7 +44,10 @@ func Open(ctx context.Context, cfg PoolConfig) (*pgxpool.Pool, error) {
 		}
 		pc.ConnConfig.RuntimeParams["application_name"] = cfg.ApplicationName
 	}
-	if cfg.Tracing {
+	switch {
+	case cfg.Tracer != nil:
+		pc.ConnConfig.Tracer = cfg.Tracer
+	case cfg.Tracing:
 		pc.ConnConfig.Tracer = queryTracer{}
 	}
 	pool, err := pgxpool.NewWithConfig(ctx, pc)

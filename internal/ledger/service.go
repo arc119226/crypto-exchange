@@ -172,104 +172,6 @@ type balanceKey struct{ account, asset string }
 
 type balanceDelta struct{ available, hold money.Amount }
 
-// Post writes one journal entry inside the caller's transaction. It returns
-// the persisted entry and replayed=true when the idempotency key already
-// existed (nothing is written in that case). On ErrInsufficient the caller
-// must roll back the transaction.
-func (s *Service) Post(ctx context.Context, tx pgx.Tx, e Entry) (JournalEntry, bool, error) {
-	if err := e.Validate(); err != nil {
-		return JournalEntry{}, false, err
-	}
-	q := sqlcgen.New(tx)
-
-	// 1. the entry row; a conflict on the key means a replay
-	row, err := q.InsertJournalEntry(ctx, sqlcgen.InsertJournalEntryParams{
-		TenantID: s.tenant, IdempotencyKey: e.IdempotencyKey, Kind: e.Kind,
-		RefType: optString(e.RefType), RefID: optString(e.RefID), Reason: optString(e.Reason), CorrelationID: optString(e.CorrelationID),
-	})
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			existing, err := s.entryByKey(ctx, tx, e.IdempotencyKey)
-			if err != nil {
-				return JournalEntry{}, false, err
-			}
-			return existing, true, nil
-		}
-		return JournalEntry{}, false, fmt.Errorf("ledger: insert entry: %w", err)
-	}
-
-	// 2. accounts exist and buckets match their kind
-	if err := s.checkAccounts(ctx, q, e.Postings); err != nil {
-		return JournalEntry{}, false, err
-	}
-
-	// 3. lock the affected balance rows in a fixed order and check funds
-	deltas, keys := aggregateDeltas(e.Postings)
-	for _, k := range keys {
-		cur, err := q.LockBalance(ctx, sqlcgen.LockBalanceParams{AccountID: k.account, Asset: k.asset})
-		if err != nil {
-			return JournalEntry{}, false, fmt.Errorf("ledger: lock balance: %w", err)
-		}
-		available, err := pg.AmountFromNumeric(cur.Available)
-		if err != nil {
-			return JournalEntry{}, false, err
-		}
-		hold, err := pg.AmountFromNumeric(cur.Hold)
-		if err != nil {
-			return JournalEntry{}, false, err
-		}
-		d := deltas[k]
-		if available.Add(d.available).IsNegative() {
-			return JournalEntry{}, false, fmt.Errorf("%w: account %s %s available %s, need %s", ErrInsufficient, k.account, k.asset, available, d.available.Neg())
-		}
-		if hold.Add(d.hold).IsNegative() {
-			return JournalEntry{}, false, fmt.Errorf("%w: account %s %s hold %s, need %s", ErrInsufficient, k.account, k.asset, hold, d.hold.Neg())
-		}
-	}
-
-	// 4. postings
-	for _, p := range e.Postings {
-		if err := q.InsertPosting(ctx, sqlcgen.InsertPostingParams{
-			EntryID: row.ID, AccountID: p.AccountID, Asset: p.Asset, Bucket: string(p.Bucket), Direction: string(p.Direction),
-			Amount: pg.NumericFromAmount(p.Amount),
-		}); err != nil {
-			return JournalEntry{}, false, fmt.Errorf("ledger: insert posting: %w", err)
-		}
-	}
-
-	// 5. balances cache (the CHECK constraints are the backstop for step 3)
-	balances := make([]Balance, 0, len(keys))
-	for _, k := range keys {
-		d := deltas[k]
-		updated, err := q.ApplyBalanceDelta(ctx, sqlcgen.ApplyBalanceDeltaParams{
-			AccountID: k.account, Asset: k.asset,
-			Available: pg.NumericFromAmount(d.available), Hold: pg.NumericFromAmount(d.hold),
-		})
-		if err != nil {
-			if pgErr := pgErrorCode(err); pgErr == "23514" {
-				return JournalEntry{}, false, fmt.Errorf("%w: %s %s", ErrInsufficient, k.account, k.asset)
-			}
-			return JournalEntry{}, false, fmt.Errorf("ledger: apply balance delta: %w", err)
-		}
-		available, err := pg.AmountFromNumeric(updated.Available)
-		if err != nil {
-			return JournalEntry{}, false, err
-		}
-		hold, err := pg.AmountFromNumeric(updated.Hold)
-		if err != nil {
-			return JournalEntry{}, false, err
-		}
-		balances = append(balances, Balance{AccountID: updated.AccountID, Asset: updated.Asset, Available: available, Hold: hold, Version: updated.Version})
-	}
-	if s.metrics != nil {
-		s.metrics.entries.WithLabelValues(e.Kind).Inc()
-	}
-	je := journalFromRow(row)
-	je.Postings = append([]Posting(nil), e.Postings...)
-	je.Balances = balances
-	return je, false, nil
-}
-
 // NextAccountSeq increments and returns the account's private event
 // sequence (docs/plan-v1.0.md §7.1). Call it in the transaction that writes
 // the outbox rows so account_seq and commit order agree.
@@ -282,6 +184,32 @@ func (s *Service) NextAccountSeq(ctx context.Context, tx pgx.Tx, accountID strin
 		return 0, fmt.Errorf("ledger: bump account seq: %w", err)
 	}
 	return seq, nil
+}
+
+// ReserveAccountSeqs takes n consecutive private-stream sequences for one
+// account in a single statement and returns the first of them; the trading
+// runner uses it once per account per command instead of NextAccountSeq
+// once per event. The order the caller hands the sequences out in must be
+// the order it writes the outbox rows in.
+func (s *Service) ReserveAccountSeqs(ctx context.Context, tx pgx.Tx, accountID string, n int) (int64, error) {
+	if n <= 0 {
+		return 0, fmt.Errorf("%w: reserve %d sequences", ErrInvalidEntry, n)
+	}
+	last, err := sqlcgen.New(tx).BumpAccountSeqBy(ctx, sqlcgen.BumpAccountSeqByParams{ID: accountID, NextSeq: int64(n)})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return 0, fmt.Errorf("%w: %s", ErrAccountNotFound, accountID)
+		}
+		return 0, fmt.Errorf("ledger: bump account seq: %w", err)
+	}
+	return last - int64(n) + 1, nil
+}
+
+// QueueReserveAccountSeqs is ReserveAccountSeqs queued into the caller's
+// batch. The result is the last sequence taken; the first is last-n+1. A
+// missing account surfaces as pgx.ErrNoRows on the result.
+func (*Service) QueueReserveAccountSeqs(b *pg.Batch, accountID string, n int) *pg.Result[int64] {
+	return pg.QueueValue[int64](b, sqlcgen.BumpAccountSeqBy, accountID, int64(n))
 }
 
 // aggregateDeltas turns spot postings into per-(account, asset) liability
@@ -322,7 +250,8 @@ func aggregateDeltas(postings []Posting) (map[balanceKey]*balanceDelta, []balanc
 	return deltas, keys
 }
 
-func (s *Service) checkAccounts(ctx context.Context, q *sqlcgen.Queries, postings []Posting) error {
+// accountIDs returns the distinct accounts of the postings, sorted.
+func accountIDs(postings []Posting) []string {
 	ids := map[string]struct{}{}
 	for _, p := range postings {
 		ids[p.AccountID] = struct{}{}
@@ -332,10 +261,12 @@ func (s *Service) checkAccounts(ctx context.Context, q *sqlcgen.Queries, posting
 		list = append(list, id)
 	}
 	sort.Strings(list)
-	rows, err := q.GetAccounts(ctx, list)
-	if err != nil {
-		return fmt.Errorf("ledger: get accounts: %w", err)
-	}
+	return list
+}
+
+// checkAccountKinds verifies every posting's account exists in the tenant
+// and that its bucket matches the account kind.
+func (s *Service) checkAccountKinds(rows []sqlcgen.LedgerAccount, postings []Posting) error {
 	kinds := map[string]AccountKind{}
 	for _, r := range rows {
 		if r.TenantID == s.tenant {
