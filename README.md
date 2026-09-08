@@ -63,6 +63,10 @@ ACC=$(go run ./cmd/exchangectl admin accounts create)                           
 go run ./cmd/exchangectl admin fund --account $ACC --asset USDC --amount 10000            # dev faucet(external → available,寫審計)
 go run ./cmd/exchangectl admin balances $ACC && go run ./cmd/exchangectl admin trial-balance   # 每資產 diff = 0
 
+# 後台(admin role 的 :8082;人用密碼 + TOTP 登入,機器用上面的 API key)
+docker compose exec exchange-all exchange admin totp enroll --email $(sed -n 's/^ADMIN_BOOTSTRAP_EMAIL=//p' .env)   # 印 otpauth URL 與 secret,只印這一次;加進 authenticator
+open http://localhost:8082/admin/login          # 密碼是 .env 的 ADMIN_BOOTSTRAP_PASSWORD;第一個 code 完成啟用,之後每次登入都要碼
+
 # 交易(public API;JWT session 或 API key HMAC,規格見 docs/api-conventions.md)
 go run ./cmd/exchangectl user register --email alice@example.com --password 'correct horse battery'   # 印出 export EXCHANGE_TOKEN=...
 export EXCHANGE_TOKEN=...                                                                              # 貼上一步的輸出
@@ -162,12 +166,13 @@ docs                  計畫、審查、ADR、領域文件
 | [`docs/api-conventions.md`](docs/api-conventions.md) | Public API 慣例:金額字串、problem+json、JWT / API key HMAC 簽章、限流、`client_order_id` 狀態碼(English) |
 | [`docs/events.md`](docs/events.md) | 事件契約:envelope、subject 與 stream、排序與去重、consumer 型別、catalog、相容規則(English);schema 在 [`api/events/v1/`](api/events/v1) |
 | [`docs/webhooks.md`](docs/webhooks.md) | 出站 Webhook:簽章與驗證、重試排程、**至少一次投遞的實際後果**、endpoint 管理與 replay(English) |
-| [`docs/runbooks/`](docs/runbooks/) | 營運手冊:Sepolia 實跑、卡住的提現、對帳差異、reorg 告警 |
+| [`docs/runbooks/`](docs/runbooks/) | 營運手冊:Sepolia 實跑、卡住的提現、對帳差異、reorg 告警、admin TOTP(啟用、換 secret、鎖定) |
+| [`docs/screenshots/`](docs/screenshots/) | 後台每一頁的截圖(`make screenshots` 產生) |
 | [`docs/adr/`](docs/adr/) | ADR-0000 需求訪談決策(8 輪 32 題);ADR-0001~0008 架構決策(單體、真相來源、租戶、數值、帳本、認證、簽名、工具鏈) |
 | [`docs/archive/plan-v0.1.md`](docs/archive/plan-v0.1.md) | 原始 v0.1 規劃書(已取代,僅供對照) |
 
 ## 下一步
 
-Phase 3 與 Phase 4 全數合併,DoD 全滿足;4d 在 Sepolia 上實跑過一次,結果與抓到的缺陷記在 [`docs/runbooks/sepolia.md`](docs/runbooks/sepolia.md) 與 [`docs/domain.md`](docs/domain.md) §21–§22。
+Phase 3、4、5 全數完成,DoD 全滿足;4d 在 Sepolia 上實跑過一次,結果與抓到的缺陷記在 [`docs/runbooks/sepolia.md`](docs/runbooks/sepolia.md) 與 [`docs/domain.md`](docs/domain.md) §21–§22;Phase 5 的後台、admin 登入、帳本自檢與 webhook secret 輪替的對應與偏離在 §24。
 
 Phase 5(`docs/plan-v1.0.md` §12)分批進行:5a 出站投遞路徑(已合併)、5b webhook 後台(本 PR)。接下來是 htmx 後台本身(登入 + TOTP、registry / 用戶 / 帳本 / 審核 / 對帳頁)、`PUT /admin/v1/users/{id}/kyc-level`,以及 webhook secret 的輪替(`rotate-secret`,留到 5c)。DoD 不過不進下一階段。

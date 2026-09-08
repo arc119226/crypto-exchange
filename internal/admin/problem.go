@@ -1,6 +1,7 @@
 // Package admin implements the operator API (api/admin/v1/openapi.yaml) on
-// top of the oapi-codegen strict server in internal/admin/gen, and the
-// sessions the back office in internal/admin/ui authenticates with.
+// top of the oapi-codegen strict server in internal/admin/gen, and the back
+// office: the pages under /admin (ui*.go, templates/, static/) and the
+// session middleware they sit behind (session.go).
 //
 // Every write lives once, as an unexported method on Handler that runs the
 // transaction, the audit record and the outbox event together. The REST

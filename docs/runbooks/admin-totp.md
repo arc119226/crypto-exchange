@@ -1,0 +1,51 @@
+# Admin 登入與 TOTP
+
+後台(admin role 的 `/admin`)的登入是密碼加一個 RFC 6238 的 TOTP 碼;密碼證明你知道一個秘密,碼證明你手上有那支手機。這份手冊寫的是營運方會遇到的幾件事:第一次啟用、換 secret、被鎖住、以及 admin 本人出事的時候。程式碼與計畫的對應在 `docs/domain.md` §24。
+
+## 第一次啟用
+
+1. `exchange admin bootstrap` 只給第一個管理員密碼(`ADMIN_BOOTSTRAP_EMAIL` / `ADMIN_BOOTSTRAP_PASSWORD`),**不給** TOTP。這時候用密碼登入會停在 `/admin/totp`,頁面說「No authenticator yet」。
+2. 持 DB 憑證的人跑:
+
+   ```sh
+   # compose
+   docker compose exec exchange-all exchange admin totp enroll --email admin@example.com
+   # 或在主機上,DATABASE_URL 指向 ex_admin / ex_all
+   exchange admin totp enroll --email admin@example.com --qr-out /tmp/admin.png
+   ```
+
+   它把 otpauth URL 與 base32 secret 印到**你的終端機**(不進容器 log),`--qr-out` 另存一張 QR 圖。這是 secret 唯一出現的一次。
+3. 管理員把 secret 加進 authenticator,回到 `/admin/totp` 輸入它顯示的第一個 code。驗過之後 `totp_enabled = true`,session 換發成正式的 8 小時 session,之後每次登入都要碼。
+
+為什麼 secret 只由 CLI 發、不讓瀏覽器在登入到一半時自己產:登入到一半的人只證明了密碼。讓那個人自己發 secret,密碼外洩就等於帳號外洩,第二因子就不是第二因子了。
+
+## 換 secret(換手機、疑似外洩)
+
+再跑一次 `exchange admin totp enroll --email X`。它會:發新 secret(`totp_enabled` 回到 `false`,等第一個 code 確認)、**撤銷該管理員所有的後台 session**、記審計 `auth.admin.totp.enroll`(actor `system`)。舊的 authenticator 從這一刻起沒用。
+
+## 被鎖住
+
+- 連續輸錯 5 次碼 → `totp_locked_until = now + 15 分鐘`,鎖定期間**正確的碼也拒絕**,頁面說「Locked for fifteen minutes」。等 15 分鐘;不需要任何人介入。
+- 鎖定只計 TOTP 錯誤。密碼階段錯誤不鎖帳號(否則知道 email 的人每 15 分鐘就能把 admin 鎖一次),改用每個來源 IP 的節流(`LOGIN_PER_IP`,預設 10/分鐘),超過回 429。
+- 同一個 30 秒窗口內用同一個碼登入兩次,第二次會被拒(`totp_last_step`:配中的那一步記下來,不再接受它或更早的步)。這不是鎖定,等下一個碼就好。
+- 一直被鎖而且不是自己按的:有人拿到密碼在猜碼。用另一個管理員把這個帳號凍結(`exchangectl admin users freeze <id> --reason ...`,或後台的 Users 頁),換密碼,再 enroll。
+
+## 凍結管理員、最後一個管理員
+
+- 凍結一個 `role = admin` 的用戶會同時撤銷他所有的後台 session;他既登不進去也續不了。
+- **最後一個 active 的管理員不能被凍**(API 回 409,頁面說「last active administrator」):凍了就沒人能進後台解凍。先用 `exchange admin bootstrap` 之外的方式(SQL 或另一個管理員)建第二個。
+
+## 金鑰
+
+- `ADMIN_TOTP_KEY`(32 bytes hex)封住所有管理員的 secret。它是獨立的一把,**不是** `API_KEY_MASTER_KEY`——那把能解開每一個 API key secret,admin role 沒有理由拿到它。admin role 沒有這把鑰匙會拒絕啟動。
+- 鑰匙遺失 = 所有 secret 打不開 = 每個管理員都要重新 enroll。備份它,像備份其他 `*_KEY` 一樣(`make gen-dev-secrets` 只在 dev 幫你生)。
+
+## Cookie 與 session
+
+- cookie `admin_session`:`HttpOnly; SameSite=Lax; Path=/admin`。`Secure` 由 `ADMIN_COOKIE_SECURE` 決定;`EXCHANGE_ENV=dev` 預設關(本機 http),其他環境預設開——admin role 自己沒有 TLS,前面要有終止 TLS 的東西。
+- 密碼過了、碼還沒過:pending session,10 分鐘,只能到 `/admin/totp` 與登出。碼過了:verified session,`ADMIN_SESSION_TTL`(預設 8h)。登出是 `revoked_at` 時間戳,列不刪。
+- 每一個 session 的 IP 與 `last_seen_at` 都在 `auth.admin_sessions`,查「誰什麼時候從哪裡登入過」直接看表。
+
+## 審計動作
+
+`auth.admin.login`(成功,actor `admin`)、`auth.admin.login.failed`(actor `user`:失敗的嘗試不算管理員)、`auth.admin.totp.confirmed`、`auth.admin.totp.verified`、`auth.admin.totp.failed`、`auth.admin.totp.locked`、`auth.admin.totp.enroll`(actor `system`)、`auth.admin.logout`。後台的 Audit 頁可以用 `actor_id` 濾出一個人的全部動作。

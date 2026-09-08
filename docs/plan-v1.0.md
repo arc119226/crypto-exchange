@@ -1269,19 +1269,19 @@ exchangectl admin reconcile                                              # diff 
 
 **任務清單**:
 
-- [ ] admin 登入 + TOTP enroll/confirm/verify、`RequireAdmin` cookie 中介層、CSRF(1.5 d)
-- [ ] 版面與 htmx 基礎(layout、表格 partial、分頁、flash)(1 d)
-- [ ] registry 頁面:assets / markets / fee_schedules / withdrawal_limits CRUD + 狀態切換 + 引擎 reload 按鈕;每次寫入審計 + `*.updated` 事件(2 d)
-- [ ] 用戶頁:列表、詳情、kyc_level、凍結;`PUT /users/{id}/kyc-level` API(admin API key scope)(1 d)
-- [ ] 帳本頁:試算平衡、帳戶餘額、journal 瀏覽(依 account / ref)、調帳表單(1 d)
-- [ ] 提現審核佇列(approve/reject/resolve)、充值、歸集、熱錢包頁(1.5 d)
-- [ ] 對帳 job(每 5 min)+ `0013_reconciliation.sql`(`reconciliation_reports`、`reconciliation_breaks`)+ 頁面 + `reconciliation.break_detected` 事件(1.5 d)——**已於 Phase 4c-2 完成,而且跑在 chain role 而不是 worker**:對帳要讀鏈上餘額,而只有 chain role 有節點(理由見 `docs/domain.md` §20.1)
-- [ ] 審計查詢頁(過濾 actor / action / target)(0.5 d)
-- [ ] `webhook`:`0016_webhook.sql` + `0017_webhook_replay.sql`、endpoint 管理頁、dispatcher(durable consumer、HMAC、退避、deliveries、dead)、replay(2 d)——5a 做了 dispatcher,5b 做了 admin API 與 replay,頁面留到後台那批
-- [ ] `docs/webhooks.md`、`exchangectl webhook-sink`(本機接收並驗簽的測試工具)(0.5 d)
-- [ ] 測試:對帳能抓出人為植入的錯帳(直接 SQL 插一筆 posting 破壞平衡 → break);提現審核狀態機每個轉移;webhook 重試與簽名驗證;TOTP 錯碼鎖定(1.5 d)
+- [x] admin 登入 + TOTP enroll/confirm/verify、`RequireAdmin` cookie 中介層、CSRF(1.5 d)——CSRF 用 Go 1.25 的 `http.CrossOriginProtection` + `SameSite=Lax`,不做每張表單的 token;TOTP secret 只由 `exchange admin totp enroll` 產生(理由見 `docs/domain.md` §24)
+- [x] 版面與 htmx 基礎(layout、表格 partial、分頁、flash)(1 d)——htmx 2.0.4 內嵌;只做表格分頁,表單一律 POST + 303 + flash
+- [x] registry 頁面:assets / markets / fee_schedules / withdrawal_limits CRUD + 狀態切換 + 引擎 reload 按鈕;每次寫入審計 + `*.updated` 事件(2 d)——`asset.updated`、`fee_schedule.updated`、`registry.reload` 新事件;withdrawal limits 不發事件(worker 每次讀 DB)
+- [x] 用戶頁:列表、詳情、kyc_level、凍結;`PUT /users/{id}/kyc-level` API(admin API key scope)(1 d)——凍結連帶現貨帳戶與 `Login` / `Refresh` / API key 驗證;scoped admin key 未做,靜態 key 留著
+- [x] 帳本頁:試算平衡、帳戶餘額、journal 瀏覽(依 account / ref)、調帳表單(1 d)
+- [x] 提現審核佇列(approve/reject/resolve)、充值、歸集、熱錢包頁(1.5 d)——`GET /deposits`、`GET /hot-wallet` 新 API
+- [x] 對帳 job(每 5 min)+ `0013_reconciliation.sql`(`reconciliation_reports`、`reconciliation_breaks`)+ 頁面 + `reconciliation.break_detected` 事件(1.5 d)——**已於 Phase 4c-2 完成,而且跑在 chain role 而不是 worker**:對帳要讀鏈上餘額,而只有 chain role 有節點(理由見 `docs/domain.md` §20.1)
+- [x] 審計查詢頁(過濾 actor / action / target)(0.5 d)——API 加 `actor_type` / `actor_id`
+- [x] `webhook`:`0016_webhook.sql` + `0017_webhook_replay.sql`、endpoint 管理頁、dispatcher(durable consumer、HMAC、退避、deliveries、dead)、replay(2 d)——5a 做了 dispatcher,5b 做了 admin API 與 replay,頁面留到後台那批
+- [x] `docs/webhooks.md`、`exchangectl webhook-sink`(本機接收並驗簽的測試工具)(0.5 d)——5c 的 secret 輪替(`0020`、`POST /webhooks/{id}/rotate-secret`、寬限期雙簽)一併完成
+- [x] 測試:對帳能抓出人為植入的錯帳(直接 SQL 插一筆 posting 破壞平衡 → break);提現審核狀態機每個轉移;webhook 重試與簽名驗證;TOTP 錯碼鎖定(1.5 d)——錯帳進的是 `admin.ledger_breaks`(帳本自檢,跑在 admin role),不是鏈上對帳的 `reconciliation_breaks`,理由見 `docs/domain.md` §24
 
-**DoD(CI)**:`integration` 新增:植入錯帳 → `reconciliation_breaks` 有一筆;webhook 端點回 500 兩次後第三次成功,deliveries 有 3 筆;`kyc_level` 改變後提現限額生效;`unit`:template 渲染測試;E2E 增加「超額提現 → 後台 approve(透過 admin API)→ confirmed」。手動:後台 12 個頁面截圖進 `docs/screenshots/`。
+**DoD(CI)**:`integration` 新增:植入錯帳 → `admin.ledger_breaks` 有一筆(帳本自檢;`reconciliation_breaks` 是鏈上對帳的表,要節點才寫得到——見 `docs/domain.md` §24);webhook 端點回 500 兩次後第三次成功,deliveries 有 3 筆;`kyc_level` 改變後提現限額生效;`unit`:template 渲染測試;E2E 增加「超額提現 → 後台 approve(透過 admin API)→ confirmed」。手動:後台 12 個頁面截圖進 `docs/screenshots/`(實際 14 張:登入、TOTP 與用戶詳情也各一張;`make screenshots` 產生)。
 
 **展示腳本**:
 

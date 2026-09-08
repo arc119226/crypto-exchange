@@ -193,6 +193,9 @@ contracts-test: ## forge build + test inside the pinned foundry image (no local 
 gen-dev-secrets: ## Create .env and dev secrets (idempotent; FORCE=1 to regenerate)
 	scripts/gen-dev-secrets.sh
 
+screenshots: ## Screenshot every back-office page into docs/screenshots (needs a running admin role; ADMIN_URL ADMIN_EMAIL ADMIN_PASSWORD ADMIN_TOTP_SECRET)
+	NODE_PATH=$$(npm root -g) node scripts/screenshots.mjs
+
 demo: ## Run the Phase demo script
 	go run ./cmd/exchangectl demo
 

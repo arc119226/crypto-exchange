@@ -1,15 +1,25 @@
 openapi: 3.0.3
 info:
   title: Exchange Admin API
-  version: 1.0.0-phase2
+  version: 1.0.0-phase5
   description: |
     Operator API of the white-label exchange engine (docs/plan-v1.0.md §7.4).
-    Every write is recorded in the audit trail.
+    Every write is recorded in the audit trail with who made it, and every
+    change the engine or a customer has to know about is published from the
+    same transaction (docs/events.md).
 
-    Phase 2 scope: ledger accounts, balances, journal entries, trial balance,
-    administrator adjustments and the audit log. Authentication is a static
-    admin API key (`X-Admin-Api-Key`, `ADMIN_API_KEY`) until Phase 5 adds
-    admin sessions with TOTP and scoped admin API keys.
+    Scope: the ledger (accounts, balances, entries, trial balance,
+    adjustments), the registry (assets, markets, fee schedules, withdrawal
+    limits, engine reload), users (KYC level, freeze), the withdrawal review
+    queue, what the chain role has seen (deposits, sweeps, hot wallet),
+    reconciliation reports and breaks of both kinds, outbound webhooks
+    (endpoints, deliveries, replay, secret rotation), the audit trail and a
+    system status for the dashboard.
+
+    Authentication is a static admin API key (`X-Admin-Api-Key`,
+    `ADMIN_API_KEY`) for machine integrations. People use the back office at
+    /admin instead, with a password, a TOTP code and a session cookie; the
+    same writes serve both.
 
     Conventions are those of the public API: decimal strings for money,
     RFC 7807 problems with `correlation_id`, `X-Request-Id` echo.
