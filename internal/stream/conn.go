@@ -100,6 +100,12 @@ func newConn(ctx context.Context, id uint64, kind string, t transport, cfg Confi
 // send queues b for the writer. A full buffer is a client that cannot keep
 // up: it is closed rather than waited for (docs/plan-v1.0.md §7.5).
 func (c *conn) send(b []byte) bool {
+	c.closeMu.Lock()
+	closing := c.closing
+	c.closeMu.Unlock()
+	if closing {
+		return false
+	}
 	select {
 	case <-c.ctx.Done():
 		return false
@@ -158,34 +164,58 @@ func (c *conn) writeLoop() {
 		}
 		return true
 	}
+	closeSocket := func() {
+		code, reason := c.closeStatus()
+		if err := c.t.Close(code, reason); err != nil && !errors.Is(err, context.Canceled) {
+			c.log.Debug("close", slog.String("err", err.Error()))
+		}
+	}
 	for {
+		// A close request outranks queued frames. select picks among ready
+		// cases at random, and against a peer that stopped reading every
+		// queued frame costs a full write timeout, so without this the
+		// close could trail the decision by WriteBuffer timeouts.
+		select {
+		case <-c.closeReq:
+			c.flush(write)
+			closeSocket()
+			return
+		default:
+		}
 		select {
 		case <-c.base.Done():
 			return
 		case <-c.closeReq:
-			// flush what was queued before the decision, then close
-		drain:
-			for {
-				select {
-				case b := <-c.out:
-					if !write(b) {
-						break drain
-					}
-				default:
-					break drain
-				}
-			}
-			code, reason := c.closeStatus()
-			if err := c.t.Close(code, reason); err != nil && !errors.Is(err, context.Canceled) {
-				c.log.Debug("close", slog.String("err", err.Error()))
-			}
+			c.flush(write)
+			closeSocket()
 			return
 		case b := <-c.out:
 			if !write(b) {
-				// the socket is gone or the peer is not reading; the close
-				// request queued by closeWith is served on the next loop
-				continue
+				// the socket is gone or the peer is not reading: nothing
+				// queued behind this frame would get through either
+				closeSocket()
+				return
 			}
+		}
+	}
+}
+
+// flush writes what was queued before the close decision, so an error
+// message reaches the client ahead of the close frame. A slow consumer is
+// the exception: the queue is full because the peer is not reading, and
+// waiting on it once more per frame would only delay the close.
+func (c *conn) flush(write func([]byte) bool) {
+	if _, reason := c.closeStatus(); reason == ReasonSlowConsumer {
+		return
+	}
+	for {
+		select {
+		case b := <-c.out:
+			if !write(b) {
+				return
+			}
+		default:
+			return
 		}
 	}
 }

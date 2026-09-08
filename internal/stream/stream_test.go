@@ -142,7 +142,11 @@ func TestSlowClientIsClosedNotWaitedFor(t *testing.T) {
 
 func TestBadFramesAreAnsweredThenClosed(t *testing.T) {
 	ft := newFakeTransport()
-	c := newConn(context.Background(), 1, "public", ft, testConfig(), NewMetrics(nil), quiet)
+	// five error replies must fit the queue whether or not the writer has
+	// started draining, or the fifth would trip the slow-consumer close
+	cfg := testConfig()
+	cfg.WriteBuffer = 16
+	c := newConn(context.Background(), 1, "public", ft, cfg, NewMetrics(nil), quiet)
 	done := make(chan struct{})
 	go func() { c.serve(func(clientMessage) {}, func() {}); close(done) }()
 	for i := 0; i < 5; i++ {
