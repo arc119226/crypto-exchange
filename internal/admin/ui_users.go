@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -79,22 +80,19 @@ func (u *UI) user(w http.ResponseWriter, r *http.Request) {
 
 func (u *UI) setUserKYC(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	back := "/admin/users/" + id
+	back := userPath(id)
 	if err := r.ParseForm(); err != nil {
-		setFlash(w, "err", "Bad form.")
-		http.Redirect(w, r, back, http.StatusSeeOther)
+		u.bounce(w, r, back, "Bad form.")
 		return
 	}
 	level, err := strconv.Atoi(r.PostFormValue("kyc_level"))
 	if err != nil {
-		setFlash(w, "err", "KYC level must be a number.")
-		http.Redirect(w, r, back, http.StatusSeeOther)
+		u.bounce(w, r, back, "KYC level must be a number.")
 		return
 	}
 	reason := strings.TrimSpace(r.PostFormValue("reason"))
 	if reason == "" {
-		setFlash(w, "err", "A reason is required; it goes in the audit trail.")
-		http.Redirect(w, r, back, http.StatusSeeOther)
+		u.bounce(w, r, back, "A reason is required; it goes in the audit trail.")
 		return
 	}
 	usr, err := u.h.setUserKYCLevel(r.Context(), id, level, reason)
@@ -103,16 +101,14 @@ func (u *UI) setUserKYC(w http.ResponseWriter, r *http.Request) {
 
 func (u *UI) setUserStatus(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	back := "/admin/users/" + id
+	back := userPath(id)
 	if err := r.ParseForm(); err != nil {
-		setFlash(w, "err", "Bad form.")
-		http.Redirect(w, r, back, http.StatusSeeOther)
+		u.bounce(w, r, back, "Bad form.")
 		return
 	}
 	reason := strings.TrimSpace(r.PostFormValue("reason"))
 	if reason == "" {
-		setFlash(w, "err", "A reason is required; it goes in the audit trail.")
-		http.Redirect(w, r, back, http.StatusSeeOther)
+		u.bounce(w, r, back, "A reason is required; it goes in the audit trail.")
 		return
 	}
 	usr, err := u.h.setUserStatus(r.Context(), id, r.PostFormValue("status"), reason)
@@ -121,6 +117,24 @@ func (u *UI) setUserStatus(w http.ResponseWriter, r *http.Request) {
 		msg = "User is frozen: no login, no orders, no withdrawals."
 	}
 	u.done(w, r, back, err, msg)
+}
+
+// userPath is the page of one user. The id came off the URL, so it is
+// checked before it goes back into one; anything that is not an id goes to
+// the list, which says the user does not exist.
+func userPath(id string) string {
+	if !idToken.MatchString(id) {
+		return "/admin/users"
+	}
+	return "/admin/users/" + id
+}
+
+var idToken = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
+
+// bounce is a form that could not be read: say why and go back.
+func (u *UI) bounce(w http.ResponseWriter, r *http.Request, back, text string) {
+	setFlash(w, "err", text)
+	http.Redirect(w, r, back, http.StatusSeeOther) //nolint:gosec // G710: back came from userPath, which admits only an id
 }
 
 // done turns a write's outcome into a flash and a redirect. The domain
@@ -140,7 +154,7 @@ func (u *UI) done(w http.ResponseWriter, r *http.Request, back string, err error
 		telemetry.Logger(r.Context()).Error("admin: write failed", "path", r.URL.Path, "err", err.Error())
 		setFlash(w, "err", "Something went wrong; nothing was changed.")
 	}
-	http.Redirect(w, r, back, http.StatusSeeOther)
+	http.Redirect(w, r, back, http.StatusSeeOther) //nolint:gosec // G710: back came from userPath, which admits only an id
 }
 
 // fail is a read that could not be served: log it, show the page with an
