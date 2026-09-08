@@ -113,8 +113,8 @@ docker compose up -d exchange-signer
 - JWT:B 之後 `jwks.json` 有兩個 kid、新登入的 token header 是第一個 kid、舊 token 在到期前打 `GET /v1/account` 仍 200;C 之後只剩一個 kid,`grep -c '401' ` 在 api log 沒有明顯上升。整合測試 `TestSignerPublishesThePreviousKey`、`TestRemoteVerifierAcceptsBothKidsDuringRotation` 守住行為。
 - 主金鑰:rewrap 輸出 `N rows scanned, N re-sealed`,再跑一次是 `N scanned, 0 re-sealed`;`audit.audit_events` 有兩列 `secrets.rewrap`;拿掉 `_PREVIOUS` 重啟後,用一把**舊** API key 打 HMAC 請求仍 200、一個既有 webhook endpoint 仍收到簽名正確的投遞、admin 用既有 authenticator 仍登得進去。`TestRewrapMovesEveryDomainToTheCurrentKey` 是同一件事的自動化版本。
 - keystore:`rekey` 印出的 hot wallet == `HOT_WALLET_ADDRESS`;signer 啟動 log 的 `hot_wallet` 相同;舊 passphrase 開不了(`bin/exchange keys rekey` 用舊的再跑一次會回「current passphrase」錯);`secrets/keystore/` 只剩 `hd-seed.json`。`TestRekeyKeystore` 守住。
-- 通用:輪替後 24 小時內 `exchange_ready` 全部角色為 1、`http_request_duration_seconds{status="401"}` 沒有異常、`webhook_deliveries_total{status="failed"}` 沒有跳升。
+- 通用:輪替後 24 小時內 `exchange_ready` 全部角色為 1、`http_request_duration_seconds{status="401"}` 沒有異常、`webhook_attempts_total{status="failed"}` 沒有跳升。
 
 ## 相關指標
 
-`exchange_ready{role}`、`http_request_duration_seconds{status}`、`webhook_deliveries_total{status}`、`trading_command_queue_depth`(NATS 重連期間會堆);沒有金鑰專屬指標,「哪一把在用」以 JWKS 的 kid 與 config log 為準。
+`exchange_ready{role}`、`http_request_duration_seconds{status}`、`webhook_attempts_total{status}`、`trading_command_queue_depth`(NATS 重連期間會堆);沒有金鑰專屬指標,「哪一把在用」以 JWKS 的 kid 與 config log 為準。

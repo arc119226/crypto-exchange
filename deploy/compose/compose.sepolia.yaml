@@ -9,7 +9,7 @@
 # would be intermittently red, and an intermittently red test trains everyone
 # to ignore red.
 #
-# Read docs/runbooks/sepolia.md first -- it says which two files under
+# Read docs/guides/sepolia.md first -- it says which two files under
 # ./sepolia/ this expects and where their contents come from.
 
 # A separate project name, so this gets its own postgres/nats volumes and the

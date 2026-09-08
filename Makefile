@@ -151,7 +151,7 @@ up: ## Start infra + all roles as separate containers (+observability unless OBS
 up-single: ## Start infra + single all-in-one container (+observability unless OBS=0)
 	$(COMPOSE) --profile infra $(OBS_PROFILE) --profile single up -d --build --wait
 
-up-sepolia: ## Start the all-in-one container against Sepolia (see docs/runbooks/sepolia.md)
+up-sepolia: ## Start the all-in-one container against Sepolia (see docs/guides/sepolia.md)
 	@test -f deploy/compose/sepolia/sepolia-addresses.json || 	  (echo "missing deploy/compose/sepolia/sepolia-addresses.json — see deploy/compose/sepolia/README.md" && exit 2)
 	@test -f deploy/compose/sepolia/seed-params.json || 	  (echo "missing deploy/compose/sepolia/seed-params.json — see deploy/compose/sepolia/README.md" && exit 2)
 	$(COMPOSE_SEP) --profile infra $(OBS_PROFILE) --profile single up -d --build --wait

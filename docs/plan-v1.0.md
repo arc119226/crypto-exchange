@@ -1213,7 +1213,7 @@ exchangectl book ETH-USDC                       # 與 kill 前一致
 - **4a 充值(2 週)**:`exchange keys import-mnemonic` 產生 `hd-seed.json`;`signer` role 內的 HD 派生與 `deposit_addresses` **預生成地址池**(index 由 DB sequence、`ADDRESS_POOL_MIN`);`GET /v1/deposit-address` 只做指派(`api` 不碰金鑰);scanner 輪詢、原生 ETH 與 ERC-20 路徑、確認數、reorg 回退(含 `orphaned → detected` 的 UPDATE 路徑)、`Credit` 入帳;`genesis_hash` 檢查;指標 `chain_scanner_lag_blocks`、`chain_head_block`。
 - **4b 提現(2 週)**:`POST /v1/withdrawals` + `Idempotency-Key`;worker 狀態機(6.4.2);`WithdrawalPolicy`(限額表、kyc_level、每日累計);`NonceManager`;`KeystoreSigner` + 政策檢查 + 簽名審計;EIP-1559 費用與上限;receipt 追蹤、重送、`failed` 兩型;admin approve/reject/resolve。
 - **4c 歸集 + 對帳(1 週)**:sweeper(ETH、ERC-20 兩段式)、`sweeps` 表、custody 分錄、熱錢包低水位告警事件、`reconciliation` 查詢(帳本 custody vs 鏈上)與 `exchangectl admin reconcile`。
-- **4d Sepolia(0.5–1 週)**:`ETH_RPC_URL`/`ETH_CHAIN_ID`/確認數 6 切換;在 Sepolia 部署同一 `MockUSDC`;faucet 注資熱錢包;手動走充值 → 提現 → 歸集;記錄 gas 與確認時間到 `docs/runbooks/sepolia.md`;不進 CI。
+- **4d Sepolia(0.5–1 週)**:`ETH_RPC_URL`/`ETH_CHAIN_ID`/確認數 6 切換;在 Sepolia 部署同一 `MockUSDC`;faucet 注資熱錢包;手動走充值 → 提現 → 歸集;記錄 gas 與確認時間到 `docs/guides/sepolia.md`;不進 CI。
 
 **需要的 Go 能力**:`ethclient`(`BlockByNumber`、`FilterLogs`、`TransactionReceipt`、`PendingNonceAt`、`SuggestGasTipCap`、`FeeHistory`)、`abigen` 產生的 binding、`types.NewTx(&types.DynamicFeeTx{})`、`keystore`、`big.Int` 複製紀律、長時間執行的 worker loop 與 ticker、重試與 backoff、JSON-RPC 測試用 client(`rpc.Client.Call("anvil_mine")`)。
 

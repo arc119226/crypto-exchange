@@ -2,7 +2,7 @@
 
 白牌交易引擎(white-label exchange engine)的商業化原型:現貨撮合、複式記帳帳本、EVM 充提與歸集、行情推播、管理後台,以單一 Go binary 多角色的模組化單體交付,客戶透過 REST / WebSocket / Webhook 與事件契約整合。
 
-**目前狀態:Phase 5b 進行中(webhook 的後台:endpoint 管理、投遞紀錄、手動 replay、本機驗簽的 sink;本 PR)。Phase 4 全數完成,包含 4d 在 Sepolia 上的實跑([`docs/runbooks/sepolia.md`](docs/runbooks/sepolia.md) 有逐筆的交易、gas 與區塊);Phase 5a 已合併,worker role 第一次做真的工作。** 已合併:Phase 0 walking skeleton、Phase 1 `internal/matching`(無 I/O、確定性訂單簿)、Phase 2 `internal/ledger`(複式記帳、凍結即分錄、冪等鍵)與 admin API、Phase 3a `internal/trading` + `internal/eventbus`(每市場 runner、一筆交易內 Hold → Apply → 成交 / 分錄 / outbox、重啟重建、JetStream relay)、Phase 3b `internal/auth` + `internal/ratelimit` + public API(JWT / refresh / API key HMAC、限流、`client_order_id` 冪等)。3c 讓拆分部署真的能交易:`internal/cmdbus`(NATS request-reply 命令匯流排,跨容器仍保持 404 / 422 / 503 的錯誤語意,命令帶 `aud=internal` JWT)、`eventbus` 消費端與引擎的`market.updated` 熱載入、`PUT /admin/v1/markets/{symbol}/status`、`api/events/v1/*.json` + `docs/events.md` 事件契約(golden + JSON Schema 測試),以及每個 PR 都跑的多容器 `make e2e`。
+**目前狀態:Phase 5b 進行中(webhook 的後台:endpoint 管理、投遞紀錄、手動 replay、本機驗簽的 sink;本 PR)。Phase 4 全數完成,包含 4d 在 Sepolia 上的實跑([`docs/guides/sepolia.md`](docs/guides/sepolia.md) 有逐筆的交易、gas 與區塊);Phase 5a 已合併,worker role 第一次做真的工作。** 已合併:Phase 0 walking skeleton、Phase 1 `internal/matching`(無 I/O、確定性訂單簿)、Phase 2 `internal/ledger`(複式記帳、凍結即分錄、冪等鍵)與 admin API、Phase 3a `internal/trading` + `internal/eventbus`(每市場 runner、一筆交易內 Hold → Apply → 成交 / 分錄 / outbox、重啟重建、JetStream relay)、Phase 3b `internal/auth` + `internal/ratelimit` + public API(JWT / refresh / API key HMAC、限流、`client_order_id` 冪等)。3c 讓拆分部署真的能交易:`internal/cmdbus`(NATS request-reply 命令匯流排,跨容器仍保持 404 / 422 / 503 的錯誤語意,命令帶 `aud=internal` JWT)、`eventbus` 消費端與引擎的`market.updated` 熱載入、`PUT /admin/v1/markets/{symbol}/status`、`api/events/v1/*.json` + `docs/events.md` 事件契約(golden + JSON Schema 測試),以及每個 PR 都跑的多容器 `make e2e`。
 
 4a-1 已合併:`internal/chain/hdwallet`(BIP-44 派生、scrypt + AES-256-GCM 的 `hd-seed.json`)、`exchange keys import-mnemonic`、signer role 維護的**預生成充值地址池**、`GET /v1/deposit-address`——api role 只認領地址,永遠拿不到金鑰。
 
@@ -26,7 +26,7 @@
 
 對帳另外還抓到兩個:nonce 補洞燒掉的 gas 從來沒進帳本(`hotwallet` 整個套件沒 import `ledger`),以及一次失敗的簽名會讓下一個 tick 記下一筆熱錢包從來沒送出去的 ETH。細節在 [`docs/domain.md`](docs/domain.md) §20 與 [`docs/runbooks/reconciliation-break.md`](docs/runbooks/reconciliation-break.md)。
 
-4d 是拿這一整套去對真的鏈:Sepolia 上手動走完充值 → 提現 → 歸集 → 對帳,七筆交易的 hash、gas 與區塊都記在 [`docs/runbooks/sepolia.md`](docs/runbooks/sepolia.md)。準備階段對真節點做讀取實測就抓到四個只在真鏈上才會踩到的缺陷,實跑之後又找到八個,細節在 [`docs/domain.md`](docs/domain.md) §21–§22。
+4d 是拿這一整套去對真的鏈:Sepolia 上手動走完充值 → 提現 → 歸集 → 對帳,七筆交易的 hash、gas 與區塊都記在 [`docs/guides/sepolia.md`](docs/guides/sepolia.md)。準備階段對真節點做讀取實測就抓到四個只在真鏈上才會踩到的缺陷,實跑之後又找到八個,細節在 [`docs/domain.md`](docs/domain.md) §21–§22。
 
 **Phase 5a 已合併,worker role 第一次做真的工作:出站 webhook 的投遞路徑。** `internal/webhook` 從 JetStream 收事件、寫進自己的佇列、按 §7.6 的排程(1m → 5m → 30m → 2h → 12h → 24h)投遞,每一次嘗試連狀態碼、耗時、錯誤一起記進 `webhook.deliveries`。簽章是 `HMAC-SHA256(secret, timestamp + "." + body)`,刻意不是 API key 那一套。退避排程住在資料庫而不是 JetStream,因為 nak 的延遲是單一固定值配 30s AckWait,撐不過第一分鐘。
 
@@ -107,7 +107,7 @@ make down               # 停止(保留資料)
 make reset              # 停止並清空 postgres / nats / anvil 狀態與合約產物
 
 # 真的鏈(Sepolia,手動、不進 CI)
-# 逐步操作在 docs/runbooks/sepolia.md;它的 Part A 不需要這裡的任何東西就能開始
+# 逐步操作在 docs/guides/sepolia.md;它的 Part A 不需要這裡的任何東西就能開始
 make up-sepolia         # compose.yaml + compose.sepolia.yaml,獨立的 project name 與 volume
 make down-sepolia
 ```
@@ -189,6 +189,6 @@ docs                  計畫、審查、ADR、領域文件
 
 ## 下一步
 
-Phase 3、4、5、6 全數完成,DoD 全滿足;4d 在 Sepolia 上實跑過一次,結果與抓到的缺陷記在 [`docs/runbooks/sepolia.md`](docs/runbooks/sepolia.md) 與 [`docs/domain.md`](docs/domain.md) §21–§22;Phase 5 的後台在 §24;Phase 6 的行情、WebSocket、前台、觀測性與 trace 的對應與偏離在 §25。
+Phase 3、4、5、6 全數完成,DoD 全滿足;4d 在 Sepolia 上實跑過一次,結果與抓到的缺陷記在 [`docs/guides/sepolia.md`](docs/guides/sepolia.md) 與 [`docs/domain.md`](docs/domain.md) §21–§22;Phase 5 的後台在 §24;Phase 6 的行情、WebSocket、前台、觀測性與 trace 的對應與偏離在 §25。
 
 壓測([`docs/loadtest.md`](docs/loadtest.md))把 §3.3 的差距量化了:行情與推播那一側全部達標,引擎單市場飽和在每秒約 165 個命令,因為每個命令是一筆約 7 ms、十幾次往返的 Postgres 交易。Phase 7(`docs/plan-v1.0.md` §12:Helm、備份、密鑰、runbook)之前或之中,值得先做 runner 內的 `pgx.Batch` 與 group commit,才有機會碰到 1,000 orders/s。DoD 不過不進下一階段。
