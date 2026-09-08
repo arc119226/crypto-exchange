@@ -77,6 +77,7 @@ WAL 歸檔的用途是日後補上 `pg_basebackup` 之後做時間點還原:`res
 | 日期 | 環境 | dump 大小 | 資料量 | RTO(秒) | 備註 |
 |---|---|---|---|---|---|
 | 2026-09-08 | 本機檔案模式(`BACKUP_STORE=file://`,4 vCPU,Postgres 16 同機),`exchange_loadgen` = `docs/loadtest.md` §8 壓測後的資料 | 25.7 MB(`-Fc -Z 6`,`pg_dump` 3 秒) | 86,739 entries / 231,268 postings / 59,100 orders / 11,500 trades / 217,398 outbox / 501 users | **8** | 還原(`pg_restore -j 2`)約 5 秒 + 檢查;不含從儲存端下載 |
+| 2026-09-08 | 本機 S3 模式(`BACKUP_STORE=s3`,MinIO 與 Postgres 16 同機),同一份 `exchange_loadgen` | 25.7 MB | 同上 | **14** | `backup.sh once`(WAL 出貨 + dump 上傳)之後 `restore-drill.sh` 從 MinIO 下載再還原;含下載 |
 | (CI) | compose + MinIO,`e2e` job 的 `backup-drill` 步驟 | artifact `backup-drill-log` | e2e 的資料 | log 尾行 `rto_seconds` | 含 MinIO 下載;每個 PR 一次 |
 
 RPO:dump 24 小時;WAL 歸檔閒置最多 15 分鐘(`archive_timeout=900`)、忙碌時一段 16 MB 就歸檔,出貨延遲 ≤ 30 秒——但 WAL 目前只能配合手動 `pg_basebackup` 使用(見 PITR),所以**可還原的 RPO 就是 24 小時**。要縮短就把 `BACKUP_INTERVAL` 調小(dump 3 秒、25 MB 的成本可以每小時一次)。

@@ -64,11 +64,11 @@ store_ready() {
   mc mb --ignore-existing "backup/$BACKUP_S3_BUCKET" >/dev/null 2>&1
 }
 
-# record KIND STARTED STATUS SIZE LOCATION ERROR writes one admin.backups row
-# as ex_backup (migration 0022). A failure to record is logged, not fatal:
-# the backup itself may well have succeeded.
+# record KIND STARTED STATUS SIZE LOCATION [ERROR] writes one admin.backups
+# row as ex_backup (migration 0022). A failure to record is logged, not
+# fatal: the backup itself may well have succeeded.
 record() {
-  psql -v ON_ERROR_STOP=1 -qX -v kind="$1" -v started="$2" -v status="$3" -v size="$4" -v location="$5" -v error="$6" <<'SQL' || log "could not record the $1 outcome in admin.backups"
+  psql -v ON_ERROR_STOP=1 -qX -v kind="$1" -v started="$2" -v status="$3" -v size="$4" -v location="$5" -v error="${6:-}" <<'SQL' || log "could not record the $1 outcome in admin.backups"
 INSERT INTO admin.backups (kind, started_at, status, size_bytes, location, error)
 VALUES (:'kind', :'started'::timestamptz, :'status', :'size'::bigint, :'location', NULLIF(:'error', ''));
 SQL

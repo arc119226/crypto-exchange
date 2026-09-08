@@ -291,7 +291,10 @@ jobs:
       # the stack is still up: back it up into the compose MinIO, restore the
       # dump into a throwaway database, check it, and print the RTO
       # (docs/runbooks/backup-restore.md)
+      # shell: bash makes the step's shell `bash -eo pipefail`, so a failed
+      # drill fails the step instead of tee's exit status hiding it
       - name: backup and restore drill
+        shell: bash
         run: make backup-drill 2>&1 | tee backup-drill.log
       - uses: actions/upload-artifact@v4
         if: always()
