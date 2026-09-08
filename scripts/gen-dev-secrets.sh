@@ -67,6 +67,7 @@ else
   set_var .env API_KEY_MASTER_KEY "$(openssl rand -hex 32)"    # AES-256 key: 32 bytes
   set_var .env WEBHOOK_SIGNING_KEY "$(openssl rand -hex 32)"   # AES-256 key: 32 bytes
   set_var .env ADMIN_TOTP_KEY "$(openssl rand -hex 32)"        # AES-256 key: 32 bytes
+  set_var .env OTEL_EXPORTER_OTLP_ENDPOINT "http://jaeger:4318" # the observability profile's Jaeger
   log "wrote .env"
 fi
 

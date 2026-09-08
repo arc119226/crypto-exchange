@@ -2,6 +2,7 @@ package eventbus
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -17,8 +18,9 @@ import (
 // Publisher is what the relay publishes to. JetStream is the only
 // implementation in v1; the interface keeps the outbox independent of it.
 type Publisher interface {
-	// Publish sends one envelope; msgID is the deduplication key.
-	Publish(ctx context.Context, subject, msgID string, body []byte) error
+	// Publish sends one envelope; msgID is the deduplication key and
+	// headers are the outbox row's (correlation id, trace context).
+	Publish(ctx context.Context, subject, msgID string, headers map[string]string, body []byte) error
 }
 
 // JetStreamPublisher publishes with Nats-Msg-Id so a republish inside the
@@ -31,8 +33,13 @@ func NewJetStreamPublisher(js jetstream.JetStream) *JetStreamPublisher {
 }
 
 // Publish implements Publisher.
-func (p *JetStreamPublisher) Publish(ctx context.Context, subject, msgID string, body []byte) error {
+func (p *JetStreamPublisher) Publish(ctx context.Context, subject, msgID string, headers map[string]string, body []byte) error {
 	msg := &nats.Msg{Subject: subject, Data: body, Header: nats.Header{}}
+	for k, v := range headers {
+		if v != "" {
+			msg.Header.Set(k, v)
+		}
+	}
 	msg.Header.Set(jetstream.MsgIDHeader, msgID)
 	if _, err := p.js.PublishMsg(ctx, msg); err != nil {
 		return fmt.Errorf("eventbus: publish %s: %w", subject, err)
@@ -58,6 +65,19 @@ func (c RelayConfig) withDefaults() RelayConfig {
 		c.Channel = "outbox_new"
 	}
 	return c
+}
+
+// decodeHeaders reads the outbox row's headers; a row without any (or with
+// something that is not a string map) publishes with none.
+func decodeHeaders(raw []byte) map[string]string {
+	if len(raw) == 0 {
+		return nil
+	}
+	var h map[string]string
+	if err := json.Unmarshal(raw, &h); err != nil {
+		return nil
+	}
+	return h
 }
 
 // Relay moves unpublished outbox rows to the Publisher in id order. Exactly
@@ -163,7 +183,7 @@ func (r *Relay) Drain(ctx context.Context) (int, error) {
 		if err != nil {
 			return len(ids), fmt.Errorf("eventbus: marshal %s: %w", row.EventID, err)
 		}
-		if err := r.pub.Publish(ctx, row.Subject, row.EventID, body); err != nil {
+		if err := r.pub.Publish(ctx, row.Subject, row.EventID, decodeHeaders(row.Headers), body); err != nil {
 			// stop at the first failure so ids stay in order; what was
 			// published is marked below and the rest is retried
 			if len(ids) > 0 {

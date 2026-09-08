@@ -6,9 +6,12 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -152,3 +155,35 @@ func TestAPIServerFallbacks(t *testing.T) {
 type nopWriter struct{}
 
 func (nopWriter) Write(b []byte) (int, error) { return len(b), nil }
+
+func TestReadinessGaugeFollowsChecker(t *testing.T) {
+	var fail atomic.Bool
+	c := NewChecker()
+	c.Register("dep", true, func(context.Context) error {
+		if fail.Load() {
+			return errors.New("down")
+		}
+		return nil
+	})
+	reg := prometheus.NewPedanticRegistry()
+	g := newReadinessGauge(reg)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- g.run(ctx, c, 5*time.Millisecond) }()
+
+	require.Eventually(t, func() bool { return testutil.ToFloat64(g.ready) == 1 }, time.Second, time.Millisecond)
+	fail.Store(true)
+	require.Eventually(t, func() bool { return testutil.ToFloat64(g.ready) == 0 }, time.Second, time.Millisecond)
+	fail.Store(false)
+	require.Eventually(t, func() bool { return testutil.ToFloat64(g.ready) == 1 }, time.Second, time.Millisecond)
+	c.SetDraining()
+	require.Eventually(t, func() bool { return testutil.ToFloat64(g.ready) == 0 }, time.Second, time.Millisecond)
+
+	cancel()
+	require.NoError(t, <-done)
+	families, err := reg.Gather()
+	require.NoError(t, err)
+	require.Len(t, families, 1)
+	assert.Equal(t, "exchange_ready", families[0].GetName())
+}

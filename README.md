@@ -92,6 +92,17 @@ EP=$(echo $WH | jq -r .id)
 go run ./cmd/exchangectl admin webhooks deliveries $EP                  # 每次嘗試的狀態碼、耗時、錯誤
 go run ./cmd/exchangectl admin webhooks replay $EP $DELIVERY_ID         # 重送(客戶會再收到一次,event_id 相同)
 
+# 行情與推播(Phase 6;wire format 在 docs/ws-api.md)
+go run ./cmd/exchangectl ticker ETH-USDC && go run ./cmd/exchangectl klines ETH-USDC --interval 1m --limit 5
+websocat ws://localhost:8081/ws/v1/public <<< '{"op":"subscribe","channel":"depth","market":"ETH-USDC"}'   # snapshot,之後每個 seq 一則 delta
+websocat ws://localhost:8081/ws/v1/private <<< "{\"op\":\"auth\",\"token\":\"$EXCHANGE_TOKEN\"}"            # 之後下單:orders / fills / balances 三個頻道都會推
+(cd web/trade && npm ci && npm run dev)         # 參考前台 http://localhost:5173(Vite 把 /v1 與 /ws 代理到 8080 / 8081)
+make web-e2e                                    # Playwright 冒煙:註冊 → 注資 → 掛單 → 訂單簿出現 → 對手單 → 成交、餘額變動
+make loadgen                                    # 60 s 壓測;數字與瓶頸分析在 docs/loadtest.md
+open http://localhost:3000                      # Grafana(admin / .env 的 GRAFANA_ADMIN_PASSWORD):Exchange Overview / Ledger / Chain / Stream / System
+open http://localhost:9090/alerts               # Prometheus:§15 的七條告警(沒有 Alertmanager)
+open http://localhost:16686                     # Jaeger:找 exchange-api 的 POST /v1/orders,看它一路到 engine、Postgres 與每個 consumer
+
 make down               # 停止(保留資料)
 make reset              # 停止並清空 postgres / nats / anvil 狀態與合約產物
 
@@ -101,7 +112,7 @@ make up-sepolia         # compose.yaml + compose.sepolia.yaml,獨立的 project 
 make down-sepolia
 ```
 
-`make up` 改為每個 role 一個容器(api / engine / chain / signer / stream / admin / worker);`OBS=0` 可略過 prometheus / grafana。
+`make up` 改為每個 role 一個容器(api / engine / chain / signer / stream / admin / worker);`OBS=0` 可略過 prometheus / grafana / jaeger。
 
 ## 開發循環
 
@@ -142,15 +153,18 @@ internal/admin        admin REST(oapi-codegen strict server)+ X-Admin-Api-Key
 internal/webhook      出站投遞:HMAC 簽章、退避排程、deliveries、endpoint 管理與 replay
 internal/registry     assets / markets / fee schedules(sqlc)+ seed
 internal/money        Decimal 金額型別(禁 float;JSON 字串)
-internal/telemetry    slog、correlation id、Prometheus
-internal/platform     pgx / NATS / Redis 連線與健康檢查;secretbox 是 auth 與 webhook 共用的 AES-256-GCM 信封
+internal/marketdata   影子訂單簿投影(depth delta)、K 線聚合與落地、ticker、Redis 深度快照(sqlc)
+internal/stream       WebSocket server:公開頻道(depth / trades / ticker / kline)、私有頻道(auth、account_seq、resume 自 outbox)、慢客戶端斷線
+internal/telemetry    slog、correlation id、Prometheus、OpenTelemetry(HTTP span、traceparent 注入 / 抽取)
+internal/platform     pgx / NATS / Redis 連線與健康檢查、pgx query tracer、pool collector;secretbox 是 auth 與 webhook 共用的 AES-256-GCM 信封
 api/public/v1         公開 OpenAPI 契約
 api/admin/v1          admin OpenAPI 契約
 migrations            goose SQL(embed)
 deploy/compose        compose.yaml(profiles:infra / app / single / observability)
 infra/contracts       MockUSDC + 冪等部署腳本(Foundry)
 infra/postgres        ex_* 登入角色 initdb 腳本
-infra/observability   prometheus / grafana 設定
+infra/observability   prometheus(含 alerts.yml)/ grafana 設定與五個 dashboard JSON;observability_test.go 驗指標名
+web/trade             參考前台(React + Vite + TS;OpenAPI 產 TS client;Playwright 冒煙)
 test/integration      testcontainers 整合測試(build tag integration)
 test/fixtures/matching 撮合命令腳本與 golden 事件 / 快照
 docs                  計畫、審查、ADR、領域文件
@@ -166,13 +180,15 @@ docs                  計畫、審查、ADR、領域文件
 | [`docs/api-conventions.md`](docs/api-conventions.md) | Public API 慣例:金額字串、problem+json、JWT / API key HMAC 簽章、限流、`client_order_id` 狀態碼(English) |
 | [`docs/events.md`](docs/events.md) | 事件契約:envelope、subject 與 stream、排序與去重、consumer 型別、catalog、相容規則(English);schema 在 [`api/events/v1/`](api/events/v1) |
 | [`docs/webhooks.md`](docs/webhooks.md) | 出站 Webhook:簽章與驗證、重試排程、**至少一次投遞的實際後果**、endpoint 管理與 replay(English) |
+| [`docs/ws-api.md`](docs/ws-api.md) | WebSocket:公開 / 私有頻道的訊息、depth 的客戶端規則、`account_seq` 與 resume、錯誤碼與斷線原因(English) |
+| [`docs/loadtest.md`](docs/loadtest.md) | Phase 6 本機壓測:四組 run 的數字、與 §3.3 目標的對照、瓶頸(每命令一筆 PG 交易)與補法 |
 | [`docs/runbooks/`](docs/runbooks/) | 營運手冊:Sepolia 實跑、卡住的提現、對帳差異、reorg 告警、admin TOTP(啟用、換 secret、鎖定) |
-| [`docs/screenshots/`](docs/screenshots/) | 後台每一頁的截圖(`make screenshots` 產生) |
+| [`docs/screenshots/`](docs/screenshots/) | 後台每一頁的截圖(`make screenshots` 產生)與參考前台的交易頁 / 錢包頁 |
 | [`docs/adr/`](docs/adr/) | ADR-0000 需求訪談決策(8 輪 32 題);ADR-0001~0008 架構決策(單體、真相來源、租戶、數值、帳本、認證、簽名、工具鏈) |
 | [`docs/archive/plan-v0.1.md`](docs/archive/plan-v0.1.md) | 原始 v0.1 規劃書(已取代,僅供對照) |
 
 ## 下一步
 
-Phase 3、4、5 全數完成,DoD 全滿足;4d 在 Sepolia 上實跑過一次,結果與抓到的缺陷記在 [`docs/runbooks/sepolia.md`](docs/runbooks/sepolia.md) 與 [`docs/domain.md`](docs/domain.md) §21–§22;Phase 5 的後台、admin 登入、帳本自檢與 webhook secret 輪替的對應與偏離在 §24。
+Phase 3、4、5、6 全數完成,DoD 全滿足;4d 在 Sepolia 上實跑過一次,結果與抓到的缺陷記在 [`docs/runbooks/sepolia.md`](docs/runbooks/sepolia.md) 與 [`docs/domain.md`](docs/domain.md) §21–§22;Phase 5 的後台在 §24;Phase 6 的行情、WebSocket、前台、觀測性與 trace 的對應與偏離在 §25。
 
-Phase 5(`docs/plan-v1.0.md` §12)分批進行:5a 出站投遞路徑(已合併)、5b webhook 後台(本 PR)。接下來是 htmx 後台本身(登入 + TOTP、registry / 用戶 / 帳本 / 審核 / 對帳頁)、`PUT /admin/v1/users/{id}/kyc-level`,以及 webhook secret 的輪替(`rotate-secret`,留到 5c)。DoD 不過不進下一階段。
+壓測([`docs/loadtest.md`](docs/loadtest.md))把 §3.3 的差距量化了:行情與推播那一側全部達標,引擎單市場飽和在每秒約 165 個命令,因為每個命令是一筆約 7 ms、十幾次往返的 Postgres 交易。Phase 7(`docs/plan-v1.0.md` §12:Helm、備份、密鑰、runbook)之前或之中,值得先做 runner 內的 `pgx.Batch` 與 group commit,才有機會碰到 1,000 orders/s。DoD 不過不進下一階段。

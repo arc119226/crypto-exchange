@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/arc119226/crypto-exchange/internal/api/gen"
 	"github.com/arc119226/crypto-exchange/internal/auth"
@@ -12,6 +13,8 @@ import (
 	"github.com/arc119226/crypto-exchange/internal/chain/deposit"
 	"github.com/arc119226/crypto-exchange/internal/chain/withdrawal"
 	"github.com/arc119226/crypto-exchange/internal/ledger"
+	"github.com/arc119226/crypto-exchange/internal/marketdata"
+	"github.com/arc119226/crypto-exchange/internal/money"
 	"github.com/arc119226/crypto-exchange/internal/ratelimit"
 	"github.com/arc119226/crypto-exchange/internal/registry"
 	"github.com/arc119226/crypto-exchange/internal/trading"
@@ -42,8 +45,24 @@ type Deps struct {
 	// Withdrawals records requests; nil switches /v1/withdrawals off with
 	// 503. It never locks funds or signs — the chain role does both.
 	Withdrawals *withdrawal.Service
-	Limiter     ratelimit.Limiter // nil = unlimited (tests)
-	Limits      Limits
+	// MarketData serves klines and the ticker from what the worker persisted;
+	// nil switches those endpoints off with 503.
+	MarketData MarketDataReader
+	// DepthCache is the stream role's snapshot of every book; nil, or a
+	// snapshot older than DepthFreshness (default 10 s), sends GET /depth to
+	// the engine instead.
+	DepthCache     marketdata.DepthCache
+	DepthFreshness time.Duration
+	// Now is the clock; nil means time.Now (tests pin it).
+	Now     func() time.Time
+	Limiter ratelimit.Limiter // nil = unlimited (tests)
+	Limits  Limits
+}
+
+// MarketDataReader is the part of marketdata.Store the handlers read.
+type MarketDataReader interface {
+	marketdata.Reader
+	LastCloseBefore(ctx context.Context, market string, iv marketdata.Interval, t time.Time) (*money.Amount, error)
 }
 
 // Handler implements gen.StrictServerInterface for one tenant.

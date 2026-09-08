@@ -128,6 +128,8 @@ func TestConfigLogValueRedacts(t *testing.T) {
 	slog.New(slog.NewJSONHandler(&buf, nil)).Info("cfg", slog.Any("config", cfg))
 	assert.NotContains(t, buf.String(), "hunter2")
 	assert.Contains(t, buf.String(), "postgres://ex_all:xxxxx@localhost:5432/exchange")
+	assert.Contains(t, buf.String(), `"otel_endpoint_set":false`)
+	assert.Empty(t, cfg.OTLPEndpoint, "tracing is off unless OTEL_EXPORTER_OTLP_ENDPOINT is set")
 }
 
 // A hosted RPC endpoint carries its API key in the path, not in userinfo, so

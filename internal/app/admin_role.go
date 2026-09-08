@@ -65,12 +65,8 @@ func newAdminServer(cfg Config, log *slog.Logger, m *telemetry.HTTPMetrics, reg 
 	}
 	r := chi.NewRouter()
 	r.Use(telemetry.CorrelationMiddleware(log))
-	r.Use(m.Middleware(func(req *http.Request) string {
-		if rc := chi.RouteContext(req.Context()); rc != nil {
-			return rc.RoutePattern()
-		}
-		return ""
-	}))
+	r.Use(m.Middleware(chiRoute))
+	r.Use(telemetry.TracingMiddleware(chiRoute))
 	r.Use(recoverer())
 	r.NotFound(func(w http.ResponseWriter, req *http.Request) {
 		admin.WriteProblem(w, req, http.StatusNotFound, "Not Found", "no route for "+req.Method+" "+req.URL.Path)

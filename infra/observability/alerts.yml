@@ -1,0 +1,78 @@
+# Prometheus alerting rules for the compose stack: the minimal set from
+# docs/plan-v1.0.md §15. Prometheus loads this through `rule_files` in
+# prometheus.yml; compose mounts it next to that file.
+#
+# There is no Alertmanager in the compose stack, so firing alerts show in
+# the Prometheus UI (http://127.0.0.1:9090/alerts) and on the Grafana
+# dashboards that graph the same expressions; wiring a receiver is a
+# deployment-time decision (docs/plan-v1.0.md §16).
+#
+# infra/observability/observability_test.go parses this file and checks that
+# every metric each rule reads is one the Go code registers.
+groups:
+  - name: exchange
+    rules:
+      - alert: ExchangeNotReady
+        # exchange_ready is the process's own /readyz sampled every 10 s;
+        # a process that is gone has no sample, which is what `up == 0`
+        # catches. Either condition for a minute is the §15 "readyz fails
+        # > 1 min".
+        expr: exchange_ready == 0 or up{job="exchange"} == 0
+        for: 1m
+        labels: { severity: critical }
+        annotations:
+          summary: "{{ $labels.instance }} has not been ready for a minute"
+          description: "Check /readyz on the instance: it names the failing dependency (postgres, nats, engine lock, chain node, ...)."
+
+      - alert: LedgerTrialBalanceBroken
+        # Debits and credits per asset must net to zero (docs/plan-v1.0.md §6.1).
+        # Any non-zero value means a posting was written outside ledger.Post,
+        # which the database roles are supposed to make impossible.
+        expr: ledger_trial_balance_diff != 0
+        for: 0m
+        labels: { severity: critical }
+        annotations:
+          summary: "Trial balance for {{ $labels.asset }} is off by {{ $value }}"
+          description: "Stop withdrawals and follow docs/runbooks (ledger break). The admin role's ledger watcher also emits reconciliation.ledger_break_detected."
+
+      - alert: ChainScannerLagging
+        expr: chain_scanner_lag_blocks > 20
+        for: 2m
+        labels: { severity: warning }
+        annotations:
+          summary: "Deposit scanner is {{ $value }} blocks behind the head"
+          description: "Deposits confirm late. Check the node (ETH_RPC_URL) and the chain role's log; the scanner catches up on its own once the node answers."
+
+      - alert: OutboxBacklog
+        expr: outbox_backlog > 1000
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "{{ $value }} outbox rows are waiting for the relay"
+          description: "Webhooks, market data and private pushes are all late. Check NATS (JetStream) and the engine role's relay log."
+
+      - alert: HotWalletLow
+        # The threshold is the compose stack's; a deployment sets it to the
+        # gas budget it wants (ETH_HOT_WALLET_MIN also drives alert.hot_wallet_low).
+        expr: hot_wallet_balance{asset="ETH"} < 1
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "Hot wallet holds {{ $value }} ETH"
+          description: "Withdrawals and sweeps need gas. Top up the hot wallet (docs/runbooks)."
+
+      - alert: WithdrawalsPendingReview
+        expr: withdrawals_pending_review > 20
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "{{ $value }} withdrawals are waiting for an operator"
+          description: "Review them in the back office (Withdrawals page) before customers start asking."
+
+      - alert: ReconciliationBreak
+        expr: reconciliation_diff != 0
+        for: 0m
+        labels: { severity: critical }
+        annotations:
+          summary: "On-chain vs ledger reconciliation for {{ $labels.asset }} differs by {{ $value }}"
+          description: "reconciliation.break_detected carries the numbers; see the Breaks page and docs/runbooks."

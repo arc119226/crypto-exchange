@@ -24,6 +24,10 @@ x-exchange-env: &exchange-env
   OPS_ADDR: ":9100"
   LOG_LEVEL: ${LOG_LEVEL:-info}
   JWT_JWKS_URL: http://exchange-api:8080/.well-known/jwks.json
+  # Empty = no tracing. gen-dev-secrets writes http://jaeger:4318 so the
+  # observability profile's Jaeger receives spans; with OBS=0 the exporter
+  # fails quietly (debug log) and nothing else changes.
+  OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
 
 x-exchange: &exchange
   image: ghcr.io/arc119226/crypto-exchange:${EXCHANGE_TAG:-dev}
@@ -244,6 +248,9 @@ services:
       <<: *exchange-env
       DATABASE_URL: postgres://ex_stream:${POSTGRES_PASSWORD}@postgres:5432/exchange?sslmode=disable
       WS_ADDR: ":8081"
+      # The browser front end runs on its own origin in development
+      # (web/trade on :5173); "*" is refused outside EXCHANGE_ENV=dev.
+      STREAM_ALLOWED_ORIGINS: "*"
     ports: ["8081:8081"]
     depends_on: *app-deps
 
@@ -305,6 +312,7 @@ services:
       ADMIN_BOOTSTRAP_PASSWORD: ${ADMIN_BOOTSTRAP_PASSWORD}
       ADMIN_TOTP_KEY: ${ADMIN_TOTP_KEY}
       ADMIN_COOKIE_SECURE: "false"
+      STREAM_ALLOWED_ORIGINS: "*"               # same reasoning as exchange-stream
       ETH_REQUIRED_CONFIRMATIONS_DEFAULT: "1"   # anvil: a deposit in the head block is already confirmed
       ETH_SCAN_INTERVAL: 2s
       ETH_SWEEP_INTERVAL: 3s                    # same reasoning as exchange-chain above
@@ -326,8 +334,18 @@ services:
     profiles: [observability]
     volumes:
       - ../../infra/observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ../../infra/observability/alerts.yml:/etc/prometheus/alerts.yml:ro
       - prom-data:/prometheus
     ports: ["127.0.0.1:9090:9090"]
+    restart: unless-stopped
+    networks: [exchange-net]
+
+  # Jaeger v2 all-in-one: OTLP/HTTP in on 4318 (the roles' exporter), UI on
+  # 16686, in-memory storage -- traces live as long as the container does.
+  jaeger:
+    image: jaegertracing/jaeger:2.4.0
+    profiles: [observability]
+    ports: ["127.0.0.1:16686:16686"]
     restart: unless-stopped
     networks: [exchange-net]
 

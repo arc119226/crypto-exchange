@@ -107,7 +107,11 @@ func (c *Client) Depth(ctx context.Context, market string, n int) (matching.Dept
 // do performs one request-reply round trip.
 func (c *Client) do(ctx context.Context, market string, r Request) (Response, error) {
 	start := time.Now()
+	ctx, end := telemetry.StartSpan(ctx, "cmdbus "+string(r.Op), telemetry.SpanClient, map[string]string{
+		"messaging.system": "nats", "exchange.market": market,
+	})
 	resp, err := c.request(ctx, market, r)
+	end(err)
 	c.cfg.Metrics.observeClient(string(r.Op), status(err), time.Since(start))
 	return resp, err
 }
@@ -131,6 +135,11 @@ func (c *Client) request(ctx context.Context, market string, r Request) (Respons
 	msg.Data = body
 	if cid := telemetry.CorrelationID(ctx); cid != "" {
 		msg.Header.Set(HeaderCorrelationID, cid)
+	}
+	carrier := map[string]string{}
+	telemetry.InjectTrace(ctx, carrier)
+	for k, v := range carrier {
+		msg.Header.Set(k, v)
 	}
 	ctx, cancel := context.WithTimeout(ctx, c.cfg.Timeout)
 	defer cancel()

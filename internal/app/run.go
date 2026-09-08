@@ -15,7 +15,9 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/arc119226/crypto-exchange/internal/admin"
+	"github.com/arc119226/crypto-exchange/internal/eventbus"
 	"github.com/arc119226/crypto-exchange/internal/ledger"
+	"github.com/arc119226/crypto-exchange/internal/marketdata"
 	"github.com/arc119226/crypto-exchange/internal/platform/natsx"
 	"github.com/arc119226/crypto-exchange/internal/platform/pg"
 	"github.com/arc119226/crypto-exchange/internal/platform/redisx"
@@ -52,6 +54,22 @@ func Run(ctx context.Context, cfg Config, roles []Role, bi BuildInfo) error {
 	checker := NewChecker()
 	log.Info("starting", slog.Any("config", cfg), slog.String("roles", label), slog.String("commit", bi.Commit))
 
+	stopTracing, err := telemetry.SetupTracing(ctx, telemetry.TracingConfig{
+		Endpoint: cfg.OTLPEndpoint, ServiceName: "exchange-" + label, Version: bi.Version,
+	}, log)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		// after cleanup (deferred later, so it runs first): the last spans
+		// of the shutdown itself get a chance to leave
+		fctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := stopTracing(fctx); err != nil {
+			log.Debug("tracing shutdown", slog.String("err", err.Error()))
+		}
+	}()
+
 	d, cleanup, err := connectDeps(ctx, cfg, label, log, checker)
 	if err != nil {
 		return err
@@ -59,6 +77,14 @@ func Run(ctx context.Context, cfg Config, roles []Role, bi BuildInfo) error {
 	defer cleanup()
 
 	httpMetrics := telemetry.NewHTTPMetrics(reg)
+	reg.MustRegister(pg.NewPoolCollector(d.pool))
+	readiness := newReadinessGauge(reg)
+	// one set of outbox / consumer instruments per process: the engine's
+	// relay, the worker's and the stream's consumers all report through it
+	ebMetrics := eventbus.NewMetrics(reg)
+	// likewise the market-data instruments: the worker (candle writer) and
+	// the stream (shadow books) both report through one set
+	mdMetrics := marketdata.NewMetrics(reg)
 	var (
 		servers      []*http.Server
 		adminLedger  *ledger.Service
@@ -69,6 +95,7 @@ func Run(ctx context.Context, cfg Config, roles []Role, bi BuildInfo) error {
 		signer       *signerComponents
 		chainRole    *chainComponents
 		workerRole   *workerComponents
+		streamRole   *streamComponents
 	)
 	// the ledger service is shared by every role in the process that needs it
 	ledgerFor := func() (*ledger.Service, error) {
@@ -91,7 +118,7 @@ func Run(ctx context.Context, cfg Config, roles []Role, bi BuildInfo) error {
 		}
 		eng.engine = newEngine(cfg, log, d.pool, l, reg)
 		if d.nc != nil {
-			if err := eng.attachNATS(ctx, cfg, log, d, reg); err != nil {
+			if err := eng.attachNATS(ctx, cfg, log, d, reg, ebMetrics); err != nil {
 				return err
 			}
 			defer eng.close(log)
@@ -162,13 +189,22 @@ func Run(ctx context.Context, cfg Config, roles []Role, bi BuildInfo) error {
 			defer chainRole.close()
 			checker.Register("chain", true, chainRole.ready)
 		case RoleWorker:
-			w, err := newWorker(cfg, log, d.pool, reg, d.nc)
+			w, err := newWorker(cfg, log, d.pool, reg, d.nc, ebMetrics, mdMetrics)
 			if err != nil {
 				return err
 			}
 			workerRole = w
 			defer workerRole.close()
 			checker.Register("worker", true, workerRole.ready)
+		case RoleStream:
+			s, srv, err := newStream(ctx, cfg, log, reg, d, ebMetrics, mdMetrics)
+			if err != nil {
+				return err
+			}
+			streamRole = s
+			defer streamRole.close()
+			servers = append(servers, srv)
+			checker.Register("stream", true, streamRole.ready)
 		case RoleSigner:
 			// built above
 		default:
@@ -181,6 +217,7 @@ func Run(ctx context.Context, cfg Config, roles []Role, bi BuildInfo) error {
 	for _, s := range append(servers, ops) {
 		g.Go(listenAndServe(s, log))
 	}
+	g.Go(func() error { return readiness.run(gctx, checker, readinessSampleInterval) })
 	if adminLedger != nil {
 		g.Go(func() error { return observeLedger(gctx, log, adminLedger, adminHandler) })
 	}
@@ -192,6 +229,11 @@ func Run(ctx context.Context, cfg Config, roles []Role, bi BuildInfo) error {
 		// the ops server is already listening so /readyz reports why.
 		g.Go(func() error { return workerRole.start(gctx) })
 		g.Go(func() error { return workerRole.runDelivering(gctx, log) })
+		g.Go(func() error { return workerRole.runKlines(gctx, log) })
+	}
+	if streamRole != nil {
+		g.Go(func() error { return streamRole.start(gctx) })
+		g.Go(func() error { return streamRole.run(gctx) })
 	}
 	if chainRole != nil {
 		// start blocks while the node is verified and the signer answers; the
@@ -252,6 +294,7 @@ func connectDeps(ctx context.Context, cfg Config, appName string, log *slog.Logg
 	err := retryUntil(ctx, log, "postgres", func(ctx context.Context) error {
 		pool, err := pg.Open(ctx, pg.PoolConfig{
 			DSN: cfg.DB.URL.Reveal(), MaxConns: cfg.DB.MaxConns, ConnectTimeout: cfg.DB.ConnectTimeout, ApplicationName: "exchange-" + appName,
+			Tracing: cfg.OTLPEndpoint != "",
 		})
 		if err != nil {
 			return err

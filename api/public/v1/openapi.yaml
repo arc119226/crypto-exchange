@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Exchange Public API
-  version: 1.0.0-phase3
+  version: 1.0.0-phase6
   description: |
     Public REST API of the white-label exchange engine (docs/plan-v1.0.md §7.4).
 
@@ -563,6 +563,87 @@ paths:
           $ref: "#/components/responses/NotFound"
         "500":
           $ref: "#/components/responses/InternalError"
+
+  /v1/markets/{symbol}/ticker:
+    get:
+      tags: [market-data]
+      operationId: getTicker
+      summary: 24-hour ticker
+      description: |
+        Rolling 24-hour summary folded from the market's 1-minute candles:
+        last price, the open 24 hours ago, high, low, base and quote volume,
+        trade count and the change. The price fields are omitted when the
+        window holds no trade. Served from persisted candles, so it lags the last
+        trade by up to the worker's poll interval (about a second).
+      parameters:
+        - $ref: "#/components/parameters/MarketSymbol"
+      responses:
+        "200":
+          description: Ticker
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ticker"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /v1/markets/{symbol}/klines:
+    get:
+      tags: [market-data]
+      operationId: listKlines
+      summary: Candles (OHLCV)
+      description: |
+        One candle per bucket of `[from, to)`, oldest first, gaps filled with
+        flat candles that carry the previous close (`trades` is `0` on those).
+        Buckets are aligned to UTC; a day starts at 00:00 UTC. `to` defaults
+        to now and `from` to `to − limit × interval`; a range wider than
+        `limit` buckets is cut at `limit` from `from`.
+      parameters:
+        - $ref: "#/components/parameters/MarketSymbol"
+        - name: interval
+          in: query
+          required: true
+          schema:
+            $ref: "#/components/schemas/KlineInterval"
+        - name: from
+          in: query
+          description: Start of the range (inclusive), aligned down to a bucket
+          schema:
+            type: string
+            format: date-time
+        - name: to
+          in: query
+          description: End of the range (exclusive); default now
+          schema:
+            type: string
+            format: date-time
+        - name: limit
+          in: query
+          description: Maximum candles returned (default 500, max 1000)
+          schema:
+            type: integer
+            format: int32
+            minimum: 1
+            maximum: 1000
+      responses:
+        "200":
+          description: Candles, oldest first
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KlineList"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
 
   /v1/orders:
     post:
@@ -1630,7 +1711,11 @@ components:
         last_seq:
           type: integer
           format: int64
-          description: Engine sequence the snapshot reflects (WebSocket deltas resume from it, Phase 6)
+          description: |
+            Engine sequence the snapshot reflects; WebSocket depth deltas
+            continue from it (docs/ws-api.md). The snapshot may come from the
+            stream role's cache rather than the engine, at most a few hundred
+            milliseconds behind, and is always consistent with its levels.
         bids:
           type: array
           description: Best (highest) bid first
@@ -1641,6 +1726,89 @@ components:
           description: Best (lowest) ask first
           items:
             $ref: "#/components/schemas/Level"
+
+    KlineInterval:
+      type: string
+      description: Candle width; buckets are aligned to UTC
+      enum: [1m, 5m, 15m, 1h, 1d]
+
+    Kline:
+      type: object
+      description: One OHLCV bucket. `trades` is 0 on a synthesized candle that carries the previous close through an empty bucket.
+      required: [market, interval, start, open, high, low, close, volume, quote_volume, trades]
+      properties:
+        market:
+          type: string
+        interval:
+          $ref: "#/components/schemas/KlineInterval"
+        start:
+          type: string
+          format: date-time
+          description: Bucket start (UTC)
+        open:
+          $ref: "#/components/schemas/Amount"
+        high:
+          $ref: "#/components/schemas/Amount"
+        low:
+          $ref: "#/components/schemas/Amount"
+        close:
+          $ref: "#/components/schemas/Amount"
+        volume:
+          $ref: "#/components/schemas/Amount"
+        quote_volume:
+          $ref: "#/components/schemas/Amount"
+        trades:
+          type: integer
+          format: int64
+
+    KlineList:
+      type: object
+      required: [market, interval, klines]
+      properties:
+        market:
+          type: string
+        interval:
+          $ref: "#/components/schemas/KlineInterval"
+        klines:
+          type: array
+          description: Oldest first, one per bucket
+          items:
+            $ref: "#/components/schemas/Kline"
+
+    Ticker:
+      type: object
+      description: Rolling 24-hour summary. The price fields are omitted when the window holds no trade.
+      required: [market, volume, quote_volume, trades, at]
+      properties:
+        market:
+          type: string
+        last_price:
+          $ref: "#/components/schemas/Amount"
+        open:
+          $ref: "#/components/schemas/Amount"
+          description: First trade price inside the window
+        high:
+          $ref: "#/components/schemas/Amount"
+        low:
+          $ref: "#/components/schemas/Amount"
+        change:
+          $ref: "#/components/schemas/Amount"
+          description: last_price − open
+        change_pct:
+          $ref: "#/components/schemas/Amount"
+          description: change / open × 100, truncated to two decimals
+        volume:
+          $ref: "#/components/schemas/Amount"
+          description: Base volume inside the window
+        quote_volume:
+          $ref: "#/components/schemas/Amount"
+        trades:
+          type: integer
+          format: int64
+        at:
+          type: string
+          format: date-time
+          description: When the summary was computed
 
     Problem:
       type: object

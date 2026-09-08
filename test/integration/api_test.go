@@ -25,6 +25,7 @@ import (
 	"github.com/arc119226/crypto-exchange/internal/audit"
 	"github.com/arc119226/crypto-exchange/internal/auth"
 	"github.com/arc119226/crypto-exchange/internal/chain"
+	"github.com/arc119226/crypto-exchange/internal/marketdata"
 	"github.com/arc119226/crypto-exchange/internal/ratelimit"
 	"github.com/arc119226/crypto-exchange/internal/telemetry"
 )
@@ -70,7 +71,8 @@ func setupAPI(t *testing.T) *apiHarness {
 	api.Mount(r, api.NewHandler(api.Deps{
 		Tenant: "default", Registry: th.store, Auth: authSvc, Ledger: th.svc2(), Trading: th.svc,
 		Limiter: ratelimit.NewMemory(), Limits: limits,
-		Chain: chain.NewAddresses(th.all, "default", testChainID),
+		Chain:      chain.NewAddresses(th.all, "default", testChainID),
+		MarketData: marketdata.NewStore(th.all, "default"),
 	}))
 	srv := httptest.NewServer(r)
 	t.Cleanup(srv.Close)

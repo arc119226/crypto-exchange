@@ -16,6 +16,7 @@ import (
 
 	"github.com/arc119226/crypto-exchange/internal/eventbus"
 	"github.com/arc119226/crypto-exchange/internal/platform/secretbox"
+	"github.com/arc119226/crypto-exchange/internal/telemetry"
 	"github.com/arc119226/crypto-exchange/internal/webhook/sqlcgen"
 )
 
@@ -69,6 +70,9 @@ func New(db *pgxpool.Pool, cfg Config, log *slog.Logger) *Dispatcher {
 		db: db, cfg: cfg, log: log, metrics: NewMetrics(nil), now: func() time.Time { return time.Now().UTC() },
 		http: &http.Client{
 			Timeout: cfg.Timeout,
+			// The customer's endpoint receives traceparent, so a delivery
+			// they log can be matched to the trace on our side.
+			Transport: telemetry.TracingTransport(nil),
 			// A webhook URL is operator-configured, but a redirect is chosen
 			// by whoever answers it -- so following one lets the far end
 			// point us anywhere, including at addresses only this network can

@@ -991,3 +991,60 @@ Phase 5 剩下的全部圍繞一件事:營運方在這之前沒有任何不用 C
 - **gosec 的 taint 分析是跨函式的,而且不認得你的驗證。** `http.Redirect` 到一個由 `chi.URLParam` 組出來的路徑會被標 G710,經過一個檢查 id 格式的 helper 之後照樣標。留下的兩個 `//nolint:gosec` 寫明路徑從哪來、經過什麼檢查;另外五個早退改走同一個 helper,不是為了消警告,是那本來就是同一件事。
 - **文件說「任一符合」而程式只驗最後一個。** `webhook.Verify` 從 5a 就寫成 `for ... { v1 = v }`,`docs/webhooks.md` 從 5b 就說 header 可以帶多個 `v1=`。在只有一把 secret 的世界裡兩者等價,所以沒有測試能分辨;輪替一上來就不等價。§22.8 那條「會說謊的註解」的變體:會說謊的文件。
 - **`make gen-check` 在 commit 之前永遠紅。** 它 diff 的對象是 HEAD,不是工作樹。中途看到它紅不代表產生的程式碼有問題;`make gen` 之後 `git status` 沒有新變動才是對的訊號。
+
+## 25. Phase 6 程式碼與 §7.5 / §12 / §15 的對應(行情、WebSocket、參考前台、觀測性、trace)
+
+Phase 6 把事件第一次真的扇出給人看:影子訂單簿與 depth delta、K 線落地、公開與私有 WebSocket、能完整交易的參考前台、五個 dashboard 與七條告警、以及一條從 api 到每個 consumer 的 trace。計畫先經過一輪對抗式檢查,三個原設計缺陷(§25.1)在寫第一行程式之前改掉;壓測(`docs/loadtest.md`)量出了 §3.3 兩個沒達標的目標與確切原因。表格是對應,小節是為什麼。
+
+| 項目 | 實作 | 備註 |
+|---|---|---|
+| 影子簿(§7.5、§12「以 seq 對齊」) | `marketdata.BookProjector`:order-level(`orders map[id]{side, price, remaining}` + 每邊價位表),事件規則 `accepted` 加、`trade.executed` 減 maker(與本批已知的 taker)、`cancelled` 減 `remaining_qty`;`delta` = **本批碰到的價位「批前 vs 批後」之差**,不是從事件流推導 | `marketdata` 不能 import `trading`,payload 自己宣告同形 struct;rapid property test 隨機腳本同時餵 `matching.Book` 與投影器,每個 seq 後 `Depth(0)` 相等,且「上一個 depth 套 delta」等於新 depth;golden 來自 `test/fixtures/matching/*.jsonl` |
+| 批次收斂(修 H1) | 只看**本市場自己的事件**:`order.rejected`(seq 有值)→ 空 delta;`order.cancelled` 沒開批 → 取消命令;`order.accepted(T)` 開批,收到 `order_id == T` 的 filled / cancelled / updated 就收;GTC 限價不會穿過對手最佳價 → accepted 當下收;任何更大的 seq 先把開批收掉(warn);50 ms `Flush()` 保底 | 原設計拿 `balance.updated` 當終止符,但 outbox id 跨市場交錯,別的市場的 `balance.updated` 會把一個 seq 切成兩則 delta,第二則被客戶端「seq ≤ last_seq 丟棄」吃掉,影子簿無聲損壞。每個推進的 seq **恰好一則** delta(可為空),契約的「seq 連續」才成立 |
+| 重建 | 啟動或 gap:先建 ordered consumer 再讀 DB(`REPEATABLE READ, READ ONLY` 一筆交易讀 `market_sequences.last_seq` + open orders);重建中事件進有界緩衝(`MARKETDATA_REBUILD_BUFFER` 10,000),`Restore` 後丟 seq ≤ 快照、套 seq == expected、其他 → `ErrGap` 退避重來;`marketdata_book_rebuilds_total{market,reason}` | 不向引擎要快照:cmdbus 只有 place / cancel / depth,而且 1,000 個客戶端重連時不該有 1,000 個 request-reply 打進市場 runner 的 goroutine。`ex_stream` 對 `trading.orders` 本來就有 SELECT(0005) |
+| K 線落地(修 H2) | worker 依市場**輪詢 `trading.trades`**:`seq ∈ (cursor, min(last_seq, cursor+500)]` 依 `(seq, idx)` 讀出,Go 裡按 (interval, bucket) 聚合,**同一筆交易** upsert `marketdata.klines` + 寫 `marketdata.kline_cursors`(0021);追平後睡 `MARKETDATA_KLINE_POLL_INTERVAL`(1 s) | 原設計是 durable consumer:nak 一筆成交時後面的成交照送(MaxAckPending),重送的那筆被 `(seq, idx)` 守門擋掉,成交量就少了;修法 `MaxAckPending: 1` 等於每筆成交一次 DB 往返。輪詢真相表天然批次、天然冪等(cursor 與蠟燭同交易),整合測試只要 Postgres。§7.3 的 `worker-kline` durable 名字不用;`processed_events` 也不用 |
+| 空桶與 ticker | 空桶**不存**,讀時 `FillGaps` 用前一根收盤價補(`trades == 0` 表示合成);ticker = 1m 蠟燭的 24h 折疊(`TickerFrom`),`change_pct` 截到 2 位;沒有 `marketdata.tickers` 表 | §8 偏離。窗口沒成交時價格欄位省略,OpenAPI 說明寫「omitted」(`x-omitempty` 放在 `$ref` 旁會被 oapi-codegen 忽略) |
+| stream 端的 K 線 | 每市場一個 1,440 格的 1m `CandleRing`,各 interval 由環聚合(桶對齊所以一致);**播種要精確**:ordered consumer 建好後一筆交易讀 `kline_cursors.last_seq = C`、24h 的 1m 蠟燭、`trading.trades` 中 `seq ∈ (C, S]`,之後即時 `trade.executed` 中 seq ≤ S 丟掉 | 命令的成交原子落地、writer 從不切開一個 seq,所以無重無漏(`TestStreamTradesTickerKline` 重啟 stream 驗) |
+| Redis 深度快照 | stream 每市場最多每 100 ms(seq 有變時)寫 `md:depth:<tenant>:<market>`(TTL 10 s);api 的 `GET /depth` 先讀快照(`MARKETDATA_SNAPSHOT_TTL` 內新鮮)再走引擎;未知市場先查 registry 回 404 | 只有 `TEST_REDIS_ADDR` 時測 Redis 實作,api 的單元測試用記憶體假物件(fresh / stale / absent / error) |
+| WebSocket server(§7.5) | `github.com/coder/websocket`;每連線一個 writer goroutine + `STREAM_WRITE_BUFFER`(256)有界 channel,塞滿 → `1008 slow_consumer`;伺服器每 15 s ping、15 s 無 pong 斷;`Hub` 每則訊息編碼一次 N 次送;`CloseAll` 先等握手完成再取消 | coder/websocket 的三個坑:Read / Write / Ping 的 ctx 到期會**直接關線**(不是取消那一次操作),所以讀寫用伺服器的 base ctx、關線一律經由 writer goroutine(`closeReq`);`Close` 在 reader 跑著的時候從別的 goroutine 呼叫才會做握手;`CloseAll` 若先取消 base ctx,握手永遠送不出去 |
+| 私有協定(修 H3) | auth ack 帶帳戶當下的 `account_seq`(掛上 hub **之後**才讀 `ledger.accounts.next_seq`);之後的即時 frame **先扣住**(上限 4 × WriteBuffer),等客戶端第一個 op:`resume` → 回放 outbox 分頁(`account_seq > since_seq`)→ 放出扣住的 frame 中 `account_seq > 最後回放值` 者 → 即時;其他 op 或 1 s 到期 → 從現在即時;上線後 `resume` → `resume_too_late` | 原設計「先回放再掛上即時流」在回放期間有事件時會漏;「先掛上再回放」不合併會重。扣住 + 合併是唯一同時不漏不重的順序,`TestStreamResumeNoLossNoDup` 在離線期間下 30 張單且回放期間另一個 goroutine 持續下單,驗 `account_seq` 聯集恰好是 {K+1..N} 各一次 |
+| 頻道對應 | `order.*` → `orders`;`balance.updated` → `balances`;`deposit.*` → `deposits`;`withdrawal.*` → `withdrawals`;`trade.executed` → `fills`(maker 與 taker 兩邊各一則,帶 `role`,`account_seq: null`) | 比計畫多 `deposits` / `withdrawals`:它們是帳戶級、帶 `account_seq`、可 resume,SPA 靠它們知道要重抓餘額(充提的 `balance.updated` 不存在)。`fills` **不可 resume**:`trade.executed` 沒有 `account_id` / `account_seq`(`runner.go` 以帳戶 `""` 加入 outbox),不在 `outbox_account_seq_idx` 裡;加帳戶級成交事件是引擎契約變更,不該和 stream 綁同一個 PR,記為 Phase 7 候選(`fill.executed`) |
+| WS 認證 | 無狀態 JWT(`Verify(token, aud=exchange, now)` + tenant);拆分部署用 `auth.NewRemoteVerifier(JWT_JWKS_URL)`,role=all 用 signer 的 `VerifierFor()`;dev 沒有 JWKS → 私有端點 `auth_failed`、啟動 warn | API key HMAC 上 WS v1 不做(`docs/ws-api.md` 寫明);凍結用戶的 socket 最多再活 access TTL(15 分鐘),這是 bearer token 的本質(§24 同一條) |
+| Origin | `STREAM_ALLOWED_ORIGINS`(逗號清單;`*` 只在 `EXCHANGE_ENV=dev`,`Validate` 拒絕其他環境);沒有 cookie,auth 是明文 token frame,`*` 的風險是資源不是憑證 | compose 的 dev 給 `*`,因為 Vite proxy 轉出去的 Origin 是 `http://localhost:5173` |
+| 扇出型 consumer(§7.3) | `eventbus.SubscribeOrdered`:`js.OrderedConsumer(DeliverNew)`,無法解碼就跳過;lag 每 5 s 取樣進 **`event_consumer_lag{consumer}`**(§15 缺的指標),`Info()` 在第一次 consume 前回 `ErrOrderedConsumerNotCreated` 要擋;durable 的 `Subscribe` 也取樣 | `eventbus.NewMetrics` 原本在 `attachNATS` 裡 `MustRegister`,role=all 時 engine + worker + stream 共用 registry 會 panic → 在 `app.Run` 建一次傳下去;`marketdata.NewMetrics` 同一件事(worker 與 stream 同 process 時撞到) |
+| REST 行情 | `GET /v1/markets/{symbol}/ticker`、`/klines?interval&from&to&limit`(舊 → 新、限 `limit` 桶、預設窗口 = 最後 `limit` 桶含當前那根);`exchangectl ticker` / `klines` | 預設 `from = BucketStart(to) − (limit−1)×d`:原本 `to − limit×d` 會把當前那根切掉 |
+| CORS | **不在 Go 做**:`web/trade` 開發用 Vite `server.proxy`(`/v1`、`/.well-known` → 8080,`/ws` → 8081),`vite preview` 用 `preview.proxy`;部署時 SPA 與 api / stream 在同一個 origin 後面 | Playwright 走 preview server,瀏覽器只跟 5173 講話,跟部署一樣 |
+| 參考前台(§12) | React 19 + Vite 8 + TS 5.9(計畫寫 React 18)、`react-router-dom`、`lightweight-charts` 5、`openapi-typescript` 產 `src/api/schema.d.ts`(**進 repo**,`make web-check` 重產後 diff 必須為空)+ `openapi-fetch`;頁面:登入 / 註冊、市場列表、交易頁(訂單簿實作 §7.5 客戶端規則、K 線圖 REST + `kline.*`、下單表單以 BigInt 縮放整數做 tick / step / min notional 檢查、我的訂單 / 成交 / 餘額 REST 初始 + 私有 frame 觸發重抓 + resume)、錢包頁(充值地址、充值、提現表單帶 `Idempotency-Key`、提現) | 金額全程字串,`decimal.ts` 是縮放 BigInt,只有畫圖的座標轉 float;access token 在記憶體、refresh token 在 `sessionStorage`(單次使用 + 重用即撤銷 family,外洩會自我暴露);私有 frame 是**觸發器**,清單永遠是伺服器的(不從 payload 重建狀態);SPA 不進 container image(`.dockerignore` 排除 `web/`) |
+| Playwright 冒煙(DoD) | `web/trade/e2e/smoke.spec.ts`(`@playwright/test` 釘 1.56.1):瀏覽器註冊 → Node 端 admin faucet 注資(admin key **只在 Node**)→ 掛 bid → 公開流的 delta 把價位放進訂單簿 → 第二個帳戶走 REST 穿價 → 成交列、部分成交狀態、餘額、最近成交都透過兩條流變了 → 瀏覽器取消 → 價位離開訂單簿;CI 在 `KEEP=1 make e2e` 之後跑 `make web-e2e`,`fast-checks` 加 `make web-check` | 每個 PR 都跑(使用者決定),不是 nightly;3.8 s |
+| loadgen + 壓測(§3.3、§12) | `exchangectl loadgen`:註冊 + faucet N 帳戶、每帳戶一個 closed-loop goroutine 掛限價單 / 穿價 / 取消,`--ws-clients` / `--private-clients` / `--idle-connections` 量推播延遲與 1,000 連線;報表 nearest-rank 百分位;`docs/loadtest.md` | 行情側全部達標(1,030 連線、depth p99 19 ms、500 訂閱者 46,000 則/s 下 44 ms、私有 p99 24 ms、0 gap);引擎單市場飽和 ≈ 165 命令/s,`synchronous_commit=off` 只值 10%,瓶頸是每命令約 17 次 DB 往返;`POST p99 < 50 ms` 與 1,000 orders/s 未達,補法(`pgx.Batch`、group commit)記錄給 Phase 7 |
+| dashboards + alerts(§15) | `infra/observability/dashboards/{overview,ledger,chain,stream,system}.json`(Grafana 11.2、schemaVersion 39、datasource uid `prometheus`、`deployment` / `instance` 變數)、`alerts.yml` 七條、`prometheus.yml` `rule_files`、compose 掛載;新指標 `exchange_ready`(自己的 `/readyz` 每 10 s 取樣)、`db_pool_connections{state}` / `db_pool_max`(`pg.NewPoolCollector`,scrape 時讀 `pgxpool.Stat`)| 沒有 Alertmanager(告警在 Prometheus UI)、沒有 cAdvisor(System 板用 `process_*`,板上寫明);`observability_test.go` 是 promtool 的替身:每個 dashboard 可解析、uid 與 panel id 唯一、每條規則有 expr / severity / summary,**每個被讀的指標名都要在 `internal/**/*.go` 以字串常值出現** |
+| OTel trace 最小版(§15) | `telemetry.SetupTracing`(`OTEL_EXPORTER_OTLP_ENDPOINT` 空即關、無 provider 時每個呼叫只剩一次 context 查表);`TracingMiddleware`(handler 跑完後用 chi `RoutePattern()` `SetName`,sampled 時 request logger 加 `trace_id`);cmdbus client / server 注入 / 抽取 NATS header;runner 以 `WithSpanOf` 把呼叫者的 span 帶過命令佇列(不帶 cancellation);pgx `QueryTracer` 只在 sampled span 下開 span、名字取 sqlc 的 `-- name:`;`Outbox.Append` 把 `traceparent` 與 `Correlation-Id` 寫進 headers,relay 全部搬上 NATS header,兩種 consumer 在其下開 consumer span;webhook client 用 otelhttp transport;compose observability profile 加 Jaeger v2 | 只有 `telemetry` 與 `platform/pg` import OTel,其他 package 只看 `StartSpan` / `InjectTrace` / `ExtractTrace`(depguard);`OTEL_EXPORTER_OTLP_ENDPOINT` 依規範是 base URL,但 `WithEndpointURL` 當完整 URL 用,`http://jaeger:4318` 會 POST 到 `/`,所以沒有 path 時補 `/v1/traces`(單元測試對假 collector 驗);stream router **不掛** tracing middleware:WS 路由的 span 會活到連線結束,batch processor 永遠送不出去 |
+| 未做(刻意) | 多副本 stream 的 sticky(單副本);TradingView;`fill.executed`;API key HMAC 上 WS;`ledger.posted`;Alertmanager;cAdvisor;depth delta 合併(契約要 seq 連續;量出來的上限記錄在 loadtest.md);SPA 的 i18n / 深色模式以外的裝飾 | 都寫在 §12 的勾選註記與各文件 |
+
+### 25.1 設計審查抓到的三個 High
+
+- **H1 批次收斂用錯終止符。** 見表格「批次收斂」。這一條要是漏了,測試不容易抓到:單市場、單帳戶的情境下 `balance.updated` 永遠緊跟在本命令後面,一切正常;只有兩個市場同時活躍時,別的市場的 `balance.updated` 才會把 delta 切成兩半。rapid property test 只跑一個市場,所以修法之外還加了「已收斂的 seq 又來事件 = 一致性失敗 → 重建」這條保底。
+- **H2 K 線用 durable consumer 會少算成交量。** 見表格「K 線落地」。這也是「§7.3 已經決定了機制」與「這個 consumer 的正確性要求」不合的例子:處理型 consumer 的冪等靠 `processed_events`,但 K 線的守門是 `(seq, idx)`,兩者在 nak + MaxAckPending 的組合下打架。從真相表輪詢反而更簡單,也更好測。
+- **H3 resume 的時序。** 見表格「私有協定」。原設計描述的是兩個步驟,沒有寫它們之間會發生什麼;寫整合測試的時候「回放期間另一個 goroutine 持續下單」是照著這個漏洞設計的。
+
+### 25.2 與計畫書的偏離,以及刻意不做的
+
+- **K 線不走 JetStream**(§7.3 `worker-kline`):worker 輪詢 `trading.trades`。理由在 H2。
+- **沒有 `marketdata.tickers` 表**(§8):ticker 是 1m 蠟燭的折疊。
+- **多兩個私有頻道**(§7.5 只列 `orders` / `fills` / `balances`):`deposits`、`withdrawals`。
+- **`fills` 不可 resume**:見表格。`docs/ws-api.md` 寫明用 `GET /v1/fills` 對齊。
+- **React 19 / Vite 8**(§12 寫 React 18):用當前版本。TypeScript 用 5.9(7.0 是新的原生版,工具鏈相容性未定)。
+- **前台 Playwright 每個 PR 跑**(§12 說「可放 nightly」):使用者決定。
+- **OTel 是最小版**:沒有 metrics / logs 走 OTLP(Prometheus 與 slog 維持),沒有 stream router 的 span。
+- **壓測在本機跑、不進 CI**:數字只對那台機器有效,`docs/loadtest.md` 寫了怎麼重現。
+- **不做**:上面表格最後一列。
+
+### 25.3 這一輪學到的事
+
+- **「每個 seq 恰好一則」比「盡快送」重要。** 影子簿最早的版本在收到事件就送 delta,快是快,但客戶端的去重規則(seq ≤ last 丟)只在「一個 seq 一則」時正確。契約決定了實作的節奏,不是反過來。
+- **coder/websocket 的 ctx 語意跟 net/http 不一樣。** Read / Write / Ping 的 ctx 到期會直接關掉整條連線。第一版把連線的 ctx 傳進去,結果任何一次超時都變成斷線,測試裡表現成「慢客戶端被踢了,可是別的客戶端也斷了」。讀寫改用伺服器的 base ctx,關線只走 writer goroutine 一條路。
+- **同一個 process 註冊兩次 metrics 是 role=all 才會遇到的 panic。** worker 與 stream 各自 `marketdata.NewMetrics`,拆開跑沒事,合起來跑第一次啟動就 panic。凡是兩個 role 都用的 instrument,都要在 `app.Run` 建一次往下傳,eventbus 的那組也是這樣搬的。
+- **產生器的假設要寫進報告。** loadgen 是 closed loop(每帳戶同時一個請求在飛),所以飽和時量到的延遲 ≈ 帳戶數 × 服務時間,不是伺服器的「真正」延遲。不寫清楚,`POST p99 = 1.2 s` 這個數字會被當成伺服器慢了 25 倍。
+- **`synchronous_commit=off` 只值一成,先量再猜。** 直覺是「每命令一次 fsync 所以慢」,關掉 fsync 才知道 6 ms 裡有 5 ms 是十幾次往返。補法因此是 `pgx.Batch` 而不是換磁碟。
+- **OTel 的環境變數與 option 語意不同。** 規範說 `OTEL_EXPORTER_OTLP_ENDPOINT` 是 base URL(SDK 會補 `/v1/traces`),但 Go SDK 的 `WithEndpointURL` 把參數當完整 URL。假的 collector 收到 `POST /` 才發現;真的 Jaeger 會安靜地回 404,span 一個都不會到。
+- **本機的 NATS 是共用的。** 整合測試的 cmdbus server 與還在跑的 `bin/exchange serve` 都在 queue group `engine` 裡,請求被分流到用另一把 JWT 金鑰的那個,錯誤訊息是「找不到 key ID」。跟 §24 的「jsonb 會重排」一樣:紅的是環境,不是程式。
+- **瀏覽器的 locale 字串也可能是垃圾。** 沙盒的 Chromium 回 `en-US@posix`,lightweight-charts 拿去給 `Intl.DateTimeFormat` 每一幀都 throw,圖是空的但沒有任何錯誤顯示在頁面上。圖表的 locale 釘死 `en-US`。

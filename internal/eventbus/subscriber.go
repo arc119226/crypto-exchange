@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/nats-io/nats.go/jetstream"
@@ -28,6 +29,7 @@ type ConsumerConfig struct {
 	MaxDeliver     int           // default 10
 	Backoff        time.Duration // nak delay, default 2s
 	AckWait        time.Duration // default 30s
+	Metrics        *Metrics      // optional: event_consumer_lag{consumer=Durable}
 }
 
 func (c ConsumerConfig) withDefaults() ConsumerConfig {
@@ -57,15 +59,24 @@ func (c ConsumerConfig) validate() error {
 
 // Subscription is a running durable consumer.
 type Subscription struct {
-	cc jetstream.ConsumeContext
+	cc   jetstream.ConsumeContext
+	stop context.CancelFunc
+	done sync.WaitGroup
 }
 
 // Stop ends the consumption loop; the durable consumer and its position
 // survive on the server, so a restart resumes where this left off.
 func (s *Subscription) Stop() {
-	if s != nil && s.cc != nil {
+	if s == nil {
+		return
+	}
+	if s.stop != nil {
+		s.stop()
+	}
+	if s.cc != nil {
 		s.cc.Stop()
 	}
+	s.done.Wait()
 }
 
 // Subscribe creates (or reuses) the durable consumer and starts delivering
@@ -105,7 +116,10 @@ func Subscribe(ctx context.Context, js jetstream.JetStream, cfg ConsumerConfig, 
 			ack(log, msg)
 			return
 		}
-		if err := h(ctx, env); err != nil {
+		hctx, end := consumerSpan(ctx, msg, cfg.Durable, env)
+		err = h(hctx, env)
+		end(err)
+		if err != nil {
 			log.Error("event handler failed, redelivering",
 				slog.String("event_id", env.EventID), slog.String("event_type", env.EventType), slog.String("err", err.Error()))
 			if nerr := msg.NakWithDelay(cfg.Backoff); nerr != nil {
@@ -118,8 +132,18 @@ func Subscribe(ctx context.Context, js jetstream.JetStream, cfg ConsumerConfig, 
 	if err != nil {
 		return nil, fmt.Errorf("eventbus: consume %s: %w", cfg.Durable, err)
 	}
+	sub := &Subscription{cc: cc}
+	if cfg.Metrics != nil {
+		sctx, cancel := context.WithCancel(ctx)
+		sub.stop = cancel
+		sub.done.Add(1)
+		go func() {
+			defer sub.done.Done()
+			sampleLag(sctx, cons, cfg.Durable, cfg.Metrics)
+		}()
+	}
 	log.Info("event consumer started", slog.Any("subjects", cfg.FilterSubjects))
-	return &Subscription{cc: cc}, nil
+	return sub, nil
 }
 
 func ack(log *slog.Logger, msg jetstream.Msg) {
