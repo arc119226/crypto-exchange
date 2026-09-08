@@ -1311,18 +1311,18 @@ exchangectl admin webhooks deliveries $(echo $WH | jq -r .id)   # 每次嘗試�
 
 **任務清單**:
 
-- [ ] `marketdata.BookProjector`:消費 order.* 事件維護影子簿(以 seq 對齊、缺口重建自 `GET /orders?status=open` 內部查詢)、產 depth delta(1.5 d)
-- [ ] trades / ticker / kline 聚合器(worker 持久化 `marketdata.klines`;重啟從最後一根 K 線的 seq 重放)(1.5 d)
-- [ ] REST 行情端點 + Redis 深度快照快取(0.5 d)
-- [ ] `stream` server:連線、subscribe/unsubscribe、公開頻道、snapshot + delta、心跳、有界 buffer 斷線(2 d)
-- [ ] 私有頻道:auth、依 account_id 扇出、`account_seq`、`resume` 從 outbox 補齊(1.5 d)
-- [ ] `docs/ws-api.md` + 整合測試:重連補齊不漏不重、seq 缺口重抓、慢客戶端被斷而其他客戶端延遲不變(1.5 d)
-- [ ] `web/trade`:登入、市場列表、訂單簿(WS)、下單表單、我的訂單/成交/餘額(私有 WS)、充值地址、提現;OpenAPI 產 TS client(4 d)
-- [ ] `exchangectl loadgen` + 壓測報告(p99、吞吐、WS 延遲)(1 d)
-- [ ] Grafana dashboards(引擎、帳本、鏈上、HTTP/WS、系統)+ alert rules(服務不健康、`ledger_trial_balance_diff != 0`、`chain_scanner_lag_blocks > 20`、`outbox_backlog > 1000`、熱錢包低水位、pending_review 積壓)(1.5 d)
-- [ ] OTel trace(選用):HTTP → DB → NATS header → consumer;Tempo 或 Jaeger 在 observability profile(1 d)
+- [x] `marketdata.BookProjector`:消費 order.* 事件維護影子簿(以 seq 對齊、缺口重建自 `GET /orders?status=open` 內部查詢)、產 depth delta(1.5 d)——order-level 影子簿,delta 是「批前 vs 批後」的價位差;批次以本市場自己的事件收斂(taker 終態事件、不會穿價的 GTC 在 accepted 當下、50 ms flush 保底);重建直接讀 `trading.orders`(REPEATABLE READ),不向引擎要快照;rapid property test 對 `matching.Book`
+- [x] trades / ticker / kline 聚合器(worker 持久化 `marketdata.klines`;重啟從最後一根 K 線的 seq 重放)(1.5 d)——worker **輪詢 `trading.trades`** 依 seq 聚合,蠟燭與 `kline_cursors` 同一交易(冪等),不用 durable consumer(§7.3 的 `worker-kline` 名字不用);空桶讀時補;ticker 由 1m 蠟燭 24h 折疊算出,沒有 `marketdata.tickers` 表
+- [x] REST 行情端點 + Redis 深度快照快取(0.5 d)——`GET /ticker`、`GET /klines`;api role 的 `GET /depth` 先讀 stream 寫的 Redis 快照(10 s 內新鮮)再走引擎
+- [x] `stream` server:連線、subscribe/unsubscribe、公開頻道、snapshot + delta、心跳、有界 buffer 斷線(2 d)——`github.com/coder/websocket`;`STREAM_ALLOWED_ORIGINS`(`*` 只在 dev)
+- [x] 私有頻道:auth、依 account_id 扇出、`account_seq`、`resume` 從 outbox 補齊(1.5 d)——auth 後扣住 1 s 等第一個 op,resume 回放 outbox 分頁後合併扣住的 frame;多 `deposits`、`withdrawals` 兩個頻道;`fills` 只做即時(`trade.executed` 沒有 `account_seq`)
+- [x] `docs/ws-api.md` + 整合測試:重連補齊不漏不重、seq 缺口重抓、慢客戶端被斷而其他客戶端延遲不變(1.5 d)
+- [x] `web/trade`:登入、市場列表、訂單簿(WS)、下單表單、我的訂單/成交/餘額(私有 WS)、充值地址、提現;OpenAPI 產 TS client(4 d)——React 19 + Vite 8 + TS 5.9(計畫寫 React 18),`openapi-typescript` 產 `schema.d.ts` 進 repo;K 線圖 lightweight-charts 5;Playwright 冒煙每個 PR 跑(接在 `make e2e` 之後)
+- [x] `exchangectl loadgen` + 壓測報告(p99、吞吐、WS 延遲)(1 d)——`docs/loadtest.md`:行情側全部達標(1,030 連線、depth delta p99 19 ms、私有推播 p99 24 ms);引擎單市場飽和 ≈ 165 命令/s(每命令一筆 6.9 ms 的 PG 交易,fsync 只佔一成),`POST p99 < 50 ms` 與 1,000 orders/s 未達,差距與補法記錄在文件
+- [x] Grafana dashboards(引擎、帳本、鏈上、HTTP/WS、系統)+ alert rules(服務不健康、`ledger_trial_balance_diff != 0`、`chain_scanner_lag_blocks > 20`、`outbox_backlog > 1000`、熱錢包低水位、pending_review 積壓)(1.5 d)——五個 JSON + `alerts.yml` 七條;新指標 `exchange_ready`、`db_pool_connections{state}`、`db_pool_max`、`event_consumer_lag`;`infra/observability/observability_test.go` 驗每個指標名都在 Go 程式裡註冊;沒有 Alertmanager / cAdvisor
+- [x] OTel trace(選用):HTTP → DB → NATS header → consumer;Tempo 或 Jaeger 在 observability profile(1 d)——最小版:`OTEL_EXPORTER_OTLP_ENDPOINT` 空即關;api → cmdbus → engine(跨 runner 佇列)→ pgx → outbox headers `traceparent` → relay → consumer;Jaeger v2 在 observability profile
 
-**DoD(CI)**:`integration`:WS 重連補齊測試、慢客戶端測試、kline 聚合 golden;`e2e`:前台 Playwright 冒煙(登入 → 下單 → 訂單簿更新 → 餘額變動)(可放 nightly);壓測結果達 3.3 目標或記錄差距;dashboards JSON 與 alert rules 進 `infra/observability` 並被 compose 載入。
+**DoD(CI)**:`integration`:WS 重連補齊測試、慢客戶端測試、kline 聚合 golden;`e2e`:前台 Playwright 冒煙(登入 → 下單 → 訂單簿更新 → 餘額變動)(可放 nightly);壓測結果達 3.3 目標或記錄差距;dashboards JSON 與 alert rules 進 `infra/observability` 並被 compose 載入。——全部滿足:`TestStreamResumeNoLossNoDup`、`TestStreamSlowClientIsDisconnectedOthersUnaffected`、`TestGoldenDeltas` / kline golden;`web/trade/e2e/smoke.spec.ts` 在每個 PR 的 `e2e` job 跑(不是 nightly);`docs/loadtest.md`;`observability_test.go` + `make compose-config`。
 
 **展示腳本**:
 
@@ -1331,6 +1331,7 @@ websocat ws://localhost:8081/ws/v1/public -E <<< '{"op":"subscribe","channel":"d
 cd web/trade && npm run dev   # http://localhost:5173
 make loadgen                  # 印 p50/p99、成交/秒、WS 推播延遲
 open http://localhost:3000    # Grafana: Exchange Overview
+open http://localhost:16686   # Jaeger:一張單從 api 到 consumer 的 trace
 ```
 
 **預估工時**:4–6 週。

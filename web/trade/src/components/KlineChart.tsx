@@ -40,6 +40,9 @@ export function KlineChart({ feed, market }: { feed: PublicFeed; market: string 
       layout: { background: { color: '#171d25' }, textColor: '#8b95a7' },
       grid: { vertLines: { color: '#262e3a' }, horzLines: { color: '#262e3a' } },
       timeScale: { timeVisible: true, secondsVisible: false },
+      // the chart formats its axis with Intl; pin the locale so an odd
+      // browser locale tag cannot make every frame throw
+      localization: { locale: 'en-US' },
       autoSize: true,
     })
     const s = c.addSeries(CandlestickSeries, {

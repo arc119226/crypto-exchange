@@ -81,16 +81,29 @@ events, and `_` when neither applies.
 Two kinds, and picking the wrong one is a silent bug:
 
 - **Fan-out** — every replica needs every event (the WebSocket servers).
-  Use an *ephemeral ordered* consumer per replica and deduplicate on `seq` /
-  `account_seq`. A shared durable consumer is a work queue: each replica
-  would receive only a slice of the stream.
+  Use an *ephemeral ordered* consumer per replica (`eventbus.SubscribeOrdered`)
+  and deduplicate on `seq` / `account_seq`. A shared durable consumer is a
+  work queue: each replica would receive only a slice of the stream. An
+  ordered consumer starts from "now" and is not durable; the stream role
+  rebuilds its shadow books from `trading.orders` and its candles from
+  `marketdata.klines` after it subscribes, so nothing committed in between
+  is lost (`docs/domain.md` §25).
 - **Processing** — the work must happen exactly once (webhook delivery,
   K-line aggregation, the back-office projection). Use a *durable* consumer
   with explicit ack (`eventbus.Subscribe`), write your effect and
   `eventbus.MarkProcessed` in the same transaction, and treat a duplicate
   key as "already done" and ack. A handler whose effect is idempotent by
   construction — the engine's registry reload, which only re-reads Postgres —
-  needs no `processed_events` row.
+  needs no `processed_events` row. K-line aggregation is the exception that
+  uses neither: the worker polls `trading.trades` by sequence and writes the
+  candles and its cursor in one transaction, because a durable consumer
+  that naks one trade lets the ones behind it through.
+
+Both consumer kinds hand the handler a context carrying the event's
+correlation id and its W3C trace context: the outbox row stores
+`Correlation-Id` and `traceparent` in `headers`, the relay copies them onto
+the NATS message, and the consumer opens its span under the request that
+produced the event (`docs/plan-v1.0.md` §15).
 
 ## Catalog
 
@@ -104,15 +117,15 @@ schema; `planned` means the phase that adds it will add the schema with it.
 | `order.filled` | engine | stream, webhook | shipped |
 | `order.cancelled` | engine | stream (private, depth), webhook | shipped |
 | `order.rejected` | engine | stream, webhook | shipped |
-| `trade.executed` | engine | stream (trades, ticker, kline), worker, webhook | shipped |
-| `balance.updated` | engine, chain, admin | stream (private), webhook | shipped |
+| `trade.executed` | engine | stream (trades, ticker, kline; private `fills`), worker (klines), webhook | shipped |
+| `balance.updated` | engine | stream (private `balances`), webhook | shipped |
 | `market.updated` | admin | **engine (reload)**, stream, webhook | shipped |
-| `ledger.posted` | engine, chain, admin | stream (balances), back-office projection | planned (Phase 6, with the private stream) |
+| `ledger.posted` | — | — | not in v1: the private `balances` channel carries the engine's `balance.updated`; deposits, withdrawals and adjustments reach the stream as their own events and the client refetches balances (`docs/ws-api.md`) |
 | `asset.updated`, `fee_schedule.updated` | admin | engine (reload), webhook | shipped |
 | `registry.reload` | admin | engine (reload), webhook | shipped |
-| `deposit.detected`, `deposit.credited`, `deposit.orphaned`, `deposit.dropped`, `deposit.reversed` | chain | stream, webhook, admin | shipped |
-| `withdrawal.requested` | api | stream, webhook, admin | shipped |
-| `withdrawal.state_changed` | api, chain, admin | stream, webhook, admin | shipped |
+| `deposit.detected`, `deposit.credited`, `deposit.orphaned`, `deposit.dropped`, `deposit.reversed` | chain | stream (private `deposits`), webhook, admin | shipped |
+| `withdrawal.requested` | api | stream (private `withdrawals`), webhook, admin | shipped |
+| `withdrawal.state_changed` | api, chain, admin | stream (private `withdrawals`), webhook, admin | shipped |
 | `sweep.completed`, `sweep.failed` | chain | admin | shipped |
 | `alert.hot_wallet_low` | chain | webhook, admin | shipped |
 | `reconciliation.break_detected` | **chain** | webhook, admin | shipped |
