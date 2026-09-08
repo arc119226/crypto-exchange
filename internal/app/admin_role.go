@@ -45,23 +45,23 @@ func newLedger(ctx context.Context, cfg Config, log *slog.Logger, pool *pgxpool.
 // panic recovery, then two groups on one router -- the OpenAPI routes behind
 // the static API key for machines, and the back-office pages behind a
 // session cookie for people (docs/plan-v1.0.md §12).
-func newAdminServer(cfg Config, log *slog.Logger, m *telemetry.HTTPMetrics, reg prometheus.Registerer, pool *pgxpool.Pool, l *ledger.Service) (*http.Server, error) {
+func newAdminServer(cfg Config, log *slog.Logger, m *telemetry.HTTPMetrics, reg prometheus.Registerer, pool *pgxpool.Pool, l *ledger.Service) (*http.Server, *admin.Handler, error) {
 	// Only to seal the secrets of endpoints this role creates. Config.Validate
 	// has already checked the key, so a failure here is a wiring mistake --
 	// but swallowing it would leave admin up with every webhook endpoint
 	// returning 500, which is a worse way to find out.
 	master, err := cfg.Webhook.Master()
 	if err != nil {
-		return nil, fmt.Errorf("webhook signing key: %w", err)
+		return nil, nil, fmt.Errorf("webhook signing key: %w", err)
 	}
 	// Run has already refused to start without it; this only decodes it.
 	totpKey, err := cfg.Admin.TOTPMaster()
 	if err != nil {
-		return nil, fmt.Errorf("admin totp key: %w", err)
+		return nil, nil, fmt.Errorf("admin totp key: %w", err)
 	}
 	loginLimit, err := ratelimit.ParseLimit(cfg.RateLimit.LoginPerIP)
 	if err != nil {
-		return nil, fmt.Errorf("config: LOGIN_PER_IP: %w", err)
+		return nil, nil, fmt.Errorf("config: LOGIN_PER_IP: %w", err)
 	}
 	r := chi.NewRouter()
 	r.Use(telemetry.CorrelationMiddleware(log))
@@ -95,7 +95,7 @@ func newAdminServer(cfg Config, log *slog.Logger, m *telemetry.HTTPMetrics, reg 
 		Tenant: cfg.TenantID, Issuer: cfg.Auth.Issuer, TOTPKey: totpKey, AdminSessionTTL: cfg.Admin.SessionTTL,
 	}, nil, nil, l, rec)
 	if err != nil {
-		return nil, fmt.Errorf("admin sessions: %w", err)
+		return nil, nil, fmt.Errorf("admin sessions: %w", err)
 	}
 	h := admin.NewHandler(pool, l, registry.NewStore(pool), rec, cfg.TenantID).
 		// Which chain's reconciliation reports this role shows. It cannot
@@ -118,22 +118,29 @@ func newAdminServer(cfg Config, log *slog.Logger, m *telemetry.HTTPMetrics, reg 
 		Cookies: admin.Cookies{Secure: cfg.SecureCookies()}, LoginLimit: loginLimit, Registerer: reg,
 	})
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if !cfg.SecureCookies() {
 		log.Warn("admin session cookie is not Secure (ADMIN_COOKIE_SECURE / EXCHANGE_ENV=dev): plain http only on a private network")
 	}
 	admin.Routes(r, h, ui, cfg.Admin.APIKey.Reveal())
-	return &http.Server{Addr: cfg.AdminAddr, Handler: r, ReadHeaderTimeout: 5 * time.Second}, nil
+	return &http.Server{Addr: cfg.AdminAddr, Handler: r, ReadHeaderTimeout: 5 * time.Second}, h, nil
 }
 
-// observeTrialBalance refreshes the trial-balance gauge until ctx ends.
-func observeTrialBalance(ctx context.Context, log *slog.Logger, l *ledger.Service) error {
+// observeLedger refreshes the trial-balance gauge and runs the ledger's
+// self-check until ctx ends: the first is a number for Prometheus, the second
+// is a row and an event for people (docs/plan-v1.0.md §12, §15). Both read
+// the same sums; the check is what turns a gauge nobody watches at 3am into
+// something that pages.
+func observeLedger(ctx context.Context, log *slog.Logger, l *ledger.Service, h *admin.Handler) error {
 	tick := time.NewTicker(trialBalanceInterval)
 	defer tick.Stop()
 	for {
 		if err := l.ObserveTrialBalance(ctx); err != nil && ctx.Err() == nil {
 			log.Warn("trial balance refresh failed", slog.String("err", err.Error()))
+		}
+		if _, _, err := h.WatchLedgerBreaks(ctx); err != nil && ctx.Err() == nil {
+			log.Warn("ledger break check failed", slog.String("err", err.Error()))
 		}
 		select {
 		case <-ctx.Done():

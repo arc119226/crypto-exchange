@@ -20,6 +20,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/arc119226/crypto-exchange/internal/admin"
 	"github.com/arc119226/crypto-exchange/internal/auth"
 	"github.com/arc119226/crypto-exchange/internal/chain/deposit"
 	"github.com/arc119226/crypto-exchange/internal/chain/reconcile"
@@ -59,6 +60,8 @@ var (
 		"asset.updated":        "01J8Z2K3M4N5P6Q7R8S9T0V1Y3",
 		"fee_schedule.updated": "01J8Z2K3M4N5P6Q7R8S9T0V1Y4",
 		"registry.reload":      "01J8Z2K3M4N5P6Q7R8S9T0V1Y5",
+		// the ledger against itself, found by the admin role (§12)
+		"reconciliation.ledger_break_detected": "01J8Z2K3M4N5P6Q7R8S9T0V1Y6",
 		// the deposit story of docs/plan-v1.0.md §6.4.1, one id per state
 		"deposit.detected": "01J8Z2K3M4N5P6Q7R8S9T0V1X0",
 		"deposit.credited": "01J8Z2K3M4N5P6Q7R8S9T0V1X1",
@@ -220,6 +223,11 @@ func sample(t *testing.T, eventType string) eventbus.Envelope {
 			UserID: "01J8Z2K3M4N5P6Q7R8S9T0U100", KYCLevel: 2, PreviousKYCLevel: 0, Version: 4,
 			Reason: "documents verified",
 		}
+	case admin.EventLedgerBreakDetected:
+		payload = admin.LedgerBreakPayload{
+			BreakID: "01J8Z2K3M4N5P6Q7R8S9T0B100", Asset: "ETH", Debits: amt("1250.5"), Credits: amt("1249"), Diff: amt("1.5"),
+			DetectedAt: fixedTime,
+		}
 	case registry.EventAssetUpdated:
 		payload = registry.AssetUpdatedPayload{
 			AssetID: "01J8Z2K3M4N5P6Q7R8S9T0A100", Symbol: "USDC", Status: "active", DepositEnabled: true, WithdrawEnabled: false,
@@ -255,6 +263,7 @@ func allEventTypes() []string {
 	out := append([]string{}, trading.EventTypes()...)
 	out = append(out, registry.EventTypes()...)
 	out = append(out, auth.EventTypes()...)
+	out = append(out, admin.EventTypes()...)
 	out = append(out, deposit.EventTypes()...)
 	out = append(out, withdrawal.EventTypes()...)
 	out = append(out, sweep.EventTypes()...)

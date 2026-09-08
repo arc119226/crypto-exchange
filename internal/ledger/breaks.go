@@ -5,6 +5,9 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
+
 	"github.com/arc119226/crypto-exchange/internal/ledger/sqlcgen"
 	"github.com/arc119226/crypto-exchange/internal/money"
 	"github.com/arc119226/crypto-exchange/internal/platform/pg"
@@ -73,4 +76,88 @@ func breakFromRow(r sqlcgen.AdminLedgerBreak) (Break, error) {
 		b.ResolvedAt = &t
 	}
 	return b, nil
+}
+
+// ReconcileBreaks is the ledger checking itself: one pass over the trial
+// balance against the breaks already open, inside the caller's transaction
+// so the events for what it found commit with the rows.
+//
+// Edge-triggered, like the chain reconciliation (docs/events.md): a break is
+// opened when an asset first fails to balance or when the size of its
+// difference changes (the old row is resolved and a new one opened, so the
+// history keeps every size it had), and resolved when the asset balances
+// again. An asset that stays out by the same amount is left alone -- it is
+// already open, already visible, and re-announcing it would only teach people
+// to ignore it.
+func (s *Service) ReconcileBreaks(ctx context.Context, tx pgx.Tx, now time.Time) (opened, resolved []Break, err error) {
+	q := sqlcgen.New(tx)
+	rows, err := q.TrialBalance(ctx, s.tenant)
+	if err != nil {
+		return nil, nil, fmt.Errorf("ledger: trial balance: %w", err)
+	}
+	type totals struct{ debits, credits, diff money.Amount }
+	out := map[string]totals{}
+	for _, r := range rows {
+		debits, err := pg.AmountFromNumeric(r.Debits)
+		if err != nil {
+			return nil, nil, err
+		}
+		credits, err := pg.AmountFromNumeric(r.Credits)
+		if err != nil {
+			return nil, nil, err
+		}
+		if diff := debits.Sub(credits); !diff.IsZero() {
+			out[r.Asset] = totals{debits, credits, diff}
+		}
+	}
+	openRows, err := q.ListOpenLedgerBreaks(ctx, s.tenant)
+	if err != nil {
+		return nil, nil, fmt.Errorf("ledger: open breaks: %w", err)
+	}
+	open := map[string]Break{}
+	for _, r := range openRows {
+		b, err := breakFromRow(r)
+		if err != nil {
+			return nil, nil, err
+		}
+		open[b.Asset] = b
+	}
+	resolve := func(b Break) error {
+		if _, err := q.ResolveLedgerBreak(ctx, sqlcgen.ResolveLedgerBreakParams{ID: b.ID, ResolvedAt: pgtype.Timestamptz{Time: now, Valid: true}}); err != nil {
+			return fmt.Errorf("ledger: resolve break %s: %w", b.ID, err)
+		}
+		b.ResolvedAt = &now
+		resolved = append(resolved, b)
+		return nil
+	}
+	for asset, t := range out {
+		if prev, ok := open[asset]; ok {
+			if prev.Diff.Equal(t.diff) {
+				continue // still out by the same amount: already announced
+			}
+			if err := resolve(prev); err != nil {
+				return nil, nil, err
+			}
+		}
+		row, err := q.InsertLedgerBreak(ctx, sqlcgen.InsertLedgerBreakParams{
+			TenantID: s.tenant, Asset: asset, Debits: pg.NumericFromAmount(t.debits), Credits: pg.NumericFromAmount(t.credits),
+			Diff: pg.NumericFromAmount(t.diff), DetectedAt: now,
+		})
+		if err != nil {
+			return nil, nil, fmt.Errorf("ledger: record break %s: %w", asset, err)
+		}
+		b, err := breakFromRow(row)
+		if err != nil {
+			return nil, nil, err
+		}
+		opened = append(opened, b)
+	}
+	for asset, prev := range open {
+		if _, still := out[asset]; !still {
+			if err := resolve(prev); err != nil {
+				return nil, nil, err
+			}
+		}
+	}
+	return opened, resolved, nil
 }

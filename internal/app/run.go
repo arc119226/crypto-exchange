@@ -14,6 +14,7 @@ import (
 	"github.com/redis/go-redis/v9"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/arc119226/crypto-exchange/internal/admin"
 	"github.com/arc119226/crypto-exchange/internal/ledger"
 	"github.com/arc119226/crypto-exchange/internal/platform/natsx"
 	"github.com/arc119226/crypto-exchange/internal/platform/pg"
@@ -61,6 +62,7 @@ func Run(ctx context.Context, cfg Config, roles []Role, bi BuildInfo) error {
 	var (
 		servers      []*http.Server
 		adminLedger  *ledger.Service
+		adminHandler *admin.Handler
 		eng          engineComponents
 		sharedLedger *ledger.Service
 		apiRefresh   *registryRefresher
@@ -141,10 +143,11 @@ func Run(ctx context.Context, cfg Config, roles []Role, bi BuildInfo) error {
 				return err
 			}
 			adminLedger = l
-			srv, err := newAdminServer(cfg, log, httpMetrics, reg, d.pool, l)
+			srv, h, err := newAdminServer(cfg, log, httpMetrics, reg, d.pool, l)
 			if err != nil {
 				return err
 			}
+			adminHandler = h
 			servers = append(servers, srv)
 		case RoleChain:
 			l, err := ledgerFor()
@@ -179,7 +182,7 @@ func Run(ctx context.Context, cfg Config, roles []Role, bi BuildInfo) error {
 		g.Go(listenAndServe(s, log))
 	}
 	if adminLedger != nil {
-		g.Go(func() error { return observeTrialBalance(gctx, log, adminLedger) })
+		g.Go(func() error { return observeLedger(gctx, log, adminLedger, adminHandler) })
 	}
 	if signer != nil {
 		g.Go(func() error { return signer.run(gctx, log) })

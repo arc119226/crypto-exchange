@@ -116,6 +116,7 @@ schema; `planned` means the phase that adds it will add the schema with it.
 | `sweep.completed`, `sweep.failed` | chain | admin | shipped |
 | `alert.hot_wallet_low` | chain | webhook, admin | shipped |
 | `reconciliation.break_detected` | **chain** | webhook, admin | shipped |
+| `reconciliation.ledger_break_detected` | **admin** | webhook, admin | shipped |
 | `user.status_updated`, `user.kyc_level_updated` | admin | webhook, admin | shipped |
 
 `deposit.*` events all share one payload: what a consumer needs about a
@@ -172,6 +173,19 @@ wallet when the balance crosses the line — remembered in
 `chain.hot_wallets.low_alerted_at`, so a restart does not re-announce it
 either. A consumer that wants the current state should read
 `GET /admin/v1/reconciliation`, not count events.
+
+`reconciliation.ledger_break_detected` is the other half of §6.4.4, the one
+that needs no node: the ledger against itself, one asset whose debits and
+credits disagree. The **admin** role finds it on the same thirty-second loop
+that refreshes `ledger_trial_balance_diff`, records it in
+`admin.ledger_breaks`, and publishes it from the same transaction. The two
+break events are deliberately two types rather than one with optional fields:
+they are found by different roles, argued about against different terms, and
+a consumer that subscribes to one should not have to check which kind arrived.
+Like its sibling it is edge-triggered -- a break that stays out by the same
+amount is not re-announced, one whose size changes is (the old row is resolved
+and a new one opened, so the history keeps every size it had) -- and it closes
+on its own when the books agree again.
 
 `reconciliation.break_detected` carries every term of the comparison and not
 just `diff`, because the terms are what say where to look: a difference the
