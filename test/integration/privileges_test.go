@@ -75,3 +75,39 @@ func TestAPIRolePrivileges(t *testing.T) {
 		assert.Equal(t, "42501", pgErr.Code, "only ex_admin and ex_all may read audit.audit_events")
 	})
 }
+
+// The fee snapshot is enforced by a grant, not by discipline: the chain role
+// may drive the state machine but holds no privilege on chain.withdrawals.fee
+// or fee_asset, so a rate change cannot reach a withdrawal already in flight
+// even through a bug. Every other test connects as ex_all and would never
+// notice; without this one, an implementation that updated the snapshot would
+// pass the whole suite and fail only in a split deployment.
+func TestChainRoleCannotRewriteTheFeeSnapshot(t *testing.T) {
+	h := setupLedger(t)
+	ctx := context.Background()
+
+	chainPool, err := pg.Open(ctx, pg.PoolConfig{DSN: h.DSN("ex_chain"), MaxConns: 2})
+	require.NoError(t, err)
+	defer chainPool.Close()
+
+	// Column privileges are checked when the statement is planned, so these
+	// need no fixture row: a permitted UPDATE succeeds against nothing, and a
+	// forbidden one fails before it looks.
+	t.Run("the chain role may advance the state machine", func(t *testing.T) {
+		_, err := chainPool.Exec(ctx,
+			`UPDATE chain.withdrawals SET status = 'signed' WHERE id = 'no-such-withdrawal'`)
+		require.NoError(t, err)
+	})
+
+	t.Run("but not the fee it was quoted", func(t *testing.T) {
+		for _, stmt := range []string{
+			`UPDATE chain.withdrawals SET fee = 0 WHERE id = 'no-such-withdrawal'`,
+			`UPDATE chain.withdrawals SET fee_asset = 'ETH' WHERE id = 'no-such-withdrawal'`,
+		} {
+			_, err := chainPool.Exec(ctx, stmt)
+			var pgErr *pgconn.PgError
+			require.ErrorAs(t, err, &pgErr, stmt)
+			assert.Equal(t, "42501", pgErr.Code, stmt)
+		}
+	})
+}
