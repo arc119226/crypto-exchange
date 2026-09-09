@@ -220,21 +220,31 @@ CI 需要一個 Docker 引擎。有兩種裝法,**建議用 6A**。
 
 ```sh
 sudo apt-get update
-sudo apt-get install -y ca-certificates curl git jq unzip make
+sudo apt-get install -y ca-certificates curl git jq unzip make build-essential
+curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
+sudo apt-get install -y nodejs
 curl -fsSL https://get.docker.com | sudo sh
 sudo usermod -aG docker "$USER"
 sudo systemctl enable --now docker
 ```
 
+**`build-essential` 不能漏。** `make test` 是 `go test -race`,race detector 需要 cgo,cgo 需要 C 編譯器,而 WSL 的 Ubuntu 映像預設不含 gcc。這在第一次實跑就踩到了:`checks` job 的前十二步全過(`go vet`、golangci-lint、gitleaks、sqlc、oapi-codegen 都是純 Go;`make build` 是 `CGO_ENABLED=0`),到 `-race` 那一步**零秒失敗**——零秒代表指令根本沒啟動,不是測試沒過。
+
+**Node 用 NodeSource 22,不要用 Ubuntu 內建的。** 24.04 內建是 Node 18,而這個專案要 22。Ubuntu 還把 `npm` 拆成獨立套件,少裝一半就會出現第 14 節那個「指令掉到 Windows 去」的問題。NodeSource 的 `nodejs` 套件內含 npm。
+
 **登出再登入**(關掉 Ubuntu 視窗重開),讓群組生效,然後驗證:
 
 ```sh
+gcc --version
+node --version                  # v22.x
+command -v npm npx              # 都要 /usr/bin,不能是 /mnt/c
 docker version
 docker compose version
+docker buildx version
 docker run --rm hello-world
 ```
 
-三個都要有正常輸出。
+全部都要有正常輸出。`docker buildx` 少了的話 `image` job 會在 `docker/setup-buildx-action` 那一步失敗。
 
 如果你已經裝了 Docker Desktop,**把它對這個 distro 的 WSL Integration 關掉**(Settings → Resources → WSL integration → 把 Ubuntu-24.04 的開關關掉 → Apply),否則兩個引擎會搶 `/var/run/docker.sock`。Docker Desktop 本身可以留著手動用。
 
@@ -271,6 +281,29 @@ docker version
 ### 兩條路線共通
 
 testcontainers 在 WSL2 上是開箱即用的。**不要**去設 `DOCKER_HOST=tcp://localhost:2375`——那是舊版 WSL 的建議,而且等於在一台跑 CI 的機器上開一個沒有認證也沒有 TLS 的 root 等級 daemon。
+
+### 還有一件裝一次的事:Playwright 的系統函式庫
+
+`e2e` job 會用 Playwright 開瀏覽器跑前台冒煙測試。瀏覽器本身 CI 每次會自己抓(抓過就留在 `~/.cache/ms-playwright`,之後是 no-op),但它依賴的**系統函式庫**要你先裝一次:
+
+```sh
+npx playwright@1.56.1 install --with-deps chromium
+ls ~/.cache/ms-playwright
+```
+
+版本要對得上 `web/trade/package.json` 裡釘的那個。
+
+**為什麼這一步不能交給 CI:** `--with-deps` 內部是 `sudo -- sh -c "apt-get ..."`。要 CI 每次跑它,等於得給 runner 帳號免密碼 sudo。所以 workflow 在 `vars.CI_RUNNER` 有值時把 `PLAYWRIGHT_INSTALL_DEPS` 設成 `0`,`scripts/e2e-web.sh` 就只要瀏覽器、不碰 `--with-deps`。**這台機器因此完全不需要 NOPASSWD。**
+
+**發行版版本要對。** `--with-deps` 只認得 Playwright 有出套件清單的那幾個 Ubuntu 版本。實測 Ubuntu 26.04 會直接拒絕:
+
+```
+BEWARE: your OS is not officially supported by Playwright;
+installing dependencies for ubuntu26.04-x64 as a fallback.
+Cannot install dependencies for ubuntu26.04-x64 with Playwright 1.56.1!
+```
+
+這是第 2 節指定 **24.04** 而不是最新版的原因。想用更新的 Ubuntu,得先確認你釘的 Playwright 版本支援它。
 
 ---
 
@@ -349,7 +382,15 @@ runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
 > - Name: `CI_RUNNER`
 > - Value: `exchange-ci`
 
+**那一頁有兩個區塊,點錯完全沒有效果。** 上面是 **Environment variables**,下面是 **Repository variables**,要按的是**後者**的 **New repository variable**。
+
+環境變數在這裡行不通,而且不是設定問題是機制問題:GitHub 的文件寫「Configuration variables at the environment level are automatically available **after their environment is declared by the runner**」——環境要等 runner 宣告之後才解析,而 `runs-on` 就是決定 runner 的那一刻,比那更早。`ci.yml` 也沒有任何 job 宣告 `environment:`。所以放在環境裡的 `CI_RUNNER` 永遠是空字串,每個 job 都會安靜地落回 `ubuntu-latest`,看起來就像什麼都沒發生。
+
+左側選單的 **Environments** 是完全不同的功能,不要在那裡建東西。
+
 按 **Add variable**,下一次 push 就會跑在你的機器上。不用改任何程式碼、不用開 PR。
+
+**已經開跑的 run 不會回頭讀新變數。** 變數是在 run 開始時解析的,所以設定之前就排進去的 run 仍然跑在 GitHub 的機器上。在 Actions 頁對那個 run 按 **Re-run all jobs** 就會用新值重跑,不需要新的 commit。
 
 **機器掛了怎麼辦:** 把這個變數**刪掉**,CI 立刻回到 GitHub 的機器上跑。會開始計費,但不會卡住。修好機器再把變數加回去。
 
