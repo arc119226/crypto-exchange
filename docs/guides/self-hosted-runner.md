@@ -399,13 +399,17 @@ echo '$nrconf{override_rc}{qr(^actions\.runner\..*\.service$)} = 0;' | \
   sudo tee /etc/needrestart/conf.d/actions_runner_services.conf
 ```
 
-**然後整段重複一到兩次**,換成 `~/runner-2` / `--name box-2`(和 `~/runner-3` / `--name box-3`),每次都要回網頁拿一組**新的** token。
+**然後整段再做一次**,換成 `~/runner-2` / `--name box-2`,回網頁拿一組**新的** token。
 
 要求是:**各自獨立的目錄** + **唯一的 `--name`**(systemd 的 unit 名稱是 `actions.runner.<org>-<repo>.<name>.service`,由 name 衍生)。`_work` 相對於各自的目錄,所以自動就分開了。
 
-為什麼要多個?**一個 runner 一次只跑一個 job。** 現在一次完整的 run 是九個 job、加起來 45 分鐘的機器時間。只裝一個,九個 job 會排隊,你要等 45 分鐘才看得到結果;三個平行跑大約 15 分鐘,和 GitHub 托管的機器差不多。每個 runner 閒置時大約吃 80 MB 記憶體、500 MB 磁碟。
+為什麼要兩個?**一個 runner 一次只跑一個 job。** PR 的 job 圖是 `checks` → `integration` → (`helm` ∥ `e2e` ∥ `image`):前兩段本來就是串的,只有第三段能平行。
 
-裝完回網頁的 Runners 頁,應該看到兩到三個綠點,標籤都是 `exchange-ci`。
+一台機器上實測一次完整的 PR run 是 **25 分鐘**牆鐘,其中第三段的三個 job 依序跑掉了 15 分鐘(helm 7m12、e2e 3m26、image 4m15)。第二個 runner 讓 `helm` 和另外兩個同時跑,第三段縮到約 7m41,整體約 18 分鐘。
+
+**第三個 runner 只再省半分鐘左右**——第三段的長度由最長的 `helm` 決定,而 `e2e` 加 `image` 相加仍然比它短。所以裝兩個就好。每個 runner 閒置時大約吃 80 MB 記憶體、500 MB 磁碟。
+
+裝完回網頁的 Runners 頁,應該看到兩個綠點,標籤都是 `exchange-ci`。
 
 ---
 
@@ -576,7 +580,7 @@ systemctl status cron
 
 ```cron
 # 每週日 04:00 停 runner、徹底清、再開
-0 4 * * 0 for d in $HOME/runner-1 $HOME/runner-2 $HOME/runner-3; do sudo $d/svc.sh stop; done; docker system prune -af --volumes; for d in $HOME/runner-1 $HOME/runner-2 $HOME/runner-3; do sudo $d/svc.sh start; done
+0 4 * * 0 for d in $HOME/runner-1 $HOME/runner-2; do sudo $d/svc.sh stop; done; docker system prune -af --volumes; for d in $HOME/runner-1 $HOME/runner-2; do sudo $d/svc.sh start; done
 ```
 
 停掉 runner 再清,才不會清到跑到一半的 job。
@@ -613,7 +617,7 @@ wsl --manage Ubuntu-24.04 --compact
 
    如果看到 `Runner Image: ubuntu-24.04` 之類的,表示變數沒設成功,還在用 GitHub 的機器。
 
-2. **重開機測試——這一項不能跳過。** 真的把 Windows 重開一次,**不要碰任何東西**,等幾分鐘後看倉庫的 Runners 頁:兩到三個 runner 應該自己回到 **Idle**。
+2. **重開機測試——這一項不能跳過。** 真的把 Windows 重開一次,**不要碰任何東西**,等幾分鐘後看倉庫的 Runners 頁:兩個 runner 應該自己回到 **Idle**。
 
    這是整個設計裡最容易失敗的地方(WSL 的 session 0 限制、閒置逾時、Docker 引擎)。沒通過這一項,就等於每次 Windows Update 之後 CI 都會停到你發現為止。沒過的話照第 14 節的順序查。
 
