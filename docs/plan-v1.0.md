@@ -1631,7 +1631,7 @@ scripts/backup.sh && scripts/restore-drill.sh
 | Day 2 | 寫 ADR:0001 modular monolith 單一 binary 多角色;0002 Postgres 為唯一真相 + outbox + JetStream;0003 單租戶但預留 tenant_id;0004 決策數值(decimal + scale,禁 float);0005 帳本模型(複式、hold 為分錄、house 科目);0006 認證(EdDSA JWT + JWKS、API key HMAC、admin TOTP);0007 簽名隔離(keystore + Signer 介面,KMS 預留);0008 工具鏈版本釘住(Go、foundry tag、go-ethereum、nats、postgres) | `docs/adr/0001–0008` |
 | Day 3 | `go mod init`;`cmd/exchange`(cobra);`internal/app`(config、run loop、healthz/readyz/metrics、SIGTERM);`internal/telemetry`;`internal/money` + 測試;`.golangci.yml`;Makefile 骨架 | `make lint test` 綠 |
 | Day 4 | `build/Dockerfile`;`deploy/compose/compose.yaml` infra profile(postgres/redis/nats/anvil/contracts-deployer)+ `infra/contracts` + `initdb` + `gen-dev-secrets`;goose `0001`、`0002`;`exchange migrate`、`exchange seed` | `make up` 全 healthy,`addresses.json` 產生,registry 有 ETH-USDC |
-| Day 5 | `api/public/v1/openapi.yaml`(markets/assets)→ oapi-codegen → handler → sqlc;testcontainers 整合測試;GitHub Actions(lint/unit/integration/compose-config/image);`exchangectl markets list`;README 產品邊界段 | CI 綠;第一個 PR 合併;把本週學到的 Go 疑問寫進 `docs/learning-log.md` |
+| Day 5 | `api/public/v1/openapi.yaml`(markets/assets)→ oapi-codegen → handler → sqlc;testcontainers 整合測試;GitHub Actions(lint/unit/integration/compose-config/image);`exchangectl markets list`;README 產品邊界段 | CI 綠;第一個 PR 合併 |
 
 第一週不寫任何撮合或帳本程式碼。若 Day 1–2 發現本文件的分錄或狀態機有錯,先改文件、再改 ADR、再開工。
 
