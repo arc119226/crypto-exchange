@@ -103,6 +103,12 @@ permissions:
 env:
   # helm is not a Go module, so its pin lives here; kind's is on the helm job
   HELM_VERSION: v3.16.4
+  # docker/build-push-action@v6 writes a job summary and uploads a
+  # .dockerbuild record as an artifact for every build it runs. Nothing in
+  # this repository reads either, and the artifacts inherit the repository's
+  # 90-day retention.
+  DOCKER_BUILD_SUMMARY: false
+  DOCKER_BUILD_RECORD_UPLOAD: false
 
 jobs:
   # lint, unit and fast-checks used to be three jobs, and fast-checks was
@@ -435,8 +441,14 @@ jobs:
           tags: crypto-exchange:ci
           build-args: |
             VERSION=${{ steps.appv.outputs.version }}
-            COMMIT=${{ github.sha }}
-            DATE=${{ github.event.head_commit.timestamp || github.event.pull_request.updated_at }}
+            # Fixed on a pull request. These are baked into the binary's
+            # ldflags, so the real commit and timestamp change the hash of the
+            # final `go build` layer on every single commit -- which is every
+            # layer cache in this workflow missing, always, by construction.
+            # A pull request image is never published, so the only thing the
+            # real values buy there is a cache that can never hit.
+            COMMIT=${{ github.event_name == 'push' && github.sha || 'dev' }}
+            DATE=${{ github.event_name == 'push' && github.event.head_commit.timestamp || '1970-01-01T00:00:00Z' }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
       - uses: helm/kind-action@v1
@@ -517,9 +529,14 @@ jobs:
           load: true
           tags: crypto-exchange:ci
           build-args: |
-            VERSION=${{ github.ref_name }}
-            COMMIT=${{ github.sha }}
-            DATE=${{ github.event.head_commit.timestamp || github.event.pull_request.updated_at }}
+            # github.ref_name on a pull request is "<number>/merge", so it
+            # differed per pull request and no two branches could share a
+            # layer. Nothing published comes out of a pull request build.
+            VERSION=${{ github.event_name == 'push' && github.ref_name || 'dev' }}
+            # see the note in the helm job: real metadata on a push, fixed on
+            # a pull request so the layer cache has something to hit
+            COMMIT=${{ github.event_name == 'push' && github.sha || 'dev' }}
+            DATE=${{ github.event_name == 'push' && github.event.head_commit.timestamp || '1970-01-01T00:00:00Z' }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
       - name: image smoke
