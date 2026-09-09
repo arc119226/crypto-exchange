@@ -220,29 +220,72 @@ CI 需要一個 Docker 引擎。有兩種裝法,**建議用 6A**。
 
 ```sh
 sudo apt-get update
-sudo apt-get install -y ca-certificates curl git jq unzip make
+sudo apt-get install -y ca-certificates curl git jq unzip make build-essential
+curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
+sudo apt-get install -y nodejs
 curl -fsSL https://get.docker.com | sudo sh
 sudo usermod -aG docker "$USER"
 sudo systemctl enable --now docker
 ```
 
+**`build-essential` 不能漏。** `make test` 是 `go test -race`,race detector 需要 cgo,cgo 需要 C 編譯器,而 WSL 的 Ubuntu 映像預設不含 gcc。這在第一次實跑就踩到了:`checks` job 的前十二步全過(`go vet`、golangci-lint、gitleaks、sqlc、oapi-codegen 都是純 Go;`make build` 是 `CGO_ENABLED=0`),到 `-race` 那一步**零秒失敗**——零秒代表指令根本沒啟動,不是測試沒過。
+
+**Node 用 NodeSource 22,不要用 Ubuntu 內建的。** 24.04 內建是 Node 18,而這個專案要 22。Ubuntu 還把 `npm` 拆成獨立套件,少裝一半就會出現第 14 節那個「指令掉到 Windows 去」的問題。NodeSource 的 `nodejs` 套件內含 npm。
+
 **登出再登入**(關掉 Ubuntu 視窗重開),讓群組生效,然後驗證:
 
 ```sh
+gcc --version
+node --version                  # v22.x
+command -v npm npx              # 都要 /usr/bin,不能是 /mnt/c
 docker version
 docker compose version
+docker buildx version
 docker run --rm hello-world
 ```
 
-三個都要有正常輸出。
+全部都要有正常輸出。`docker buildx` 少了的話 `image` job 會在 `docker/setup-buildx-action` 那一步失敗。
 
 如果你已經裝了 Docker Desktop,**把它對這個 distro 的 WSL Integration 關掉**(Settings → Resources → WSL integration → 把 Ubuntu-24.04 的開關關掉 → Apply),否則兩個引擎會搶 `/var/run/docker.sock`。Docker Desktop 本身可以留著手動用。
+
+**如果這個 distro 以前開過 Docker Desktop 的 WSL Integration,先檢查 `/var/run`。** 症狀是引擎明明活著但誰都連不上:
+
+```
+$ sudo systemctl status docker
+   Active: active (running)
+   ...dockerd[43804]: ...msg="API listen on /run/docker.sock"
+
+$ ls -l /var/run/docker.sock
+ls: cannot access '/var/run/docker.sock': No such file or directory
+```
+
+`dockerd` 跑的是 `-H fd://`,也就是 systemd socket activation,而 `docker.socket` 的 `ListenStream` 是 **`/run/docker.sock`**——這是正確的。標準 Ubuntu 上 `/var/run` 是一條指向 `/run` 的符號連結,所以兩個路徑等價;而 docker CLI、buildx、compose 全都預設連 `/var/run/docker.sock`。這條符號連結不見了,CI 就連不上。
+
+一行診斷:
+
+```sh
+readlink -f /var/run        # 要印 /run
+```
+
+印出別的東西(或 `/var/run` 是個真目錄)就修它:
+
+```sh
+sudo systemctl stop docker.socket docker.service
+sudo mv /var/run /var/run.bak      # /var/run 不存在的話跳過這行
+sudo ln -s /run /var/run
+```
+
+然後 PowerShell `wsl --shutdown`、重開 distro,驗證 `readlink -f /var/run` 是 `/run`、`ls -l /var/run/docker.sock` 看得到、`docker ps` 正常,再 `sudo rm -rf /var/run.bak`。
+
+修 `/var/run` 而不是只補一條 `/var/run/docker.sock` → `/run/docker.sock`,是因為 `/run` 是 tmpfs、每次開機重建,只補 socket 那條每次重開都要重補;而 `/var` 在磁碟上,`/var/run` 這條符號連結補一次就持久。何況 `/var/run` 指向 `/run` 是 FHS 與 systemd 的前提,壞著會拖累其他寫 pid 檔的服務,不只 docker。
+
+**全新安裝、從來沒開過 Docker Desktop Integration 的 distro 不會遇到這個。**
 
 **為什麼建議這條:**
 
 - `dockerd` 由 systemd 管,開機自己起,不依賴任何 GUI 程式。
 - 容器資料放在 Ubuntu 自己的虛擬磁碟裡,所以第 10 節的空間回收**真的有效**。
-- 沒有下面 6B 那個符號連結的回歸問題。
+- 沒有下面 6B 那個「Windows 端沒把符號連結重建回來」的回歸問題(上面那個 `/var/run` 的檢查是不同的東西:那是舊 Integration 留下的痕跡,修一次就好,不會每次重開機復發)。
 
 ### 6B(替代)Docker Desktop
 
@@ -265,12 +308,44 @@ docker version
 
 - **Docker Desktop 必須有人登入 Windows 才會跑。任何付費層級都沒有無頭或服務模式**——Docker 自己的 roadmap issue #515 至今未解,Docker Desktop 也完全不支援 Windows Server。`com.docker.service` 那個 Windows 服務只是 Hyper-V 與 Windows 容器用的特權輔助程式,WSL2 模式下根本不會自動啟動。(不過第 9 節的自動登入本來就是必要的,所以這一項不是額外的成本。)
 - **4.75.0 起有一個回歸**:WSL 重啟之後 `/var/run/docker.sock` 的符號連結不會被重建。手動 `sudo ln -sf /mnt/wsl/docker-desktop/shared-sockets/guest-services/docker.proxy.sock /var/run/docker.sock` 可以救,但**重開機後又沒了**。對一台每月被 Windows Update 重開一次的機器,這是週期性斷線。
+
+  **這在第一次實跑就發生了。** 設定 `.wslconfig` 需要 `wsl --shutdown`,重開之後 `docker version` 在互動 shell 裡還是好的,但 CI 的 `image` job 在 `docker/setup-buildx-action` 一秒內死掉:
+
+  ```
+  failed to connect to the docker API at unix:///var/run/docker.sock;
+  dial unix /var/run/docker.sock: connect: no such file or directory
+  ```
+
+  路線 6A 沒有這個問題:`dockerd` 是發行版裡的 systemd 服務,socket 由它自己建立與持有,不依賴任何 Windows 端的程式在正確的時機補一條符號連結。
 - **Docker 的資料在另一個虛擬磁碟**(`%LOCALAPPDATA%\Docker\wsl\data\docker_data.vhdx`,新版可能在 `...\wsl\disk\` 底下),**官方沒有支援的縮小方法**,只有核彈級的「Clean up data」。第 10 節的空間回收對它無效。
 - **Windows 帳號之間不共用容器與映像**,所以跑 Docker Desktop 的 Windows 帳號每次都必須是同一個。
 
 ### 兩條路線共通
 
 testcontainers 在 WSL2 上是開箱即用的。**不要**去設 `DOCKER_HOST=tcp://localhost:2375`——那是舊版 WSL 的建議,而且等於在一台跑 CI 的機器上開一個沒有認證也沒有 TLS 的 root 等級 daemon。
+
+### 還有一件裝一次的事:Playwright 的系統函式庫
+
+`e2e` job 會用 Playwright 開瀏覽器跑前台冒煙測試。瀏覽器本身 CI 每次會自己抓(抓過就留在 `~/.cache/ms-playwright`,之後是 no-op),但它依賴的**系統函式庫**要你先裝一次:
+
+```sh
+npx playwright@1.56.1 install --with-deps chromium
+ls ~/.cache/ms-playwright
+```
+
+版本要對得上 `web/trade/package.json` 裡釘的那個。
+
+**為什麼這一步不能交給 CI:** `--with-deps` 內部是 `sudo -- sh -c "apt-get ..."`。要 CI 每次跑它,等於得給 runner 帳號免密碼 sudo。所以 workflow 在 `vars.CI_RUNNER` 有值時把 `PLAYWRIGHT_INSTALL_DEPS` 設成 `0`,`scripts/e2e-web.sh` 就只要瀏覽器、不碰 `--with-deps`。**這台機器因此完全不需要 NOPASSWD。**
+
+**發行版版本要對。** `--with-deps` 只認得 Playwright 有出套件清單的那幾個 Ubuntu 版本。實測 Ubuntu 26.04 會直接拒絕:
+
+```
+BEWARE: your OS is not officially supported by Playwright;
+installing dependencies for ubuntu26.04-x64 as a fallback.
+Cannot install dependencies for ubuntu26.04-x64 with Playwright 1.56.1!
+```
+
+這是第 2 節指定 **24.04** 而不是最新版的原因。想用更新的 Ubuntu,得先確認你釘的 Playwright 版本支援它。
 
 ---
 
@@ -349,7 +424,15 @@ runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
 > - Name: `CI_RUNNER`
 > - Value: `exchange-ci`
 
+**那一頁有兩個區塊,點錯完全沒有效果。** 上面是 **Environment variables**,下面是 **Repository variables**,要按的是**後者**的 **New repository variable**。
+
+環境變數在這裡行不通,而且不是設定問題是機制問題:GitHub 的文件寫「Configuration variables at the environment level are automatically available **after their environment is declared by the runner**」——環境要等 runner 宣告之後才解析,而 `runs-on` 就是決定 runner 的那一刻,比那更早。`ci.yml` 也沒有任何 job 宣告 `environment:`。所以放在環境裡的 `CI_RUNNER` 永遠是空字串,每個 job 都會安靜地落回 `ubuntu-latest`,看起來就像什麼都沒發生。
+
+左側選單的 **Environments** 是完全不同的功能,不要在那裡建東西。
+
 按 **Add variable**,下一次 push 就會跑在你的機器上。不用改任何程式碼、不用開 PR。
+
+**已經開跑的 run 不會回頭讀新變數。** 變數是在 run 開始時解析的,所以設定之前就排進去的 run 仍然跑在 GitHub 的機器上。在 Actions 頁對那個 run 按 **Re-run all jobs** 就會用新值重跑,不需要新的 commit。
 
 **機器掛了怎麼辦:** 把這個變數**刪掉**,CI 立刻回到 GitHub 的機器上跑。會開始計費,但不會卡住。修好機器再把變數加回去。
 
@@ -605,7 +688,7 @@ sudo -iu ghrunner        # 之後第 7 節的指令都在這個身分下做
 標籤對不上。網頁 Runners 頁看標籤是不是 `exchange-ci`,和倉庫變數 `CI_RUNNER` 的值一字不差。
 
 **Q: `Cannot connect to the Docker daemon` / `permission denied ... docker.sock`。**
-路線 6A:`sudo systemctl status docker`;`groups` 裡有沒有 `docker`(加完群組要登出再登入)。
+路線 6A:`sudo systemctl status docker`;`groups` 裡有沒有 `docker`(加完群組要登出再登入);服務是 running 卻還是連不上的話,`readlink -f /var/run` 要印 `/run`(見第 6A 節)。
 路線 6B:Docker Desktop 有沒有開;WSL Integration 有沒有打開;`readlink -f /var/run/docker.sock` 是不是還指向 `/mnt/wsl/docker-desktop/...`(那個回歸問題)。
 
 **Q: C 槽滿了。**

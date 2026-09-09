@@ -27,7 +27,16 @@ fi
 
 npm ci --no-fund --no-audit
 if [[ "${PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD:-0}" != "1" ]]; then
-  npx playwright install --with-deps chromium
+  # PLAYWRIGHT_INSTALL_DEPS=0 asks for the browser without the system
+  # libraries: the download needs no privileges and knows nothing about the
+  # host's distribution, while --with-deps needs sudo and a package list
+  # Playwright ships per Ubuntu release. A machine that installed those
+  # libraries once -- a laptop, a self-hosted runner -- sets it to 0.
+  if [[ "${PLAYWRIGHT_INSTALL_DEPS:-1}" == "1" ]]; then
+    npx playwright install --with-deps chromium
+  else
+    npx playwright install chromium
+  fi
 fi
 npm run build
 npx playwright test "$@"
