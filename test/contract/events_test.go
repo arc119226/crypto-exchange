@@ -159,22 +159,33 @@ func sample(t *testing.T, eventType string) eventbus.Envelope {
 			deposit.EventReversed: "reversed",
 		}[eventType]
 		confirmations := int32(2)
-		if eventType == deposit.EventCredited || eventType == deposit.EventReversed {
+		credited := eventType == deposit.EventCredited || eventType == deposit.EventReversed
+		if credited {
 			confirmations = 6
 		}
-		payload = deposit.Payload{
+		d := deposit.Payload{
 			DepositID: "01J8Z2K3M4N5P6Q7R8S9T0V600", AccountID: buyer, Asset: "ETH", Amount: amt("2"),
 			Address:  "0x9858effd232b4033e47d90003d41ec34ecaeda94",
 			TxHash:   "0x1f4b2c9d8e7a6b5c4d3e2f1a0b9c8d7e6f5a4b3c2d1e0f9a8b7c6d5e4f3a2b1c",
 			LogIndex: -1, BlockNumber: 18234, BlockHash: "0xa1b2c3d4e5f60718293a4b5c6d7e8f901a2b3c4d5e6f708192a3b4c5d6e7f801",
 			Confirmations: confirmations, Status: status, Required: 6,
 		}
+		if credited {
+			// The seeded deposit rate is zero, so the whole 2 ETH became the
+			// balance. The fields are still present, which is the difference
+			// between a fee of nothing and no fee computed yet.
+			d.Fee, d.Credited = ptr(amt("0")), ptr(amt("2"))
+		}
+		payload = d
 	case withdrawal.EventRequested, withdrawal.EventStateChanged:
 		// The same 0.5 ETH withdrawal at two points: recorded, then sent to
 		// the review queue for being over the level-0 auto-approve ceiling.
 		env.AccountID, env.AccountSeq = str(buyer), i64(52)
+		// The fee is charged on top: 0.5 ETH reaches the destination and the
+		// account is debited 0.501.
 		p := withdrawal.Payload{
 			WithdrawalID: "01J8Z2K3M4N5P6Q7R8S9T0V700", AccountID: buyer, Asset: "ETH", Amount: amt("0.5"),
+			Fee: amt("0.001"), FeeAsset: "ETH",
 			ToAddress: "0x70997970c51812dc3a010c7d01b50e0d17dc79c8", ChainID: 31337,
 			Status: "requested",
 		}

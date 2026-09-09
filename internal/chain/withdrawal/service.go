@@ -273,7 +273,7 @@ func emit(ctx context.Context, tx pgx.Tx, l *ledger.Service, tenant, eventType s
 	if err != nil {
 		return fmt.Errorf("withdrawal: account seq for %s: %w", row.AccountID, err)
 	}
-	amount, err := pg.AmountFromNumeric(row.Amount)
+	amount, fee, err := amountAndFee(row)
 	if err != nil {
 		return err
 	}
@@ -283,6 +283,7 @@ func emit(ctx context.Context, tx pgx.Tx, l *ledger.Service, tenant, eventType s
 	}
 	env, err := Event(eventType, tenant, Payload{
 		WithdrawalID: row.ID, AccountID: row.AccountID, Asset: row.Asset, Amount: amount,
+		Fee: fee, FeeAsset: row.FeeAsset,
 		ToAddress: row.ToAddress, ChainID: row.ChainID, Status: row.Status,
 		PreviousStatus: previous, Reason: reason, TxHash: txHash,
 	}, seq, time.Now().UTC().Truncate(time.Microsecond))

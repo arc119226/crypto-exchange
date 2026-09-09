@@ -102,3 +102,30 @@ export function scaleOf(step: string): number {
 export function toNumberUnsafe(v: string): number {
   return Number(v)
 }
+
+// ceilAt rounds up to `scale` fraction digits. Rounding up is what the
+// exchange does to a fee (§6.5 rounds in its favour), so the number shown
+// here matches the one the server will charge instead of being a cent short.
+export function ceilAt(d: Dec, scale: number): Dec {
+  if (d.s <= scale) return d
+  const div = 10n ** BigInt(d.s - scale)
+  const q = d.n / div
+  const up = d.n > 0n && q * div !== d.n ? q + 1n : q
+  return { n: up, s: scale }
+}
+
+// withdrawalFee mirrors registry.Asset.WithdrawalFeeFor exactly (§23.3):
+//
+//   fee = withdrawal_fee + ceil(amount * withdrawal_fee_bps / 10000)
+//
+// The server is the authority -- it snapshots the fee on the row and returns
+// it -- but a user typing an amount should see what leaves the account before
+// they press the button, not after. Keeping the two formulas identical is the
+// point; a divergence here shows up as a number that changes after submitting.
+export function withdrawalFee(amount: Dec, flat: Dec, bps: number, scale: number): Dec {
+  if (bps === 0) return flat
+  // The division only shifts the decimal point, so it is exact before the
+  // rounding: multiply by bps, then drop four decimal places.
+  const raw = mul(amount, { n: BigInt(bps), s: 0 })
+  return add(flat, ceilAt({ n: raw.n, s: raw.s + 4 }, scale))
+}

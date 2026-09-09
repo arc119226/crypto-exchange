@@ -97,6 +97,7 @@ func (h *Handler) ListDeposits(ctx context.Context, req gen.ListDepositsRequestO
 			ID: d.ID, Asset: d.Asset, Amount: d.Amount, Address: d.Address,
 			TxHash: d.TxHash, LogIndex: d.LogIndex, BlockNumber: d.BlockNumber,
 			Confirmations: d.Confirmations, RequiredConfirmations: required[d.Asset],
+			Fee: d.Fee, CreditedAmount: d.Credited,
 			Status: d.Status, CreditedAt: d.CreditedAt, CreatedAt: d.CreatedAt,
 		})
 	}
@@ -195,8 +196,8 @@ func (h *Handler) ListWithdrawals(ctx context.Context, req gen.ListWithdrawalsRe
 
 func toWithdrawal(w withdrawal.Record) gen.Withdrawal {
 	out := gen.Withdrawal{
-		ID: w.ID, Asset: w.Asset, Amount: w.Amount, ToAddress: w.ToAddress,
-		ChainID: w.ChainID, Status: w.Status,
+		ID: w.ID, Asset: w.Asset, Amount: w.Amount, Fee: w.Fee, FeeAsset: w.FeeAsset,
+		ToAddress: w.ToAddress, ChainID: w.ChainID, Status: w.Status,
 		CreatedAt: w.CreatedAt, UpdatedAt: &w.UpdatedAt,
 	}
 	if w.FailureReason != "" {

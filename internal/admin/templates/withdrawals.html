@@ -38,6 +38,7 @@
     <dt>{{T "col.status"}}</dt><dd><span title="{{.Status}}" class="badge {{badge .Status}}">{{status .Status}}</span>{{if .FailureReason}} <span class="muted">{{.FailureReason}}</span>{{end}}</dd>
     <dt>{{T "col.account"}}</dt><dd><a class="mono" href="/admin/ledger?account_id={{.AccountID}}">{{.AccountID}}</a></dd>
     <dt>{{T "col.amount"}}</dt><dd>{{amount .Amount}} {{.Asset}} {{T "withdrawals.to"}} <span class="mono">{{.ToAddress}}</span> {{T "withdrawals.on_chain"}} {{.ChainID}}</dd>
+    <dt>{{T "col.fee"}}</dt><dd>{{amount .Fee}} {{.FeeAsset}} <span class="muted">{{T "withdrawals.fee.hint"}}</span></dd>
     <dt>{{T "withdrawals.review"}}</dt><dd>{{if .ReviewedAt}}{{whenp .ReviewedAt}}{{if .ReviewedBy}} {{T "withdrawals.review.by"}} <span class="mono">{{.ReviewedBy}}</span>{{end}}{{if .ReviewNote}}: {{.ReviewNote}}{{end}}{{else}}<span class="muted">{{T "common.none"}}</span>{{end}}</dd>
     <dt>{{T "col.transaction"}}</dt><dd>{{if .TxHash}}<span class="mono">{{.TxHash}}</span>{{else}}<span class="muted">{{T "common.none_yet"}}</span>{{end}}</dd>
     <dt>{{T "withdrawals.resolution"}}</dt><dd>{{if .ResolveAction}}<span class="badge warn">{{T "withdrawals.resolve.requested" (status .ResolveAction)}}</span>{{if .ResolveError}} <span class="muted">{{T "withdrawals.last_attempt"}} {{.ResolveError}}</span>{{end}}{{else}}<span class="muted">{{T "withdrawals.none_requested"}}</span>{{end}}</dd>

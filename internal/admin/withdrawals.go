@@ -130,6 +130,7 @@ func conflict(ctx context.Context, instance, detail string) gen.ConflictApplicat
 func toAdminWithdrawal(w withdrawal.Record) gen.AdminWithdrawal {
 	out := gen.AdminWithdrawal{
 		ID: w.ID, AccountID: w.AccountID, Asset: w.Asset, Amount: w.Amount,
+		Fee: w.Fee, FeeAsset: w.FeeAsset,
 		ToAddress: w.ToAddress, ChainID: w.ChainID, Status: w.Status,
 		ReviewedAt: w.ReviewedAt,
 		CreatedAt:  w.CreatedAt, UpdatedAt: &w.UpdatedAt,

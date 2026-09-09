@@ -141,6 +141,13 @@ reappears under the same `deposit_id`, with a different `block_number`.
 `deposit.reversed` is an alert rather than a completed reversal — the
 reversing entry is made by hand once an operator confirms it (§6.4.1).
 
+`fee` and `credited_amount` appear once the deposit is credited and are absent
+before that: a deposit fee comes *out of* what arrived (§6.1.4 i), so `amount`
+stays what the chain delivered and `credited_amount` is what became the
+balance. Both ship at zero and a fee of nothing is not the same fact as no fee
+computed yet, which is why the fields are absent rather than `"0"` on
+`deposit.detected`.
+
 `withdrawal.*` is two types rather than one per state. `withdrawal.requested`
 marks the row coming into existence and `withdrawal.state_changed` carries
 every move after it, naming both ends in `previous_status` and `status`. The
@@ -149,6 +156,13 @@ it with the signer role — and a type per state would multiply the contract by
 the length of the machine for consumers that subscribe to all of them anyway.
 `withdrawal.requested` is the one event the **api** role produces; every other
 transition comes from `chain` or `admin`.
+
+`fee` and `fee_asset` are on both types and always present. Unlike a deposit
+fee this one is charged *on top*: the destination receives `amount` and the
+account is debited `amount + fee`. It is quoted when the request is accepted
+and snapshotted on the row, so raising a rate never reprices a withdrawal
+already in the queue; and it stays the account's money until the transaction
+confirms, so every ending that is not `confirmed` returns it.
 
 `tx_hash` appears on `withdrawal.state_changed` once a transaction exists. It
 is the transaction *now representing* the withdrawal, which is not always the

@@ -603,16 +603,22 @@ type AdminDeposit struct {
 	// Amount Decimal serialized as a string (NUMERIC(36,18)); never a JSON number.
 	//
 	// Example: 1990.00
-	Amount        Amount             `json:"amount"`
-	Asset         string             `json:"asset"`
-	BlockNumber   int64              `json:"block_number"`
-	Confirmations int32              `json:"confirmations"`
-	CreatedAt     time.Time          `json:"created_at"`
-	CreditedAt    *time.Time         `json:"credited_at,omitempty"`
-	ID            string             `json:"id"`
-	LogIndex      int32              `json:"log_index"`
-	Status        AdminDepositStatus `json:"status"`
-	TxHash        string             `json:"tx_hash"`
+	Amount        Amount    `json:"amount"`
+	Asset         string    `json:"asset"`
+	BlockNumber   int64     `json:"block_number"`
+	Confirmations int32     `json:"confirmations"`
+	CreatedAt     time.Time `json:"created_at"`
+
+	// CreditedAmount What became the account's balance: `amount - fee`. Null until credited.
+	CreditedAmount *Amount    `json:"credited_amount,omitempty"`
+	CreditedAt     *time.Time `json:"credited_at,omitempty"`
+
+	// Fee Taken out of the amount at credit time, so it is null until the deposit is credited. Unlike a withdrawal fee it is not charged on top: `amount` stays what the chain delivered.
+	Fee      *Amount            `json:"fee,omitempty"`
+	ID       string             `json:"id"`
+	LogIndex int32              `json:"log_index"`
+	Status   AdminDepositStatus `json:"status"`
+	TxHash   string             `json:"tx_hash"`
 }
 
 // AdminDepositStatus defines model for AdminDeposit.Status.
@@ -630,17 +636,23 @@ type AdminWithdrawal struct {
 	// Amount Decimal serialized as a string (NUMERIC(36,18)); never a JSON number.
 	//
 	// Example: 1990.00
-	Amount        Amount     `json:"amount"`
-	Asset         string     `json:"asset"`
-	ChainID       int64      `json:"chain_id"`
-	CreatedAt     time.Time  `json:"created_at"`
-	FailureReason *string    `json:"failure_reason,omitempty"`
-	ID            string     `json:"id"`
-	ReviewNote    *string    `json:"review_note,omitempty"`
-	ReviewedAt    *time.Time `json:"reviewed_at,omitempty"`
-	ReviewedBy    *string    `json:"reviewed_by,omitempty"`
-	Status        string     `json:"status"`
-	ToAddress     string     `json:"to_address"`
+	Amount        Amount    `json:"amount"`
+	Asset         string    `json:"asset"`
+	ChainID       int64     `json:"chain_id"`
+	CreatedAt     time.Time `json:"created_at"`
+	FailureReason *string   `json:"failure_reason,omitempty"`
+
+	// Fee What was quoted when the request was accepted, charged on top of the amount. It stays in the account's hold until the transaction confirms, and comes back on every path that does not confirm, so a withdrawal in the review queue can still be refunded in full after a rate change.
+	Fee Amount `json:"fee"`
+
+	// FeeAsset The asset the fee is charged in, which today is `asset`.
+	FeeAsset   string     `json:"fee_asset"`
+	ID         string     `json:"id"`
+	ReviewNote *string    `json:"review_note,omitempty"`
+	ReviewedAt *time.Time `json:"reviewed_at,omitempty"`
+	ReviewedBy *string    `json:"reviewed_by,omitempty"`
+	Status     string     `json:"status"`
+	ToAddress  string     `json:"to_address"`
 
 	// TxHash The transaction now representing this withdrawal: the displacement while a cancellation is in flight, otherwise the withdrawal's own.
 	TxHash    *string    `json:"tx_hash,omitempty"`
@@ -665,9 +677,15 @@ type Asset struct {
 	ContractAddress *string   `json:"contract_address,omitempty"`
 	CreatedAt       time.Time `json:"created_at"`
 	DepositEnabled  bool      `json:"deposit_enabled"`
-	DisplayScale    int32     `json:"display_scale"`
-	ID              string    `json:"id"`
-	IsNative        bool      `json:"is_native"`
+
+	// DepositFeeBps Basis points taken out of an arriving deposit. There is no flat part: a flat deposit fee makes small deposits arbitrarily expensive. 10000 is refused for this one -- it would credit a depositor nothing. Deposits are the inlet and this ships at 0; the column exists in case sweep gas ever exceeds what trading brings in.
+	//
+	//
+	// Example: 0
+	DepositFeeBps int32  `json:"deposit_fee_bps"`
+	DisplayScale  int32  `json:"display_scale"`
+	ID            string `json:"id"`
+	IsNative      bool   `json:"is_native"`
 
 	// MinDeposit Decimal serialized as a string (NUMERIC(36,18)); never a JSON number.
 	//
@@ -696,6 +714,12 @@ type Asset struct {
 	//
 	// Example: 1990.00
 	WithdrawalFee Amount `json:"withdrawal_fee"`
+
+	// WithdrawalFeeBps The proportional part of the withdrawal fee, in basis points of the amount. The total charged is `withdrawal_fee + ceil(amount * withdrawal_fee_bps / 10000)`, rounded up at the asset's scale, and it is charged on top of the amount rather than taken out of it.
+	//
+	//
+	// Example: 0
+	WithdrawalFeeBps int32 `json:"withdrawal_fee_bps"`
 }
 
 // AssetList defines model for AssetList.
@@ -708,8 +732,14 @@ type AssetRequest struct {
 	ChainID         int64   `json:"chain_id"`
 	ContractAddress *string `json:"contract_address,omitempty"`
 	DepositEnabled  bool    `json:"deposit_enabled"`
-	DisplayScale    int32   `json:"display_scale"`
-	IsNative        bool    `json:"is_native"`
+
+	// DepositFeeBps Basis points taken out of an arriving deposit. There is no flat part: a flat deposit fee makes small deposits arbitrarily expensive. 10000 is refused for this one -- it would credit a depositor nothing. Deposits are the inlet and this ships at 0; the column exists in case sweep gas ever exceeds what trading brings in.
+	//
+	//
+	// Example: 0
+	DepositFeeBps int32 `json:"deposit_fee_bps"`
+	DisplayScale  int32 `json:"display_scale"`
+	IsNative      bool  `json:"is_native"`
 
 	// MinDeposit Decimal serialized as a string (NUMERIC(36,18)); never a JSON number.
 	//
@@ -736,6 +766,12 @@ type AssetRequest struct {
 	//
 	// Example: 1990.00
 	WithdrawalFee Amount `json:"withdrawal_fee"`
+
+	// WithdrawalFeeBps The proportional part of the withdrawal fee, in basis points of the amount. The total charged is `withdrawal_fee + ceil(amount * withdrawal_fee_bps / 10000)`, rounded up at the asset's scale, and it is charged on top of the amount rather than taken out of it.
+	//
+	//
+	// Example: 0
+	WithdrawalFeeBps int32 `json:"withdrawal_fee_bps"`
 }
 
 // AssetStatus defines model for AssetStatus.
@@ -853,8 +889,14 @@ type CreateAssetRequest struct {
 	ChainID         int64   `json:"chain_id"`
 	ContractAddress *string `json:"contract_address,omitempty"`
 	DepositEnabled  bool    `json:"deposit_enabled"`
-	DisplayScale    int32   `json:"display_scale"`
-	IsNative        bool    `json:"is_native"`
+
+	// DepositFeeBps Basis points taken out of an arriving deposit. There is no flat part: a flat deposit fee makes small deposits arbitrarily expensive. 10000 is refused for this one -- it would credit a depositor nothing. Deposits are the inlet and this ships at 0; the column exists in case sweep gas ever exceeds what trading brings in.
+	//
+	//
+	// Example: 0
+	DepositFeeBps int32 `json:"deposit_fee_bps"`
+	DisplayScale  int32 `json:"display_scale"`
+	IsNative      bool  `json:"is_native"`
 
 	// MinDeposit Decimal serialized as a string (NUMERIC(36,18)); never a JSON number.
 	//
@@ -884,6 +926,12 @@ type CreateAssetRequest struct {
 	//
 	// Example: 1990.00
 	WithdrawalFee Amount `json:"withdrawal_fee"`
+
+	// WithdrawalFeeBps The proportional part of the withdrawal fee, in basis points of the amount. The total charged is `withdrawal_fee + ceil(amount * withdrawal_fee_bps / 10000)`, rounded up at the asset's scale, and it is charged on top of the amount rather than taken out of it.
+	//
+	//
+	// Example: 0
+	WithdrawalFeeBps int32 `json:"withdrawal_fee_bps"`
 }
 
 // CreateFeeScheduleRequest defines model for CreateFeeScheduleRequest.

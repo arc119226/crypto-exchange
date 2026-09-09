@@ -1528,13 +1528,25 @@ components:
 
     AdminWithdrawal:
       type: object
-      required: [id, account_id, asset, amount, to_address, chain_id, status, created_at]
+      required: [id, account_id, asset, amount, fee, fee_asset, to_address, chain_id, status, created_at]
       properties:
         id: { type: string }
         account_id: { type: string }
         asset: { type: string }
         amount:
           $ref: "#/components/schemas/Amount"
+        fee:
+          allOf:
+            - $ref: "#/components/schemas/Amount"
+          description: >
+            What was quoted when the request was accepted, charged on top of
+            the amount. It stays in the account's hold until the transaction
+            confirms, and comes back on every path that does not confirm, so
+            a withdrawal in the review queue can still be refunded in full
+            after a rate change.
+        fee_asset:
+          type: string
+          description: The asset the fee is charged in, which today is `asset`.
         to_address: { type: string }
         chain_id: { type: integer, format: int64 }
         status: { type: string }
@@ -1868,7 +1880,7 @@ components:
 
     Asset:
       type: object
-      required: [id, symbol, name, chain_id, is_native, scale, display_scale, required_confirmations, min_deposit, min_withdrawal, withdrawal_fee, sweep_threshold, deposit_enabled, withdraw_enabled, status, version, created_at, updated_at]
+      required: [id, symbol, name, chain_id, is_native, scale, display_scale, required_confirmations, min_deposit, min_withdrawal, withdrawal_fee, withdrawal_fee_bps, deposit_fee_bps, sweep_threshold, deposit_enabled, withdraw_enabled, status, version, created_at, updated_at]
       properties:
         id:
           type: string
@@ -1900,6 +1912,31 @@ components:
           $ref: "#/components/schemas/Amount"
         withdrawal_fee:
           $ref: "#/components/schemas/Amount"
+        withdrawal_fee_bps:
+          type: integer
+          format: int32
+          minimum: 0
+          maximum: 10000
+          description: >
+            The proportional part of the withdrawal fee, in basis points of
+            the amount. The total charged is
+            `withdrawal_fee + ceil(amount * withdrawal_fee_bps / 10000)`,
+            rounded up at the asset's scale, and it is charged on top of the
+            amount rather than taken out of it.
+          example: 0
+        deposit_fee_bps:
+          type: integer
+          format: int32
+          minimum: 0
+          maximum: 10000
+          description: >
+            Basis points taken out of an arriving deposit. There is no flat
+            part: a flat deposit fee makes small deposits arbitrarily
+            expensive. 10000 is refused for this one -- it would credit a
+            depositor nothing. Deposits are the inlet and this ships at 0;
+            the column exists in case sweep gas ever exceeds what trading
+            brings in.
+          example: 0
         sweep_threshold:
           $ref: "#/components/schemas/Amount"
         deposit_enabled:
@@ -1929,7 +1966,7 @@ components:
 
     AssetRequest:
       type: object
-      required: [name, chain_id, is_native, scale, display_scale, required_confirmations, min_deposit, min_withdrawal, withdrawal_fee, sweep_threshold, deposit_enabled, withdraw_enabled, status, reason]
+      required: [name, chain_id, is_native, scale, display_scale, required_confirmations, min_deposit, min_withdrawal, withdrawal_fee, withdrawal_fee_bps, deposit_fee_bps, sweep_threshold, deposit_enabled, withdraw_enabled, status, reason]
       properties:
         name:
           type: string
@@ -1956,6 +1993,31 @@ components:
           $ref: "#/components/schemas/Amount"
         withdrawal_fee:
           $ref: "#/components/schemas/Amount"
+        withdrawal_fee_bps:
+          type: integer
+          format: int32
+          minimum: 0
+          maximum: 10000
+          description: >
+            The proportional part of the withdrawal fee, in basis points of
+            the amount. The total charged is
+            `withdrawal_fee + ceil(amount * withdrawal_fee_bps / 10000)`,
+            rounded up at the asset's scale, and it is charged on top of the
+            amount rather than taken out of it.
+          example: 0
+        deposit_fee_bps:
+          type: integer
+          format: int32
+          minimum: 0
+          maximum: 10000
+          description: >
+            Basis points taken out of an arriving deposit. There is no flat
+            part: a flat deposit fee makes small deposits arbitrarily
+            expensive. 10000 is refused for this one -- it would credit a
+            depositor nothing. Deposits are the inlet and this ships at 0;
+            the column exists in case sweep gas ever exceeds what trading
+            brings in.
+          example: 0
         sweep_threshold:
           $ref: "#/components/schemas/Amount"
         deposit_enabled:
@@ -2410,6 +2472,21 @@ components:
           type: string
         amount:
           $ref: "#/components/schemas/Amount"
+        fee:
+          allOf:
+            - $ref: "#/components/schemas/Amount"
+          nullable: true
+          description: >
+            Taken out of the amount at credit time, so it is null until the
+            deposit is credited. Unlike a withdrawal fee it is not charged on
+            top: `amount` stays what the chain delivered.
+        credited_amount:
+          allOf:
+            - $ref: "#/components/schemas/Amount"
+          nullable: true
+          description: >
+            What became the account's balance: `amount - fee`. Null until
+            credited.
         address:
           type: string
         tx_hash:

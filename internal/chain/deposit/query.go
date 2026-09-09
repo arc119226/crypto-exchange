@@ -24,8 +24,13 @@ type Record struct {
 	BlockNumber   int64
 	Confirmations int32
 	Status        string
-	CreditedAt    *time.Time
-	CreatedAt     time.Time
+	// Fee and Credited exist only once the deposit has been credited: the
+	// fee comes out of Amount rather than being added to it, so Amount stays
+	// what the chain delivered and Credited is what became the balance.
+	Fee        *money.Amount
+	Credited   *money.Amount
+	CreditedAt *time.Time
+	CreatedAt  time.Time
 }
 
 // Reader lists deposits. It is separate from the Scanner because the api and
@@ -67,11 +72,19 @@ func records(rows []sqlcgen.ChainDeposit) ([]Record, error) {
 		if err != nil {
 			return nil, fmt.Errorf("deposit: amount of %s: %w", row.ID, err)
 		}
+		fee, err := pg.NullableAmountFromNumeric(row.Fee)
+		if err != nil {
+			return nil, fmt.Errorf("deposit: fee of %s: %w", row.ID, err)
+		}
+		credited, err := pg.NullableAmountFromNumeric(row.CreditedAmount)
+		if err != nil {
+			return nil, fmt.Errorf("deposit: credited amount of %s: %w", row.ID, err)
+		}
 		rec := Record{
 			ID: row.ID, AccountID: row.AccountID, Asset: row.Asset, Amount: amount,
 			Address: row.Address, TxHash: row.TxHash, LogIndex: row.LogIndex,
 			BlockNumber: row.BlockNumber, Confirmations: row.Confirmations,
-			Status: row.Status, CreatedAt: row.CreatedAt,
+			Status: row.Status, Fee: fee, Credited: credited, CreatedAt: row.CreatedAt,
 		}
 		if row.CreditedAt.Valid {
 			at := row.CreditedAt.Time

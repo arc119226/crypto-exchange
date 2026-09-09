@@ -393,12 +393,14 @@ type Asset struct {
 	Symbol          string `json:"symbol"`
 	WithdrawEnabled bool   `json:"withdraw_enabled"`
 
-	// WithdrawalFee Arbitrary-precision decimal serialized as a string, at most 18 integer
-	// and 18 fractional digits (Postgres NUMERIC(36,18)). Never a JSON number.
-	//
-	//
-	// Example: 1990.00
+	// WithdrawalFee The flat part of the withdrawal fee. The total charged is `withdrawal_fee + ceil(amount * withdrawal_fee_bps / 10000)`, rounded up at `scale`, and it is added to the amount rather than taken out of it: the destination receives `amount` and the account is debited the sum.
 	WithdrawalFee Amount `json:"withdrawal_fee"`
+
+	// WithdrawalFeeBps The proportional part of the withdrawal fee, in basis points of the amount. `0` unless the operator has set a rate.
+	//
+	//
+	// Example: 0
+	WithdrawalFeeBps int32 `json:"withdrawal_fee_bps"`
 }
 
 // AssetList defines model for AssetList.
@@ -502,11 +504,17 @@ type Deposit struct {
 	Asset string `json:"asset"`
 
 	// BlockNumber Where it currently sits; a reorg can change this.
-	BlockNumber   int64      `json:"block_number"`
-	Confirmations int32      `json:"confirmations"`
-	CreatedAt     time.Time  `json:"created_at"`
-	CreditedAt    *time.Time `json:"credited_at,omitempty"`
-	ID            string     `json:"id"`
+	BlockNumber   int64     `json:"block_number"`
+	Confirmations int32     `json:"confirmations"`
+	CreatedAt     time.Time `json:"created_at"`
+
+	// CreditedAmount What became the account's balance: `amount - fee`. Null until credited. `amount` stays what the chain delivered, so the two can be reconciled independently.
+	CreditedAmount *Amount    `json:"credited_amount,omitempty"`
+	CreditedAt     *time.Time `json:"credited_at,omitempty"`
+
+	// Fee What was deducted from `amount` before crediting, or null until the deposit is credited -- unlike a withdrawal fee this one is computed when the money is credited, not when it is first seen. `0` unless the operator has set a rate; deposits are free by default.
+	Fee *Amount `json:"fee,omitempty"`
+	ID  string  `json:"id"`
 
 	// LogIndex ERC-20 log index, or -1 for a native transfer.
 	LogIndex int32 `json:"log_index"`
@@ -1118,7 +1126,17 @@ type Withdrawal struct {
 
 	// FailureReason Why it failed; null unless the status is failed.
 	FailureReason *string `json:"failure_reason,omitempty"`
-	ID            string  `json:"id"`
+
+	// Fee What this withdrawal is charged, on top of `amount`. The destination receives `amount`; the account is debited `amount + fee`. Quoted when the request was accepted and never recomputed, so changing the rate does not reprice a withdrawal already in flight.
+	// It is the account's money until the transaction is confirmed. On every path that does not confirm -- a broadcast that failed, a withdrawal displaced by a cancellation, an operator refund -- it goes back to the available balance. `0` unless the operator has set a rate.
+	Fee Amount `json:"fee"`
+
+	// FeeAsset The asset `fee` is denominated in, which is `asset`. A USDC withdrawal is charged in USDC even though its gas is paid in ETH.
+	//
+	//
+	// Example: ETH
+	FeeAsset string `json:"fee_asset"`
+	ID       string `json:"id"`
 
 	// ReviewNote What the administrator wrote when approving or rejecting.
 	ReviewNote *string `json:"review_note,omitempty"`

@@ -438,11 +438,20 @@ func (s *Scanner) emit(ctx context.Context, tx pgx.Tx, eventType string, row sql
 	if err != nil {
 		return err
 	}
+	fee, err := pg.NullableAmountFromNumeric(row.Fee)
+	if err != nil {
+		return err
+	}
+	credited, err := pg.NullableAmountFromNumeric(row.CreditedAmount)
+	if err != nil {
+		return err
+	}
 	env, err := Event(eventType, s.cfg.Tenant, Payload{
 		DepositID: row.ID, AccountID: row.AccountID, Asset: row.Asset, Amount: amount,
 		Address: row.Address, TxHash: row.TxHash, LogIndex: row.LogIndex,
 		BlockNumber: uint64(row.BlockNumber), BlockHash: row.BlockHash, //nolint:gosec // CHECKed >= 0
 		Confirmations: row.Confirmations, Status: row.Status,
+		Fee: fee, Credited: credited,
 	}, seq, time.Now().UTC().Truncate(time.Microsecond))
 	if err != nil {
 		return err

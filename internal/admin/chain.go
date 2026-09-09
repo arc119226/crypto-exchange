@@ -80,6 +80,7 @@ func toDeposit(d deposit.Record) gen.AdminDeposit {
 	return gen.AdminDeposit{
 		ID: d.ID, AccountID: d.AccountID, Asset: d.Asset, Amount: d.Amount, Address: d.Address, TxHash: d.TxHash,
 		LogIndex: d.LogIndex, BlockNumber: d.BlockNumber, Confirmations: d.Confirmations,
+		Fee: d.Fee, CreditedAmount: d.Credited,
 		Status: gen.AdminDepositStatus(d.Status), CreditedAt: d.CreditedAt, CreatedAt: d.CreatedAt,
 	}
 }

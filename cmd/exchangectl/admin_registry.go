@@ -54,12 +54,13 @@ func printAdminAssets(cmd *cobra.Command, assets []adminclient.Asset) error {
 		}
 		rows = append(rows, []string{
 			a.Symbol, a.Name, strconv.FormatInt(a.ChainID, 10), contract, fmt.Sprintf("%d/%d", a.Scale, a.DisplayScale),
-			strconv.Itoa(int(a.RequiredConfirmations)), a.MinWithdrawal.String(), a.WithdrawalFee.String(), a.SweepThreshold.String(),
+			strconv.Itoa(int(a.RequiredConfirmations)), a.MinWithdrawal.String(), a.WithdrawalFee.String(),
+			strconv.Itoa(int(a.WithdrawalFeeBps)), strconv.Itoa(int(a.DepositFeeBps)), a.SweepThreshold.String(),
 			onOff(a.DepositEnabled), onOff(a.WithdrawEnabled), string(a.Status), strconv.Itoa(int(a.Version)),
 		})
 	}
 	return printTable(cmd.OutOrStdout(),
-		[]string{"SYMBOL", "NAME", "CHAIN", "CONTRACT", "SCALE", "CONFS", "MIN_WD", "WD_FEE", "SWEEP_AT", "DEPOSITS", "WITHDRAWALS", "STATUS", "V"}, rows)
+		[]string{"SYMBOL", "NAME", "CHAIN", "CONTRACT", "SCALE", "CONFS", "MIN_WD", "WD_FEE", "WD_BPS", "DEP_BPS", "SWEEP_AT", "DEPOSITS", "WITHDRAWALS", "STATUS", "V"}, rows)
 }
 
 func onOff(b bool) string {

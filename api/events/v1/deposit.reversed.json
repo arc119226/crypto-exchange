@@ -34,6 +34,16 @@
       "pattern": "^-?\\d{1,18}(\\.\\d{1,18})?$",
       "description": "Decimal amount in the asset's own units, never wei."
     },
+    "fee": {
+      "type": "string",
+      "pattern": "^-?\\d{1,18}(\\.\\d{1,18})?$",
+      "description": "What was taken out of amount before crediting. Unlike a withdrawal fee this one is deducted from what arrived rather than added to it, so amount stays what the chain delivered. Absent until the deposit is credited -- a zero fee and no fee yet are different facts. 0 unless the operator has set a rate; deposits ship free."
+    },
+    "credited_amount": {
+      "type": "string",
+      "pattern": "^-?\\d{1,18}(\\.\\d{1,18})?$",
+      "description": "What became the account's balance: amount minus fee. Absent until the deposit is credited."
+    },
     "address": {
       "type": "string",
       "pattern": "^0x[0-9a-f]{40}$",
