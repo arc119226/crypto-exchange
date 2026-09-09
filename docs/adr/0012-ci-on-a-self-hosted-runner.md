@@ -42,33 +42,41 @@ runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
 
 例外是 `release`,寫死 `ubuntu-latest`:它一個月跑幾次、要推 ghcr 與開 GitHub Release,而發布不該依賴一台家用機器有沒有開著。
 
-**2026-09-09 補上第二個例外:`image` 在 `push` 事件上也走托管。** 它在 pull request 上只是 build 三個 image 再各跑一次,那是自建 runner 上免費的驗證;但在 push 上它還會登入 ghcr 並把三個 image 推上去——那就是發布,和 `release` 適用同一句話。
+**`release` 是唯一的例外。** 2026-09-09 曾經短暫有第二個,那件事值得完整記下來,因為錯誤訊息離根因有三層,而看起來最像的假設全都是錯的。
 
-寫成一行條件而不是再開一個 job:
+**症狀。** `image` job 在自建 runner 上死於一行 `##[error]Connect Timeout Error`,發生在第 3 個步驟 `docker/metadata-action`,build 連開始都沒有。run 98(pull request)與 run 100(合併到 main,所以 main 紅了)各一次,中間隔 40 分鐘。同一步驟在 09:55 的 run 97 只花 **1 秒**就通過,而且中間沒有任何 workflow 改動。
 
-```yaml
-runs-on: ${{ github.event_name == 'push' && 'ubuntu-latest' || vars.CI_RUNNER || 'ubuntu-latest' }}
+**三個被排除的假設。** 每一個都很有說服力,每一個都被一項證據推翻:
+
+| 假設 | 推翻它的證據 |
+|---|---|
+| GitHub 把 Node 20 的 action 強制升到 Node 24 | 那則警告在**成功那一次**的 log 裡就已經在了 |
+| WSL 的 IPv6 出不去 | `getent ahosts` 只回 IPv4——根本沒有 AAAA 記錄可以連 |
+| WSL2 的 MTU 問題(症狀確實像:有些主機正常、有些慢到爆) | `curl` 的分段計時顯示 TCP 連線 **34 ms**、TLS **37 ms**。路徑好得不能再好 |
+
+**根因。** 分段計時把它指出來:
+
+```
+dns=16.092  conn=16.126  tls=16.163  total=16.201
 ```
 
-促成它的是一次實際故障,不是預想。`docker/metadata-action` 會呼叫 `api.github.com` 拿倉庫的描述與授權條款去填 OCI label;同一台 runner 上,這一步 09:55 花 **1 秒**通過,12:34(run 98)與 13:14(run 100)各回一次 `Connect Timeout Error`,中間沒有任何 workflow 改動,Node 24 的強制升級在成功那次就已經生效。也就是說**這台機器連 `api.github.com` 的能力會消失**,而 `v*` tag 走的是同一條 push 路徑——再過幾天要切的 `v0.1.0`,只差這一通打不出去的 API 就會失敗。
+16.2 秒裡有 **16.09 秒是 DNS**,其餘三段加起來 0.109 秒。再用 `getent` 往下切一層就釘死了:
 
-代價是有界的,而且**這次是量到的,不是推估**:合併到 main 只跑 `fuzz-smoke` 和 `image`,而 `fuzz-smoke` 留在自建 runner 上。
+```
+ahostsv4 api.github.com   0.048s     只問 A
+ahosts   api.github.com  17.339s     A + AAAA
+ahosts   example.com      0.026s     A + AAAA
+```
 
-改動合併之後的第一次實跑(run 102,`6f0e3e9`)每一項都對上:
+所以壞的不是 IPv6(`example.com` 同時問 A 和 AAAA 只要 26 ms)、不是這台機器、也不是 GitHub,而是 **`api.github.com` 的 AAAA 查詢沒有人回答**。`/etc/resolv.conf` 指向 `nameserver 10.255.255.254`——WSL 自己的 DNS 代理。查詢石沉大海,glibc 等滿預設的 5 秒 × 2 次再加重試,湊出 17 秒,然後放棄、只回 IPv4。
 
-| 檢查點 | 實測 |
-|---|---|
-| `image` 落在哪 | `GitHub Actions 1000001553`,label `ubuntu-latest`——托管機器,不是 `MSI`/`MSI2` |
-| 三個 metadata 步驟 | 都執行、都通過,各 1 秒 |
-| `login to ghcr` + 三次 push | 全部成功,共 25 秒 |
-| `reclaim disk` | **skipped**——`runner.environment == 'self-hosted'` 如預期擋掉 |
-| `fuzz-smoke` | 仍在 `MSI2`,不計費 |
-| **`image` 耗時** | 13:58:10 → 14:02:19 = **4m09**,進位後 **5 個計費分鐘** |
-| **整個合併的牆鐘** | 13:58:06 → 14:02:20 = **4m14** |
+**為什麼偏偏是 `metadata-action` 死。** 它底層是 Node 的 undici,**connect timeout 預設 10 秒**。16 秒剛好落在錯的一側。`actions/checkout` 沒有這種短逾時,所以它只是慢,不會紅——這就是為什麼整個 job 看起來只有一步壞掉。09:55 那次通過不是狀態比較好,是抽籤抽中。
 
-以每月 30 次合併算是 150 分鐘,佔 3,000 分鐘額度的 5%。機器恢復之後把這一行改回去就是零。
+**修法在機器上,不在 workflow 裡。** `/etc/wsl.conf` 加 `[network] generateResolvConf = false`,`/etc/resolv.conf` 改成靜態的公共 DNS,並加上 `options timeout:2 attempts:2`。最後那一項是結構性的保險:就算之後又有名字沒人回答,最糟也只等 4 秒,**再也撞不到 undici 的 10 秒門檻**。
 
-同一輪還做了兩件小事:三個 `metadata-action` 步驟加上 `if: github.event_name == 'push'`(它們的輸出只有 push 步驟在讀,pull request 上算出來沒人看,卻是三個網路失敗點),以及 `image` 的清理步驟改用 `runner.environment == 'self-hosted'` 判斷——它現在有可能落在托管機器上,而那裡整台 VM 跑完就丟,沒有東西要清。合起來的結果是:**`metadata-action` 再也不會在自建 runner 上執行。**
+**期間的繞道與它量到的數字。** 修好之前,`image` 在 push 事件上被釘到 `ubuntu-latest`——理由和 `release` 一樣,發布不該依賴一台家用機器,而 `v*` tag 走的正是同一條 push 路徑,`v0.1.0` 只差這一通打不出去的 API 就會失敗。兩次實跑量到 **4m09**(run 102)與 **3m50**(run 103),都是 **4–5 個計費分鐘**;`fuzz-smoke` 留在自建 runner 上不計費。DNS 修好之後這一行就改回一般的開關了。
+
+**留下來的一件事。** 三個 `metadata-action` 步驟保留了 `if: github.event_name == 'push'`。它的理由跟這次的網路無關:那三個步驟算出來的 tag 與 label **只有 push 步驟在讀**,而那些步驟本來就全是 push-only,所以在 pull request 上它們是三通沒有人讀結果的 API 呼叫,也就是三個白給的失敗點。清理步驟的條件則改了又改回 `vars.CI_RUNNER != ''`:繞道期間用過 `runner.environment == 'self-hosted'`,那個寫法只驗證過它在托管機器上會 skip,沒驗證過它在這台 runner 上會等於 `self-hosted`——猜錯的話清理會安靜地不執行,而症狀要等磁碟滿了才看得到。job 不再換機器之後,原本的條件就精確了。
 
 考慮過但不採納的替代方案:
 

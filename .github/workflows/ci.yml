@@ -533,22 +533,13 @@ jobs:
     # a merge to main. A real integration failure still stops it, and
     # !cancelled() rather than always() so a cancelled run cannot publish.
     if: ${{ !cancelled() && (needs.integration.result == 'success' || needs.integration.result == 'skipped') }}
-    # Split by event, for the reason release is already pinned: on a pull
-    # request this job builds three images and smoke-tests them locally, which
-    # is free on the self-hosted runner; on a push it also logs in to ghcr and
-    # publishes them, and publishing must not depend on one machine's
-    # connectivity. That stopped being hypothetical on 2026-09-09: the
-    # metadata step, which asks api.github.com for the repository description
-    # that goes into the OCI labels, returned `Connect Timeout Error` twice
-    # inside 45 minutes on the self-hosted runner -- run 98 and run 100 -- and
-    # had taken one second on the same runner two hours earlier. A v* tag
-    # takes the same path, so the release those images belong to was one
-    # unreachable API call away from failing too.
-    #
-    # A merge to main runs only fuzz-smoke and image, so what this bills is
-    # bounded to this one job. Move it back when the runner can reach
-    # api.github.com reliably again.
-    runs-on: ${{ github.event_name == 'push' && 'ubuntu-latest' || vars.CI_RUNNER || 'ubuntu-latest' }}
+    # This job spent 2026-09-09 pinned to ubuntu-latest on push events,
+    # because the metadata step below could not reach api.github.com from the
+    # self-hosted runner. The cause was DNS, not the network: one name's AAAA
+    # query went unanswered and the resolver spent 17 seconds giving up. Fixed
+    # on the machine, so this is back to the ordinary switch. ADR-0012
+    # decision 1 has the elimination chain.
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
     permissions:
       contents: read
       packages: write
@@ -687,12 +678,9 @@ jobs:
           tags: ${{ steps.meta-backup.outputs.tags }}
           labels: ${{ steps.meta-backup.outputs.labels }}
           cache-from: type=gha,scope=backup
-      # a self-hosted runner keeps everything this job built; see the action.
-      # This is the one job that can also land on a hosted runner, where the
-      # whole VM is thrown away afterwards, so it asks where it is rather than
-      # whether the repository has a runner configured at all.
+      # a self-hosted runner keeps everything this job built; see the action
       - name: reclaim disk
-        if: ${{ always() && runner.environment == 'self-hosted' }}
+        if: ${{ always() && vars.CI_RUNNER != '' }}
         uses: ./.github/actions/reclaim-disk
 
   # A v* tag is a release (docs/release.md): the images are already on ghcr
