@@ -373,8 +373,8 @@ func (q *Queries) GetWithdrawalForUpdate(ctx context.Context, arg GetWithdrawalF
 const insertWithdrawal = `-- name: InsertWithdrawal :one
 INSERT INTO chain.withdrawals (
     tenant_id, account_id, asset, amount, to_address, chain_id,
-    idempotency_key, request_hash, status, correlation_id
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'requested', $9)
+    idempotency_key, request_hash, status, correlation_id, fee, fee_asset
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'requested', $9, $10, $11)
 RETURNING id, tenant_id, account_id, asset, amount, to_address, chain_id, idempotency_key, request_hash, status, failure_reason, reviewed_by, reviewed_at, review_note, hold_entry_id, correlation_id, version, created_at, updated_at, nonce, raw_tx, tx_hash, broadcast_at, replacements, block_number, gas_cost, cancel_tx_hash, resolve_action, resolve_note, resolve_requested_by, resolve_requested_at, resolve_error, fee, fee_asset
 `
 
@@ -388,6 +388,8 @@ type InsertWithdrawalParams struct {
 	IdempotencyKey string
 	RequestHash    string
 	CorrelationID  *string
+	Fee            pgtype.Numeric
+	FeeAsset       string
 }
 
 func (q *Queries) InsertWithdrawal(ctx context.Context, arg InsertWithdrawalParams) (ChainWithdrawal, error) {
@@ -401,6 +403,8 @@ func (q *Queries) InsertWithdrawal(ctx context.Context, arg InsertWithdrawalPara
 		arg.IdempotencyKey,
 		arg.RequestHash,
 		arg.CorrelationID,
+		arg.Fee,
+		arg.FeeAsset,
 	)
 	var i ChainWithdrawal
 	err := row.Scan(

@@ -13,6 +13,7 @@ package withdrawal
 
 import (
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgconn"
@@ -76,6 +77,16 @@ type Record struct {
 	AccountID string
 	Asset     string
 	Amount    money.Amount
+	// Fee is what this withdrawal is charged, in FeeAsset, snapshotted when
+	// the request was accepted (§23.3). It is charged on top of Amount: the
+	// destination receives Amount and the account pays Amount + Fee. Reading
+	// it off the row rather than recomputing it is the whole point -- a rate
+	// change must not reprice a withdrawal that is already in flight.
+	//
+	// FeeAsset is always Asset today; a USDC withdrawal is charged in USDC
+	// even though its gas is paid in ETH.
+	Fee       money.Amount
+	FeeAsset  string
 	ToAddress string
 	ChainID   int64
 	Status    string
@@ -110,8 +121,13 @@ func recordFrom(row sqlcgen.ChainWithdrawal) (Record, error) {
 	if err != nil {
 		return Record{}, err
 	}
+	fee, err := pg.AmountFromNumeric(row.Fee)
+	if err != nil {
+		return Record{}, err
+	}
 	rec := Record{
 		ID: row.ID, AccountID: row.AccountID, Asset: row.Asset, Amount: amount,
+		Fee: fee, FeeAsset: row.FeeAsset,
 		ToAddress: row.ToAddress, ChainID: row.ChainID, Status: row.Status,
 		FailureReason: deref(row.FailureReason), ReviewNote: deref(row.ReviewNote),
 		ReviewedBy: deref(row.ReviewedBy), TxHash: deref(row.TxHash),
@@ -127,6 +143,23 @@ func recordFrom(row sqlcgen.ChainWithdrawal) (Record, error) {
 		rec.ReviewedAt = &at
 	}
 	return rec, nil
+}
+
+// amountAndFee reads what a withdrawal moves and what it is charged.
+//
+// Every path that touches the hold goes through this rather than reading one
+// column, because the two numbers travel together from approved until the
+// withdrawal ends and then part company: the amount goes to the chain and the
+// fee becomes revenue, or both come back. A path that read only Amount would
+// leave the fee locked forever with nothing to release it (§6.1.4 h).
+func amountAndFee(row sqlcgen.ChainWithdrawal) (amount, fee money.Amount, err error) {
+	if amount, err = pg.AmountFromNumeric(row.Amount); err != nil {
+		return money.Zero, money.Zero, fmt.Errorf("withdrawal: amount of %s: %w", row.ID, err)
+	}
+	if fee, err = pg.AmountFromNumeric(row.Fee); err != nil {
+		return money.Zero, money.Zero, fmt.Errorf("withdrawal: fee of %s: %w", row.ID, err)
+	}
+	return amount, fee, nil
 }
 
 func deref(p *string) string {

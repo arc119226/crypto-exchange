@@ -315,13 +315,16 @@ func (w *Worker) broadcastFailed(ctx context.Context, row sqlcgen.ChainWithdrawa
 			slog.String("withdrawal_id", row.ID), slog.Uint64("nonce", nonce), slog.String("err", cause.Error()))
 		return nil
 	}
-	amount, err := pg.AmountFromNumeric(row.Amount)
+	amount, fee, err := amountAndFee(row)
 	if err != nil {
 		return err
 	}
 	if err := inTx(ctx, w.db, func(tx pgx.Tx) error {
+		// Both come back. The transaction never reached the chain, so the
+		// exchange sent nothing and charges nothing (§23.3: the fee's
+		// ownership moves at confirmation, not before).
 		if _, _, err := w.ledger.Release(ctx, tx, ledger.HoldParams{
-			AccountID: row.AccountID, Asset: row.Asset, Amount: amount,
+			AccountID: row.AccountID, Asset: row.Asset, Amount: amount.Add(fee),
 			IdempotencyKey: "release:withdrawal:" + row.ID,
 			Ref:            ledger.Ref{Type: "withdrawal", ID: row.ID},
 			CorrelationID:  deref(row.CorrelationID),
@@ -403,7 +406,11 @@ func (w *Worker) track(ctx context.Context, row sqlcgen.ChainWithdrawal) error {
 // produces one USDC entry and one ETH entry. Merging them would make a single
 // entry that does not balance per asset.
 func (w *Worker) confirm(ctx context.Context, row sqlcgen.ChainWithdrawal, block uint64, gas money.Amount) error {
-	amount, err := pg.AmountFromNumeric(row.Amount)
+	amount, fee, err := amountAndFee(row)
+	if err != nil {
+		return err
+	}
+	feeRevenue, err := w.ledger.HouseAccount(ledger.HouseFeeRevenue)
 	if err != nil {
 		return err
 	}
@@ -430,6 +437,29 @@ func (w *Worker) confirm(ctx context.Context, row sqlcgen.ChainWithdrawal, block
 			},
 		}); err != nil {
 			return fmt.Errorf("withdrawal: post confirm %s: %w", row.ID, err)
+		}
+		// The fee, and only now (§6.1.4 h). Until this posting it was the
+		// user's money sitting on hold; this is the single moment in the
+		// whole state machine where it changes hands, and it happens only
+		// because the transaction is mined. A separate entry from the one
+		// above so the revenue is attributable to its own reference -- the
+		// revenue report reads `withdrawal:fee:*` entries by name (§23.5).
+		//
+		// Skipped entirely when the fee is zero, which is every withdrawal
+		// until an operator sets a rate: the ledger refuses zero-amount
+		// postings, and an empty entry would be noise in the journal.
+		if fee.IsPositive() {
+			if _, _, err := w.ledger.Post(ctx, tx, ledger.Entry{
+				IdempotencyKey: "withdrawal:fee:" + row.ID, Kind: "fee",
+				RefType: "withdrawal", RefID: row.ID, Reason: "withdrawal fee",
+				CorrelationID: deref(row.CorrelationID),
+				Postings: []ledger.Posting{
+					{AccountID: row.AccountID, Asset: row.Asset, Bucket: ledger.BucketHold, Direction: ledger.Debit, Amount: fee},
+					{AccountID: feeRevenue, Asset: row.Asset, Bucket: ledger.BucketHouse, Direction: ledger.Credit, Amount: fee},
+				},
+			}); err != nil {
+				return fmt.Errorf("withdrawal: post fee %s: %w", row.ID, err)
+			}
 		}
 		if err := w.postGas(ctx, tx, row, gasAccount, hot, gas); err != nil {
 			return err

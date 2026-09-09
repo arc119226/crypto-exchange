@@ -104,18 +104,34 @@ func (s *Service) Create(ctx context.Context, p CreateParams) (CreateResult, err
 		return CreateResult{}, err
 	}
 
+	// The fee is quoted here and never recomputed (§23.3). Everything above
+	// this line -- min_withdrawal, the scale check -- deliberately looks at
+	// the amount alone: the minimum is about how much is worth sending, not
+	// about what the send costs, and the policy limits downstream read the
+	// amount for the same reason.
+	fee, err := asset.WithdrawalFeeFor(p.Amount)
+	if err != nil {
+		return CreateResult{}, err
+	}
+	total := p.Amount.Add(fee)
+
 	// An available-balance pre-check. It is advisory: the funds are not held
 	// until the chain worker locks them, so between here and there the balance
 	// can move. Telling a user now beats a withdrawal that fails minutes later.
 	// (Balance answers zero for an account that has never held the asset, so
 	// there is no not-found case to fold in here.)
+	//
+	// It checks amount + fee, because that is what the hold will take. A
+	// balance that covers the amount but not the fee would pass this check,
+	// pass policy, and then fail at funds_locked with insufficient_balance --
+	// after the user had been told the request was accepted.
 	balance, err := s.ledger.Balance(ctx, p.AccountID, asset.Symbol)
 	if err != nil {
 		return CreateResult{}, fmt.Errorf("withdrawal: balance of %s: %w", p.AccountID, err)
 	}
-	if balance.Available.Cmp(p.Amount) < 0 {
-		return CreateResult{}, fmt.Errorf("%w: available %s %s is less than %s",
-			ErrInvalid, balance.Available, asset.Symbol, p.Amount)
+	if balance.Available.Cmp(total) < 0 {
+		return CreateResult{}, fmt.Errorf("%w: available %s %s is less than %s (%s plus %s fee)",
+			ErrInvalid, balance.Available, asset.Symbol, total, p.Amount, fee)
 	}
 
 	var out CreateResult
@@ -125,6 +141,8 @@ func (s *Service) Create(ctx context.Context, p CreateParams) (CreateResult, err
 			Amount: pg.NumericFromAmount(p.Amount), ToAddress: to, ChainID: s.chainID,
 			IdempotencyKey: p.IdempotencyKey, RequestHash: hash,
 			CorrelationID: optString(p.CorrelationID),
+			Fee:           pg.NumericFromAmount(fee),
+			FeeAsset:      asset.Symbol,
 		})
 		if err != nil {
 			// Two requests with the same key at once: one inserts, the other
@@ -147,8 +165,11 @@ func (s *Service) Create(ctx context.Context, p CreateParams) (CreateResult, err
 		if err := s.audit.Record(ctx, tx, audit.Event{
 			ActorType: audit.ActorUser, ActorID: p.UserID, Action: "withdrawal.request",
 			TargetType: "withdrawal", TargetID: row.ID,
-			After: map[string]any{"asset": row.Asset, "amount": p.Amount.String(), "to_address": to, "status": row.Status},
-			IP:    p.IP, CorrelationID: p.CorrelationID,
+			After: map[string]any{
+				"asset": row.Asset, "amount": p.Amount.String(), "fee": fee.String(),
+				"to_address": to, "status": row.Status,
+			},
+			IP: p.IP, CorrelationID: p.CorrelationID,
 		}); err != nil {
 			return fmt.Errorf("withdrawal: audit: %w", err)
 		}

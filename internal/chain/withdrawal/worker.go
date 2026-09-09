@@ -250,12 +250,16 @@ func (w *Worker) decide(ctx context.Context, tx pgx.Tx, row sqlcgen.ChainWithdra
 // hold would let the signer spend money the ledger still says is available.
 func (w *Worker) lockFunds(ctx context.Context, tx pgx.Tx, row sqlcgen.ChainWithdrawal) error {
 	q := sqlcgen.New(tx)
-	amount, err := pg.AmountFromNumeric(row.Amount)
+	amount, fee, err := amountAndFee(row)
 	if err != nil {
-		return fmt.Errorf("withdrawal: amount of %s: %w", row.ID, err)
+		return err
 	}
+	// The hold covers both: the destination's amount and the fee the account
+	// agreed to when the request was accepted. Holding only the amount would
+	// let the balance drop below the fee between here and confirmation, and
+	// the fee posting at the end would then have nothing to draw on.
 	entry, _, err := w.ledger.Hold(ctx, tx, ledger.HoldParams{
-		AccountID: row.AccountID, Asset: row.Asset, Amount: amount,
+		AccountID: row.AccountID, Asset: row.Asset, Amount: amount.Add(fee),
 		IdempotencyKey: "hold:withdrawal:" + row.ID,
 		Ref:            ledger.Ref{Type: "withdrawal", ID: row.ID},
 		CorrelationID:  deref(row.CorrelationID),

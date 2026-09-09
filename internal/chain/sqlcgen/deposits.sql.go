@@ -535,19 +535,28 @@ func (q *Queries) ListMaturingDeposits(ctx context.Context, arg ListMaturingDepo
 const markDepositCredited = `-- name: MarkDepositCredited :one
 UPDATE chain.deposits
 SET status = 'credited', confirmations = $3, credited_at = now(),
+    fee = $4, credited_amount = $5,
     version = version + 1, updated_at = now()
 WHERE id = $1 AND tenant_id = $2 AND status <> 'credited'
 RETURNING id, tenant_id, chain_id, tx_hash, log_index, address, account_id, asset, amount, block_number, block_hash, confirmations, status, orphaned_at_block, credited_at, correlation_id, version, created_at, updated_at, fee, credited_amount
 `
 
 type MarkDepositCreditedParams struct {
-	ID            string
-	TenantID      string
-	Confirmations int32
+	ID             string
+	TenantID       string
+	Confirmations  int32
+	Fee            pgtype.Numeric
+	CreditedAmount pgtype.Numeric
 }
 
 func (q *Queries) MarkDepositCredited(ctx context.Context, arg MarkDepositCreditedParams) (ChainDeposit, error) {
-	row := q.db.QueryRow(ctx, markDepositCredited, arg.ID, arg.TenantID, arg.Confirmations)
+	row := q.db.QueryRow(ctx, markDepositCredited,
+		arg.ID,
+		arg.TenantID,
+		arg.Confirmations,
+		arg.Fee,
+		arg.CreditedAmount,
+	)
 	var i ChainDeposit
 	err := row.Scan(
 		&i.ID,

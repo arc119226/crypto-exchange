@@ -67,6 +67,7 @@ RETURNING *;
 -- name: MarkDepositCredited :one
 UPDATE chain.deposits
 SET status = 'credited', confirmations = $3, credited_at = now(),
+    fee = $4, credited_amount = $5,
     version = version + 1, updated_at = now()
 WHERE id = $1 AND tenant_id = $2 AND status <> 'credited'
 RETURNING *;
