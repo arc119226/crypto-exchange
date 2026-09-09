@@ -542,6 +542,14 @@ jobs:
       - uses: docker/setup-buildx-action@v3
       - name: image metadata
         id: meta
+        # Only the push steps below read these outputs, and every one of them
+        # is push-only. On a pull request the action still calls the GitHub API
+        # for the repository description and licence that go into the OCI
+        # labels -- three calls whose results nothing reads, and each one a way
+        # for the job to fail before it has built anything. Run 98's image job
+        # died exactly there, on `Connect Timeout Error`, with checkout and
+        # buildx fine either side of it.
+        if: github.event_name == 'push'
         uses: docker/metadata-action@v5
         with:
           images: ghcr.io/${{ github.repository }}
@@ -576,6 +584,7 @@ jobs:
       # their own cache scopes.
       - name: edge image metadata
         id: meta-edge
+        if: github.event_name == 'push'
         uses: docker/metadata-action@v5
         with:
           images: ghcr.io/${{ github.repository }}-edge
@@ -600,6 +609,7 @@ jobs:
           docker run --rm --entrypoint sh crypto-exchange-edge:ci -c 'test -s /srv/index.html && ls /srv/assets | grep -q "\.js$"'
       - name: backup image metadata
         id: meta-backup
+        if: github.event_name == 'push'
         uses: docker/metadata-action@v5
         with:
           images: ghcr.io/${{ github.repository }}-backup
