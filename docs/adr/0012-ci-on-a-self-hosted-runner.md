@@ -48,11 +48,19 @@ runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
 - **只靠優化**——上面的算術否決了它。優化仍然全做(見決定 3),但它是給退路用的,不是解法。
 - **付費加購分鐘**——每月約 20,000 分鐘的超額,長期成本遠高於一台閒置機器,而且用量還在長。
 
-### 2. 三個 runner 實例,共用一個 Docker daemon,清理必須加時間過濾
+### 2. 兩個 runner 實例,共用一個 Docker daemon,清理必須加時間過濾
 
-一個 runner 一次只跑一個 job;一次完整 run 是 45 分鐘的 job 時間,單一 runner 就是 45 分鐘牆鐘。三個實例把牆鐘壓回約 15 分鐘,和托管相當。
+一個 runner 一次只跑一個 job,所以牆鐘由實例數與 job 依賴圖一起決定。這條原本寫「三個實例把牆鐘壓回約 15 分鐘」,那是 45 分鐘 job 時間除以三推出來的,沒有看依賴圖。**實際的圖是 `checks` → `integration` → (`helm` ∥ `e2e` ∥ `image`),前兩段是串的,第三段的長度由最長的 `helm` 決定。** 用一台 runner 上量到的每個 job 的秒數(見「後果」)推:
 
-三個實例共用同一個 Docker daemon,所以**每一個 prune 都必須帶 `until` 過濾**:`image` job 裡一句沒有過濾的 `docker system prune -a` 會刪掉旁邊 `e2e` job 正在用的容器與 image。`.github/actions/reclaim-disk/action.yml` 因此是 `container prune --filter until=6h`、`image prune --filter until=72h`、`builder prune --filter until=72h`,而且完全不碰 volume——`docker volume prune` 沒有 `until`,分不出死的和活的。volume 交給 `compose down -v`、testcontainers 的 Ryuk,和停掉 runner 之後的每週深度清理。
+| runner 數 | 第三段 | 總牆鐘 |
+|---|---|---|
+| 1 | 7m12 + 3m26 + 4m15 依序 = 14m53 | **25m05(實測)** |
+| 2 | helm 7m12 ∥ (e2e 3m26 → image 4m15 = 7m41) = 7m41 | 約 18m |
+| 3 | max(7m12, 3m26, 4m15) = 7m12 | 約 17m |
+
+**第三個實例只買到約半分鐘**,因為它只是讓 `image` 不必等 `e2e`,而兩者相加仍短於 `helm`。所以是兩個,不是三個。
+
+兩個實例共用同一個 Docker daemon,所以**每一個 prune 都必須帶 `until` 過濾**:`image` job 裡一句沒有過濾的 `docker system prune -a` 會刪掉旁邊 `e2e` job 正在用的容器與 image。`.github/actions/reclaim-disk/action.yml` 因此是 `container prune --filter until=6h`、`image prune --filter until=72h`、`builder prune --filter until=72h`、`network prune --filter until=6h`,而且完全不碰 volume——`docker volume prune` 沒有 `until`,分不出死的和活的。volume 交給 `compose down -v`、testcontainers 的 Ryuk,和停掉 runner 之後的每週深度清理。
 
 清理步驟只在 `vars.CI_RUNNER != ''` 時執行:托管 runner 整台都會被丟掉,在上面清理是花錢整理一台即將刪除的 VM。
 
@@ -98,10 +106,27 @@ Docker Desktop 仍寫進 guide 當替代路線,把上面三項代價寫清楚,�
 
   這強化而不是削弱本 ADR 的結論——**托管 runner 上連快取都不穩定,而自建 runner 上 `cache: ${{ vars.CI_RUNNER == '' }}` 讓這 249 秒整個消失**。同時它也說明為什麼決定 3 的優化不能當成解法:它們是給退路用的。
 - 一次 A/B 不是量測。上面的數字本身也有抖動,最終要看的是 Settings → Billing 跑一週的實際數字。
+- **搬到自建 runner 之後的第一次全綠 run(一台 runner,`runner_id` 全部相同):**
+
+  | job | 耗時 |
+  |---|---|
+  | checks | 2m20s |
+  | integration | 7m39s |
+  | helm | 7m12s |
+  | e2e | 3m26s |
+  | image | 4m15s |
+  | **牆鐘** | **25m05s** |
+  | **計費** | **0 分鐘** |
+
+  對照托管的 #89(44 計費分鐘 / 31 分鐘牆鐘):**一台自建 runner 已經比托管的三台平行還快,而且不計費。** 快的來源不是機器比較猛,是不必再等網路——三項步驟級的證據:
+
+  - **`actions/setup-go` 兩端都是 0 秒**(還原與 `Post Run` 都是)。上一條推論「10 GB 快取配額被三個 `type=gha,mode=max` 擠爆」並預測 `cache: ${{ vars.CI_RUNNER == '' }}` 會讓 e2e 那 249 秒消失——**量到 0 秒,預測成立**。
+  - **Playwright 那一步 10 秒**。`PLAYWRIGHT_INSTALL_DEPS` 只關掉 `--with-deps`、保留瀏覽器下載,而瀏覽器已在 `~/.cache/ms-playwright`,所以整步是 no-op。上面那條被撤銷的 Chromium 猜測,正確的版本長這樣。
+  - **同一個 app image 在一次 run 裡建了兩次**:`helm` 的「build the image under test」4m19s、`image` 的「build (load locally)」2m40s,合計約 7 分鐘,佔 25 分鐘牆鐘的 **28%**。這是下面「沒做但值得做」那一項第一次有數字。
 - 預期每月計費從約 23,400 分鐘降到 **50~100 分鐘**(只剩 `release`),額度使用率 780% → 約 3%。
 - **`checks` 是循序的**:lint 失敗會擋住 unit,要多推一次才知道第二個失敗。這是刻意的取捨——失敗的 run 佔帳單 28%,提早停損比一次報完所有失敗值錢。步驟因此照「最便宜、最常失敗」排序。
 - **摘要列的名字變少**:紅燈寫 `checks` 而不是 `contracts`。GitHub 仍會指出失敗的 step,失去的只是摘要那一行的名字。
 - **自建 runner 是單點,而 Windows 路線的單點特別脆**:三件事疊在一起——WSL 無法在登入前啟動(session 0 不支援)、未公開的 `instanceIdleTimeout` 預設 15 秒就終止發行版、Windows Update 每月大約重開一次(2026 年 7 月起合併成每月一次)。所以 guide 把「重開機之後不碰任何東西,runner 要自己回到 Idle」列為**必測項目**,沒過就不算裝好。退路是刪掉倉庫變數,但那時又開始計費。
 - **安全邊界變了**:自建 runner 執行的是分支上的任意程式碼。私有倉庫 + 單人提交風險可控,但 `docs/guides/self-hosted-runner.md` 把三件事寫成必做:機器上不放別的東西、fork PR 全關、機器當拋棄式的看待。Windows 路線還多一條——自動登入代表實體接觸就等於登入。
 - **本機沒有 Docker,`e2e` / `integration` / `helm` 的改動只能靠 CI 驗證**。這反過來是自建 runner 最大的附帶價值:驗證這類改動的邊際成本會變成零。
-- 沒做但值得做的兩件事留在後面:app image 一次 run 建三次(`image`、`helm`、e2e 的 `compose up --build`)應該改成建一次、三處載入;`test/integration/` 約 185 次 Postgres 容器啟動應該改成共用一個容器、每個測試一個 database。兩件都要動測試碼或 compose,風險與這次的 workflow 改動不同量級,而且搬到自建 runner 之後它們只影響牆鐘、不影響帳單。
+- 沒做但值得做的兩件事留在後面:app image 一次 run 建兩次(`image` 與 `helm` 各一次,約 7 分鐘、佔牆鐘 28%;e2e 走 compose 用既有的)應該改成建一次、多處載入;`test/integration/` 約 185 次 Postgres 容器啟動應該改成共用一個容器、每個測試一個 database。兩件都要動測試碼或 compose,風險與這次的 workflow 改動不同量級,而且搬到自建 runner 之後它們只影響牆鐘、不影響帳單。

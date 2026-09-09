@@ -1465,25 +1465,19 @@ scripts/backup.sh && scripts/restore-drill.sh
 
 ### 13.3 CI workflow(`.github/workflows/ci.yml`)
 
-```
-lint ──► unit ──► fuzz-smoke ──► integration ──► e2e ──► image(main/tag)──► helm(kind, Phase 7+)
-          │                                        │
-          ├─► gen-check(oapi-codegen / sqlc / abigen 產物是否同步)
-          └─► compose-config(docker compose config 對 dev 與 prod 覆蓋檔皆可解析)
-                                                   └─► e2e-multi(nightly:infra + app 多容器,驗證 NATS request-reply 與跨容器 relay)
-```
+> **這一節原本列出每個 job 在做什麼,已經過時並移除。** 計畫寫在程式之前,而 workflow 後來合併過 job(`lint` + `unit` + `fast-checks` → `checks`)、拿掉過 job(`gen-check`、`compose-config` 併進 `checks`;夜間的 `e2e-multi` 由 `e2e` 取代)、也新增過 job(`release`)。維護第二份清單只會讓兩份都不可信。
+>
+> **每個 job 現在在證明什麼、會起什麼、什麼情況會紅、量到幾分鐘**,寫在 [`docs/guides/self-hosted-runner.md`](guides/self-hosted-runner.md) 第 12 節,那一份和 workflow 放在一起維護。決策與量到的帳單數字在 `docs/adr/0012-ci-on-a-self-hosted-runner.md`。
 
-- `lint`:golangci-lint、`go vet`、`gitleaks`(禁止密鑰入庫)。
-- `unit`:`go test -race -short -coverprofile`。
-- `fuzz-smoke`:每個 `Fuzz*` 30 s;失敗語料進 `testdata/fuzz` 並成為回歸測試。
-- `integration`:需要 Docker;`-tags integration -race -p 1`。
-- `e2e`:`docker compose --profile infra --profile single up --wait` → `exchangectl e2e` → kill/restart 驗證 → `down -v`;收集容器 log 為 artifact。
-- `e2e-multi`(nightly,Phase 3 尾起):`--profile infra --profile app up --wait`(api / engine / chain / signer / stream / admin / worker 各一容器)→ `exchangectl e2e` → 驗證 NATS request-reply 命令路徑、signer request-reply、relay 跨容器運作。
-- `compose-config`:`docker compose -f compose.yaml config` 與 `-f compose.yaml -f compose.prod.yaml config` 皆可解析(用假 `.env`)。
-- `image`:multi-arch 可選;`main` 推 `dev`,tag 推版本。
-- 版本釘住:Go 以 `go.mod`;容器 image 以 tag;foundry 以 `.env` / CI 變數 `FOUNDRY_TAG`,本機與 CI 一致。
-- **純文件的 PR 不跑**:`pull_request` 加 `paths-ignore: ['**/*.md', 'docs/**']`。一輪完整 CI 是九個 job、約 30 分鐘 runner 時間,而沒有任何 job 讀 `docs/**` 或 `.md`——測試載入的非 Go 檔案只有 `.env.example`、`deploy/seed-params/*.json`、`test/fixtures/*.json`,三者都不在濾除範圍內。`pull_request` 的 path filter 是對整個 PR diff 判定,所以同時碰程式與文件的分支照跑。
+以下是**不會隨 job 重組而變的性質**,屬於本計畫的範圍:
+
+- **每個 job 都要有 `timeout-minutes`。** GitHub 的預設是 360 分鐘,而這個 repo 有數個沒有次數上限的等待迴圈——任何一次卡住就是一次燒掉月額度的 12%。
+- **版本釘住:** Go 以 `go.mod`;容器 image 以 tag;foundry 以 `.env` 與 CI 的 `FOUNDRY_TAG`,本機與 CI 一致。
+- **失敗語料要進版控。** fuzz 找到的 crash 存進 `testdata/fuzz`,自動成為回歸測試。
+- **`runs-on` 必須是一個變數,而且刪掉變數就回到托管 runner。** 退路必須是一個動作(ADR-0012 決定 1)。
+- **純文件的 PR 不跑**:`pull_request` 加 `paths-ignore: ['**/*.md', 'docs/**']`。沒有任何 job 讀 `docs/**` 或 `.md`——測試載入的非 Go 檔案只有 `.env.example`、`deploy/seed-params/*.json`、`test/fixtures/*.json`,三者都不在濾除範圍內。`pull_request` 的 path filter 是對整個 PR diff 判定,所以同時碰程式與文件的分支照跑。
   **刻意不套用在 `push` 上**:在純文件 commit 上打 `v*` tag 會讓 `image` 不跑而發出沒有 image 的 release;而 main 是所有分支的基準,每個 commit 都驗過是值得一輪的性質。
+  一個已知的後果:`test/docs/` 那兩支測試因此在**合併到 main 時才跑**,不是在文件 PR 上。改文件之後本機要自己跑一次 `go test ./test/docs/...`。
   未來若在 main 開 branch protection 並把這些檢查設為 required,純文件 PR 會因為 required check 永不回報而合不起來——那時要補一個同名 job 的 workflow 在被濾路徑上直接成功。
 
 ## 14. 安全邊界與密鑰清單
@@ -1637,7 +1631,7 @@ lint ──► unit ──► fuzz-smoke ──► integration ──► e2e ─
 | Day 2 | 寫 ADR:0001 modular monolith 單一 binary 多角色;0002 Postgres 為唯一真相 + outbox + JetStream;0003 單租戶但預留 tenant_id;0004 決策數值(decimal + scale,禁 float);0005 帳本模型(複式、hold 為分錄、house 科目);0006 認證(EdDSA JWT + JWKS、API key HMAC、admin TOTP);0007 簽名隔離(keystore + Signer 介面,KMS 預留);0008 工具鏈版本釘住(Go、foundry tag、go-ethereum、nats、postgres) | `docs/adr/0001–0008` |
 | Day 3 | `go mod init`;`cmd/exchange`(cobra);`internal/app`(config、run loop、healthz/readyz/metrics、SIGTERM);`internal/telemetry`;`internal/money` + 測試;`.golangci.yml`;Makefile 骨架 | `make lint test` 綠 |
 | Day 4 | `build/Dockerfile`;`deploy/compose/compose.yaml` infra profile(postgres/redis/nats/anvil/contracts-deployer)+ `infra/contracts` + `initdb` + `gen-dev-secrets`;goose `0001`、`0002`;`exchange migrate`、`exchange seed` | `make up` 全 healthy,`addresses.json` 產生,registry 有 ETH-USDC |
-| Day 5 | `api/public/v1/openapi.yaml`(markets/assets)→ oapi-codegen → handler → sqlc;testcontainers 整合測試;GitHub Actions(lint/unit/integration/compose-config/image);`exchangectl markets list`;README 產品邊界段 | CI 綠;第一個 PR 合併;把本週學到的 Go 疑問寫進 `docs/learning-log.md` |
+| Day 5 | `api/public/v1/openapi.yaml`(markets/assets)→ oapi-codegen → handler → sqlc;testcontainers 整合測試;GitHub Actions(lint/unit/integration/compose-config/image);`exchangectl markets list`;README 產品邊界段 | CI 綠;第一個 PR 合併 |
 
 第一週不寫任何撮合或帳本程式碼。若 Day 1–2 發現本文件的分錄或狀態機有錯,先改文件、再改 ADR、再開工。
 

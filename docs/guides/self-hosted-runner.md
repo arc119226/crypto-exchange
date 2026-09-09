@@ -2,7 +2,9 @@
 
 > **這份文件假設你只會複製貼上指令。** 每一步都會說在哪台機器上做、要打什麼、應該看到什麼。
 >
-> 主線是 **Windows 11 + WSL2**(第 2 節起),Linux VPS 的作法在第 12 節。
+> 主線是 **Windows 11 + WSL2**(第 2 節起),Linux VPS 的作法在第 13 節。裝好之後 CI 會跑哪些 job、每個 job 在證明什麼,在第 12 節。
+>
+> **完全沒碰過這類東西的人**,先看同一件事的新手版:[`self-hosted-runner-newcomer.md`](self-hosted-runner-newcomer.md)。那一份每一步都寫明「你會看到什麼」,做完再回來看這一份的細節。
 >
 > 對應 `.github/workflows/ci.yml` 開頭的 "Where the jobs run" 註解與 `docs/adr/0012-ci-on-a-self-hosted-runner.md`。
 
@@ -47,7 +49,7 @@ wsl --version
 |---|---|---|---|
 | 32 GB / 8 核以上 | 20 GB | 6 | 3 |
 | 16 GB / 4~8 核 | 10 GB | 總核心數 − 2 | 3 |
-| 8 GB / 4 核 | 6 GB | 2 | 2(見第 13 節的降級方案) |
+| 8 GB / 4 核 | 6 GB | 2 | 2(見第 14 節的降級方案) |
 
 **C 槽至少要 60 GB 可用**:kind 的 node image 約 900 MB、compose 一整套 image 好幾 GB,再加上 Go 與 npm 的快取。
 
@@ -70,7 +72,32 @@ wsl --install -d Ubuntu-24.04
 
 **`wsl --update` 不能跳過。** Ubuntu 24.04 用的是 WSL 新的 tar 封裝格式,需要 **WSL 2.4.10 以上**;版本太舊會以看不懂的錯誤失敗。
 
-如果想確認當下有哪些發行版可以裝,用 `wsl -l -o` 看清單,不要相信任何文件裡寫死的名字(包含這一份)。
+**為什麼指名 24.04,而不是當下最新的那個。** 這是實測出來的,不是保守:`e2e` job 要開一個無頭瀏覽器跑前台冒煙測試,而 Playwright 的 `install --with-deps` **只認得它有出套件清單的 Ubuntu 版本**。在 26.04 上它會先警告「你的作業系統不在官方支援清單裡」,退回 fallback,然後直接失敗:
+
+```
+Cannot install dependencies for ubuntu26.04-x64 with Playwright 1.56.1!
+```
+
+而 Playwright 的版本釘在 `web/trade/package.json`,所以這是結構性的,不是設定問題。第 6 節末尾的 Playwright 小節有完整的來龍去脈。**升級這台機器的 Ubuntu 之前,先確認新版本在 Playwright 的支援清單裡。**
+
+如果想確認當下有哪些發行版可以裝,用 `wsl -l -o` 看清單,不要相信任何文件裡寫死的名字(包含這一份)。清單裡沒有 `Ubuntu-24.04` 的話,先跑一次 `wsl --update` 再看;還是沒有的話,Microsoft Store 裡搜 "Ubuntu 24.04" 也可以裝同一個東西。
+
+**`wsl --install` 失敗的話**,多半是兩個 Windows 功能沒開。手動開(PowerShell,系統管理員),然後重開機:
+
+```powershell
+dism.exe /online /enable-feature /featurename:Microsoft-Windows-Subsystem-Linux /all /norestart
+dism.exe /online /enable-feature /featurename:VirtualMachinePlatform /all /norestart
+```
+
+**機器上已經有其他發行版的話**,這樣做不會影響它們——每個發行版有自己的檔案系統,彼此看不到對方。但有兩件事是共用的,後面會踩到:第 4 節的 `.wslconfig` 是**整台虛擬機共用**的(所有發行版分同一份記憶體),而 Docker Desktop 的 WSL integration 是逐發行版開關的(第 6A 節會叫你把這個發行版的關掉)。
+
+**想砍掉重來**,PowerShell:
+
+```powershell
+wsl --unregister Ubuntu-24.04
+```
+
+這會**永久刪除**那個發行版裡的所有東西——檔案、安裝的套件、runner 的設定,全部。刪完重跑 `wsl --install -d Ubuntu-24.04` 就是全新的。在裝壞了不知道哪裡壞的時候,這比逐項排查快。
 
 裝完會叫你**重開機**。重開後會自動跳出一個 Ubuntu 視窗,要你設一個 Linux 使用者名稱和密碼——**記住這組密碼**,後面 `sudo` 要用。
 
@@ -230,7 +257,7 @@ sudo systemctl enable --now docker
 
 **`build-essential` 不能漏。** `make test` 是 `go test -race`,race detector 需要 cgo,cgo 需要 C 編譯器,而 WSL 的 Ubuntu 映像預設不含 gcc。這在第一次實跑就踩到了:`checks` job 的前十二步全過(`go vet`、golangci-lint、gitleaks、sqlc、oapi-codegen 都是純 Go;`make build` 是 `CGO_ENABLED=0`),到 `-race` 那一步**零秒失敗**——零秒代表指令根本沒啟動,不是測試沒過。
 
-**Node 用 NodeSource 22,不要用 Ubuntu 內建的。** 24.04 內建是 Node 18,而這個專案要 22。Ubuntu 還把 `npm` 拆成獨立套件,少裝一半就會出現第 14 節那個「指令掉到 Windows 去」的問題。NodeSource 的 `nodejs` 套件內含 npm。
+**Node 用 NodeSource 22,不要用 Ubuntu 內建的。** 24.04 內建是 Node 18,而這個專案要 22。Ubuntu 還把 `npm` 拆成獨立套件,少裝一半就會出現第 15 節那個「指令掉到 Windows 去」的問題。NodeSource 的 `nodejs` 套件內含 npm。
 
 **登出再登入**(關掉 Ubuntu 視窗重開),讓群組生效,然後驗證:
 
@@ -349,7 +376,7 @@ Cannot install dependencies for ubuntu26.04-x64 with Playwright 1.56.1!
 
 ---
 
-## 7. 裝 runner(重複兩到三次)
+## 7. 裝 runner(裝兩個)
 
 在 **Ubuntu 視窗**裡,用你在第 2 節建的那個使用者(不用另外開帳號——WSL 這台虛擬機本身就是那個可以砍掉重練的環境)。
 
@@ -399,13 +426,17 @@ echo '$nrconf{override_rc}{qr(^actions\.runner\..*\.service$)} = 0;' | \
   sudo tee /etc/needrestart/conf.d/actions_runner_services.conf
 ```
 
-**然後整段重複一到兩次**,換成 `~/runner-2` / `--name box-2`(和 `~/runner-3` / `--name box-3`),每次都要回網頁拿一組**新的** token。
+**然後整段再做一次**,換成 `~/runner-2` / `--name box-2`,回網頁拿一組**新的** token。
 
 要求是:**各自獨立的目錄** + **唯一的 `--name`**(systemd 的 unit 名稱是 `actions.runner.<org>-<repo>.<name>.service`,由 name 衍生)。`_work` 相對於各自的目錄,所以自動就分開了。
 
-為什麼要多個?**一個 runner 一次只跑一個 job。** 現在一次完整的 run 是九個 job、加起來 45 分鐘的機器時間。只裝一個,九個 job 會排隊,你要等 45 分鐘才看得到結果;三個平行跑大約 15 分鐘,和 GitHub 托管的機器差不多。每個 runner 閒置時大約吃 80 MB 記憶體、500 MB 磁碟。
+為什麼要兩個?**一個 runner 一次只跑一個 job。** PR 的 job 圖是 `checks` → `integration` → (`helm` ∥ `e2e` ∥ `image`):前兩段本來就是串的,只有第三段能平行。
 
-裝完回網頁的 Runners 頁,應該看到兩到三個綠點,標籤都是 `exchange-ci`。
+一台機器上實測一次完整的 PR run 是 **25 分鐘**牆鐘,其中第三段的三個 job 依序跑掉了 15 分鐘(helm 7m12、e2e 3m26、image 4m15)。第二個 runner 讓 `helm` 和另外兩個同時跑,第三段縮到約 7m41,整體約 18 分鐘。
+
+**第三個 runner 只再省半分鐘左右**——第三段的長度由最長的 `helm` 決定,而 `e2e` 加 `image` 相加仍然比它短。所以裝兩個就好。每個 runner 閒置時大約吃 80 MB 記憶體、500 MB 磁碟。
+
+裝完回網頁的 Runners 頁,應該看到兩個綠點,標籤都是 `exchange-ci`。
 
 ---
 
@@ -556,6 +587,7 @@ GitHub 的機器每個 job 跑完就整台丟掉,自己的機器不會——每�
 docker container prune -f --filter until=6h
 docker image prune -af --filter until=72h
 docker builder prune -f --filter until=72h
+docker network prune -f --filter until=6h
 ```
 
 為什麼要加 `until`:多個 runner 共用**同一個** Docker 引擎。如果 `image` job 直接跑 `docker system prune -a`,它會把旁邊 `e2e` job 正在用的容器和 image 一起殺掉。加了時間過濾,只動閒置超過任何單一 job 執行時間的東西,才可以邊跑邊清。
@@ -576,7 +608,7 @@ systemctl status cron
 
 ```cron
 # 每週日 04:00 停 runner、徹底清、再開
-0 4 * * 0 for d in $HOME/runner-1 $HOME/runner-2 $HOME/runner-3; do sudo $d/svc.sh stop; done; docker system prune -af --volumes; for d in $HOME/runner-1 $HOME/runner-2 $HOME/runner-3; do sudo $d/svc.sh start; done
+0 4 * * 0 for d in $HOME/runner-1 $HOME/runner-2; do sudo $d/svc.sh stop; done; docker system prune -af --volumes; for d in $HOME/runner-1 $HOME/runner-2; do sudo $d/svc.sh start; done
 ```
 
 停掉 runner 再清,才不會清到跑到一半的 job。
@@ -604,6 +636,8 @@ wsl --manage Ubuntu-24.04 --compact
 
 ## 11. 驗證有沒有成功
 
+> 這四項都過了之後,第 12 節說明你的機器現在實際上在跑什麼。
+
 1. **看 runner 有沒有接到工作。** 隨便 push 一個 commit,到 Actions 頁點開任何一個 job,展開最上面的 **Set up job**,應該看到:
 
    ```
@@ -613,9 +647,9 @@ wsl --manage Ubuntu-24.04 --compact
 
    如果看到 `Runner Image: ubuntu-24.04` 之類的,表示變數沒設成功,還在用 GitHub 的機器。
 
-2. **重開機測試——這一項不能跳過。** 真的把 Windows 重開一次,**不要碰任何東西**,等幾分鐘後看倉庫的 Runners 頁:兩到三個 runner 應該自己回到 **Idle**。
+2. **重開機測試——這一項不能跳過。** 真的把 Windows 重開一次,**不要碰任何東西**,等幾分鐘後看倉庫的 Runners 頁:兩個 runner 應該自己回到 **Idle**。
 
-   這是整個設計裡最容易失敗的地方(WSL 的 session 0 限制、閒置逾時、Docker 引擎)。沒通過這一項,就等於每次 Windows Update 之後 CI 都會停到你發現為止。沒過的話照第 14 節的順序查。
+   這是整個設計裡最容易失敗的地方(WSL 的 session 0 限制、閒置逾時、Docker 引擎)。沒通過這一項,就等於每次 Windows Update 之後 CI 都會停到你發現為止。沒過的話照第 15 節的順序查。
 
 3. **看帳單有沒有停止增加。** **Settings** → **Billing** → **Actions**。自建 runner 跑的 job 在 API 上照樣有時間長度,但**不計入帳單**——要看的是 Billing 頁的實際數字,不是 job 的秒數。跑幾天後,每月用量應該從約 23,400 分鐘掉到 **50~100 分鐘**(只剩 `release`)。
 
@@ -630,7 +664,137 @@ wsl --manage Ubuntu-24.04 --compact
 
 ---
 
-## 12. Linux VPS(另一條路線)
+## 12. CI 會跑哪些 job,每個 job 在證明什麼
+
+裝好之後,你的機器上會跑七個 job。這一節說明每一個在證明什麼、會起什麼東西、什麼情況會紅、以及它對這台機器的要求——**因為前面每一項設定,都是為了下面某一個 job 存在的**。
+
+秒數是這台機器上量到的實際值(一台 runner,五個 job 依序跑,牆鐘 25m05)。
+
+### job 之間的關係
+
+```
+checks ─┬─► integration ─┬─► e2e  ─┐
+        │                ├─► helm ─┼─► release(只有 v* tag)
+        │                └─► image ┘
+        └─► fuzz-smoke(只有 push)
+```
+
+前兩段是**串的**——`checks` 不過就不會跑 `integration`。第三段的三個可以平行,所以第二個 runner 才有意義(第 7 節有算式)。
+
+還有一條規則:**合併到 main 的時候幾乎什麼都不跑**。因為這個專案一次只有一個 PR 在飛,合併出來的樹和 PR 上跑過的樹是同一棵,再跑一次是付兩次錢驗同一件事。只有 `fuzz-smoke` 和 `image` 會跑,因為它們是合併才做、PR 上沒做過的事。
+
+---
+
+### `checks` —— 靜態檢查與單元測試(2m20)
+
+**跑什麼:** 21 個步驟,順序是刻意排的——**最便宜、最常失敗的先跑**,壞掉的改動幾秒就擋下來,不會先燒掉二十分鐘。
+
+依序是:`go vet`、golangci-lint、gitleaks、`go.mod` 有沒有 tidy、九支 shell 腳本的語法、產生的程式碼(OpenAPI 與 sqlc)跟 repo 裡的一不一致、`sqlc vet`、compose 三種疊法都算得出來、fuzz target 有沒有跑到 `internal/matching` 以外的地方、單元與屬性測試(`-race`)、`internal/money` 的覆蓋率、兩個 binary 的版本與拒絕空助記詞、前台的 TS client 與 OpenAPI 一致且 build 得過、Solidity 合約 build 與 test。
+
+**它在證明的事裡,有兩個是架構層級的:** golangci-lint 的設定裡有 depguard(擋跨層 import——領域套件不准 import NATS、`internal/chain` 不准 import `hdwallet`)和 forbidigo(擋金錢路徑上的 float)。**架構規則寫在文件裡會腐爛,寫成 linter 不會。**
+
+**gitleaks 掃的是整個 git 歷史,不是工作目錄。** 所以 checkout 用 `fetch-depth: 0`——淺 checkout 會讓它幾乎什麼都沒掃到,而且不會報錯。
+
+**這台機器要有:** gcc(`-race` 需要 cgo)、Node 22、foundry(自己裝)。**不需要 Docker。**
+
+**最容易在這裡踩到的:** 缺 `build-essential` 時,前十二步全過,到 `-race` 那一步**零秒失敗**——零秒代表指令根本沒啟動,不是測試沒過。第 6A 節有完整說明。
+
+---
+
+### `fuzz-smoke` —— 亂數轟炸(30 秒 + build)
+
+**跑什麼:** 對 `internal/matching` 的 `FuzzApply` 丟 30 秒隨機輸入。
+
+**只在 push 上跑**——也就是合併到 main 和打 tag 的時候。PR 完全跳過。這是刻意的取捨:PR 上省下的是「單一目標 30 秒的模糊測試」,代價很小。
+
+**它為什麼指名一個 package:** 原本是 `go test -list 'Fuzz.*'` 掃全部 43 個 package 去找那唯一一個目標,每個 package 都要連結一個測試 binary——四分鐘的帳單換一句 grep 的答案。所以現在直接寫死 `./internal/matching/`,並且在 `checks` 裡加一句斷言:**新增的 fuzz target 出現在別的地方會變紅燈,而不是沒人跑**。
+
+**這台機器要有:** 只要 Go。
+
+---
+
+### `integration` —— 整合測試(7m39)
+
+**跑什麼:** 用 testcontainers 起真的 Postgres 與 NATS,測 migration、seed、registry API、帳本、admin API、撮合引擎(kill/restart、屬性、併發)、outbox relay、public API(認證、HMAC、限流 429、狀態碼)。
+
+**一個設計細節:** 這個 job 設了 `CI=true`,作用是讓「找不到 Docker」**變成失敗而不是跳過**。沒有它,一台 Docker 壞掉的機器會安靜地回報全綠。
+
+**這台機器要有:** Docker。
+
+**它是最貴的一個 job**(在托管 runner 上佔帳單的 25%),因為 `test/integration/` 大約會啟動 185 次 Postgres 容器。改成共用一個容器、每個測試一個 database 是已知該做但還沒做的事,記在 ADR-0012。
+
+---
+
+### `e2e` —— 端對端(3m26)
+
+**跑什麼:** 這是**唯一驗證拆分部署的 job**。api / engine / chain / signer / stream / admin / worker 各一個容器,所以每一筆下單都必須真的走過 NATS 命令匯流排——在單一容器的模式下,那段程式碼會退化成直接函式呼叫,永遠測不到。
+
+`scripts/e2e.sh` 有 24 個階段,依序:準備密鑰 → 起十幾個容器 → 引擎的命令匯流排通了 → signer 打開的種子和部署腳本注資的是同一個地址 → **對帳一開始就找到帳本沒被告知過的錢**(dev 鏈直接塞 100 ETH 給熱錢包)→ 記一筆開帳分錄讓對帳歸零 → 走完一輪交易 → 領充值地址 → 鏈上 ETH 充值到帳 → 鏈上 USDC 充值到帳 → 額度內的提現簽名送出並確認 → **收款地址真的收到 0.05 ETH** → 超額的提現停在人工審核 → 代幣提現移動代幣但用原生幣付 gas → resolve 拒絕一個已經來不及的動作 → 歸集 → 充值地址被清空 → **帳本 custody 對得上鏈** → `kill -9` 引擎後掛單還在 → 在一波下單中間 `kill -9`,重建的簿子和資料庫一致 → 停牌以 `market.updated` 傳到引擎 → **容器 log 裡沒有任何金鑰材料**。
+
+之後還有兩步:Playwright 開無頭瀏覽器跑前台冒煙(註冊 → 注資 → 掛單 → 訂單簿出現 → 對手單 → 成交、餘額變動),以及備份還原演練(備份一次 → 還原到拋棄式 DB → 驗試算平衡 / 序號 / 成交 → 印出 RTO)。
+
+**這台機器要有:** Docker(十幾個容器同時跑)、Playwright 的系統函式庫、Node。
+
+**在自建 runner 上,Playwright 那一步只有 10 秒**——因為瀏覽器已經在 `~/.cache/ms-playwright`,而系統函式庫是第 6 節裝過一次的。workflow 用 `PLAYWRIGHT_INSTALL_DEPS` 把「下載瀏覽器」和「裝系統套件」拆開,只跳過後者,所以**快取被清掉的時候它會自癒,不會紅**。
+
+**失敗的時候看什麼:** `e2e-compose-logs` 這個 artifact 有全部容器的 log;腳本的 EXIT trap 會把失敗的行號印在 200 行 log **之後**,所以捲到最下面。
+
+---
+
+### `helm` —— Kubernetes 部署(7m12)
+
+**跑什麼:** build 一個 image → 用 kind 開一座真的 Kubernetes 叢集 → 把 image 載進去 → 建 chart 需要的 Secret 與 ConfigMap → `helm upgrade --install --wait` → 斷言 pod 裡跑的 binary 版本等於 chart 的 `appVersion` → 在叢集裡跑一輪交易 → 掛一張買單並記下訂單簿 → **刪掉 engine pod** → 等它重新拉起來 → 輪詢 30 次,訂單簿要**一字不差**地回來 → 刪掉叢集。
+
+每一個 `exchangectl` 呼叫都是一個用同一個 image 開的拋棄式 pod,**不是 port-forward**——因為 port-forward 會在引擎重啟時斷掉,那樣測的就不是這件事了。
+
+**這台機器要有:** Docker、kind、以及**第 5 節那兩個 inotify 參數**。那兩個參數就是為這個 job 設的:kind 的節點是一個容器裡跑一整套 Kubernetes,會開非常多檔案監看。少了它,叢集建到一半失敗,錯誤訊息跟 inotify 無關。
+
+**它也是最吃記憶體的一個。** 一個 `kindest/node` image 大約 900 MB,而 `helm` 和 `e2e` 在 PR 上是可以平行的。
+
+**失敗的時候看什麼:** `helm-kind-logs` 這個 artifact 裡有 `kubectl get all`、events、每個 pod 的 describe 與 log(含 `--previous`)、以及 `helm get manifest`。`events.txt` 通常一眼就看得出是哪個 pod 起不來。
+
+---
+
+### `image` —— 打包(4m15)
+
+**跑什麼:** build 三個 image,而且每一個 build 完都**真的跑一次**:
+
+- **app image** —— `exchange version` 與 `exchangectl version` 印得出來
+- **edge image**(Caddy + 前台) —— `caddy validate` 兩份設定檔都過,而且 `/srv/index.html` 非空、`/srv/assets` 裡真的有 `.js`。**這一項在證明 SPA 真的被烤進去了**,不是 build 成功但檔案是空的
+- **backup image** —— `mc` 與 `pg_dump` 在,而且打包進去的 `backup.sh` 語法正確
+
+push 事件才會登入 ghcr 並推上去;PR 只 build 和 smoke。
+
+**這台機器要有:** Docker + buildx。
+
+**PR 上的 build metadata 是固定值**(`COMMIT=dev`、`DATE=1970-01-01T00:00:00Z`),不是真的 commit。原因是 `build/Dockerfile` 把這些烤進 ldflags,每個 commit 都變的話,最後那層 `go build` 的快取**依設計不可能命中**。PR 的建置不會被發布,所以固定它沒有代價。
+
+---
+
+### `release` —— 發布(只有 `v*` tag)
+
+**跑什麼:** 從 ghcr 把剛推上去的 image 拉回來、跑 `version --json`、斷言版本等於 tag;確認 `-edge` 與 `-backup` 在同一個版本也存在;打包 Helm chart 並斷言它的 `appVersion` 等於 tag;推 chart 到 ghcr 的 OCI registry;交叉編譯兩個平台的 `exchangectl`;算 SHA256;開 GitHub Release 並附上檔案。
+
+**這個 job 固定跑在 `ubuntu-latest`,不會用你的機器。** 它一個月跑幾次,而且要推到 ghcr 與開 Release——**發布不該取決於一台家用機器有沒有開著**。這是 ADR-0012 決定 1 的例外條款。
+
+---
+
+### 一句話總結每個設定是為了誰
+
+| 你在第幾節做的事 | 是為了哪個 job |
+|---|---|
+| §3 systemd | 全部——runner 服務、dockerd、sysctl 都靠它 |
+| §4 兩個閒置逾時 | 全部——沒有它,runner 在你關掉終端機 15 秒後離線 |
+| §5 inotify | `helm` |
+| §6 Docker 引擎 | `integration`、`e2e`、`helm`、`image` |
+| §6 `build-essential` | `checks`(`-race` 需要 cgo) |
+| §6 Node / npm | `checks`(前台 build)、`e2e`(Playwright) |
+| §6 Playwright 系統函式庫 | `e2e` |
+| §9 電源與自動啟動 | 全部——每月 Windows Update 重開之後還能自己回來 |
+| §10 磁碟清理 | `integration`、`e2e`、`helm`、`image` 累積出來的東西 |
+
+
+## 13. Linux VPS(另一條路線)
 
 如果你用的是 Linux 主機而不是 Windows,第 2 到 6 節和第 9 節整段跳過,改做這些:
 
@@ -654,7 +818,7 @@ sudo -iu ghrunner        # 之後第 7 節的指令都在這個身分下做
 
 ---
 
-## 13. 機器規格不夠的時候
+## 14. 機器規格不夠的時候
 
 如果只有 2 核 / 8 GB,`e2e` 和 `helm` 會很吃力(前者十幾個容器,後者一整個 Kubernetes)。折衷做法是**只把吃計費最兇、但資源需求中等的 job 搬過去**:
 
@@ -670,7 +834,7 @@ sudo -iu ghrunner        # 之後第 7 節的指令都在這個身分下做
 
 ---
 
-## 14. 常見問題
+## 15. 常見問題
 
 **Q: 重開機之後 runner 沒有自己回來。**
 按這個順序查,每一步都確認過再往下:
