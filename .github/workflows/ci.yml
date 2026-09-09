@@ -232,10 +232,12 @@ jobs:
           cache: ${{ vars.CI_RUNNER == '' && 'npm' || '' }}
           cache-dependency-path: web/trade/package-lock.json
       # the committed TypeScript client must match the OpenAPI document, and
-      # the SPA must type-check and build; the browser smoke runs in e2e
+      # the SPA must type-check and build; the browser smoke runs in e2e.
+      # This step used to set PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD, which did
+      # nothing: @playwright/test has no npm install script (package-lock.json
+      # is v3 and marks only fsevents with hasInstallScript), so `npm ci` was
+      # never going to fetch a browser here in the first place.
       - name: web/trade — schema.d.ts fresh, tsc, vite build
-        env:
-          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
         run: make web-check
       - name: read pinned foundry version
         id: foundry
