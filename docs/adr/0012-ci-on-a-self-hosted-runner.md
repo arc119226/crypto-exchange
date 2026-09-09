@@ -52,7 +52,21 @@ runs-on: ${{ github.event_name == 'push' && 'ubuntu-latest' || vars.CI_RUNNER ||
 
 促成它的是一次實際故障,不是預想。`docker/metadata-action` 會呼叫 `api.github.com` 拿倉庫的描述與授權條款去填 OCI label;同一台 runner 上,這一步 09:55 花 **1 秒**通過,12:34(run 98)與 13:14(run 100)各回一次 `Connect Timeout Error`,中間沒有任何 workflow 改動,Node 24 的強制升級在成功那次就已經生效。也就是說**這台機器連 `api.github.com` 的能力會消失**,而 `v*` tag 走的是同一條 push 路徑——再過幾天要切的 `v0.1.0`,只差這一通打不出去的 API 就會失敗。
 
-代價是有界的,而且量過:合併到 main 只跑 `fuzz-smoke` 和 `image`,而 `fuzz-smoke` 留在自建 runner 上。托管的 `image` 在 run #89 量到 **4 個計費分鐘**(見「後果」的逐 job 表),push 才有的登入與三次推送另外約 40 秒——所以一次合併大約 **5 分鐘**。以每月 30 次合併算是 150 分鐘,佔 3,000 分鐘額度的 5%。機器恢復之後把這一行改回去就是零。
+代價是有界的,而且**這次是量到的,不是推估**:合併到 main 只跑 `fuzz-smoke` 和 `image`,而 `fuzz-smoke` 留在自建 runner 上。
+
+改動合併之後的第一次實跑(run 102,`6f0e3e9`)每一項都對上:
+
+| 檢查點 | 實測 |
+|---|---|
+| `image` 落在哪 | `GitHub Actions 1000001553`,label `ubuntu-latest`——托管機器,不是 `MSI`/`MSI2` |
+| 三個 metadata 步驟 | 都執行、都通過,各 1 秒 |
+| `login to ghcr` + 三次 push | 全部成功,共 25 秒 |
+| `reclaim disk` | **skipped**——`runner.environment == 'self-hosted'` 如預期擋掉 |
+| `fuzz-smoke` | 仍在 `MSI2`,不計費 |
+| **`image` 耗時** | 13:58:10 → 14:02:19 = **4m09**,進位後 **5 個計費分鐘** |
+| **整個合併的牆鐘** | 13:58:06 → 14:02:20 = **4m14** |
+
+以每月 30 次合併算是 150 分鐘,佔 3,000 分鐘額度的 5%。機器恢復之後把這一行改回去就是零。
 
 同一輪還做了兩件小事:三個 `metadata-action` 步驟加上 `if: github.event_name == 'push'`(它們的輸出只有 push 步驟在讀,pull request 上算出來沒人看,卻是三個網路失敗點),以及 `image` 的清理步驟改用 `runner.environment == 'self-hosted'` 判斷——它現在有可能落在托管機器上,而那裡整台 VM 跑完就丟,沒有東西要清。合起來的結果是:**`metadata-action` 再也不會在自建 runner 上執行。**
 

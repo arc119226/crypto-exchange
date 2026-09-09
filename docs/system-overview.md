@@ -338,6 +338,7 @@ CI 原本跑在 GitHub 的機器上,而私有專案是按分鐘計費的。實�
 | 你想知道 | 去看 |
 |---|---|
 | 親手把它跑起來 | [`../README.md`](../README.md)(不需要會寫程式) |
+| 用網頁把整個生意跑一遍 | [`guides/web-walkthrough.md`](guides/web-walkthrough.md)(開機三行指令,之後全部用滑鼠) |
 | 技術細節、怎麼開發 | [`README.md`](README.md) |
 | 每一筆帳的逐項驗算 | [`domain.md`](domain.md) |
 | 為什麼這樣設計 | [`adr/`](adr/) 這十四份決策紀錄 |
