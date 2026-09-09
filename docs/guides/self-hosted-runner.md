@@ -248,11 +248,44 @@ docker run --rm hello-world
 
 如果你已經裝了 Docker Desktop,**把它對這個 distro 的 WSL Integration 關掉**(Settings → Resources → WSL integration → 把 Ubuntu-24.04 的開關關掉 → Apply),否則兩個引擎會搶 `/var/run/docker.sock`。Docker Desktop 本身可以留著手動用。
 
+**如果這個 distro 以前開過 Docker Desktop 的 WSL Integration,先檢查 `/var/run`。** 症狀是引擎明明活著但誰都連不上:
+
+```
+$ sudo systemctl status docker
+   Active: active (running)
+   ...dockerd[43804]: ...msg="API listen on /run/docker.sock"
+
+$ ls -l /var/run/docker.sock
+ls: cannot access '/var/run/docker.sock': No such file or directory
+```
+
+`dockerd` 跑的是 `-H fd://`,也就是 systemd socket activation,而 `docker.socket` 的 `ListenStream` 是 **`/run/docker.sock`**——這是正確的。標準 Ubuntu 上 `/var/run` 是一條指向 `/run` 的符號連結,所以兩個路徑等價;而 docker CLI、buildx、compose 全都預設連 `/var/run/docker.sock`。這條符號連結不見了,CI 就連不上。
+
+一行診斷:
+
+```sh
+readlink -f /var/run        # 要印 /run
+```
+
+印出別的東西(或 `/var/run` 是個真目錄)就修它:
+
+```sh
+sudo systemctl stop docker.socket docker.service
+sudo mv /var/run /var/run.bak      # /var/run 不存在的話跳過這行
+sudo ln -s /run /var/run
+```
+
+然後 PowerShell `wsl --shutdown`、重開 distro,驗證 `readlink -f /var/run` 是 `/run`、`ls -l /var/run/docker.sock` 看得到、`docker ps` 正常,再 `sudo rm -rf /var/run.bak`。
+
+修 `/var/run` 而不是只補一條 `/var/run/docker.sock` → `/run/docker.sock`,是因為 `/run` 是 tmpfs、每次開機重建,只補 socket 那條每次重開都要重補;而 `/var` 在磁碟上,`/var/run` 這條符號連結補一次就持久。何況 `/var/run` 指向 `/run` 是 FHS 與 systemd 的前提,壞著會拖累其他寫 pid 檔的服務,不只 docker。
+
+**全新安裝、從來沒開過 Docker Desktop Integration 的 distro 不會遇到這個。**
+
 **為什麼建議這條:**
 
 - `dockerd` 由 systemd 管,開機自己起,不依賴任何 GUI 程式。
 - 容器資料放在 Ubuntu 自己的虛擬磁碟裡,所以第 10 節的空間回收**真的有效**。
-- 沒有下面 6B 那個符號連結的回歸問題。
+- 沒有下面 6B 那個「Windows 端沒把符號連結重建回來」的回歸問題(上面那個 `/var/run` 的檢查是不同的東西:那是舊 Integration 留下的痕跡,修一次就好,不會每次重開機復發)。
 
 ### 6B(替代)Docker Desktop
 
@@ -655,7 +688,7 @@ sudo -iu ghrunner        # 之後第 7 節的指令都在這個身分下做
 標籤對不上。網頁 Runners 頁看標籤是不是 `exchange-ci`,和倉庫變數 `CI_RUNNER` 的值一字不差。
 
 **Q: `Cannot connect to the Docker daemon` / `permission denied ... docker.sock`。**
-路線 6A:`sudo systemctl status docker`;`groups` 裡有沒有 `docker`(加完群組要登出再登入)。
+路線 6A:`sudo systemctl status docker`;`groups` 裡有沒有 `docker`(加完群組要登出再登入);服務是 running 卻還是連不上的話,`readlink -f /var/run` 要印 `/run`(見第 6A 節)。
 路線 6B:Docker Desktop 有沒有開;WSL Integration 有沒有打開;`readlink -f /var/run/docker.sock` 是不是還指向 `/mnt/wsl/docker-desktop/...`(那個回歸問題)。
 
 **Q: C 槽滿了。**
