@@ -220,6 +220,13 @@ func (p *PendingEntry) Finish() error {
 	}
 	if p.s.metrics != nil {
 		p.s.metrics.entries.WithLabelValues(p.e.Kind).Inc()
+		// Finish, not Post: the trading runner drives the phases itself and
+		// never calls Post, so an increment there would miss every trade fee.
+		// Finish is also skipped on a replay, which is what stops a retry
+		// counting the same fee twice.
+		if p.accounts != nil {
+			p.s.metrics.observeFees(p.e, p.accounts.Val)
+		}
 	}
 	p.result = je
 	return nil
