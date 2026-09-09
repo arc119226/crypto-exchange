@@ -1,12 +1,13 @@
 # CI for the walking skeleton (docs/plan-v1.0.md §13.3). Tool versions come from
 # go.mod / tools/go.mod / .env.example so CI and laptops run the same binaries.
 #
-#   lint ─┐
-#   unit ─┼─► integration ─┬─► e2e  ─┐
-#        │                 ├─► helm ─┼─► release (v* tags only: chart to ghcr, GitHub Release)
-#        │                 └─► image ┘
-#        └─► fuzz-smoke (push only: main merges and v* tags)
-#   fast-checks runs alongside: generated code, compose rendering, contracts.
+#   checks ─┬─► integration ─┬─► e2e  ─┐
+#           │                 ├─► helm ─┼─► release (v* tags: chart to ghcr, GitHub Release)
+#           │                 └─► image ┘
+#           └─► fuzz-smoke (push only: main merges and v* tags)
+#
+#   checks is lint, the unit and property suites, the generated-code and
+#   compose checks, the web build and the Solidity contracts, in one job.
 #
 #   A merge to main runs only fuzz-smoke and image; see below for why.
 name: ci
@@ -43,7 +44,7 @@ on:
 # on the last three merges: 45d3dc4d, 430e8ac9 and f768d745 each appear as
 # both the merge commit's tree and its second parent's.
 #
-# So lint, unit, fast-checks, integration and e2e on main re-test a tree that
+# So checks, integration and e2e on main re-test a tree that
 # passed minutes earlier, for about 28 billable minutes a merge. They are
 # skipped there. Two jobs are not, because they are the only things a merge
 # does that the pull request did not:
@@ -104,9 +105,29 @@ env:
   HELM_VERSION: v3.16.4
 
 jobs:
-  lint:
-    name: lint
-    timeout-minutes: 15
+  # lint, unit and fast-checks used to be three jobs, and fast-checks was
+  # itself three (gen-check, compose-config, contracts). They keep collapsing
+  # for one reason: GitHub bills the sum of the jobs, each rounded up to a
+  # whole minute, so three jobs that install the same Go toolchain pay for it
+  # three times. Measured setup share was 71% of fast-checks, 25% of lint and
+  # 16% of unit -- 12.1 billable minutes for about 8 minutes of work.
+  #
+  # Two things are given up, both deliberately:
+  #
+  #   - The summary line says `checks` rather than which of the three failed.
+  #     GitHub still names the failing step, so what is lost is the name on
+  #     one line.
+  #   - The steps are sequential, so a lint failure stops the run before the
+  #     unit tests and you learn about the second failure on the next push.
+  #     That is the trade: failed runs were 28% of the bill, and the steps are
+  #     ordered cheapest-and-likeliest-to-fail first so a failure costs least.
+  #
+  # For the same reason foundry, node, helm and kubeconform are installed
+  # immediately before the steps that need them rather than all at the top: a
+  # failure in `make lint` should not have paid for a Solidity toolchain.
+  checks:
+    name: checks
+    timeout-minutes: 30
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
     # Not run on a merge to main -- see "what a merge to main runs" at the
     # top of this file. Tags still run everything.
@@ -125,28 +146,52 @@ jobs:
           cache-dependency-path: |
             go.sum
             tools/go.sum
+          # A self-hosted runner keeps ~/go/pkg/mod and ~/.cache/go-build on
+          # its own disk between jobs, so uploading them to GitHub's cache
+          # buys nothing and costs a minute of wall time per job. On a hosted
+          # runner the VM is new every time and the cache is the only thing
+          # standing between this job and a cold module download.
+          cache: ${{ vars.CI_RUNNER == '' }}
+
+      # --- the cheap checks first: a failure here costs seconds, not minutes
+
       - name: go vet + golangci-lint + gitleaks
         run: make lint
       - name: go.mod / go.sum are tidy
         run: |
           make tidy
           git diff --exit-code -- go.mod go.sum tools/go.mod tools/go.sum
+      - name: dev scripts parse
+        # e2e.sh is checked here rather than only by the e2e job: this takes
+        # milliseconds, and a syntax error found twelve minutes into a
+        # container run is twelve minutes wasted.
+        run: |
+          for f in scripts/gen-dev-secrets.sh scripts/e2e.sh scripts/e2e-web.sh scripts/kind-secrets.sh scripts/helm-e2e.sh scripts/backup.sh scripts/restore-drill.sh scripts/gen-prod-secrets.sh deploy/vm/bootstrap.sh; do
+            bash -n "$f"
+          done
+      - name: generated code is in sync (oapi-codegen, sqlc)
+        run: make gen-check
+      - name: sqlc vet
+        run: go tool -modfile=tools/go.mod sqlc vet -f sqlc.yaml
+      - name: compose file renders with every profile
+        run: make compose-config
+      # Every Fuzz* target must be one the fuzz-smoke job actually runs. That
+      # job names ./internal/matching directly instead of asking `go test
+      # -list` across all 43 packages, which cost four billable minutes to
+      # find one target; this line is what stops a new target being forgotten.
+      - name: every fuzz target lives in internal/matching
+        run: |
+          found=$(grep -rl '^func Fuzz' --include='*_test.go' . | sed 's|^\./||' | sort)
+          expected="internal/matching/fuzz_test.go"
+          test "$found" = "$expected" || {
+            echo "fuzz targets moved or multiplied:"
+            echo "$found"
+            echo "update the test-fuzz target in the Makefile and this assertion"
+            exit 1
+          }
 
-  unit:
-    name: unit
-    timeout-minutes: 20
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
-    # Not run on a merge to main -- see "what a merge to main runs" at the
-    # top of this file. Tags still run everything.
-    if: ${{ github.event_name != 'push' || github.ref != 'refs/heads/main' }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-          cache-dependency-path: |
-            go.sum
-            tools/go.sum
+      # --- the Go test suite
+
       # deploy/helm/helm_test.go lints and renders the chart; with CI set it
       # fails rather than skips when either binary is missing
       - uses: azure/setup-helm@v4
@@ -172,75 +217,13 @@ jobs:
           bin/exchange keys import-mnemonic --from /dev/null --keystore-dir "$RUNNER_TEMP/ks" && exit 1 || test $? -eq 1
           test ! -e "$RUNNER_TEMP/ks/hd-seed.json"
 
-  # Four billable minutes for one fuzz target -- FuzzApply in internal/matching
-  # is the only one in the repository. push covers both `branches: [main]` and
-  # `tags: ["v*"]`, so every merge and every release still fuzzes it; what a
-  # pull request gives up is 30 seconds of fuzzing on a single target, for the
-  # hours between opening the PR and merging it.
-  #
-  # docs/plan-v1.0.md §13.3 requires every Fuzz* for 30s with failing corpora
-  # committed to testdata/fuzz. That is about strength and what to do with a
-  # failure, not about which events run it.
-  fuzz-smoke:
-    name: fuzz-smoke
-    timeout-minutes: 20
-    needs: [unit]
-    # unit is skipped on a merge to main, and a skipped dependency would
-    # otherwise skip this too -- which is the one job the merge exists for.
-    if: ${{ !cancelled() && github.event_name == 'push' && (needs.unit.result == 'success' || needs.unit.result == 'skipped') }}
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-          cache-dependency-path: |
-            go.sum
-            tools/go.sum
-      - name: every Fuzz* target for 30s (docs/plan-v1.0.md §13.3)
-        run: make test-fuzz FUZZ_TIME=30s
+      # --- the two toolchains nothing above needs
 
-  # gen-check, compose-config and contracts used to be three jobs. Between
-  # them they did about five seconds of work and cost three billable minutes,
-  # because GitHub rounds every job up to a whole minute and two of the three
-  # spent most of their wall time installing a toolchain: gen-check took 54s,
-  # of which 32s was setup-go and 2s was the check.
-  #
-  # The cost of merging is one red check named fast-checks instead of a red
-  # check named contracts. GitHub still names the failing step, so what is
-  # actually lost is the name on the summary line, and it buys two thirds of
-  # this job's bill back.
-  #
-  # Nothing depends on these: only integration (lint, unit), fuzz-smoke (unit),
-  # e2e and image (integration) declare needs.
-  fast-checks:
-    name: fast-checks
-    timeout-minutes: 15
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
-    # Not run on a merge to main -- see "what a merge to main runs" at the
-    # top of this file. Tags still run everything.
-    if: ${{ github.event_name != 'push' || github.ref != 'refs/heads/main' }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-          cache-dependency-path: |
-            go.sum
-            tools/go.sum
-      - name: read pinned foundry version
-        id: foundry
-        run: echo "tag=$(sed -n 's/^FOUNDRY_TAG=//p' .env.example)" >> "$GITHUB_OUTPUT"
-      - uses: foundry-rs/foundry-toolchain@v1
-        with:
-          version: ${{ steps.foundry.outputs.tag }}
-
-      - name: compose file renders with every profile
-        run: make compose-config
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: npm
+          # see the note on setup-go above
+          cache: ${{ vars.CI_RUNNER == '' && 'npm' || '' }}
           cache-dependency-path: web/trade/package-lock.json
       # the committed TypeScript client must match the OpenAPI document, and
       # the SPA must type-check and build; the browser smoke runs in e2e
@@ -248,18 +231,12 @@ jobs:
         env:
           PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
         run: make web-check
-      - name: dev scripts parse
-        # e2e.sh is checked here rather than only by the e2e job: this job
-        # finishes in seconds, and a syntax error found twelve minutes into a
-        # container run is twelve minutes wasted.
-        run: |
-          for f in scripts/gen-dev-secrets.sh scripts/e2e.sh scripts/e2e-web.sh scripts/kind-secrets.sh scripts/helm-e2e.sh scripts/backup.sh scripts/restore-drill.sh scripts/gen-prod-secrets.sh deploy/vm/bootstrap.sh; do
-            bash -n "$f"
-          done
-      - name: generated code is in sync (oapi-codegen, sqlc)
-        run: make gen-check
-      - name: sqlc vet
-        run: go tool -modfile=tools/go.mod sqlc vet -f sqlc.yaml
+      - name: read pinned foundry version
+        id: foundry
+        run: echo "tag=$(sed -n 's/^FOUNDRY_TAG=//p' .env.example)" >> "$GITHUB_OUTPUT"
+      - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: ${{ steps.foundry.outputs.tag }}
       # working-directory is per-step, not a job default: a job-level default
       # would send make gen-check and make compose-config into infra/contracts.
       - name: forge build
@@ -269,10 +246,43 @@ jobs:
         working-directory: infra/contracts
         run: forge test -vv
 
+  # Four billable minutes used to go here for one fuzz target -- FuzzApply in
+  # internal/matching is the only one in the repository, and `go test -list`
+  # across all 43 packages had to link a test binary per package to find it.
+  # The Makefile now names the package; the checks job asserts no other Fuzz*
+  # target exists, so forgetting one is a red check rather than silence.
+  #
+  # push covers both `branches: [main]` and `tags: ["v*"]`, so every merge and
+  # every release still fuzzes it; what a pull request gives up is 30 seconds
+  # of fuzzing on a single target, for the hours between opening and merging.
+  #
+  # docs/plan-v1.0.md §13.3 requires every Fuzz* for 30s with failing corpora
+  # committed to testdata/fuzz. That is about strength and what to do with a
+  # failure, not about which events run it.
+  fuzz-smoke:
+    name: fuzz-smoke
+    timeout-minutes: 20
+    needs: [checks]
+    # checks is skipped on a merge to main, and a skipped dependency would
+    # otherwise skip this too -- which is the one job the merge exists for.
+    if: ${{ !cancelled() && github.event_name == 'push' && (needs.checks.result == 'success' || needs.checks.result == 'skipped') }}
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: |
+            go.sum
+            tools/go.sum
+          cache: ${{ vars.CI_RUNNER == '' }}
+      - name: FuzzApply for 30s (docs/plan-v1.0.md §13.3)
+        run: make test-fuzz FUZZ_TIME=30s
+
   integration:
     name: integration
     timeout-minutes: 30
-    needs: [lint, unit]
+    needs: [checks]
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
     # Not run on a merge to main -- see "what a merge to main runs" at the
     # top of this file. Tags still run everything.
@@ -285,6 +295,9 @@ jobs:
           cache-dependency-path: |
             go.sum
             tools/go.sum
+          # see the note on the checks job: a self-hosted runner already has
+          # the module and build caches on its own disk
+          cache: ${{ vars.CI_RUNNER == '' }}
       - name: testcontainers (postgres, nats) — migrate, seed, registry API, ledger, admin API, trading engine, outbox relay
         env:
           CI: "true" # a missing Docker daemon fails instead of skipping
@@ -310,6 +323,9 @@ jobs:
           cache-dependency-path: |
             go.sum
             tools/go.sum
+          # see the note on the checks job: a self-hosted runner already has
+          # the module and build caches on its own disk
+          cache: ${{ vars.CI_RUNNER == '' }}
       # api, engine and admin run as separate containers, so every order has
       # to travel over the NATS command bus to reach the engine. This is the
       # only job that exercises the split deployment (docs/plan-v1.0.md §13.3).
@@ -320,7 +336,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: npm
+          # see the note on the checks job
+          cache: ${{ vars.CI_RUNNER == '' && 'npm' || '' }}
           cache-dependency-path: web/trade/package-lock.json
       # the stack from `make e2e` is still up (KEEP=1): register in the
       # browser, fund through the admin faucet, trade, watch both streams
@@ -383,6 +400,9 @@ jobs:
           cache-dependency-path: |
             go.sum
             tools/go.sum
+          # see the note on the checks job: a self-hosted runner already has
+          # the module and build caches on its own disk
+          cache: ${{ vars.CI_RUNNER == '' }}
       - name: read pinned foundry version
         id: foundry
         run: echo "tag=$(sed -n 's/^FOUNDRY_TAG=//p' .env.example)" >> "$GITHUB_OUTPUT"
@@ -624,6 +644,9 @@ jobs:
           cache-dependency-path: |
             go.sum
             tools/go.sum
+          # see the note on the checks job: a self-hosted runner already has
+          # the module and build caches on its own disk
+          cache: ${{ vars.CI_RUNNER == '' }}
       - uses: azure/setup-helm@v4
         with:
           version: ${{ env.HELM_VERSION }}

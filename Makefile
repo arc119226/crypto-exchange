@@ -109,19 +109,18 @@ secrets-scan: ## gitleaks over the git history (.gitleaks.toml)
 test: ## Unit + property tests with the race detector
 	go test -race -short -count=1 ./...
 
-# The loop lists Fuzz targets across every package because that is what makes
-# it self-maintaining: add a Fuzz* anywhere and CI picks it up. Narrowing
-# `go list ./...` to packages that have test files (43 -> 19) looks like an
-# obvious win and measures at four seconds, because a package with no test
-# files has no test binary to build. Not worth the extra template.
+# This used to discover targets by running `go test -list 'Fuzz.*'` over every
+# package, which reads as self-maintaining -- add a Fuzz* anywhere and CI picks
+# it up -- and measured at four billable minutes to find the one that exists.
+# Listing tests links a test binary per package, so the cost was 43 links to
+# learn what one grep answers.
 #
-# The real cost is elsewhere: building the instrumented binary for the one
-# target that exists (internal/matching's FuzzApply) is most of the job.
-test-fuzz: ## Run every Fuzz* target for FUZZ_TIME each
-	@for pkg in $$(go list ./...); do \
-	  for f in $$(go test -list 'Fuzz.*' $$pkg | grep '^Fuzz'); do \
-	    echo "fuzz $$pkg $$f"; go test -run '^$$' -fuzz "^$$f$$" -fuzztime $(FUZZ_TIME) $$pkg || exit 1; \
-	  done; done
+# internal/matching's FuzzApply is the only Fuzz* target in the repository.
+# Naming it here means a new target added elsewhere would be skipped silently,
+# so the checks job in .github/workflows/ci.yml greps for `func Fuzz` and fails
+# if this is no longer the whole list. Forgetting is a red check, not silence.
+test-fuzz: ## Run the Fuzz* targets in internal/matching for FUZZ_TIME each
+	go test -run '^$$' -fuzz 'Fuzz' -fuzztime $(FUZZ_TIME) ./internal/matching/
 
 # ./internal/... used to be listed here too. It ran nothing the unit job had
 # not already run: no package outside ./test/integration carries the integration

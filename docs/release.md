@@ -1,6 +1,6 @@
 # 發布
 
-一個 `vX.Y.Z` 的 tag 就是一次發布:CI 的 `release` job 在完整的 pipeline(lint、unit、fast-checks、integration、e2e、helm、image)全綠之後推 chart 與三個 image、開 GitHub Release。沒有手動步驟,也沒有「在筆電上 build 一下」的路徑——筆電上能做的只有事前檢查。
+一個 `vX.Y.Z` 的 tag 就是一次發布:CI 的 `release` job 在完整的 pipeline(checks、integration、e2e、helm、image)全綠之後推 chart 與三個 image、開 GitHub Release。沒有手動步驟,也沒有「在筆電上 build 一下」的路徑——筆電上能做的只有事前檢查。
 
 ## Tag 規則
 
