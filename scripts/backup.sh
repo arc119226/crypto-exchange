@@ -162,14 +162,22 @@ dump_due() {
 }
 
 mode="${1:-run}"
-until store_ready; do
-  log "waiting for the store at $BACKUP_S3_ENDPOINT"
-  sleep 5
-done
-until pg_isready -q; do
-  log "waiting for postgres at ${PGHOST:-localhost}"
-  sleep 5
-done
+# Bounded: these run in `once` mode as well, and the CI drill calls that. An
+# endpoint that never comes up used to hold the job until GitHub's 6-hour
+# ceiling; now it fails in two minutes and says which dependency was missing.
+wait_for() {
+  local what=$1 tries=${WAIT_TRIES:-24}
+  shift
+  for _ in $(seq 1 "$tries"); do
+    "$@" && return 0
+    log "waiting for $what"
+    sleep 5
+  done
+  log "gave up waiting for $what after $((tries * 5))s"
+  return 1
+}
+wait_for "the store at $BACKUP_S3_ENDPOINT" store_ready
+wait_for "postgres at ${PGHOST:-localhost}" pg_isready -q
 
 case "$mode" in
   ship) ship_wal ;;

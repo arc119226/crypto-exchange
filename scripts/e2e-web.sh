@@ -5,9 +5,14 @@
 # (admin) with the .env that gen-dev-secrets wrote; on a laptop point
 # API_URL / WS_URL / ADMIN_URL / ADMIN_API_KEY at whatever is running.
 #
-# Playwright is pinned in web/trade/package.json; the Chromium it needs is
-# installed here unless PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD says a matching one
-# already exists (PLAYWRIGHT_BROWSERS_PATH).
+# Playwright is pinned in web/trade/package.json and has no npm install script
+# -- package-lock.json is lockfile v3 and marks only fsevents with
+# hasInstallScript -- so `npm ci` never fetches a browser. The install below is
+# the only download, and it is a no-op when a matching browser already sits in
+# PLAYWRIGHT_BROWSERS_PATH (~/.cache/ms-playwright by default). On a machine
+# that keeps its home directory between runs -- a laptop, a self-hosted CI
+# runner -- it happens once, ever. Set PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 to
+# skip it when a matching browser is already installed somewhere else.
 set -euo pipefail
 cd "$(dirname "$0")/../web/trade"
 

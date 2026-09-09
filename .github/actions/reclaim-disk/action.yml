@@ -1,0 +1,35 @@
+name: reclaim disk
+description: >
+  Delete what this job left in the shared Docker daemon. A GitHub-hosted
+  runner is destroyed after every job, so nothing here matters there; a
+  self-hosted runner keeps every image, container and build cache the job
+  produced, and this repository pulls a kind node image (~900 MB) and a
+  twelve-service compose stack, so an unattended machine fills its disk in
+  days.
+
+runs:
+  using: composite
+  steps:
+    # Every filter here exists because the plan runs two or three runner
+    # instances on one machine, sharing one Docker daemon. An unfiltered
+    # `docker system prune` in the image job would delete the containers,
+    # volumes and images the e2e job running beside it is still using.
+    # `until` makes each prune touch only what has been idle longer than any
+    # single job can run, which is what makes this safe to run mid-job.
+    #
+    # Volumes are left alone for the same reason: `docker volume prune` has
+    # no `until` filter, so it cannot tell a dead volume from a live one.
+    # scripts/e2e.sh tears its own down with `compose down -v`, testcontainers
+    # has Ryuk, and the weekly deep clean in docs/guides/self-hosted-runner.md
+    # sweeps up the rest with the runners stopped.
+    - name: reclaim disk
+      shell: bash
+      run: |
+        set -u
+        docker container prune -f --filter until=6h || true
+        docker image prune -af --filter until=72h || true
+        docker builder prune -f --filter until=72h || true
+        docker network prune -f --filter until=6h || true
+        echo "--- disk after the prune ---"
+        df -h / | tail -1
+        docker system df || true
