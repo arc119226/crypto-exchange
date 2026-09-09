@@ -86,8 +86,20 @@ func newSigner(cfg Config, log *slog.Logger, db *pgxpool.Pool, reg prometheus.Re
 	// confirm the signer opened the seed they meant to install: it must match
 	// HOT_WALLET_ADDRESS, which scripts/gen-dev-secrets.sh derives separately
 	// with `cast wallet address`.
-	ks, err := signer.NewKeystoreSigner(db, cfg.TenantID, cfg.Chain.ChainID, w,
-		registry.NewStore(db), audit.NewRecorder(cfg.TenantID), log)
+	//
+	// One case, and a default that names the value rather than falling back to
+	// it. Config.Validate has already rejected everything but keystore, so the
+	// default is unreachable -- but wiring a real KMS (docs/plan-v1.0.md §22.1
+	// gate 2) should be adding a case here and deleting a check there, not
+	// discovering that the setting was decorative all along.
+	var ks *signer.KeystoreSigner
+	switch cfg.Wallet.SignerKind {
+	case SignerKeystore:
+		ks, err = signer.NewKeystoreSigner(db, cfg.TenantID, cfg.Chain.ChainID, w,
+			registry.NewStore(db), audit.NewRecorder(cfg.TenantID), log)
+	default:
+		err = fmt.Errorf("config: WALLET_SIGNER_KIND=%s has no implementation in this build", cfg.Wallet.SignerKind)
+	}
 	if err != nil {
 		w.Close()
 		return nil, err

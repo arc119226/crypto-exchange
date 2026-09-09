@@ -195,10 +195,12 @@ func tradable(m registry.Market) bool {
 }
 
 // startRunners restores and starts a runner for every tradable market that
-// has none yet.
+// has none yet. A market whose configuration the engine cannot build is
+// logged and skipped; only every market failing is an error.
 func (e *Engine) startRunners(ctx, runCtx context.Context) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	var wanted, failed int
 	for _, m := range e.reg.Markets() {
 		if !tradable(m) {
 			continue
@@ -206,9 +208,25 @@ func (e *Engine) startRunners(ctx, runCtx context.Context) error {
 		if _, exists := e.runners[m.Symbol]; exists {
 			continue
 		}
+		wanted++
 		r := newRunner(e, m)
 		if err := r.restore(ctx); err != nil {
-			return err
+			// One market the engine cannot build must not stop the others.
+			// Aborting here meant a single unrunnable configuration -- a
+			// self-trade policy the matcher does not implement, a tick and
+			// scale combination that cannot be exact -- left every market
+			// without a runner and /readyz red. One market unavailable is a
+			// far smaller failure than all of them.
+			//
+			// Not silent, though: this is the one path where a market
+			// disappears without anyone asking it to, and with no
+			// Alertmanager in the beta (docs/beta-checklist.md) the log is
+			// where it will be found. If every market fails it is not a bad
+			// row, it is a bad deployment, and the caller still gets an error.
+			failed++
+			e.log.Error("market has no runner: its configuration is one the engine cannot build",
+				slog.String("market", m.Symbol), slog.String("error", err.Error()))
+			continue
 		}
 		e.runners[m.Symbol] = r
 		e.wg.Add(1)
@@ -216,6 +234,9 @@ func (e *Engine) startRunners(ctx, runCtx context.Context) error {
 			defer e.wg.Done()
 			r.run(runCtx)
 		}()
+	}
+	if wanted > 0 && failed == wanted {
+		return fmt.Errorf("trading: none of the %d tradable markets could be started", wanted)
 	}
 	return nil
 }

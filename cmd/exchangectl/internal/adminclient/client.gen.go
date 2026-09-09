@@ -162,6 +162,21 @@ func (e BackupSummaryKind) Valid() bool {
 	}
 }
 
+// Defines values for CreateMarketRequestSelfTradePolicy.
+const (
+	CreateMarketRequestSelfTradePolicyCancelNewest CreateMarketRequestSelfTradePolicy = "cancel_newest"
+)
+
+// Valid indicates whether the value is a known member of the CreateMarketRequestSelfTradePolicy enum.
+func (e CreateMarketRequestSelfTradePolicy) Valid() bool {
+	switch e {
+	case CreateMarketRequestSelfTradePolicyCancelNewest:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for HouseAdjustmentRequestCode.
 const (
 	HouseAdjustmentRequestCodeCustodyDepositAddresses HouseAdjustmentRequestCode = "custody_deposit_addresses"
@@ -249,6 +264,21 @@ func (e HouseCode) Valid() bool {
 	case HouseCodeGasExpense:
 		return true
 	case HouseCodePendingWithdrawal:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for MarketRequestSelfTradePolicy.
+const (
+	MarketRequestSelfTradePolicyCancelNewest MarketRequestSelfTradePolicy = "cancel_newest"
+)
+
+// Valid indicates whether the value is a known member of the MarketRequestSelfTradePolicy enum.
+func (e MarketRequestSelfTradePolicy) Valid() bool {
+	switch e {
+	case MarketRequestSelfTradePolicyCancelNewest:
 		return true
 	default:
 		return false
@@ -886,10 +916,12 @@ type CreateMarketRequest struct {
 	// QtyStep Decimal serialized as a string (NUMERIC(36,18)); never a JSON number.
 	//
 	// Example: 1990.00
-	QtyStep         Amount `json:"qty_step"`
-	QuoteAsset      string `json:"quote_asset"`
-	Reason          string `json:"reason"`
-	SelfTradePolicy string `json:"self_trade_policy"`
+	QtyStep    Amount `json:"qty_step"`
+	QuoteAsset string `json:"quote_asset"`
+	Reason     string `json:"reason"`
+
+	// SelfTradePolicy The only policy the engine implements. The Market response stays an unconstrained string so rows written before this enum can be read.
+	SelfTradePolicy CreateMarketRequestSelfTradePolicy `json:"self_trade_policy"`
 
 	// Status active takes orders and cancels; halted and cancel_only take cancels only; delisted requires an empty book (docs/plan-v1.0.md 6.6).
 	Status MarketStatus `json:"status"`
@@ -897,6 +929,9 @@ type CreateMarketRequest struct {
 	// Symbol Example: ETH-USDC
 	Symbol string `json:"symbol"`
 }
+
+// CreateMarketRequestSelfTradePolicy The only policy the engine implements. The Market response stays an unconstrained string so rows written before this enum can be read.
+type CreateMarketRequestSelfTradePolicy string
 
 // CreatedWebhookEndpoint defines model for CreatedWebhookEndpoint.
 type CreatedWebhookEndpoint struct {
@@ -1127,14 +1162,19 @@ type MarketRequest struct {
 	// QtyStep Decimal serialized as a string (NUMERIC(36,18)); never a JSON number.
 	//
 	// Example: 1990.00
-	QtyStep         Amount `json:"qty_step"`
-	QuoteAsset      string `json:"quote_asset"`
-	Reason          string `json:"reason"`
-	SelfTradePolicy string `json:"self_trade_policy"`
+	QtyStep    Amount `json:"qty_step"`
+	QuoteAsset string `json:"quote_asset"`
+	Reason     string `json:"reason"`
+
+	// SelfTradePolicy The only policy the engine implements. The Market response stays an unconstrained string so rows written before this enum can be read.
+	SelfTradePolicy MarketRequestSelfTradePolicy `json:"self_trade_policy"`
 
 	// Status active takes orders and cancels; halted and cancel_only take cancels only; delisted requires an empty book (docs/plan-v1.0.md 6.6).
 	Status MarketStatus `json:"status"`
 }
+
+// MarketRequestSelfTradePolicy The only policy the engine implements. The Market response stays an unconstrained string so rows written before this enum can be read.
+type MarketRequestSelfTradePolicy string
 
 // MarketStatus active takes orders and cancels; halted and cancel_only take cancels only; delisted requires an empty book (docs/plan-v1.0.md 6.6).
 type MarketStatus string

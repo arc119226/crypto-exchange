@@ -14,7 +14,7 @@ PR #28 之後、打 `v0.1.0` 之前,使用者提出兩個計畫書層級的問�
 2. **交易手續費已在收、後台可調**:每市場 maker / taker bps,成交時以收到的資產扣、進 `fee_revenue`;後台頁、admin API、CLI 三處可改,改了寫審計、發事件、引擎立即生效。沒有用戶等級費率(§3.1 明列不做)。
 3. **提現手續費有欄位、沒有程式收它**:`registry.assets.withdrawal_fee` 存在、驗證、後台可填、公開 API 會回,但 `internal/chain/withdrawal`、`internal/ledger`、`internal/policy` 零引用;seed 為 0。用戶提 X 只扣 X,gas 全記 `gas_expense` 由熱錢包出。每一筆提現對平台都是淨虧損。
 4. **充值手續費不存在**:沒有欄位、沒有程式;ERC-20 歸集前補 gas 的成本也由平台吸收。
-5. **主網沒有程式閘門**:`ETH_CHAIN_ID=1` 過設定驗證;擋它的是 compose / Helm / `.env.prod.example` 與文件。真要接主網要換的:KMS/HSM/MPC signer(現在只有 `KeystoreSigner`)、真 USDC 地址(seed 直接吃 `addresses.json`)、mainnet 的 seed-params、gas 上限、確認數、RPC provider。
+5. **主網沒有程式閘門**(寫這份 ADR 時的狀況;**v1.1 已經補上**,見決定 5):`ETH_CHAIN_ID=1` 過設定驗證;擋它的是 compose / Helm / `.env.prod.example` 與文件。真要接主網要換的:KMS/HSM/MPC signer(現在只有 `KeystoreSigner`)、真 USDC 地址(seed 直接吃 `addresses.json`)、mainnet 的 seed-params、gas 上限、確認數、RPC provider。
 6. **沒有營收報表**:試算平衡的 house 科目能看 `fee_revenue` / `gas_expense` 的累計,`trading.trades` 有每筆 fee,但沒有期間報表、沒有指標、沒有面板。
 
 「除了 gas 平台也要收手續費」這句話裡的 gas 要先釐清:gas 不是平台的收入,是平台付給網路的成本。平台的收入只有手續費;提現手續費的定價就是要蓋住 gas 再加利潤。
@@ -44,6 +44,10 @@ PR #28 之後、打 `v0.1.0` 之前,使用者提出兩個計畫書層級的問�
 ### 5. 主網是 v2 的目標,閘門制;程式閘門 v1.1 先做
 
 計畫書 §2.1、§3.2、§4 原則 0 改成「v1 不接主網;v2 接,但只在 §22.1 的九道閘門全部通過之後」。閘門:程式閘門、密鑰託管(KMS/HSM/MPC、冷熱分離)、外部審計、法遵(KYC/AML、地址篩查、牌照)、風控(法幣等值限額、全站上限、雙人審核、kill switch)、鏈基礎設施(RPC ×2、確認數、gas 上限)、真實資產(token allowlist、真 USDC)、營運(on-call、事件響應 runbook、PITR、準備金)、放量計畫(內部帳戶 → 白名單 → 開放)。程式閘門——已知主網 id 命中時要求 `MAINNET_ACKNOWLEDGED=true`、`EXCHANGE_ENV=prod`、非 keystore signer,缺一拒絕啟動——半天的工,可以在 v1.1 就做,讓「不接主網」從文件變成測試斷言。
+
+**v1.1 做了。** `internal/app/config.go` 有五個已知主網 id(1、10、137、8453、42161)與 `validateMainnetGate`,`internal/app/config_test.go` 的 `TestLoadConfigRefusesAKnownMainnet` 斷言每一種缺一的情況都被拒。三個條件的第三個需要一個原本不存在的概念,所以新增了 `WALLET_SIGNER_KIND`(`keystore` / `kms`)——而 `kms` **在設定驗證階段就被拒絕**,因為 `internal/chain/signer/kms.go` 只是編譯得過的 stub。
+
+這個選擇是刻意的:讓 `kms` 通過驗證會產生一種「啟動得起來但簽不了名」的部署,營運人員為了通過閘門設了它,系統照常開機,第一筆提現才死在簽名。現在的結果是**三個條件全部滿足仍然啟動不了**,主網在 v1.1 是結構上到不了的。接上真的 KMS(閘門 2)時,把驗證裡的那一句拒絕拿掉、在 `signer_role.go` 的 switch 加一個 case,並刪掉那個「全部滿足仍然拒絕」的測試斷言。
 
 ### 6. 不做
 

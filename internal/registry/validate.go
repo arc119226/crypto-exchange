@@ -146,10 +146,14 @@ func (in MarketInput) Validate() error {
 	if in.FeeSchedule == "" {
 		return fmt.Errorf("%w: market %s has no fee schedule", ErrInvalid, in.Symbol)
 	}
-	switch in.SelfTradePolicy {
-	case STPCancelNewest, STPAllow, STPCancelOldest:
-	default:
-		return fmt.Errorf("%w: market %s self_trade_policy %q", ErrInvalid, in.Symbol, in.SelfTradePolicy)
+	// Only cancel_newest. The other two constants name values the column's
+	// CHECK still accepts -- they exist so old rows can be read and reported --
+	// but neither is a policy the engine can run: matching.MarketConfig.Validate
+	// refuses cancel_oldest, and allow suppresses no self-trade at all, which
+	// is wash trading rather than a policy. Accepting either here would let a
+	// market be saved that no runner can restore.
+	if in.SelfTradePolicy != STPCancelNewest {
+		return fmt.Errorf("%w: market %s self_trade_policy %q (only %q is implemented)", ErrInvalid, in.Symbol, in.SelfTradePolicy, STPCancelNewest)
 	}
 	switch in.Status {
 	case MarketActive, MarketHalted, MarketCancelOnly, MarketDelisted:

@@ -121,7 +121,8 @@ func (h *Handler) CreateMarket(ctx context.Context, req gen.CreateMarketRequestO
 	b := req.Body
 	in := marketInput(b.Symbol, gen.MarketRequest{
 		BaseAsset: b.BaseAsset, QuoteAsset: b.QuoteAsset, PriceTick: b.PriceTick, QtyStep: b.QtyStep, MinNotional: b.MinNotional,
-		MaxQty: b.MaxQty, MaxSlippageBps: b.MaxSlippageBps, FeeSchedule: b.FeeSchedule, SelfTradePolicy: b.SelfTradePolicy, Status: b.Status,
+		MaxQty: b.MaxQty, MaxSlippageBps: b.MaxSlippageBps, FeeSchedule: b.FeeSchedule,
+		SelfTradePolicy: gen.MarketRequestSelfTradePolicy(b.SelfTradePolicy), Status: b.Status,
 	})
 	m, err := h.upsertMarket(ctx, in, true, b.Reason)
 	switch {
@@ -303,7 +304,7 @@ func marketInput(symbol string, b gen.MarketRequest) registry.MarketInput {
 	return registry.MarketInput{
 		Symbol: symbol, BaseSymbol: b.BaseAsset, QuoteSymbol: b.QuoteAsset,
 		PriceTick: b.PriceTick, QtyStep: b.QtyStep, MinNotional: b.MinNotional, MaxQty: b.MaxQty, MaxSlippageBps: b.MaxSlippageBps,
-		FeeSchedule: b.FeeSchedule, SelfTradePolicy: b.SelfTradePolicy, Status: string(b.Status),
+		FeeSchedule: b.FeeSchedule, SelfTradePolicy: string(b.SelfTradePolicy), Status: string(b.Status),
 	}
 }
 
