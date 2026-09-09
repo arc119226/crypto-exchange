@@ -1,30 +1,30 @@
 {{define "market_fields"}}{{/* . is marketFormData */}}
   <div class="row">
-    <label>Price tick <input type="text" name="price_tick" value="{{amount .Market.PriceTick}}" required></label>
-    <label>Qty step <input type="text" name="qty_step" value="{{amount .Market.QtyStep}}" required></label>
-    <label>Min notional <input type="text" name="min_notional" value="{{amount .Market.MinNotional}}" required></label>
-    <label>Max qty <input type="text" name="max_qty" value="{{if .Market.MaxQty}}{{amount .Market.MaxQty}}{{end}}" placeholder="no cap"></label>
-    <label>Max slippage bps <input type="number" name="max_slippage_bps" value="{{if .Market.MaxSlippageBps}}{{.Market.MaxSlippageBps}}{{end}}" min="1" max="10000" placeholder="none"></label>
+    <label>{{T "markets.price_tick"}} <input type="text" name="price_tick" value="{{amount .Market.PriceTick}}" required></label>
+    <label>{{T "markets.qty_step"}} <input type="text" name="qty_step" value="{{amount .Market.QtyStep}}" required></label>
+    <label>{{T "markets.min_notional"}} <input type="text" name="min_notional" value="{{amount .Market.MinNotional}}" required></label>
+    <label>{{T "markets.max_qty"}} <input type="text" name="max_qty" value="{{if .Market.MaxQty}}{{amount .Market.MaxQty}}{{end}}" placeholder="{{T "markets.max_qty.placeholder"}}"></label>
+    <label>{{T "markets.max_slippage"}} <input type="number" name="max_slippage_bps" value="{{if .Market.MaxSlippageBps}}{{.Market.MaxSlippageBps}}{{end}}" min="1" max="10000" placeholder="{{T "common.none"}}"></label>
   </div>
   <div class="row">
-    <label>Fee schedule
+    <label>{{T "markets.fee_schedule"}}
       <select name="fee_schedule">{{$f := .Market.FeeScheduleName}}{{range .FeeSchedules}}<option value="{{.Name}}"{{if eq .Name $f}} selected{{end}}>{{.Name}} ({{.MakerBps}}/{{.TakerBps}} bps)</option>{{end}}</select>
     </label>
-    <label>Self-trade policy
-      <select name="self_trade_policy">{{$p := .Market.SelfTradePolicy}}{{range .Policies}}<option value="{{.}}"{{if eq . $p}} selected{{end}}>{{.}}</option>{{end}}</select>
+    <label>{{T "markets.stp"}}
+      <select name="self_trade_policy">{{$p := .Market.SelfTradePolicy}}{{range .Policies}}<option value="{{.}}"{{if eq . $p}} selected{{end}}>{{status .}}</option>{{end}}</select>
     </label>
-    <label>Status
-      <select name="status">{{$s := .Market.Status}}{{range .Statuses}}<option value="{{.}}"{{if eq . $s}} selected{{end}}>{{.}}</option>{{end}}</select>
+    <label>{{T "col.status"}}
+      <select name="status">{{$s := .Market.Status}}{{range .Statuses}}<option value="{{.}}"{{if eq . $s}} selected{{end}}>{{status .}}</option>{{end}}</select>
     </label>
-    <label>Reason <input type="text" name="reason" required placeholder="recorded in the audit trail"></label>
+    <label>{{T "form.reason"}} <input type="text" name="reason" required placeholder="{{T "form.reason.placeholder"}}"></label>
   </div>
 {{end}}
 {{define "content"}}
-<h1>Markets</h1>
+<h1>{{T "markets.title"}}</h1>
 {{with .Data}}
 <section id="list">
 <table>
-  <thead><tr><th>Symbol</th><th class="num">Tick</th><th class="num">Step</th><th class="num">Min notional</th><th>Fees</th><th>STP</th><th>Status</th><th class="num">v</th><th></th></tr></thead>
+  <thead><tr><th>{{T "col.symbol"}}</th><th class="num">{{T "markets.col.tick"}}</th><th class="num">{{T "markets.col.step"}}</th><th class="num">{{T "markets.min_notional"}}</th><th>{{T "col.fees"}}</th><th>STP</th><th>{{T "col.status"}}</th><th class="num">v</th><th></th></tr></thead>
   <tbody>
   {{$d := .}}
   {{range .Markets}}
@@ -34,51 +34,51 @@
     <td class="num">{{amount .QtyStep}}</td>
     <td class="num">{{amount .MinNotional}}</td>
     <td>{{.FeeScheduleName}} <span class="muted">{{.MakerBps}}/{{.TakerBps}} bps</span></td>
-    <td>{{.SelfTradePolicy}}</td>
-    <td><span class="badge {{badge .Status}}">{{.Status}}</span></td>
+    <td>{{status .SelfTradePolicy}}</td>
+    <td><span title="{{.Status}}" class="badge {{badge .Status}}">{{status .Status}}</span></td>
     <td class="num">{{.Version}}</td>
     <td>
       <form method="post" action="/admin/markets/{{.Symbol}}/status" class="inline">
-        <select name="status">{{$s := .Status}}{{range $d.Statuses}}<option value="{{.}}"{{if eq . $s}} selected{{end}}>{{.}}</option>{{end}}</select>
-        <input type="text" name="reason" required placeholder="reason">
-        <button type="submit" class="quiet">Set status</button>
+        <select name="status">{{$s := .Status}}{{range $d.Statuses}}<option value="{{.}}"{{if eq . $s}} selected{{end}}>{{status .}}</option>{{end}}</select>
+        <input type="text" name="reason" required placeholder="{{T "form.reason.short"}}">
+        <button type="submit" class="quiet">{{T "markets.set_status"}}</button>
       </form>
     </td>
   </tr>
   <tr><td colspan="9">
-    <details><summary>Edit {{.Symbol}}</summary>
+    <details><summary>{{T "common.edit"}} {{.Symbol}}</summary>
       <form method="post" action="/admin/markets/{{.Symbol}}">
         <input type="hidden" name="base_asset" value="{{.BaseSymbol}}">
         <input type="hidden" name="quote_asset" value="{{.QuoteSymbol}}">
         {{template "market_fields" (marketForm . $d)}}
-        <div class="actions"><button type="submit">Save {{.Symbol}}</button></div>
+        <div class="actions"><button type="submit">{{T "common.save"}} {{.Symbol}}</button></div>
       </form>
     </details>
   </td></tr>
   {{else}}
-  <tr><td colspan="9" class="muted">No markets. Seed one, or add one below.</td></tr>
+  <tr><td colspan="9" class="muted">{{T "markets.empty"}}</td></tr>
   {{end}}
   </tbody>
 </table>
 </section>
 <section class="card">
-  <details><summary>New market</summary>
+  <details><summary>{{T "markets.new"}}</summary>
     <form method="post" action="/admin/markets">
       <div class="row">
-        <label>Base asset <select name="base_asset">{{range .Assets}}<option value="{{.Symbol}}">{{.Symbol}}</option>{{end}}</select></label>
-        <label>Quote asset <select name="quote_asset">{{range .Assets}}<option value="{{.Symbol}}">{{.Symbol}}</option>{{end}}</select></label>
+        <label>{{T "markets.base_asset"}} <select name="base_asset">{{range .Assets}}<option value="{{.Symbol}}">{{.Symbol}}</option>{{end}}</select></label>
+        <label>{{T "markets.quote_asset"}} <select name="quote_asset">{{range .Assets}}<option value="{{.Symbol}}">{{.Symbol}}</option>{{end}}</select></label>
       </div>
       {{template "market_fields" (marketForm newMarket .)}}
-      <div class="actions"><button type="submit">List market</button></div>
+      <div class="actions"><button type="submit">{{T "markets.list"}}</button></div>
     </form>
   </details>
 </section>
 <section class="card">
-  <h2>Engine</h2>
-  <p class="muted">Every registry change above already tells the engine to reload. This asks for one with nothing changed: after a seed, or when in doubt.</p>
+  <h2>{{T "markets.engine"}}</h2>
+  <p class="muted">{{T "markets.engine.hint"}}</p>
   <form method="post" action="/admin/engine/reload" class="row">
-    <label>Reason <input type="text" name="reason" required placeholder="recorded in the audit trail"></label>
-    <button type="submit" class="quiet">Request reload</button>
+    <label>{{T "form.reason"}} <input type="text" name="reason" required placeholder="{{T "form.reason.placeholder"}}"></label>
+    <button type="submit" class="quiet">{{T "markets.reload"}}</button>
   </form>
 </section>
 {{end}}

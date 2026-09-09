@@ -93,3 +93,5 @@ td:first-child, th:first-child { text-align: left; }
 .markets-table tr { cursor: pointer; }
 .markets-table tr:hover td { background: #1c2430; }
 code { background: #0b0f14; padding: 1px 4px; border-radius: 3px; word-break: break-all; }
+.topbar .tabs { margin: 0; gap: 8px; }
+.topbar .tabs button { padding: 4px 2px; }

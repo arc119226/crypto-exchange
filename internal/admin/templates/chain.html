@@ -1,32 +1,32 @@
 {{define "content"}}
-<h1>Chain</h1>
+<h1>{{T "chain.title"}}</h1>
 {{with .Data}}
 <section class="card">
-  <h2>Hot wallet</h2>
+  <h2>{{T "chain.hot_wallet"}}</h2>
   {{with .HotWallet}}
   <dl class="kv">
-    <dt>Address</dt><dd class="mono">{{.Address}}</dd>
-    <dt>Chain</dt><dd>{{.ChainID}}</dd>
-    <dt>Next nonce</dt><dd>{{.NextNonce}}</dd>
-    <dt>Balance</dt><dd>{{if .Low}}<span class="badge bad">low since {{whenp .LowAlertedAt}}</span>{{else}}<span class="badge ok">above the line</span>{{end}}</dd>
-    <dt>Holds (ledger)</dt><dd>{{range .Balances}}<div>{{amount .Balance}} {{.Asset}}</div>{{else}}<span class="muted">nothing booked to custody_hot yet</span>{{end}}</dd>
-    <dt>Updated</dt><dd>{{when .UpdatedAt}}</dd>
+    <dt>{{T "col.address"}}</dt><dd class="mono">{{.Address}}</dd>
+    <dt>{{T "col.chain"}}</dt><dd>{{.ChainID}}</dd>
+    <dt>{{T "chain.next_nonce"}}</dt><dd>{{.NextNonce}}</dd>
+    <dt>{{T "col.balance"}}</dt><dd>{{if .Low}}<span class="badge bad">{{T "chain.low_since"}} {{whenp .LowAlertedAt}}</span>{{else}}<span class="badge ok">{{T "chain.above_line"}}</span>{{end}}</dd>
+    <dt>{{T "chain.holds"}}</dt><dd>{{range .Balances}}<div>{{amount .Balance}} {{.Asset}}</div>{{else}}<span class="muted">{{T "chain.no_holds"}}</span>{{end}}</dd>
+    <dt>{{T "col.updated"}}</dt><dd>{{when .UpdatedAt}}</dd>
   </dl>
   {{else}}
-  <p class="muted">No hot wallet recorded: the chain role writes it on its first start.</p>
+  <p class="muted">{{T "chain.no_hot_wallet"}}</p>
   {{end}}
 </section>
 <section class="card">
-  <h2>Deposits</h2>
+  <h2>{{T "chain.deposits"}}</h2>
   <form method="get" action="/admin/chain" class="row">
-    <label>Status <select name="status"><option value="">any</option>{{$s := .Status}}{{range .Statuses}}<option value="{{.}}"{{if eq . $s}} selected{{end}}>{{.}}</option>{{end}}</select></label>
-    <label>Asset <input type="text" name="asset" value="{{.Asset}}" placeholder="ETH"></label>
-    <button type="submit" class="quiet">Filter</button>
+    <label>{{T "col.status"}} <select name="status"><option value="">{{T "filter.any"}}</option>{{$s := .Status}}{{range .Statuses}}<option value="{{.}}"{{if eq . $s}} selected{{end}}>{{status .}}</option>{{end}}</select></label>
+    <label>{{T "col.asset"}} <input type="text" name="asset" value="{{.Asset}}" placeholder="ETH"></label>
+    <button type="submit" class="quiet">{{T "filter.apply"}}</button>
   </form>
 </section>
 <section id="list">
 <table>
-  <thead><tr><th>Seen</th><th>Account</th><th class="num">Amount</th><th>Address</th><th>Transaction</th><th class="num">Block</th><th class="num">Confs</th><th>Status</th><th>Credited</th></tr></thead>
+  <thead><tr><th>{{T "col.seen"}}</th><th>{{T "col.account"}}</th><th class="num">{{T "col.amount"}}</th><th>{{T "col.address"}}</th><th>{{T "col.transaction"}}</th><th class="num">{{T "col.block"}}</th><th class="num">{{T "col.confs"}}</th><th>{{T "col.status"}}</th><th>{{T "col.credited"}}</th></tr></thead>
   <tbody>
   {{range .Deposits}}
   <tr>
@@ -37,33 +37,33 @@
     <td class="mono">{{.TxHash}}{{if .LogIndex}} #{{.LogIndex}}{{end}}</td>
     <td class="num">{{.BlockNumber}}</td>
     <td class="num">{{.Confirmations}}</td>
-    <td><span class="badge {{badge .Status}}">{{.Status}}</span></td>
+    <td><span title="{{.Status}}" class="badge {{badge .Status}}">{{status .Status}}</span></td>
     <td>{{whenp .CreditedAt}}</td>
   </tr>
   {{else}}
-  <tr><td colspan="9" class="muted">No deposits match.</td></tr>
+  <tr><td colspan="9" class="muted">{{T "chain.no_deposits"}}</td></tr>
   {{end}}
   </tbody>
 </table>
 {{template "pager" .Pager}}
 </section>
 <section class="card">
-  <h2>Sweeps</h2>
-  <p class="muted">The exchange moving its own custody from deposit addresses to the hot wallet. The latest fifty.</p>
+  <h2>{{T "chain.sweeps"}}</h2>
+  <p class="muted">{{T "chain.sweeps.hint"}}</p>
   <table>
-    <thead><tr><th>Started</th><th>From</th><th class="num">Amount</th><th>Transaction</th><th class="num">Gas</th><th>Status</th></tr></thead>
+    <thead><tr><th>{{T "col.started"}}</th><th>{{T "col.from"}}</th><th class="num">{{T "col.amount"}}</th><th>{{T "col.transaction"}}</th><th class="num">{{T "col.gas"}}</th><th>{{T "col.status"}}</th></tr></thead>
     <tbody>
     {{range .Sweeps}}
     <tr>
       <td>{{when .CreatedAt}}</td>
       <td class="mono">{{.FromAddress}}</td>
       <td class="num">{{amount .Amount}} {{.Asset}}</td>
-      <td class="mono">{{.TxHash}}{{if .GasFundingTxHash}}<br><span class="muted">gas: {{.GasFundingTxHash}}</span>{{end}}</td>
+      <td class="mono">{{.TxHash}}{{if .GasFundingTxHash}}<br><span class="muted">{{T "chain.gas"}} {{.GasFundingTxHash}}</span>{{end}}</td>
       <td class="num">{{if .GasCost.IsPositive}}{{amount .GasCost}}{{end}}</td>
-      <td><span class="badge {{badge .Status}}">{{.Status}}</span>{{if .FailureReason}} <span class="muted">{{.FailureReason}}</span>{{end}}</td>
+      <td><span title="{{.Status}}" class="badge {{badge .Status}}">{{status .Status}}</span>{{if .FailureReason}} <span class="muted">{{.FailureReason}}</span>{{end}}</td>
     </tr>
     {{else}}
-    <tr><td colspan="6" class="muted">No sweeps yet.</td></tr>
+    <tr><td colspan="6" class="muted">{{T "chain.no_sweeps"}}</td></tr>
     {{end}}
     </tbody>
   </table>

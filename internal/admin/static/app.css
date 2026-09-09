@@ -9,7 +9,9 @@ header.top .brand{color:#fff;font-weight:600;letter-spacing:.02em}header.top .br
 header.top nav{display:flex;gap:.2rem;flex-wrap:wrap}
 header.top nav a{color:#cbd5e1;padding:.3rem .55rem;border-radius:4px}
 header.top nav a.active,header.top nav a:hover{background:#1f2937;color:#fff;text-decoration:none}
-header.top .who{margin-left:auto;display:flex;align-items:center;gap:.6rem;color:#9ca3af}
+header.top .right{margin-left:auto;display:flex;align-items:center;gap:1rem;color:#9ca3af}
+header.top .who{display:flex;align-items:center;gap:.6rem}
+header.top .lang{display:flex;gap:.5rem}header.top .lang button.link{color:#9ca3af}header.top .lang button.active{color:#fff;text-decoration:none;font-weight:600}
 main{max-width:1200px;margin:0 auto;padding:1.2rem}
 h1{font-size:1.4rem;margin:.2rem 0 1rem}h2{font-size:1.1rem;margin:1.4rem 0 .6rem}
 .card{background:var(--card);border:1px solid var(--line);border-radius:6px;padding:1.2rem}

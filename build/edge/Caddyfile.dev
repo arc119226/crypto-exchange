@@ -1,0 +1,30 @@
+# The development edge (deploy/compose/compose.yaml, profile web): the same
+# static front end and the same three proxied paths as the Caddyfile next
+# to this file, on plain HTTP at :8088 with no certificate, so `make up`
+# and `make up-single` can open http://localhost:8088 without a browser
+# warning and without Node on the host. The upstream names are the compose
+# service names; the all-in-one container carries them as network aliases.
+{
+	admin off
+	auto_https off
+}
+
+:8088 {
+	encode zstd gzip
+
+	handle /v1/* {
+		reverse_proxy exchange-api:8080
+	}
+	handle /.well-known/* {
+		reverse_proxy exchange-api:8080
+	}
+	# /ws/v1/public and /ws/v1/private; WebSocket upgrades pass through
+	handle /ws/* {
+		reverse_proxy exchange-stream:8081
+	}
+	handle {
+		root * /srv
+		try_files {path} /index.html
+		file_server
+	}
+}

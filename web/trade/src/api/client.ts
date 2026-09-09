@@ -1,4 +1,6 @@
 import createClient, { type Middleware } from 'openapi-fetch'
+import type { Translate } from '../i18n/messages'
+import { problemKey, statusKey } from '../i18n/problems'
 import type { components, paths } from './schema'
 
 export type Schemas = components['schemas']
@@ -29,8 +31,21 @@ export class ApiError extends Error {
   }
 }
 
-export function describeError(err: unknown): string {
-  if (err instanceof ApiError) return err.message
+// describeError turns a failed call into a sentence in the interface's
+// language. A problem detail the catalogue knows is translated; any other
+// detail is shown after the generic sentence for its status (in English
+// the detail alone, which is what the interface showed before it had a
+// second language); a fetch that never reached the server is a TypeError.
+// ApiError.message keeps the English detail for logs.
+export function describeError(err: unknown, t: Translate): string {
+  if (err instanceof ApiError) {
+    const detail = err.problem?.detail ?? ''
+    const known = detail ? problemKey(detail) : undefined
+    if (known) return t(known)
+    const generic = t(statusKey(err.status))
+    return detail ? t('error.with_detail', { generic, detail }) : generic
+  }
+  if (err instanceof TypeError) return t('error.network')
   if (err instanceof Error) return err.message
   return String(err)
 }

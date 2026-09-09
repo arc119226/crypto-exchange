@@ -52,7 +52,7 @@ func (u *UI) assets(w http.ResponseWriter, r *http.Request) {
 		u.fail(w, r, "assets", "list assets", err)
 		return
 	}
-	u.tpl.render(w, r, http.StatusOK, "assets", view{Title: "Assets", Data: assetsData{Assets: assets, Statuses: assetStatuses}})
+	u.tpl.render(w, r, http.StatusOK, "assets", view{Title: langFrom(r.Context()).T("page.assets"), Data: assetsData{Assets: assets, Statuses: assetStatuses}})
 }
 
 func (u *UI) createAsset(w http.ResponseWriter, r *http.Request) {
@@ -63,7 +63,7 @@ func (u *UI) createAsset(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_, err := u.h.upsertAsset(r.Context(), in, true, f.reason())
-	u.done(w, r, "/admin/assets", err, "Asset "+in.Symbol+" listed.")
+	u.done(w, r, "/admin/assets", err, f.l.T("flash.asset_listed", in.Symbol))
 }
 
 func (u *UI) updateAsset(w http.ResponseWriter, r *http.Request) {
@@ -74,7 +74,7 @@ func (u *UI) updateAsset(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_, err := u.h.upsertAsset(r.Context(), in, false, f.reason())
-	u.done(w, r, "/admin/assets", err, "Asset "+in.Symbol+" saved.")
+	u.done(w, r, "/admin/assets", err, f.l.T("flash.asset_saved", in.Symbol))
 }
 
 func assetForm(f *form, symbol string) registry.AssetInput {
@@ -105,7 +105,7 @@ func (u *UI) markets(w http.ResponseWriter, r *http.Request) {
 		u.fail(w, r, "markets", "list fee schedules", err)
 		return
 	}
-	u.tpl.render(w, r, http.StatusOK, "markets", view{Title: "Markets", Data: marketsData{
+	u.tpl.render(w, r, http.StatusOK, "markets", view{Title: langFrom(ctx).T("page.markets"), Data: marketsData{
 		Markets: markets, Assets: assets, FeeSchedules: fees, Statuses: marketStatuses, Policies: stpPolicies,
 	}})
 }
@@ -118,7 +118,7 @@ func (u *UI) createMarket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_, err := u.h.upsertMarket(r.Context(), in, true, f.reason())
-	u.done(w, r, "/admin/markets", err, "Market "+in.Symbol+" listed; the engine opens the book on reload.")
+	u.done(w, r, "/admin/markets", err, f.l.T("flash.market_listed", in.Symbol))
 }
 
 func (u *UI) updateMarket(w http.ResponseWriter, r *http.Request) {
@@ -129,7 +129,7 @@ func (u *UI) updateMarket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_, err := u.h.upsertMarket(r.Context(), in, false, f.reason())
-	u.done(w, r, "/admin/markets", err, "Market "+in.Symbol+" saved.")
+	u.done(w, r, "/admin/markets", err, f.l.T("flash.market_saved", in.Symbol))
 }
 
 func marketForm(f *form, symbol string) registry.MarketInput {
@@ -150,11 +150,11 @@ func (u *UI) setMarketStatusPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !registry.ValidMarketStatus(status) {
-		u.bounce(w, r, "/admin/markets", "Unknown market status "+status+".")
+		u.bounce(w, r, "/admin/markets", f.l.T("flash.unknown_market_status", status))
 		return
 	}
 	_, err := u.h.setMarketStatus(r.Context(), symbol, status, f.reason())
-	u.done(w, r, "/admin/markets", err, "Market "+symbol+" is now "+status+".")
+	u.done(w, r, "/admin/markets", err, f.l.T("flash.market_status", symbol, f.l.Status(status)))
 }
 
 func (u *UI) reload(w http.ResponseWriter, r *http.Request) {
@@ -165,7 +165,7 @@ func (u *UI) reload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	evt, err := u.h.requestReload(r.Context(), reason)
-	u.done(w, r, "/admin/markets", err, "Reload requested; event "+evt.EventID+" is in the outbox.")
+	u.done(w, r, "/admin/markets", err, f.l.T("flash.reload_requested", evt.EventID))
 }
 
 func (u *UI) feeSchedules(w http.ResponseWriter, r *http.Request) {
@@ -174,7 +174,7 @@ func (u *UI) feeSchedules(w http.ResponseWriter, r *http.Request) {
 		u.fail(w, r, "fee-schedules", "list fee schedules", err)
 		return
 	}
-	u.tpl.render(w, r, http.StatusOK, "fee-schedules", view{Title: "Fee schedules", Data: feeSchedulesData{FeeSchedules: fees}})
+	u.tpl.render(w, r, http.StatusOK, "fee-schedules", view{Title: langFrom(r.Context()).T("page.fee_schedules"), Data: feeSchedulesData{FeeSchedules: fees}})
 }
 
 func (u *UI) createFeeSchedule(w http.ResponseWriter, r *http.Request) {
@@ -185,7 +185,7 @@ func (u *UI) createFeeSchedule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_, err := u.h.upsertFeeSchedule(r.Context(), in, true, f.reason())
-	u.done(w, r, "/admin/fee-schedules", err, "Fee schedule "+in.Name+" added.")
+	u.done(w, r, "/admin/fee-schedules", err, f.l.T("flash.fee_added", in.Name))
 }
 
 func (u *UI) updateFeeSchedule(w http.ResponseWriter, r *http.Request) {
@@ -196,7 +196,7 @@ func (u *UI) updateFeeSchedule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_, err := u.h.upsertFeeSchedule(r.Context(), in, false, f.reason())
-	u.done(w, r, "/admin/fee-schedules", err, "Fee schedule "+in.Name+" saved; markets on it pay the new rates from the next trade.")
+	u.done(w, r, "/admin/fee-schedules", err, f.l.T("flash.fee_saved", in.Name))
 }
 
 func (u *UI) withdrawalLimits(w http.ResponseWriter, r *http.Request) {
@@ -211,7 +211,7 @@ func (u *UI) withdrawalLimits(w http.ResponseWriter, r *http.Request) {
 		u.fail(w, r, "withdrawal-limits", "list assets", err)
 		return
 	}
-	u.tpl.render(w, r, http.StatusOK, "withdrawal-limits", view{Title: "Withdrawal limits", Data: withdrawalLimitsData{
+	u.tpl.render(w, r, http.StatusOK, "withdrawal-limits", view{Title: langFrom(ctx).T("page.withdrawal_limits"), Data: withdrawalLimitsData{
 		Limits: limits, Assets: assets, Levels: kycLevels,
 	}})
 }
@@ -223,7 +223,7 @@ func (u *UI) setWithdrawalLimitPage(w http.ResponseWriter, r *http.Request) {
 		asset = f.str("asset")
 	}
 	if level < 0 || level > 2 {
-		f.fail("kyc_level must be 0, 1 or 2")
+		f.fail(f.l.T("form.kyc_range"))
 	}
 	in := registry.WithdrawalLimitInput{
 		Asset: strings.ToUpper(asset), KYCLevel: int16(level), //nolint:gosec // bounded just above
@@ -235,21 +235,22 @@ func (u *UI) setWithdrawalLimitPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_, err := u.h.upsertWithdrawalLimit(r.Context(), in, f.reason())
-	u.done(w, r, "/admin/withdrawal-limits", err, "Limits for "+in.Asset+" at level "+strconv.Itoa(int(in.KYCLevel))+" saved.")
+	u.done(w, r, "/admin/withdrawal-limits", err, f.l.T("flash.limits_saved", in.Asset, int(in.KYCLevel)))
 }
 
 // form reads a posted form field by field and keeps the first complaint --
-// a sentence for the person, not an error -- so a handler builds its input
-// in one expression and checks once.
+// a sentence for the person, in the request's language, not an error -- so
+// a handler builds its input in one expression and checks once.
 type form struct {
 	r       *http.Request
+	l       lang
 	problem string
 }
 
 func newForm(r *http.Request) *form {
-	f := &form{r: r}
+	f := &form{r: r, l: langFrom(r.Context())}
 	if err := r.ParseForm(); err != nil {
-		f.problem = "Bad form."
+		f.problem = f.l.T("form.bad")
 	}
 	return f
 }
@@ -274,7 +275,7 @@ func (f *form) optStr(name string) *string {
 func (f *form) reason() string {
 	s := f.str("reason")
 	if s == "" {
-		f.fail("A reason is required; it goes in the audit trail.")
+		f.fail(f.l.T("form.reason_required"))
 	}
 	return s
 }
@@ -290,7 +291,7 @@ func (f *form) boolean(name string) bool {
 func (f *form) i32(name string) int32 {
 	n, err := strconv.ParseInt(f.str(name), 10, 32)
 	if err != nil {
-		f.fail(name + " must be a whole number.")
+		f.fail(f.l.T("form.whole_number", name))
 	}
 	return int32(n)
 }
@@ -306,7 +307,7 @@ func (f *form) optI32(name string) *int32 {
 func (f *form) i64(name string) int64 {
 	n, err := strconv.ParseInt(f.str(name), 10, 64)
 	if err != nil {
-		f.fail(name + " must be a whole number.")
+		f.fail(f.l.T("form.whole_number", name))
 	}
 	return n
 }
@@ -314,7 +315,7 @@ func (f *form) i64(name string) int64 {
 func (f *form) amount(name string) money.Amount {
 	a, err := money.ParseAmount(f.str(name))
 	if err != nil {
-		f.fail(name + " must be a decimal amount.")
+		f.fail(f.l.T("form.decimal", name))
 	}
 	return a
 }

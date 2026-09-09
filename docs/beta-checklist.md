@@ -12,6 +12,7 @@ Beta = 自營、封閉、單台 VM、只接 Sepolia(`docs/plan-v1.0.md` §0、§
 - **後台只在 127.0.0.1:8082**,經 SSH tunnel;沒有 VPN、mTLS、WAF。
 - **secrets 是主機上的檔案**(`secrets/prod/`),沒有 Vault/KMS;丟了 VM 又沒有 escrow,seed 就沒了。
 - **對帳每 5 分鐘一輪、沒有閾值**:任何非零 `DIFF` 都是告警(`docs/runbooks/reconciliation-break.md`)。
+- **前台與後台是繁體中文 / 英文雙語**(ADR-0010):切換器在右上角,後台另看 `Accept-Language`。`Problem.detail`、領域驗證訊息、CLI、日誌仍是英文;runbook 對的是狀態碼,badge 的 `title` 保留原始碼。
 - **壓測數字**(`docs/loadtest.md` §8):單市場 ~266 orders/s、`POST /v1/orders` p99 在 100 orders/s 時 ~550 ms。§3.3 的 1,000 orders/s 與 50 ms p99 **未達**,beta 的流量規模應該遠低於此。
 
 ## 上線前

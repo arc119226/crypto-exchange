@@ -1,6 +1,7 @@
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import { useAuth } from './auth/session'
 import { Layout } from './components/Layout'
+import { useLocale } from './i18n/LocaleProvider'
 import { LoginPage } from './pages/LoginPage'
 import { MarketsPage } from './pages/MarketsPage'
 import { RegisterPage } from './pages/RegisterPage'
@@ -10,7 +11,8 @@ import { WalletPage } from './pages/WalletPage'
 function RequireAuth({ children }: { children: React.ReactElement }) {
   const { session, ready } = useAuth()
   const location = useLocation()
-  if (!ready) return <p className="page muted">Loading…</p>
+  const { t } = useLocale()
+  if (!ready) return <p className="page muted">{t('common.loading')}</p>
   if (!session) return <Navigate to="/login" replace state={{ from: location.pathname }} />
   return children
 }

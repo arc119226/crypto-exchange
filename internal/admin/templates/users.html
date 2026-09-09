@@ -1,38 +1,38 @@
 {{define "content"}}
-<h1>Users</h1>
+<h1>{{T "users.title"}}</h1>
 {{with .Data}}
 <form method="get" action="/admin/users" class="row">
-  <label>Email contains <input type="search" name="email" value="{{.Filter.Email}}" placeholder="@example.com"></label>
-  <label>Status
+  <label>{{T "users.filter.email"}} <input type="search" name="email" value="{{.Filter.Email}}" placeholder="@example.com"></label>
+  <label>{{T "col.status"}}
     <select name="status">
-      <option value="">any</option>
-      <option value="active"{{if eq .Filter.Status "active"}} selected{{end}}>active</option>
-      <option value="frozen"{{if eq .Filter.Status "frozen"}} selected{{end}}>frozen</option>
+      <option value="">{{T "filter.any"}}</option>
+      <option value="active"{{if eq .Filter.Status "active"}} selected{{end}}>{{status "active"}}</option>
+      <option value="frozen"{{if eq .Filter.Status "frozen"}} selected{{end}}>{{status "frozen"}}</option>
     </select>
   </label>
-  <label>Role
+  <label>{{T "col.role"}}
     <select name="role">
-      <option value="">any</option>
-      <option value="user"{{if eq .Filter.Role "user"}} selected{{end}}>user</option>
-      <option value="admin"{{if eq .Filter.Role "admin"}} selected{{end}}>admin</option>
+      <option value="">{{T "filter.any"}}</option>
+      <option value="user"{{if eq .Filter.Role "user"}} selected{{end}}>{{status "user"}}</option>
+      <option value="admin"{{if eq .Filter.Role "admin"}} selected{{end}}>{{status "admin"}}</option>
     </select>
   </label>
-  <button type="submit" class="quiet">Filter</button>
+  <button type="submit" class="quiet">{{T "filter.apply"}}</button>
 </form>
 <section id="list">
 <table>
-  <thead><tr><th>Email</th><th>Role</th><th class="num">KYC</th><th>Status</th><th>Created</th></tr></thead>
+  <thead><tr><th>{{T "col.email"}}</th><th>{{T "col.role"}}</th><th class="num">KYC</th><th>{{T "col.status"}}</th><th>{{T "col.created"}}</th></tr></thead>
   <tbody>
   {{range .Users}}
   <tr>
     <td><a href="/admin/users/{{.ID}}">{{.Email}}</a></td>
-    <td>{{.Role}}{{if .TOTPEnabled}} <span class="muted">· totp</span>{{end}}</td>
+    <td>{{status .Role}}{{if .TOTPEnabled}} <span class="muted">· totp</span>{{end}}</td>
     <td class="num">{{.KYCLevel}}</td>
-    <td><span class="badge {{badge .Status}}">{{.Status}}</span></td>
+    <td><span title="{{.Status}}" class="badge {{badge .Status}}">{{status .Status}}</span></td>
     <td>{{when .CreatedAt}}</td>
   </tr>
   {{else}}
-  <tr><td colspan="5" class="muted">No users match.</td></tr>
+  <tr><td colspan="5" class="muted">{{T "users.empty"}}</td></tr>
   {{end}}
   </tbody>
 </table>

@@ -1,214 +1,294 @@
-# crypto-exchange
+[English](README.en.md) · 工程師請看 [`docs/README.md`](docs/README.md)
 
-白牌交易引擎(white-label exchange engine)的商業化原型:現貨撮合、複式記帳帳本、EVM 充提與歸集、行情推播、管理後台,以單一 Go binary 多角色的模組化單體交付,客戶透過 REST / WebSocket / Webhook 與事件契約整合。
+# crypto-exchange:一座可以裝在自己電腦裡的加密貨幣交易所
 
-**目前狀態:Phase 7 完成(本 PR):Helm chart 每個 PR 在 kind 上安裝並跑 E2E、單台 VM 的正式 compose、每日備份與每個 PR 一次的還原演練(本機 RTO 8 秒)、每一種密鑰的輪替、九本四段式 runbook、tag 即發布;在那之前把引擎改成 pipelined round trips + group commit(純掛單 17 → 3 次往返、單市場 165 → 266 orders/s)。Phase 0–6 全數合併,4d 在 Sepolia 上實跑過([`docs/guides/sepolia.md`](docs/guides/sepolia.md))。** 已合併:Phase 0 walking skeleton、Phase 1 `internal/matching`(無 I/O、確定性訂單簿)、Phase 2 `internal/ledger`(複式記帳、凍結即分錄、冪等鍵)與 admin API、Phase 3a `internal/trading` + `internal/eventbus`(每市場 runner、一筆交易內 Hold → Apply → 成交 / 分錄 / outbox、重啟重建、JetStream relay)、Phase 3b `internal/auth` + `internal/ratelimit` + public API(JWT / refresh / API key HMAC、限流、`client_order_id` 冪等)。3c 讓拆分部署真的能交易:`internal/cmdbus`(NATS request-reply 命令匯流排,跨容器仍保持 404 / 422 / 503 的錯誤語意,命令帶 `aud=internal` JWT)、`eventbus` 消費端與引擎的`market.updated` 熱載入、`PUT /admin/v1/markets/{symbol}/status`、`api/events/v1/*.json` + `docs/events.md` 事件契約(golden + JSON Schema 測試),以及每個 PR 都跑的多容器 `make e2e`。
+這是一個**交易所引擎**的原始碼:別人下單、撮合成交、記帳、充值提現、管理後台——一家交易所後面看不到的那一整套。它可以整個裝進你自己的電腦裡跑起來,用假的錢、假的區塊鏈,讓你從頭到尾玩一遍。
 
-4a-1 已合併:`internal/chain/hdwallet`(BIP-44 派生、scrypt + AES-256-GCM 的 `hd-seed.json`)、`exchange keys import-mnemonic`、signer role 維護的**預生成充值地址池**、`GET /v1/deposit-address`——api role 只認領地址,永遠拿不到金鑰。
+**它不接真的區塊鏈主網,也沒有任何真錢。** 這是專案的鐵則,寫在計畫書第一頁。你在這裡做的每一件事,都只發生在你的電腦裡。
 
-4a-2 已合併,鏈上的錢真的被看見:`internal/chain/evm`(ethclient 封裝、wei 邊界)、`internal/chain/deposit`(掃描器:原生 ETH 與 ERC-20 兩條路徑、確認數、reorg 回退與孤立/丟棄、`Credit` 入帳)、`deposit.*` 事件契約、`GET /v1/deposits`,以及 `scripts/e2e.sh` 裡真的用 `cast` 把 ETH 與 MockUSDC 打進充值地址再等餘額變動。
+這份 README 是寫給**沒碰過這種東西的人**看的:高中生、想知道交易所怎麼運作的人、第一次要把它跑起來的人。不需要會寫程式。工程師要的東西(架構、指令、文件索引)在 [`docs/README.md`](docs/README.md)。
 
-4b-1 已合併,是提現的前半段,**不碰鏈也不碰任何私鑰**:`POST /v1/withdrawals`(必帶 `Idempotency-Key`)、`policy.WithdrawalPolicy`(單筆與每日限額依 KYC 等級,超標一律進人工審核而不是拒絕)、chain role 的 worker 把提現推到 `funds_locked`(`ledger.Hold` 與狀態同一筆交易)、admin 的審核佇列,以及 `exchangectl withdrawals` / `exchangectl admin withdrawals`。
+---
 
-4b-2 已合併,讓錢真的出得去:`internal/chain/signer`(簽的是**意圖**而不是別人組好的交易——ERC-20 的收款人埋在 calldata 裡,自己組就不必解碼再相信解碼)、`chain.signing_log` 的 UNIQUE `(kind, ref_id, attempt)` 讓一個意圖只能被簽一次、`internal/signerbus`(signer role 的 NATS request-reply,私鑰永遠不上線)、`internal/chain/hotwallet` 的 nonce 管理(三條啟動規則,鏈上有我們沒配過的 nonce 就**拒絕啟動**)、`funds_locked → signed → broadcast → confirmed` 與 §6.1.4(e) 的分錄(確認時 gas 是**另一筆**分錄,永遠記在原生幣)、EIP-1559 加價重送與上限,以及 `POST /admin/v1/withdrawals/{id}/resolve` 的四種人工處置。
+## 1. 這是什麼?(先花兩分鐘)
 
-`resolve` 是**請求**而不是動作:admin role 沒有節點也沒有金鑰,它只寫四個請求欄,chain role 在自己的 tick 上執行——能寫 `tx_hash` 的角色可以讓一筆提現看起來已經送出卻什麼都沒簽過。處置的操作步驟在 [`docs/runbooks/stuck-withdrawal.md`](docs/runbooks/stuck-withdrawal.md)。
+一家加密貨幣交易所,拆開來是這幾個零件:
 
-4c-1 是歸集,把充值和提現接起來:`internal/chain/sweep`(ETH 一筆、ERC-20 兩筆——只收過代幣的地址一滴 ETH 都沒有,付不起自己的轉帳,所以熱錢包要先補 gas)、§6.1.4(f) 的 custody 分錄、`sweep.*` 事件、`GET /admin/v1/sweeps`。歸集永遠不動使用者餘額,而且刻意只收「帳本真的入過帳的數」:鏈上餘額可以合法地更高(掃描器看不到的合約內部轉帳),把那部分掃走等於讓 custody 為一筆從來沒收到的轉帳背書。多的錢留在鏈上。
+| 零件 | 它做什麼 | 在這個專案裡 |
+|---|---|---|
+| **訂單簿與撮合** | 把「我要用 2000 買 0.5 個 ETH」和「我要用 2000 賣 0.2 個 ETH」配對成交 | 純程式邏輯,沒有任何猜測:同樣的訂單進來,永遠得到同樣的結果 |
+| **帳本** | 記每一個人有多少錢、哪些錢被凍結、手續費去了哪裡 | 用會計的**複式記帳**:每一筆錢有來源也有去向,任何時候加總都必須是零 |
+| **充值與提現** | 從區塊鏈收錢、往區塊鏈付錢 | 接一條跑在你電腦裡的假區塊鏈(叫 **anvil**);也能接以太坊的測試網 Sepolia,但那是進階教學 |
+| **行情推播** | 訂單簿、成交、K 線即時推到畫面上 | WebSocket;你下單,畫面不用重新整理就會變 |
+| **交易前台** | 你按按鈕下單的那個網頁 | 中文 / 英文可切換 |
+| **管理後台** | 交易所的員工看的網頁:用戶、帳本、提現審核、對帳 | 中文 / 英文可切換,用密碼加手機驗證碼登入 |
 
-**4c-2 是對帳,去看那筆多出來的錢。** 每個資產比對「帳本的 `custody_deposit_addresses + custody_hot`」與「全部充值地址 + 熱錢包的鏈上餘額」,`GET /admin/v1/reconciliation` 與 `exchangectl admin reconcile` 顯示結果(§6.4.4)。兩側從來不會看著同一個瞬間,所以有兩個修正項——鏈上看得到但還沒入帳的充值,以及帳本在邊界之上已經記了的 movement——**兩個都是精確算出來的,所以容差是零**。餘額全部釘在同一個區塊讀,而那個區塊就是掃描器、提現 worker 和歸集三者記帳用的同一條邊界,再往回夾到掃描器的游標:帳本對鏈的認識是那個游標,不是節點的 head。
+它長這樣:
 
-差異不為零就寫 `admin.reconciliation_breaks` 並發 `reconciliation.break_detected`;熱錢包低於 `ETH_HOT_WALLET_MIN` 發 `alert.hot_wallet_low`。兩者都是邊緣觸發的——一直存在的狀況留在報告和指標裡,每五分鐘重喊一次只會教人設過濾器。
+![交易前台](docs/screenshots/web-trade.png)
 
-**第一次跑對帳一定會找到東西**,而且它是對的:dev 鏈直接給熱錢包 100 ETH,沒有任何一筆本系統的交易把它放進去。答案是 `exchangectl admin house-adjust`(§6.1.4 g 的 `external` 科目),不是在比較裡加一條例外。e2e 因此走三步:斷言第一次的差異是正的、記下正好那個數、跑完整流程之後**一個字都不記**地回到零。
+![管理後台的儀表板](docs/screenshots/03-dashboard.png)
 
-**對帳上線第一天就抓到一個 4c-1 留下的真漏洞**:歸集代幣時熱錢包補給充值地址的那筆 gas,在鏈上就是一筆流入受監控地址的普通轉帳,於是掃描器把它當成使用者的充值入帳了——使用者白得一筆交易所墊的 ETH,而 `custody_deposit_addresses` 為同一筆移動記了兩次。它撐過了完整的 integration 套件和兩輪 e2e,直到有東西真的拿帳本去和鏈上比。修法是把規則寫對:**充值是從交易所外面到達的錢**,發送方是自己的地址就不是充值。
+---
 
-對帳另外還抓到兩個:nonce 補洞燒掉的 gas 從來沒進帳本(`hotwallet` 整個套件沒 import `ledger`),以及一次失敗的簽名會讓下一個 tick 記下一筆熱錢包從來沒送出去的 ETH。細節在 [`docs/domain.md`](docs/domain.md) §20 與 [`docs/runbooks/reconciliation-break.md`](docs/runbooks/reconciliation-break.md)。
+## 2. 開始之前要準備什麼
 
-4d 是拿這一整套去對真的鏈:Sepolia 上手動走完充值 → 提現 → 歸集 → 對帳,七筆交易的 hash、gas 與區塊都記在 [`docs/guides/sepolia.md`](docs/guides/sepolia.md)。準備階段對真節點做讀取實測就抓到四個只在真鏈上才會踩到的缺陷,實跑之後又找到八個,細節在 [`docs/domain.md`](docs/domain.md) §21–§22。
+**要有的東西:**
 
-**Phase 5a 已合併,worker role 第一次做真的工作:出站 webhook 的投遞路徑。** `internal/webhook` 從 JetStream 收事件、寫進自己的佇列、按 §7.6 的排程(1m → 5m → 30m → 2h → 12h → 24h)投遞,每一次嘗試連狀態碼、耗時、錯誤一起記進 `webhook.deliveries`。簽章是 `HMAC-SHA256(secret, timestamp + "." + body)`,刻意不是 API key 那一套。退避排程住在資料庫而不是 JetStream,因為 nak 的延遲是單一固定值配 30s AckWait,撐不過第一分鐘。
+- 一台電腦:macOS、Windows 10/11 或 Linux。**8 GB 記憶體**以上、**5 GB 硬碟空間**。
+- **Docker**:它讓十幾個程式(資料庫、假區塊鏈、交易所本體)各自裝在「容器」裡,一個指令全部開起來。
+  - macOS / Windows 裝 [Docker Desktop](https://www.docker.com/products/docker-desktop/)。Windows 請照它的指示啟用 WSL 2。
+  - Linux 裝 Docker Engine 加 Compose 外掛(照 Docker 官網的說明)。
+- **Git**:把專案抓到你電腦上的工具。macOS 在終端機打 `xcode-select --install`;Ubuntu 打 `sudo apt install -y git make`;Windows 建議在 WSL 裡做同樣的事。
+- **make**:一個幫你記指令的小工具。macOS 上面那一步順便裝好了;Ubuntu 上面那一步也裝了。
+- **一個終端機**:macOS 的「終端機」、Windows 的 WSL 視窗、Linux 隨便一個。
+- 第一次要**能上網**(要下載大約 2 GB 的東西),之後不用。
+- 第 9 步要**一支有驗證器 App 的手機**(Google Authenticator、Microsoft Authenticator、1Password 都可以)。
 
-**本 PR(5b)是把它接上人**:`POST/GET /admin/v1/webhooks`、`PUT {id}` 與 `{id}/status`、投遞紀錄查詢、手動 replay,加上 `exchangectl admin webhooks` 與 `exchangectl webhook-sink`——一個本機接收並**驗簽**的工具,用的是伺服器簽章時的同一份程式碼。**沒有 DELETE**:投遞歷史必須活得比整合關係久,所以結束的 endpoint 是停用而不是刪除。
+**不需要的東西:** Node、Go、任何程式語言、任何寫程式的經驗、任何真錢。
 
-設計後台這一步本身抓到三個 5a 留下的缺陷,而且沒有一個讀 schema 讀得出來:0016 的「防重複投遞」索引其實站在 POST 的**下游**,擋不了重送、只能藏住重送的紀錄;replay 的嘗試會撞上舊一輪的編號被 `ON CONFLICT DO NOTHING` 默默吞掉(replay 一筆 dead 的投遞會產生**零列**紀錄);而一個過期的結算會刪掉別人剛排進去的佇列列。修法是給「一輪投遞」一個 `run_id`,細節與教訓在 [`docs/domain.md`](docs/domain.md) §23。客戶要讀的那一面在 [`docs/webhooks.md`](docs/webhooks.md),包括**投遞成功之後晚到的重送會讓客戶再收到一次**這件事——至少一次投遞是契約,不是免責聲明。
+**大概要花多久:** 第一次 20–30 分鐘,大半是在等下載。第二次以後兩分鐘。
 
-## 產品邊界
+---
 
-- **A. 引擎交付物**(有相容承諾):撮合、帳本、交易狀態機、行情、EVM 充提與歸集、簽名隔離、registry、管理後台、對帳、webhook;以單一 container image + Helm chart + OpenAPI / 事件契約交付。
-- **B. 參考實作**(可整包替換):最小 auth(users + JWT + API key)、React 參考前台、`exchangectl` CLI。
-- **C. 明確不做**:KYC 文件蒐集、用戶端 2FA、通知內容、主網與真實資金(只接 anvil 與 Sepolia)。
+## 3. 第一次啟動(照著打)
 
-核心程式碼全部在 `internal/`,客戶只透過 REST / WebSocket / Webhook 與事件契約整合;引擎內部一律以 `account_id` 為鍵,不認識 email 或 KYC。
+每一步都有「你會看到」。看到的跟寫的不一樣,先看第 4 節。
 
-## 快速開始
-
-需求:Go 1.26(`go.mod` 釘住 toolchain,會自動下載)、Docker Desktop 或 Docker Engine + Compose v2、`make`、`openssl`。
-
-```sh
-make gen-dev-secrets    # .env(隨機密鑰)、secrets/jwt/ed25519.pem、新的 BIP-39 助記詞與 HOT_WALLET_ADDRESS、
-                        # secrets/keystore/hd-seed.json(signer 的加密種子)
-                        # 4a-1 之前跑過的人要再跑一次,否則 signer 沒有種子起不來
-make up-single          # postgres / redis / nats / anvil / MockUSDC 部署 / migrate / seed / exchange-all / prometheus / grafana
-
-curl -s localhost:8080/v1/markets | jq          # seed 進去的 ETH-USDC,金額一律字串("price_tick": "0.01")
-go run ./cmd/exchangectl markets list           # 同一件事,走產生的 OpenAPI client
-curl -s localhost:9100/readyz                   # {"status":"ok", ...}
-curl -s localhost:9100/metrics | grep -E 'exchange_build_info|ledger_trial_balance_diff'
-
-# 帳本(admin API,金鑰在 .env 的 ADMIN_API_KEY)
-export EXCHANGE_ADMIN_URL=http://localhost:8082 EXCHANGE_ADMIN_API_KEY=$(sed -n 's/^ADMIN_API_KEY=//p' .env)
-ACC=$(go run ./cmd/exchangectl admin accounts create)                                   # 開一個現貨帳戶
-go run ./cmd/exchangectl admin fund --account $ACC --asset USDC --amount 10000            # dev faucet(external → available,寫審計)
-go run ./cmd/exchangectl admin balances $ACC && go run ./cmd/exchangectl admin trial-balance   # 每資產 diff = 0
-
-# 後台(admin role 的 :8082;人用密碼 + TOTP 登入,機器用上面的 API key)
-docker compose exec exchange-all exchange admin totp enroll --email $(sed -n 's/^ADMIN_BOOTSTRAP_EMAIL=//p' .env)   # 印 otpauth URL 與 secret,只印這一次;加進 authenticator
-open http://localhost:8082/admin/login          # 密碼是 .env 的 ADMIN_BOOTSTRAP_PASSWORD;第一個 code 完成啟用,之後每次登入都要碼
-
-# 交易(public API;JWT session 或 API key HMAC,規格見 docs/api-conventions.md)
-go run ./cmd/exchangectl user register --email alice@example.com --password 'correct horse battery'   # 印出 export EXCHANGE_TOKEN=...
-export EXCHANGE_TOKEN=...                                                                              # 貼上一步的輸出
-go run ./cmd/exchangectl admin fund --account $(go run ./cmd/exchangectl user me --output json | jq -r .account_id) --asset USDC --amount 10000
-go run ./cmd/exchangectl orders place --side buy --price 2000 --qty 0.5    # 201 open;同 --client-order-id 重送 → 200 原單;餘額不足 → 201 rejected
-go run ./cmd/exchangectl book ETH-USDC && go run ./cmd/exchangectl balances && go run ./cmd/exchangectl orders list --open
-go run ./cmd/exchangectl api-keys create --scopes read,trade               # secret 只顯示一次;之後 --api-key/--api-secret 對每個請求 HMAC 簽章
-go run ./cmd/exchangectl e2e --verbose                                     # 兩個用戶走完 docs/plan-v1.0.md §6.1.4 的數字並驗試算平衡
-
-# 拆分部署(api / engine / admin 各一容器,命令走 NATS)
-make up                    # infra + app profile;--role=api 的交易端點此時由 NATS 命令匯流排送到引擎
-make e2e                   # 上面那條路徑的完整驗證:exchangectl e2e、kill -9 引擎後訂單簿一致、停牌後下一張單被拒
-go run ./cmd/exchangectl admin markets set-status ETH-USDC halted --reason "maintenance"   # 引擎熱載入,無需重啟
-make artifacts                                  # 把 addresses.json 從 volume 複製到 deploy/compose/artifacts/
-cast call $(jq -r .usdc deploy/compose/artifacts/addresses.json) "decimals()(uint8)" --rpc-url localhost:8545   # 6
-
-# Webhook(§7.6;客戶那一面的說明在 docs/webhooks.md)
-WH=$(go run ./cmd/exchangectl admin webhooks create --url http://host.docker.internal:9999 \
-    --events 'trade.executed,withdrawal.state_changed' --output json)   # secret 只顯示一次
-go run ./cmd/exchangectl webhook-sink --port 9999 --secret $(echo $WH | jq -r .secret) &
-go run ./cmd/exchangectl e2e --verbose                                  # sink 印出已驗簽的事件
-EP=$(echo $WH | jq -r .id)
-go run ./cmd/exchangectl admin webhooks deliveries $EP                  # 每次嘗試的狀態碼、耗時、錯誤
-go run ./cmd/exchangectl admin webhooks replay $EP $DELIVERY_ID         # 重送(客戶會再收到一次,event_id 相同)
-
-# 行情與推播(Phase 6;wire format 在 docs/ws-api.md)
-go run ./cmd/exchangectl ticker ETH-USDC && go run ./cmd/exchangectl klines ETH-USDC --interval 1m --limit 5
-websocat ws://localhost:8081/ws/v1/public <<< '{"op":"subscribe","channel":"depth","market":"ETH-USDC"}'   # snapshot,之後每個 seq 一則 delta
-websocat ws://localhost:8081/ws/v1/private <<< "{\"op\":\"auth\",\"token\":\"$EXCHANGE_TOKEN\"}"            # 之後下單:orders / fills / balances 三個頻道都會推
-(cd web/trade && npm ci && npm run dev)         # 參考前台 http://localhost:5173(Vite 把 /v1 與 /ws 代理到 8080 / 8081)
-make web-e2e                                    # Playwright 冒煙:註冊 → 注資 → 掛單 → 訂單簿出現 → 對手單 → 成交、餘額變動
-make loadgen                                    # 60 s 壓測;數字與瓶頸分析在 docs/loadtest.md
-open http://localhost:3000                      # Grafana(admin / .env 的 GRAFANA_ADMIN_PASSWORD):Exchange Overview / Ledger / Chain / Stream / System
-open http://localhost:9090/alerts               # Prometheus:§15 的七條告警(沒有 Alertmanager)
-open http://localhost:16686                     # Jaeger:找 exchange-api 的 POST /v1/orders,看它一路到 engine、Postgres 與每個 consumer
-
-# 營運(Phase 7;每一步的手冊在 docs/runbooks/,上線清單在 docs/beta-checklist.md)
-make up BACKUP=1                                # 多 minio + backup sidecar:每日 pg_dump、每 30 s 出貨 WAL,結果寫 admin.backups
-make backup-drill                               # 現在備份一次 → 還原到拋棄式 DB → 驗試算平衡 / 序號 / 成交 → 印 RTO(CI 每個 PR 跑)
-go run ./cmd/exchange keys jwt-public --in secrets/jwt/ed25519.pem      # JWKS 的 kid;輪替流程在 docs/runbooks/key-rotation.md
-DATABASE_URL=postgres://ex_migrate:...@localhost:5432/exchange API_KEY_MASTER_KEY=新 API_KEY_MASTER_KEY_PREVIOUS=舊 \
-  go run ./cmd/exchange keys rewrap --domain api-keys                    # 主金鑰輪替:一筆交易把每一列改成新金鑰封的,冪等
-make helm-lint                                  # chart:lint + template + kubeconform(不需要叢集)
-make kind-up && make helm-e2e && make kind-down # 需要 kind + kubectl + docker:CI helm job 在本機的樣子
-make release-check TAG=v0.1.0                   # 發布前:chart appVersion 與 binary 都報 v0.1.0(docs/release.md)
-sudo scripts/gen-prod-secrets.sh && make up-prod   # 單台 VM 的正式形態(docs/runbooks/beta-deploy.md;secrets 全是檔案、只開 80/443)
-
-make down               # 停止(保留資料)
-make reset              # 停止並清空 postgres / nats / anvil 狀態與合約產物
-
-# 真的鏈(Sepolia,手動、不進 CI)
-# 逐步操作在 docs/guides/sepolia.md;它的 Part A 不需要這裡的任何東西就能開始
-make up-sepolia         # compose.yaml + compose.sepolia.yaml,獨立的 project name 與 volume
-make down-sepolia
-```
-
-`make up` 改為每個 role 一個容器(api / engine / chain / signer / stream / admin / worker);`OBS=0` 可略過 prometheus / grafana / jaeger。
-
-## 開發循環
+### 第 1 步:把專案抓下來
 
 ```sh
-make lint               # go vet + golangci-lint(depguard 模組邊界、forbidigo 禁 float)+ gitleaks;版本全釘在 tools/go.mod
-make secrets-scan       # 只跑 gitleaks(掃 git 歷史,不掃工作目錄——.env 與 secrets/ 是本機真金鑰,本來就 gitignored)
-make test               # 單元 + 屬性測試(-race;rapid 每個性質 1,000 個序列)
-make test-fuzz          # 每個 Fuzz* 目標跑 FUZZ_TIME(預設 30s)
-go run ./cmd/exchangectl replay --file test/fixtures/matching/market_buy_two_levels.jsonl   # 重播撮合腳本、印事件與深度
-go test ./internal/matching -run TestGolden -update   # 重新產生 golden(改語意時,diff 要 review)
-make gen && make gen-check   # 重新產生 OpenAPI server/client 與 sqlc 程式碼;產物進 repo,CI 比對
-make test-integration   # testcontainers(需要 Docker):migration、seed、帳本、admin API、trading 引擎(kill/restart、屬性、併發)、outbox relay、public API(auth、HMAC、限流 429、201/200/422)
-TEST_PG_ADMIN_URL=postgres://exchange:test@127.0.0.1:5433/postgres make test-integration   # 改用現成的本機 Postgres(先跑 infra/postgres/initdb/01-roles.sh),每個測試一個新 database
-TEST_NATS_URL=nats://127.0.0.1:4222 ...                                                    # 同理改用現成的 `nats-server -js`(outbox relay 測試會 purge 它用到的 stream)
-make contracts-test     # 在釘住的 foundry 映像內跑 forge test
-make infra-up && make migrate && make seed && make run ROLE=api   # 只起基礎設施,role 在主機上 go run
+git clone https://github.com/arc119226/crypto-exchange.git
+cd crypto-exchange
 ```
 
-契約先行:改 `api/public/v1/openapi.yaml` → `make gen` → 實作 `internal/api` 的 strict server 介面。資料庫改動一律新增 `migrations/NNNN_<module>_<desc>.sql`(goose、只 forward),查詢寫在 `internal/<module>/queries/*.sql` 交給 sqlc。
+**你會看到:** 一堆 `Receiving objects` 之類的進度,最後停在 `crypto-exchange` 這個資料夾裡。之後所有指令都在這個資料夾裡打。
 
-## Repo 結構
+### 第 2 步:產生只屬於你的密鑰
 
-```
-cmd/exchange          單一 binary:serve --role=api|engine|chain|signer|stream|admin|worker|all、migrate、seed、healthcheck、keys(gen-jwt / jwt-public / import-mnemonic / rekey / rewrap)
-cmd/exchangectl       開發/營運 CLI(產生的 OpenAPI client)
-internal/app          設定、run loop、/healthz /readyz /metrics、SIGTERM drain、依賴退避
-internal/api          public REST(oapi-codegen strict server)+ RFC 7807 + 限流
-internal/auth         最小 auth 參考實作:users、argon2id、Ed25519 JWT / JWKS、refresh 輪替、API key HMAC、Authenticate 中介層
-internal/ratelimit    token bucket(Redis Lua / 記憶體 / Fallback)
-internal/matching     純函式訂單簿(Apply / Restore / Snapshot;無 I/O、無時鐘)
-internal/trading      訂單狀態機、每市場 runner(一組 ≤ 50 個命令一筆 PG 交易,pipelined round trips,失敗退回逐筆)、client_order_id 冪等、重建
-internal/eventbus     事件 envelope、outbox、JetStream relay / streams、durable consumer
-internal/cmdbus       api → engine 的 NATS request-reply 命令匯流排(含 aud=internal JWT)
-internal/policy       同步下單規則(市場狀態、帳戶凍結)
-internal/ledger       複式帳本:Post / Hold / Release / Settle / Credit / Adjust、balances 快取、試算平衡(sqlc)
-internal/audit        append-only 稽核紀錄
-internal/admin        admin REST(oapi-codegen strict server)+ X-Admin-Api-Key
-internal/webhook      出站投遞:HMAC 簽章、退避排程、deliveries、endpoint 管理與 replay
-internal/registry     assets / markets / fee schedules(sqlc)+ seed
-internal/money        Decimal 金額型別(禁 float;JSON 字串)
-internal/marketdata   影子訂單簿投影(depth delta)、K 線聚合與落地、ticker、Redis 深度快照(sqlc)
-internal/stream       WebSocket server:公開頻道(depth / trades / ticker / kline)、私有頻道(auth、account_seq、resume 自 outbox)、慢客戶端斷線
-internal/telemetry    slog、correlation id、Prometheus、OpenTelemetry(HTTP span、traceparent 注入 / 抽取)
-internal/platform     pgx / NATS / Redis 連線與健康檢查、pgx query / batch tracer、pool collector、pg.Batch;secretbox 是 auth 與 webhook 共用的 AES-256-GCM 信封 + 輪替用的 Keyring
-api/public/v1         公開 OpenAPI 契約
-api/admin/v1          admin OpenAPI 契約
-migrations            goose SQL(embed)
-deploy/compose        compose.yaml(profiles:infra / app / single / observability / backup)、compose.sepolia.yaml、compose.prod.yaml(beta VM:檔案型 secrets、edge、node-exporter)
-deploy/helm/exchange  Helm chart(每 role 一個 Deployment、migrate hook、dev.enabled 的測試依賴 hook);helm_test.go 在 make test 裡 lint + kubeconform
-deploy/vm             Ubuntu 24.04 的 bootstrap.sh(Docker CE、ufw、systemd unit)
-build                 Dockerfile(Go image)、edge/(Caddy + 前台)、backup/(postgres 客戶端 + mc 的備份 sidecar)
-scripts               gen-dev-secrets、gen-prod-secrets、e2e、helm-e2e、kind-secrets、backup、restore-drill(+ sql/restore-checks.sql)、db-roles.sql
-infra/contracts       MockUSDC + 冪等部署腳本(Foundry)
-infra/postgres        ex_* 登入角色 initdb 腳本、postgresql.prod.conf(WAL 歸檔)
-infra/nats            nats.prod.conf(密碼登入)
-infra/observability   prometheus(含 alerts.yml 十一條)/ grafana 設定與五個 dashboard JSON;observability_test.go 驗指標名
-web/trade             參考前台(React + Vite + TS;OpenAPI 產 TS client;Playwright 冒煙)
-test/integration      testcontainers 整合測試(build tag integration)
-test/docs             runbooks_test.go:每本 runbook 四段、引用的檔案 / 子命令 / 指標都存在
-test/fixtures/matching 撮合命令腳本與 golden 事件 / 快照
-docs                  計畫、審查、ADR、領域文件、runbooks/(四段式營運手冊)、guides/(Sepolia 教學)、beta-checklist、release
+先確認 Docker 在跑(Docker Desktop 的圖示是綠的、或 `docker ps` 不報錯),然後:
+
+```sh
+make gen-dev-secrets
 ```
 
-## 文件索引
+**你會看到:**
 
-| 文件 | 內容 |
+```
+gen-dev-secrets: wrote .env
+gen-dev-secrets: wrote secrets/jwt/ed25519.pem
+gen-dev-secrets: wrote secrets/dev-mnemonic.txt (keep it: Phase 4 imports it into the keystore)
+gen-dev-secrets: wrote secrets/keystore/hd-seed.json (hot wallet matches cast)
+gen-dev-secrets: done — next: make up-single
+```
+
+這一步做了什麼:交易所需要一些密碼和金鑰(資料庫密碼、簽 token 的鑰匙、錢包的種子)。這個指令**隨機產生一套只屬於你這台電腦的**,寫進 `.env` 和 `secrets/` 資料夾。它們是你的,不要傳給別人,也不要截圖分享。
+
+### 第 3 步:把整座交易所開起來
+
+```sh
+make up-single
+```
+
+**你會看到:** 第一次要下載映像檔、編譯程式,大概 5–15 分鐘。最後幾行每個容器都會變成 `Healthy` 或 `Started`,指令結束回到提示符號。
+
+確認一下:
+
+```sh
+make ps
+```
+
+**你會看到:** 十來列,像 `postgres`、`redis`、`nats`、`anvil`、`exchange-all`、`web`、`grafana`,狀態是 `running` 或 `healthy`;`migrate`、`seed`、`contracts-deployer` 三個是一次性的工作,顯示 `exited (0)` 是正常的。
+
+這一步開了什麼:
+
+- `postgres`:資料庫,所有的帳都在這裡
+- `anvil`:假的以太坊區塊鏈,出塊瞬間完成、幣是假的
+- `exchange-all`:交易所本體(撮合、帳本、API、後台,全部在同一個程式裡)
+- `web`:交易前台的網頁伺服器
+- `nats`、`redis`、`prometheus`、`grafana`、`jaeger`:訊息、快取、監控——現在不用管
+
+### 第 4 步:打開交易前台
+
+用瀏覽器開 <http://localhost:8088>
+
+**你會看到:** 市場列表,只有一列 `ETH-USDC`——用 USDC(一種跟美元 1:1 的穩定幣)買賣 ETH(以太幣)。最新價那一欄是 `—`,因為還沒有任何人成交過。右上角有 **中文 / EN**,按一下就換語言;這份文件以下用中文介面說明。
+
+### 第 5 步:註冊一個帳號
+
+按右上角的**註冊**,電子郵件填 `alice@example.com`,密碼隨便打至少 8 個字元,按**建立帳號**。
+
+**你會看到:** 回到市場頁,右上角多了一個綠點(代表你的私人推播已連上)和你的帳戶 ID 前 8 碼,還多了一個**錢包**連結。
+
+這裡的電子郵件不會寄信、不會驗證,只是帳號名字。
+
+### 第 6 步:給自己一些假錢
+
+新帳號的餘額是零。真的交易所會要你從外面充值進來;我們有一個開發用的「水龍頭」直接給。
+
+按上方的**錢包**,最上面有一行「帳戶 ID」,後面是一串很長的字。把它整串複製下來,回到終端機,貼進下面這行的 `<ACCOUNT_ID>`:
+
+```sh
+make faucet ACCOUNT=<ACCOUNT_ID> ASSET=USDC AMOUNT=10000
+```
+
+**你會看到:** 終端機印出一筆帳本分錄的 JSON(`"kind": "adjustment"`、`"amount": "10000"`)。**不用重新整理**,回到瀏覽器,錢包頁的 USDC 可用餘額已經是 `10000`——這就是行情推播在工作:後端記完帳,馬上推給你的畫面。
+
+這筆錢在帳本上的記法是:從一個叫「外部」的科目借 10000,貸到你的可用餘額 10000。兩邊相等。這個專案裡**每一塊錢都是這樣進出的**,永遠不會有一邊沒對到的錢。
+
+### 第 7 步:掛一張買單
+
+回到**市場**,點 `ETH-USDC` 那一列,進入交易頁。右邊是**下單**:
+
+1. 確認選的是**買入 ETH**、類型**限價**
+2. 價格填 `2000`,數量填 `0.5`
+3. 按綠色的**買入 ETH**
+
+**你會看到:**
+
+- 下單表格下面一行綠字:「掛單中 · 成交量 0」
+- 左邊訂單簿的買方多了一列 `2000 / 0.5`——你的單子現在掛在簿上等人來賣
+- 下方**未成交訂單**多了一列
+- 右邊**餘額**:USDC 可用 `9000`、凍結 `1000`
+
+「凍結」是什麼:你答應用 2000 買 0.5 個,總共要付 1000 USDC。這筆錢還在你帳上,但被鎖起來了,不能拿去做別的事——要是你可以一邊掛單一邊把錢領走,成交的時候就付不出來了。等成交或撤單,凍結才解開。
+
+### 第 8 步:當自己的對手,看它成交
+
+一個人買不成交,要有人賣。開一個**新分頁**(新分頁沒有登入狀態),一樣到 <http://localhost:8088>,註冊第二個帳號 `bob@example.com`。到 bob 的錢包頁複製帳戶 ID,這次給他 ETH:
+
+```sh
+make faucet ACCOUNT=<BOB_ACCOUNT_ID> ASSET=ETH AMOUNT=1
+```
+
+在 bob 的分頁進入 `ETH-USDC`,選**賣出 ETH**,限價、價格 `2000`、數量 `0.2`,按紅色的**賣出 ETH**。
+
+**bob 的畫面會看到:** 「全部成交 · 成交量 0.2」。他的餘額:ETH `0.8`,USDC `399.2`。
+
+**切回 alice 的分頁:**
+
+- 未成交訂單那一列變成「部分成交」,已成交 `0.2`
+- **我的成交**多了一列:2000 × 0.2,角色是**掛單方**
+- 餘額:ETH `0.1998`,USDC 可用 `9000`、凍結 `600`
+- 訂單簿買方那一列變成 `2000 / 0.3`(還剩 0.3 個沒買到)
+- **最近成交**多了一筆
+
+為什麼不是整數:交易所收**手續費**。alice 是掛單方(先把單子掛在簿上、提供流動性的人),收 0.1%:0.2 × 0.1% = 0.0002 ETH,所以拿到 0.1998。bob 是吃單方(來吃掉別人掛單的人),收 0.2%:400 × 0.2% = 0.8 USDC,所以拿到 399.2。成交價永遠用掛單方的價格;alice 的 1000 凍結裡用掉了 400,剩 600 繼續凍結等剩下的 0.3 個。
+
+想把剩下的撤掉:在 alice 的未成交訂單那一列按**撤單**,訂單簿那一列消失,凍結歸零。
+
+### 第 9 步:進管理後台
+
+後台是交易所員工用的。登入要密碼**加**手機驗證碼(TOTP),所以先把驗證碼的密鑰發給預設的管理員:
+
+```sh
+make totp-enroll EMAIL=admin@example.com
+```
+
+**你會看到:**
+
+```
+admin totp enroll: admin@example.com
+
+  otpauth URL  otpauth://totp/...
+  secret       XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+```
+
+打開手機的驗證器 App,選「手動輸入」,把 `secret` 那一串打進去(或把 otpauth URL 做成 QR 掃)。**這串密鑰只會顯示這一次。**
+
+再查管理員密碼:
+
+```sh
+grep ADMIN_BOOTSTRAP_PASSWORD .env
+```
+
+用瀏覽器開 <http://127.0.0.1:8082/admin/login>,電子郵件 `admin@example.com`,密碼是剛剛查到的,按**繼續**;下一頁輸入 App 上的六位數,按**驗證**。右上角一樣可以切中文 / EN。
+
+**你會看到儀表板:**
+
+- **帳本:平衡**、0 筆未結差異——所有人的錢加起來,借貸相等
+- **鏈上對帳:有差異**(紅色)——這是正常的,而且是刻意的:假區塊鏈一開始就直接塞了 100 ETH 進交易所的熱錢包,帳本上沒有任何一筆交易記錄它。對帳程式每幾秒把「帳本以為有多少」和「鏈上真的有多少」比一次,發現鏈上比較多就報出來。真的交易所裡,這代表要有人去查錢從哪來;在這裡它證明對帳真的在看。
+- 待審核的提現 0、確認中的充值 0
+
+再逛幾頁:
+
+- **用戶** → 點 `alice@example.com` → 「現貨帳戶」那行的連結 → **帳本**頁:你會看到第 6 步的水龍頭分錄和第 8 步那筆成交的每一行——誰的錢從哪裡到哪裡、手續費進了哪個科目。
+- **審計**:你剛剛的登入、以及第 6 步和第 8 步的兩次 `make faucet`,都有紀錄。後台做的每一件事都會留在這裡,刪不掉。
+- 順帶一提,`make faucet` 做的事就是**帳本**頁最下面「手動調帳」那張表單。
+
+### 第 10 步:關掉
+
+```sh
+make down
+```
+
+資料都還在。下次 `make up-single` 兩分鐘內就回來,帳號、餘額、訂單都在。
+
+想從頭來過(清掉所有帳號和資料):
+
+```sh
+make reset
+```
+
+---
+
+## 4. 出了問題?
+
+| 你看到 | 原因 | 怎麼辦 |
+|---|---|---|
+| `Cannot connect to the Docker daemon` | Docker 沒開 | 打開 Docker Desktop,等圖示變綠再試 |
+| `port is already allocated` | 電腦上別的程式佔了 port | 這個專案用 5432、6379、4222、8545、8080、8081、8082、8088、3000、9090、16686。用 `lsof -i :8080`(把數字換成報錯的那個)找到是誰,關掉它 |
+| `make gen-dev-secrets` 停在下載 | 它要拉一個映像檔來算錢包地址 | 等它,或確認網路;再跑一次是安全的 |
+| `make up-single` 中途失敗、或卡很久 | 第一次下載太慢或斷線 | 再跑一次 `make up-single`,已經下載的不會重來 |
+| `make: command not found` | 沒裝 make | macOS `xcode-select --install`;Ubuntu `sudo apt install make`;Windows 請在 WSL 裡做 |
+| `.env: No such file` | 跳過了第 2 步 | 先 `make gen-dev-secrets` |
+| 前台右上角是紅點或黃點 | 交易所本體還沒起來,或剛重啟 | `make ps` 看 `exchange-all` 是不是 `healthy`;`make logs SERVICE=exchange-all` 看它在說什麼 |
+| 手機驗證碼一直說不對 | 手機時間不準(TOTP 靠時間) | 手機設定裡把時間改成自動;連錯五次會鎖 15 分鐘,等一下 |
+| `make faucet` 說 `account does not exist` | 帳戶 ID 貼錯或貼少 | 從錢包頁「帳戶 ID」那一行整串複製 |
+| 想整個重來 | — | `make reset`,再從第 3 步開始 |
+
+還是不行:把終端機最後 30 行和 `make ps` 的輸出貼到 [GitHub Issues](https://github.com/arc119226/crypto-exchange/issues)。**不要**貼 `.env` 或 `secrets/` 的內容。
+
+---
+
+## 5. 名詞小抄
+
+| 詞 | 意思 |
 |---|---|
-| [`docs/plan-v1.0.md`](docs/plan-v1.0.md) | **分階段可執行計畫 v1.0**(定位、範圍、領域模型、契約、模組、選型、compose、Phase 0~7、測試/CI、安全、觀測、部署、風險) |
-| [`docs/review/plan-review-2026-09.md`](docs/review/plan-review-2026-09.md) | v0.1 規劃書審查報告(28 條合併後發現、不採納意見、對 v1.0 的結構性要求) |
-| [`docs/domain.md`](docs/domain.md) | 領域文件:科目表、分錄、狀態機、撮合語意的逐項驗算與疑問清單;各 Phase 程式碼與計畫的對應表 |
-| [`docs/api-conventions.md`](docs/api-conventions.md) | Public API 慣例:金額字串、problem+json、JWT / API key HMAC 簽章、限流、`client_order_id` 狀態碼(English) |
-| [`docs/events.md`](docs/events.md) | 事件契約:envelope、subject 與 stream、排序與去重、consumer 型別、catalog、相容規則(English);schema 在 [`api/events/v1/`](api/events/v1) |
-| [`docs/webhooks.md`](docs/webhooks.md) | 出站 Webhook:簽章與驗證、重試排程、**至少一次投遞的實際後果**、endpoint 管理與 replay(English) |
-| [`docs/ws-api.md`](docs/ws-api.md) | WebSocket:公開 / 私有頻道的訊息、depth 的客戶端規則、`account_seq` 與 resume、錯誤碼與斷線原因(English) |
-| [`docs/loadtest.md`](docs/loadtest.md) | 本機壓測:Phase 6 的四組 run、瓶頸(每命令 17 次往返);§8 Phase 7 group commit 之後再量一次(3 次往返、266 orders/s) |
-| [`docs/runbooks/`](docs/runbooks/) | 九本四段式(症狀 / 檢查指令 / 處置 / 驗證)營運手冊:engine 重啟、卡住的提現、reorg 告警、熱錢包低水位、對帳差異、備份還原、密鑰輪替、beta 部署、admin TOTP |
-| [`docs/guides/sepolia.md`](docs/guides/sepolia.md) | 從零到 Sepolia 實跑的教學(4d 的逐筆交易、gas 與區塊) |
-| [`docs/beta-checklist.md`](docs/beta-checklist.md) | Beta 上線檢查表:這個 beta 的限制(單機、RPO 24h、無 PITR)、上線前的勾選項、運維節奏、刻意沒做的 |
-| [`docs/release.md`](docs/release.md) | 發布:`vX.Y.Z` tag 做什麼、版本斷言、`make release-check`、失敗時怎麼辦 |
-| [`docs/screenshots/`](docs/screenshots/) | 後台每一頁的截圖(`make screenshots` 產生)與參考前台的交易頁 / 錢包頁 |
-| [`docs/adr/`](docs/adr/) | ADR-0000 需求訪談決策(8 輪 32 題);ADR-0001~0009 架構決策(單體、真相來源、租戶、數值、帳本、認證、簽名、工具鏈、beta 形態與備份政策) |
-| [`docs/archive/plan-v0.1.md`](docs/archive/plan-v0.1.md) | 原始 v0.1 規劃書(已取代,僅供對照) |
+| 交易所 | 一個撮合買家和賣家、幫雙方記帳的地方 |
+| 訂單簿 order book | 所有還沒成交的掛單,依價格排好的清單。買方最高價和賣方最低價之間的距離叫**價差** |
+| 限價單 limit order | 「我只肯用這個價或更好的價成交」;沒人接就掛在簿上等 |
+| 市價單 market order | 「現在就成交,多少價都行」;從簿上最好的價一路吃 |
+| 掛單方 maker / 吃單方 taker | 先把單子掛在簿上等的人 / 來吃掉別人掛單的人。成交價用掛單方的;手續費通常吃單方比較高 |
+| 成交 fill | 一張單的一部分或全部被配對到 |
+| 可用 available / 凍結 hold | 可以拿去下單或提現的錢 / 已經答應要付出去、被鎖住的錢 |
+| 帳本 ledger | 記錄所有錢的來去的那本帳。這裡用**複式記帳**:每一筆都有借方和貸方,金額相等,所以任何時候「全部借方 − 全部貸方」都是零(叫**試算平衡**) |
+| 手續費 bps | basis point,萬分之一。10 bps = 0.1% |
+| anvil | 跑在你電腦裡的假以太坊區塊鏈。出塊瞬間、幣免費、關掉就消失 |
+| 充值 deposit / 提現 withdrawal | 從區塊鏈把幣轉進交易所 / 從交易所轉出去到區塊鏈上的地址 |
+| 歸集 sweep | 交易所把散在各個充值地址的幣收攏到自己的金庫(熱錢包) |
+| 對帳 reconciliation | 拿帳本上的數字和區塊鏈上真正的數字比,一分都不能差 |
+| 後台 | 交易所員工用的管理網頁 |
+| TOTP | 手機驗證器 App 每 30 秒換一次的六位數,登入後台的第二道鎖 |
+| 容器 container | Docker 把一個程式和它需要的東西打包起來跑的單位;`make up-single` 開了十幾個 |
 
-## 下一步
+更完整的表在計畫書 [`docs/plan-v1.0.md`](docs/plan-v1.0.md) 第 19 節。
 
-Phase 0–7 全數完成,`docs/plan-v1.0.md` §12 的每個 DoD 都有對應的測試或 CI job。Phase 7 的對應與偏離在 [`docs/domain.md`](docs/domain.md) §26,四個沒有唯一答案的決定在 ADR-0009。
+---
 
-接下來是 beta 本身:照 [`docs/runbooks/beta-deploy.md`](docs/runbooks/beta-deploy.md) 起一台 VM、打勾 [`docs/beta-checklist.md`](docs/beta-checklist.md)、每週演練一次還原、每 90 天輪一次密鑰。已知的缺口寫在 checklist 的第一段:可還原的 RPO 是 24 小時(WAL 有歸檔但沒有 base backup)、還原後熱錢包 nonce 要人工對帳、沒有 Alertmanager、單市場 266 orders/s 離 §3.3 的 1,000 還有距離——下一個瓶頸是每句 SQL 的 Postgres 成本,不再是往返數。
+## 6. 接下來可以看什麼
+
+- [`docs/README.md`](docs/README.md):工程師版。架構、每個資料夾是什麼、指令、文件索引。
+- [`docs/guides/sepolia.md`](docs/guides/sepolia.md):把同一套接到**真的**以太坊測試網 Sepolia 上跑一圈。也是寫給不懂的人看的,但要兩三個小時。
+- [`docs/plan-v1.0.md`](docs/plan-v1.0.md):整個專案的計畫書——為什麼這樣設計、分幾個階段做、每一階段怎麼算完成。
+- [`docs/domain.md`](docs/domain.md):帳本的每一種分錄、訂單的每一種狀態,逐條驗算。想知道「手續費到底記在哪」看這裡。
+- `web/trade/`:交易前台的原始碼(React)。`internal/admin/`:管理後台。兩邊的中文 / 英文字串各在一個檔案裡,想改字就改那裡。
+
+---
+
+## 7. 安全提醒
+
+- 這個專案**只接假的區塊鏈和測試網**,程式裡沒有任何接主網的設定。請保持這樣。
+- `.env` 和 `secrets/` 裡是你這台電腦的密鑰。不要分享、不要截圖、不要 commit(它們已經在 `.gitignore` 裡)。
+- 管理後台只綁在 `127.0.0.1`,只有你自己這台電腦連得到。
+- 這裡的「錢」沒有任何價值。玩壞了就 `make reset`。

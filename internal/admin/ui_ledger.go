@@ -62,7 +62,7 @@ func (u *UI) ledger(w http.ResponseWriter, r *http.Request) {
 	if d.AccountID != "" {
 		switch acct, err := u.h.ledger.Account(ctx, d.AccountID); {
 		case errors.Is(err, ledger.ErrAccountNotFound):
-			notice = &flash{Kind: "err", Text: "No account " + d.AccountID + "."}
+			notice = &flash{Kind: "err", Text: langFrom(ctx).T("flash.no_account", d.AccountID)}
 			d.AccountID, d.Filter.AccountID = "", ""
 		case err != nil:
 			u.fail(w, r, "ledger", "account", err)
@@ -81,7 +81,7 @@ func (u *UI) ledger(w http.ResponseWriter, r *http.Request) {
 	}
 	keep := keepQuery(q, "account_id", "ref_type", "ref_id")
 	d.Pager = newPager("/admin/ledger", keep, limit, offset, len(d.Entries))
-	u.tpl.render(w, r, http.StatusOK, "ledger", view{Title: "Ledger", Flash: notice, Data: d})
+	u.tpl.render(w, r, http.StatusOK, "ledger", view{Title: langFrom(ctx).T("page.ledger"), Flash: notice, Data: d})
 }
 
 func (u *UI) createAdjustment(w http.ResponseWriter, r *http.Request) {
@@ -96,7 +96,7 @@ func (u *UI) createAdjustment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	entry, _, err := u.h.createAdjustment(r.Context(), p)
-	u.done(w, r, back, err, "Adjustment posted as entry "+itoa64(entry.ID)+".")
+	u.done(w, r, back, err, f.l.T("flash.adjustment_posted", itoa64(entry.ID)))
 }
 
 func (u *UI) createHouseAdjustment(w http.ResponseWriter, r *http.Request) {
@@ -110,7 +110,7 @@ func (u *UI) createHouseAdjustment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	entry, _, err := u.h.createHouseAdjustment(r.Context(), p)
-	u.done(w, r, "/admin/reconciliation", err, "House adjustment posted as entry "+itoa64(entry.ID)+".")
+	u.done(w, r, "/admin/reconciliation", err, f.l.T("flash.house_adjustment_posted", itoa64(entry.ID)))
 }
 
 // newIdempotencyKey mints the key a browser cannot supply. A double submit

@@ -1,13 +1,19 @@
-export function formatTime(iso: string): string {
+import type { IntlTag } from '../i18n/LocaleProvider'
+
+// Times follow the interface's language through one of the two known Intl
+// tags (see IntlTag). Amounts never come through here: they are decimal
+// strings from the API and stay that way (lib/decimal.ts).
+
+export function formatTime(iso: string, intl: IntlTag): string {
   const d = new Date(iso)
   if (Number.isNaN(d.getTime())) return iso
-  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+  return d.toLocaleTimeString(intl, { hour: '2-digit', minute: '2-digit', second: '2-digit' })
 }
 
-export function formatDateTime(iso: string): string {
+export function formatDateTime(iso: string, intl: IntlTag): string {
   const d = new Date(iso)
   if (Number.isNaN(d.getTime())) return iso
-  return d.toLocaleString()
+  return d.toLocaleString(intl)
 }
 
 export function shortId(id: string): string {

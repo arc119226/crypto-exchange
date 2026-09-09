@@ -483,6 +483,7 @@ jobs:
         run: |
           docker run --rm crypto-exchange-edge:ci caddy version
           docker run --rm crypto-exchange-edge:ci caddy validate --config /etc/caddy/Caddyfile
+          docker run --rm crypto-exchange-edge:ci caddy validate --config /etc/caddy/Caddyfile.dev
           docker run --rm --entrypoint sh crypto-exchange-edge:ci -c 'test -s /srv/index.html && ls /srv/assets | grep -q "\.js$"'
       - name: backup image metadata
         id: meta-backup

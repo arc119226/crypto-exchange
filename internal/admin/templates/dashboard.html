@@ -1,45 +1,45 @@
 {{define "content"}}
-<h1>Dashboard</h1>
+<h1>{{T "dashboard.title"}}</h1>
 {{with .Data}}
 <section class="tiles">
   <a class="tile {{if .LedgerBalanced}}ok{{else}}bad{{end}}" href="/admin/ledger">
-    <span class="label">Ledger</span>
-    <span class="value">{{if .LedgerBalanced}}balanced{{else}}OUT OF BALANCE{{end}}</span>
-    <span class="sub">{{.OpenLedgerBreaks}} open break{{if ne .OpenLedgerBreaks 1}}s{{end}}</span>
+    <span class="label">{{T "dashboard.ledger"}}</span>
+    <span class="value">{{if .LedgerBalanced}}{{T "ledger.balanced"}}{{else}}{{T "ledger.out_of_balance"}}{{end}}</span>
+    <span class="sub">{{Tn "dashboard.open_breaks" .OpenLedgerBreaks}}</span>
   </a>
   <a class="tile {{if .LastReconciliation}}{{if .LastReconciliation.Balanced}}ok{{else}}bad{{end}}{{else}}muted{{end}}" href="/admin/reconciliation">
-    <span class="label">Chain reconciliation</span>
+    <span class="label">{{T "dashboard.reconciliation"}}</span>
     {{if .LastReconciliation}}
-    <span class="value">{{if .LastReconciliation.Balanced}}balanced{{else}}BREAK{{end}}</span>
+    <span class="value">{{if .LastReconciliation.Balanced}}{{T "recon.balanced"}}{{else}}{{T "recon.break"}}{{end}}</span>
     <span class="sub">{{when .LastReconciliation.FinishedAt}}</span>
     {{else}}
-    <span class="value">no report yet</span>
-    <span class="sub">the chain role writes one every ETH_RECONCILE_INTERVAL</span>
+    <span class="value">{{T "dashboard.no_report"}}</span>
+    <span class="sub">{{T "dashboard.no_report.sub"}}</span>
     {{end}}
   </a>
   <a class="tile {{if gt .PendingWithdrawals 0}}warn{{end}}" href="/admin/withdrawals">
-    <span class="label">Withdrawals waiting for review</span>
+    <span class="label">{{T "dashboard.pending_withdrawals"}}</span>
     <span class="value">{{.PendingWithdrawals}}</span>
   </a>
   <a class="tile" href="/admin/chain">
-    <span class="label">Deposits confirming</span>
+    <span class="label">{{T "dashboard.confirming_deposits"}}</span>
     <span class="value">{{.ConfirmingDeposits}}</span>
   </a>
   <a class="tile {{if gt .DeadWebhookDeliveries24H 0}}warn{{end}}" href="/admin/webhooks">
-    <span class="label">Dead webhook deliveries, 24h</span>
+    <span class="label">{{T "dashboard.dead_deliveries"}}</span>
     <span class="value">{{.DeadWebhookDeliveries24H}}</span>
   </a>
   <div class="tile {{if .LastBackup}}ok{{else}}muted{{end}}">
-    <span class="label">Last backup</span>
+    <span class="label">{{T "dashboard.last_backup"}}</span>
     {{if .LastBackup}}
     <span class="value">{{when .LastBackup.FinishedAt}}</span>
     <span class="sub">{{.LastBackup.Location}}</span>
     {{else}}
-    <span class="value">none yet</span>
-    <span class="sub">the backup sidecar writes admin.backups</span>
+    <span class="value">{{T "dashboard.no_backup"}}</span>
+    <span class="sub">{{T "dashboard.no_backup.sub"}}</span>
     {{end}}
   </div>
 </section>
-<p class="muted">As of {{when .Now}}. Database: {{.Database}}.</p>
+<p class="muted">{{T "dashboard.as_of"}} {{when .Now}}. {{T "dashboard.database"}} {{.Database}}.</p>
 {{end}}
 {{end}}

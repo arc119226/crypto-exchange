@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { Market } from '../api/client'
+import { useLocale } from '../i18n/LocaleProvider'
 import { cmpStr, mustDec, sub, format, trimZeros } from '../lib/decimal'
 import type { Level, PublicFeed, PublicMessage } from '../ws/public'
 
@@ -62,6 +63,7 @@ export function useOrderBook(feed: PublicFeed, market: string): BookState {
 }
 
 export function OrderBook({ feed, market, info, onPickPrice }: { feed: PublicFeed; market: string; info: Market | null; onPickPrice?: (price: string) => void }) {
+  const { t } = useLocale()
   const book = useOrderBook(feed, market)
   const rows = 15
   const asks = useMemo(() => [...book.asks.entries()].sort((a, b) => cmpStr(a[0], b[0])).slice(0, rows), [book.asks])
@@ -73,17 +75,17 @@ export function OrderBook({ feed, market, info, onPickPrice }: { feed: PublicFee
   return (
     <div className="card book" data-testid="order-book" data-status={book.status} data-seq={book.seq}>
       <h2>
-        Order book <span className="muted">{info ? `${info.base_asset}/${info.quote_asset}` : ''}</span>
+        {t('book.title')} <span className="muted">{info ? `${info.base_asset}/${info.quote_asset}` : ''}</span>
       </h2>
       <p className="muted">
         <span className={`status-dot ${book.status === 'live' ? 'live' : 'connecting'}`} />
-        {book.status === 'live' ? `seq ${book.seq}` : book.status === 'resync' ? 'resyncing…' : 'connecting…'}
+        {book.status === 'live' ? t('book.seq', { seq: book.seq }) : book.status === 'resync' ? t('book.resyncing') : t('book.connecting')}
       </p>
       <table>
         <thead>
           <tr>
-            <th>Price</th>
-            <th>Qty</th>
+            <th>{t('col.price')}</th>
+            <th>{t('col.qty')}</th>
           </tr>
         </thead>
         <tbody>
@@ -95,7 +97,7 @@ export function OrderBook({ feed, market, info, onPickPrice }: { feed: PublicFee
           ))}
         </tbody>
       </table>
-      <div className="spread">{spread ? `spread ${spread}` : '—'}</div>
+      <div className="spread">{spread ? t('book.spread', { spread }) : '—'}</div>
       <table>
         <tbody>
           {bids.map(([price, qty]) => (

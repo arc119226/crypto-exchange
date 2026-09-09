@@ -1,47 +1,47 @@
 {{define "content"}}
-<h1>Ledger</h1>
+<h1>{{T "ledger.title"}}</h1>
 {{with .Data}}
 <section class="card">
-  <h2>Trial balance <span class="badge {{if .Balanced}}ok{{else}}bad{{end}}">{{if .Balanced}}balanced{{else}}OUT OF BALANCE{{end}}</span></h2>
+  <h2>{{T "ledger.trial_balance"}} <span class="badge {{if .Balanced}}ok{{else}}bad{{end}}">{{if .Balanced}}{{T "ledger.balanced"}}{{else}}{{T "ledger.out_of_balance"}}{{end}}</span></h2>
   <table>
-    <thead><tr><th>Asset</th><th class="num">Debits</th><th class="num">Credits</th><th class="num">Diff</th></tr></thead>
+    <thead><tr><th>{{T "col.asset"}}</th><th class="num">{{T "col.debits"}}</th><th class="num">{{T "col.credits"}}</th><th class="num">{{T "col.diff"}}</th></tr></thead>
     <tbody>
     {{range .Trial}}<tr><td>{{.Asset}}</td><td class="num">{{amount .Debits}}</td><td class="num">{{amount .Credits}}</td><td class="num">{{if .Diff.IsZero}}0{{else}}<strong>{{amount .Diff}}</strong>{{end}}</td></tr>
-    {{else}}<tr><td colspan="4" class="muted">No postings yet.</td></tr>{{end}}
+    {{else}}<tr><td colspan="4" class="muted">{{T "ledger.no_postings"}}</td></tr>{{end}}
     </tbody>
   </table>
-  <h2>House accounts</h2>
+  <h2>{{T "ledger.house_accounts"}}</h2>
   <table>
-    <thead><tr><th>Account</th><th>Type</th><th>Asset</th><th class="num">Balance</th></tr></thead>
+    <thead><tr><th>{{T "col.account"}}</th><th>{{T "col.type"}}</th><th>{{T "col.asset"}}</th><th class="num">{{T "col.balance"}}</th></tr></thead>
     <tbody>
-    {{range .House}}<tr><td>{{.Code}}</td><td>{{.Type}}</td><td>{{.Asset}}</td><td class="num">{{amount .Balance}}</td></tr>
-    {{else}}<tr><td colspan="4" class="muted">No house balances yet.</td></tr>{{end}}
+    {{range .House}}<tr><td>{{.Code}}</td><td>{{status .Type}}</td><td>{{.Asset}}</td><td class="num">{{amount .Balance}}</td></tr>
+    {{else}}<tr><td colspan="4" class="muted">{{T "ledger.no_house"}}</td></tr>{{end}}
     </tbody>
   </table>
 </section>
 <section class="card">
-  <h2>Look up</h2>
+  <h2>{{T "ledger.look_up"}}</h2>
   <form method="get" action="/admin/ledger" class="row">
-    <label>Account id <input type="text" name="account_id" value="{{.AccountID}}" class="mono" placeholder="uuid"></label>
-    <label>Ref type <input type="text" name="ref_type" value="{{.Filter.RefType}}" placeholder="adjustment, withdrawal, …"></label>
-    <label>Ref id <input type="text" name="ref_id" value="{{.Filter.RefID}}" class="mono"></label>
-    <button type="submit" class="quiet">Show</button>
+    <label>{{T "ledger.account_id"}} <input type="text" name="account_id" value="{{.AccountID}}" class="mono" placeholder="uuid"></label>
+    <label>{{T "ledger.ref_type"}} <input type="text" name="ref_type" value="{{.Filter.RefType}}" placeholder="adjustment, withdrawal, …"></label>
+    <label>{{T "ledger.ref_id"}} <input type="text" name="ref_id" value="{{.Filter.RefID}}" class="mono"></label>
+    <button type="submit" class="quiet">{{T "common.show"}}</button>
   </form>
   {{if .Account}}
-  <h3>Account <span class="mono">{{.Account.ID}}</span> <span class="badge {{badge .Account.Status}}">{{.Account.Status}}</span></h3>
+  <h3>{{T "ledger.account"}} <span class="mono">{{.Account.ID}}</span> <span title="{{.Account.Status}}" class="badge {{badge .Account.Status}}">{{status .Account.Status}}</span></h3>
   <table>
-    <thead><tr><th>Asset</th><th class="num">Available</th><th class="num">Hold</th><th class="num">Total</th></tr></thead>
+    <thead><tr><th>{{T "col.asset"}}</th><th class="num">{{T "col.available"}}</th><th class="num">{{T "col.hold"}}</th><th class="num">{{T "col.total"}}</th></tr></thead>
     <tbody>
     {{range .Balances}}<tr><td>{{.Asset}}</td><td class="num">{{amount .Available}}</td><td class="num">{{amount .Hold}}</td><td class="num">{{amount .Total}}</td></tr>
-    {{else}}<tr><td colspan="4" class="muted">No balances.</td></tr>{{end}}
+    {{else}}<tr><td colspan="4" class="muted">{{T "ledger.no_balances"}}</td></tr>{{end}}
     </tbody>
   </table>
   {{end}}
 </section>
 <section id="list">
-<h2>Entries{{if .Account}} of this account{{end}}</h2>
+<h2>{{if .Account}}{{T "ledger.entries_of_account"}}{{else}}{{T "ledger.entries"}}{{end}}</h2>
 <table>
-  <thead><tr><th>#</th><th>When</th><th>Kind</th><th>Ref</th><th>Reason</th><th>Postings</th></tr></thead>
+  <thead><tr><th>#</th><th>{{T "col.when"}}</th><th>{{T "col.kind"}}</th><th>{{T "col.ref"}}</th><th>{{T "col.reason"}}</th><th>{{T "col.postings"}}</th></tr></thead>
   <tbody>
   {{range .Entries}}
   <tr>
@@ -50,25 +50,25 @@
     <td>{{.Kind}}</td>
     <td>{{.RefType}}{{if .RefID}} <span class="mono muted">{{.RefID}}</span>{{end}}</td>
     <td>{{.Reason}}</td>
-    <td>{{range .Postings}}<div><span class="mono">{{.AccountID}}</span> {{.Bucket}} {{.Direction}} {{amount .Amount}} {{.Asset}}</div>{{end}}</td>
+    <td>{{range .Postings}}<div><span class="mono">{{.AccountID}}</span> {{status .Bucket}} {{status .Direction}} {{amount .Amount}} {{.Asset}}</div>{{end}}</td>
   </tr>
   {{else}}
-  <tr><td colspan="6" class="muted">No entries match.</td></tr>
+  <tr><td colspan="6" class="muted">{{T "ledger.no_entries"}}</td></tr>
   {{end}}
   </tbody>
 </table>
 {{template "pager" .Pager}}
 </section>
 <section class="card">
-  <h2>Post an adjustment</h2>
-  <p class="muted">Against the external account, with the reason in the audit trail. Each submit is a new entry; refresh does not repeat it, but pressing the button twice does.</p>
+  <h2>{{T "ledger.adjust"}}</h2>
+  <p class="muted">{{T "ledger.adjust.hint"}}</p>
   <form method="post" action="/admin/ledger/adjustments" class="row">
-    <label>Account id <input type="text" name="account_id" value="{{.AccountID}}" class="mono" required></label>
-    <label>Asset <select name="asset">{{range .Assets}}<option value="{{.Symbol}}">{{.Symbol}}</option>{{end}}</select></label>
-    <label>Amount <input type="text" name="amount" required></label>
-    <label>Direction <select name="direction"><option value="credit">credit (give)</option><option value="debit">debit (take)</option></select></label>
-    <label>Reason <input type="text" name="reason" required placeholder="recorded in the audit trail"></label>
-    <button type="submit" class="danger">Post</button>
+    <label>{{T "ledger.account_id"}} <input type="text" name="account_id" value="{{.AccountID}}" class="mono" required></label>
+    <label>{{T "col.asset"}} <select name="asset">{{range .Assets}}<option value="{{.Symbol}}">{{.Symbol}}</option>{{end}}</select></label>
+    <label>{{T "col.amount"}} <input type="text" name="amount" required></label>
+    <label>{{T "col.direction"}} <select name="direction"><option value="credit">{{T "ledger.credit_give"}}</option><option value="debit">{{T "ledger.debit_take"}}</option></select></label>
+    <label>{{T "form.reason"}} <input type="text" name="reason" required placeholder="{{T "form.reason.placeholder"}}"></label>
+    <button type="submit" class="danger">{{T "common.post"}}</button>
   </form>
 </section>
 {{end}}

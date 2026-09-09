@@ -6,6 +6,12 @@ import { expect, test, type APIRequestContext, type Page } from '@playwright/tes
 // through the REST API, and watch the fill, the balances and the open
 // order's remaining quantity change over the private stream.
 //
+// The whole flow runs with the interface switched to Traditional Chinese
+// (ADR-0010): every locator is a test id or a data attribute, so the same
+// spec is valid in either language, and the amount assertions prove that
+// prices and quantities are not reformatted by the switch. language.spec.ts
+// covers the switch itself.
+//
 // Environment: API_URL (default http://localhost:8080), ADMIN_URL (default
 // http://localhost:8082) and ADMIN_API_KEY (required) name the running
 // stack; the browser itself only ever talks to the Vite preview server.
@@ -103,11 +109,13 @@ test('register, place a bid, see it in the book, get filled, balances move', asy
   const makerEmail = `smoke-maker-${stamp}@example.com`
   const password = `Sm0ke-${stamp}-passw0rd`
 
-  // register through the browser ...
+  // switch to Traditional Chinese, then register through the browser ...
   await page.goto('/register')
-  await page.getByLabel('Email').fill(makerEmail)
-  await page.getByLabel(/Password/).fill(password)
-  await page.getByRole('button', { name: 'Create account' }).click()
+  await page.getByTestId('lang-zh-TW').click()
+  await expect(page.locator('html')).toHaveAttribute('lang', 'zh-TW')
+  await page.getByTestId('register-email').fill(makerEmail)
+  await page.getByTestId('register-password').fill(password)
+  await page.getByTestId('register-submit').click()
   await expect(page).toHaveURL(/\/markets$/)
 
   // ... fund from Node (the admin key stays out of the browser) ...
@@ -132,7 +140,7 @@ test('register, place a bid, see it in the book, get filled, balances move', asy
   await page.getByTestId('price').fill(PRICE)
   await page.getByTestId('qty').fill('0.5')
   await page.getByTestId('submit-order').click()
-  await expect(page.getByTestId('order-result')).toContainText('open')
+  await expect(page.getByTestId('order-result')).toHaveAttribute('data-status', 'open')
 
   // the public stream's delta puts the level into the book, the private
   // stream's order.accepted refreshes the open orders
