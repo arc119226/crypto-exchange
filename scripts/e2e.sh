@@ -460,10 +460,18 @@ jq '{orders_sent, orders_ok, unavailable_503, errors}' "$burst_dir/burst.json"
 psql_check() {
   "${COMPOSE[@]}" exec -T postgres psql -U exchange -d exchange -Atc "$1"
 }
-seq_db=$(psql_check "SELECT s.last_seq || ' ' || COALESCE(max(o.seq), 0) FROM trading.market_sequences s JOIN registry.markets m ON m.id = s.market_id LEFT JOIN trading.orders o ON o.market_id = s.market_id WHERE m.symbol = 'ETH-USDC' GROUP BY s.last_seq")
-[ "${seq_db% *}" = "${seq_db#* }" ] || { echo "market sequence and orders disagree after the burst: $seq_db"; exit 1; }
+# The market sequence against what was committed. An order row carries the
+# seq of the command that accepted or rejected it, but a cancel consumes a
+# seq and writes no order row (the loadgen cancels every third order), so
+# the orders are only a lower bound; the market's newest outbox event is
+# the exact witness (the same invariant as scripts/sql/restore-checks.sql,
+# docs/domain.md §26.3).
+seq_db=$(psql_check "SELECT s.last_seq || ' ' || greatest(COALESCE((SELECT max(o.seq) FROM trading.orders o WHERE o.market_id = s.market_id), 0), COALESCE((SELECT max(e.seq) FROM eventbus.outbox e WHERE e.market_id = m.symbol), 0)) || ' ' || COALESCE((SELECT max(o.seq) FROM trading.orders o WHERE o.market_id = s.market_id), 0) FROM trading.market_sequences s JOIN registry.markets m ON m.id = s.market_id WHERE m.symbol = 'ETH-USDC'")
+read -r last_seq witnessed orders_max <<<"$seq_db"
+[ -n "$last_seq" ] && [ "$last_seq" = "$witnessed" ] && [ "$last_seq" -ge "$orders_max" ] ||
+  { echo "market sequence, orders and events disagree after the burst: last_seq=$last_seq newest event or order=$witnessed max(orders.seq)=$orders_max"; exit 1; }
 book_seq=$("$CTL" book ETH-USDC --output json | jq -r .last_seq)
-[ "$book_seq" = "${seq_db% *}" ] || { echo "the restarted book is at seq $book_seq, the database at ${seq_db% *}"; exit 1; }
+[ "$book_seq" = "$last_seq" ] || { echo "the restarted book is at seq $book_seq, the database at $last_seq"; exit 1; }
 holds=$(psql_check "SELECT count(*) FROM (SELECT b.account_id, b.asset, b.hold, COALESCE(sum(o.hold_remaining), 0) AS held FROM ledger.balances b LEFT JOIN trading.orders o ON o.account_id = b.account_id AND o.hold_asset = b.asset AND o.status IN ('open', 'partially_filled') GROUP BY 1, 2, 3) x WHERE hold <> held")
 [ "$holds" = "0" ] || { echo "$holds balances disagree with the open orders' holds after the burst"; exit 1; }
 "$CTL" admin trial-balance --output json | jq -e '.balanced == true' >/dev/null || { echo "trial balance broke during the burst"; exit 1; }
