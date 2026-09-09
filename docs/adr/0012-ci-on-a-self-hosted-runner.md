@@ -42,6 +42,20 @@ runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
 
 例外是 `release`,寫死 `ubuntu-latest`:它一個月跑幾次、要推 ghcr 與開 GitHub Release,而發布不該依賴一台家用機器有沒有開著。
 
+**2026-09-09 補上第二個例外:`image` 在 `push` 事件上也走托管。** 它在 pull request 上只是 build 三個 image 再各跑一次,那是自建 runner 上免費的驗證;但在 push 上它還會登入 ghcr 並把三個 image 推上去——那就是發布,和 `release` 適用同一句話。
+
+寫成一行條件而不是再開一個 job:
+
+```yaml
+runs-on: ${{ github.event_name == 'push' && 'ubuntu-latest' || vars.CI_RUNNER || 'ubuntu-latest' }}
+```
+
+促成它的是一次實際故障,不是預想。`docker/metadata-action` 會呼叫 `api.github.com` 拿倉庫的描述與授權條款去填 OCI label;同一台 runner 上,這一步 09:55 花 **1 秒**通過,12:34(run 98)與 13:14(run 100)各回一次 `Connect Timeout Error`,中間沒有任何 workflow 改動,Node 24 的強制升級在成功那次就已經生效。也就是說**這台機器連 `api.github.com` 的能力會消失**,而 `v*` tag 走的是同一條 push 路徑——再過幾天要切的 `v0.1.0`,只差這一通打不出去的 API 就會失敗。
+
+代價是有界的,而且量過:合併到 main 只跑 `fuzz-smoke` 和 `image`,而 `fuzz-smoke` 留在自建 runner 上。托管的 `image` 在 run #89 量到 **4 個計費分鐘**(見「後果」的逐 job 表),push 才有的登入與三次推送另外約 40 秒——所以一次合併大約 **5 分鐘**。以每月 30 次合併算是 150 分鐘,佔 3,000 分鐘額度的 5%。機器恢復之後把這一行改回去就是零。
+
+同一輪還做了兩件小事:三個 `metadata-action` 步驟加上 `if: github.event_name == 'push'`(它們的輸出只有 push 步驟在讀,pull request 上算出來沒人看,卻是三個網路失敗點),以及 `image` 的清理步驟改用 `runner.environment == 'self-hosted'` 判斷——它現在有可能落在托管機器上,而那裡整台 VM 跑完就丟,沒有東西要清。合起來的結果是:**`metadata-action` 再也不會在自建 runner 上執行。**
+
 考慮過但不採納的替代方案:
 
 - **把倉庫改公開**——公開倉庫免費。使用者明確要求維持私有,不再討論。

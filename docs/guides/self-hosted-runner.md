@@ -581,7 +581,7 @@ GitHub 的機器每個 job 跑完就整台丟掉,自己的機器不會——每�
 
 ### 10.1 job 裡的自動清理(已經寫好了)
 
-四個會用到 Docker 的 job(`integration` `e2e` `helm` `image`)結尾都掛了一個清理步驟(`.github/actions/reclaim-disk/action.yml`),**只在 `CI_RUNNER` 有值時才跑**。它用的是**有時間過濾**的清法:
+四個會用到 Docker 的 job(`integration` `e2e` `helm` `image`)結尾都掛了一個清理步驟(`.github/actions/reclaim-disk/action.yml`),**只有在自己的機器上才跑**——前三個判斷 `CI_RUNNER` 有沒有值,`image` 因為會依事件換機器,改成問 `runner.environment` 是不是 `self-hosted`。它用的是**有時間過濾**的清法:
 
 ```sh
 docker container prune -f --filter until=6h
@@ -765,7 +765,9 @@ checks ─┬─► integration ─┬─► e2e  ─┐
 
 push 事件才會登入 ghcr 並推上去;PR 只 build 和 smoke。
 
-**這台機器要有:** Docker + buildx。
+**這是唯一一個會依事件換機器的 job。** PR 上跑在你的機器(免費),push 上跑在 GitHub 托管的機器——因為 push 才是真的在發布,而發布不該依賴一台家用機器連不連得上 GitHub。2026-09-09 這件事真的發生過:`docker/metadata-action` 要向 `api.github.com` 拿倉庫描述去填 image 的標籤,同一台 runner 上這一步早上花 1 秒就過,中午之後連兩次 `Connect Timeout Error`。細節與取捨在 ADR-0012 決定 1。
+
+**這台機器要有:** Docker + buildx——**只有 PR 的那一半需要**。
 
 **PR 上的 build metadata 是固定值**(`COMMIT=dev`、`DATE=1970-01-01T00:00:00Z`),不是真的 commit。原因是 `build/Dockerfile` 把這些烤進 ldflags,每個 commit 都變的話,最後那層 `go build` 的快取**依設計不可能命中**。PR 的建置不會被發布,所以固定它沒有代價。
 
