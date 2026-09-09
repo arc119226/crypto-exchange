@@ -73,7 +73,7 @@ runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
 使用者的機器是 Windows 11 且已裝 Docker Desktop,直覺是直接用它。查證之後改成以 WSL 裡的 `docker-ce` 為主線:
 
 - **Docker Desktop 必須有人登入 Windows 才會跑,任何付費層級都沒有無頭或服務模式。** Docker 自己的 roadmap issue #515 至今未解,Docker Desktop 也完全不支援 Windows Server;`com.docker.service` 只是 Hyper-V 與 Windows 容器的特權輔助程式,WSL2 模式下不會自動啟動。
-- **4.75.0 起 `/var/run/docker.sock` 的符號連結在 WSL 重啟後不會被重建**,手動修的變通做法重開機又沒了。這台機器每月會被 Windows Update 重開一次,等於週期性斷線。
+- **4.75.0 起 `/var/run/docker.sock` 的符號連結在 WSL 重啟後不會被重建**,手動修的變通做法重開機又沒了。這台機器每月會被 Windows Update 重開一次,等於週期性斷線。**這一項在第一次實跑就被觀測到**:改 `.wslconfig` 後的 `wsl --shutdown` 之後,互動 shell 裡的 `docker version` 正常,但 `image` job 在 `docker/setup-buildx-action` 一秒內死於 `dial unix /var/run/docker.sock: connect: no such file or directory`。寫這條決定時它還只是引用別人的 bug 報告。
 - **Docker Desktop 的資料在自己的 `docker_data.vhdx`**,和 Ubuntu 的 `ext4.vhdx` 是不同的虛擬磁碟,官方沒有支援的縮小方法。放在 WSL 裡則可以用 `wsl --manage <distro> --compact` 真的把空間還給 Windows。
 
 Docker Desktop 仍寫進 guide 當替代路線,把上面三項代價寫清楚,讓使用者自己選。

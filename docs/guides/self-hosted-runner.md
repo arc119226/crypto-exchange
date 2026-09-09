@@ -275,6 +275,15 @@ docker version
 
 - **Docker Desktop 必須有人登入 Windows 才會跑。任何付費層級都沒有無頭或服務模式**——Docker 自己的 roadmap issue #515 至今未解,Docker Desktop 也完全不支援 Windows Server。`com.docker.service` 那個 Windows 服務只是 Hyper-V 與 Windows 容器用的特權輔助程式,WSL2 模式下根本不會自動啟動。(不過第 9 節的自動登入本來就是必要的,所以這一項不是額外的成本。)
 - **4.75.0 起有一個回歸**:WSL 重啟之後 `/var/run/docker.sock` 的符號連結不會被重建。手動 `sudo ln -sf /mnt/wsl/docker-desktop/shared-sockets/guest-services/docker.proxy.sock /var/run/docker.sock` 可以救,但**重開機後又沒了**。對一台每月被 Windows Update 重開一次的機器,這是週期性斷線。
+
+  **這在第一次實跑就發生了。** 設定 `.wslconfig` 需要 `wsl --shutdown`,重開之後 `docker version` 在互動 shell 裡還是好的,但 CI 的 `image` job 在 `docker/setup-buildx-action` 一秒內死掉:
+
+  ```
+  failed to connect to the docker API at unix:///var/run/docker.sock;
+  dial unix /var/run/docker.sock: connect: no such file or directory
+  ```
+
+  路線 6A 沒有這個問題:`dockerd` 是發行版裡的 systemd 服務,socket 由它自己建立與持有,不依賴任何 Windows 端的程式在正確的時機補一條符號連結。
 - **Docker 的資料在另一個虛擬磁碟**(`%LOCALAPPDATA%\Docker\wsl\data\docker_data.vhdx`,新版可能在 `...\wsl\disk\` 底下),**官方沒有支援的縮小方法**,只有核彈級的「Clean up data」。第 10 節的空間回收對它無效。
 - **Windows 帳號之間不共用容器與映像**,所以跑 Docker Desktop 的 Windows 帳號每次都必須是同一個。
 
