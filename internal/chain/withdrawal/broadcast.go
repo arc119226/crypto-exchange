@@ -262,7 +262,7 @@ func (w *Worker) broadcast(ctx context.Context, row sqlcgen.ChainWithdrawal) err
 	}
 	return inTx(ctx, w.db, func(tx pgx.Tx) error {
 		if _, _, err := w.ledger.Post(ctx, tx, ledger.Entry{
-			IdempotencyKey: "withdrawal:broadcast:" + row.ID, Kind: "withdrawal",
+			IdempotencyKey: "withdrawal:broadcast:" + row.ID, Kind: ledger.KindWithdrawal,
 			RefType: "withdrawal", RefID: row.ID, Reason: "broadcast to the chain",
 			CorrelationID: deref(row.CorrelationID),
 			Postings: []ledger.Posting{
@@ -428,7 +428,7 @@ func (w *Worker) confirm(ctx context.Context, row sqlcgen.ChainWithdrawal, block
 	}
 	return inTx(ctx, w.db, func(tx pgx.Tx) error {
 		if _, _, err := w.ledger.Post(ctx, tx, ledger.Entry{
-			IdempotencyKey: "withdrawal:confirm:" + row.ID, Kind: "withdrawal",
+			IdempotencyKey: "withdrawal:confirm:" + row.ID, Kind: ledger.KindWithdrawal,
 			RefType: "withdrawal", RefID: row.ID, Reason: "confirmed on chain",
 			CorrelationID: deref(row.CorrelationID),
 			Postings: []ledger.Posting{
@@ -450,7 +450,7 @@ func (w *Worker) confirm(ctx context.Context, row sqlcgen.ChainWithdrawal, block
 		// postings, and an empty entry would be noise in the journal.
 		if fee.IsPositive() {
 			if _, _, err := w.ledger.Post(ctx, tx, ledger.Entry{
-				IdempotencyKey: "withdrawal:fee:" + row.ID, Kind: "fee",
+				IdempotencyKey: "withdrawal:fee:" + row.ID, Kind: ledger.KindFee,
 				RefType: "withdrawal", RefID: row.ID, Reason: "withdrawal fee",
 				CorrelationID: deref(row.CorrelationID),
 				Postings: []ledger.Posting{
@@ -527,7 +527,7 @@ func (w *Worker) postGas(ctx context.Context, tx pgx.Tx, row sqlcgen.ChainWithdr
 		return nil // a scripted chain, or a receipt with no effective price
 	}
 	if _, _, err := w.ledger.Post(ctx, tx, ledger.Entry{
-		IdempotencyKey: "withdrawal:gas:" + row.ID, Kind: "gas",
+		IdempotencyKey: "withdrawal:gas:" + row.ID, Kind: ledger.KindGas,
 		RefType: "withdrawal", RefID: row.ID, Reason: "withdrawal gas",
 		CorrelationID: deref(row.CorrelationID),
 		Postings: []ledger.Posting{

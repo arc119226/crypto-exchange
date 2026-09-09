@@ -37,6 +37,7 @@ tags:
   - name: withdrawals
   - name: chain
   - name: reconciliation
+  - name: reports
   - name: webhooks
   - name: system
 
@@ -1018,6 +1019,79 @@ paths:
         "500":
           $ref: "#/components/responses/InternalError"
 
+  /admin/v1/reports/revenue:
+    get:
+      tags: [reports]
+      operationId: getRevenueReport
+      summary: What the exchange earned and what it paid the chain, per asset
+      description: |
+        The three fee sources and the gas they cost, over a half-open period
+        `[from, to)`, one row per asset (docs/plan-v1.0.md §23.5).
+
+        **Trading fees come from the trade rows, not the ledger.** A settle
+        entry credits `fee_revenue` with the same two numbers each trade
+        carries, so counting both would double them -- and only the trade row
+        records which side was the maker. Withdrawal and deposit fees are read
+        from `fee_revenue` instead, because those have no other record.
+
+        **Nothing is converted between assets.** Gas is paid in the chain's
+        native coin whatever was withdrawn, so a USDC row shows fee revenue
+        with no gas beneath it and the ETH row carries the gas for every
+        withdrawal on the chain. `net` is the subtraction within one asset and
+        means nothing across two; converting would need a price source, which
+        v1.1 does not have.
+
+        **Two clocks.** A trade is counted at the engine's command timestamp; a
+        withdrawal or deposit fee at the moment the ledger booked it. A
+        withdrawal is therefore counted when it *confirmed*, not when the user
+        asked, so one that spans the end of the period lands in the next one.
+
+        Omitting both bounds reports the last 30 days ending now.
+      parameters:
+        - $ref: "#/components/parameters/RevenueFrom"
+        - $ref: "#/components/parameters/RevenueTo"
+        - $ref: "#/components/parameters/RevenueAsset"
+      responses:
+        "200":
+          description: One row per asset that had any activity in the period
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RevenueReport"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /admin/v1/reports/revenue.csv:
+    get:
+      tags: [reports]
+      operationId: getRevenueReportCsv
+      summary: The same report as a CSV download
+      description: >
+        Identical numbers to `GET /admin/v1/reports/revenue`, one header row
+        and one row per asset, amounts as the same decimal strings. Provided
+        because a revenue report is something an operator takes somewhere else.
+      parameters:
+        - $ref: "#/components/parameters/RevenueFrom"
+        - $ref: "#/components/parameters/RevenueTo"
+        - $ref: "#/components/parameters/RevenueAsset"
+      responses:
+        "200":
+          description: CSV
+          content:
+            text/csv:
+              schema:
+                type: string
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
   /admin/v1/reconciliation/reports:
     get:
       tags: [reconciliation]
@@ -1468,6 +1542,34 @@ components:
       name: id
       in: path
       required: true
+      schema:
+        type: string
+
+    RevenueFrom:
+      name: from
+      in: query
+      description: >
+        Start of the period, inclusive. Defaults to 30 days before `to`.
+      schema:
+        type: string
+        format: date-time
+    RevenueTo:
+      name: to
+      in: query
+      description: >
+        End of the period, exclusive. Defaults to now, so a report asked for
+        twice in one day covers slightly different windows -- the boundary is
+        the request, not the calendar.
+      schema:
+        type: string
+        format: date-time
+    RevenueAsset:
+      name: asset
+      in: query
+      description: >
+        Narrow to one asset. Omit for every asset that had activity. Note that
+        narrowing to an ERC-20 hides the gas its withdrawals cost, because gas
+        is booked against the chain's native coin.
       schema:
         type: string
 
@@ -2554,6 +2656,89 @@ components:
         updated_at:
           type: string
           format: date-time
+
+    RevenueReport:
+      type: object
+      required: [from, to, lines]
+      properties:
+        from:
+          type: string
+          format: date-time
+        to:
+          type: string
+          format: date-time
+          description: Exclusive.
+        lines:
+          type: array
+          items:
+            $ref: "#/components/schemas/RevenueLine"
+
+    RevenueLine:
+      type: object
+      description: >
+        One asset's revenue and cost. Every amount is denominated in `asset`
+        and nothing is converted between assets.
+      required:
+        [asset, maker_fees, taker_fees, withdrawal_fees, deposit_fees,
+         other_fees, gas_expense, net, trades, withdrawals, deposits]
+      properties:
+        asset:
+          type: string
+        maker_fees:
+          allOf:
+            - $ref: "#/components/schemas/Amount"
+          description: >
+            Summed from the trade rows, which are the only record that knows
+            which side was the maker.
+        taker_fees:
+          $ref: "#/components/schemas/Amount"
+        withdrawal_fees:
+          allOf:
+            - $ref: "#/components/schemas/Amount"
+          description: >
+            Credited to `fee_revenue` when a withdrawal confirmed. A withdrawal
+            that was refunded or never broadcast contributes nothing, because
+            its fee went back to the account.
+        deposit_fees:
+          allOf:
+            - $ref: "#/components/schemas/Amount"
+          description: Taken out of arriving deposits. Zero unless a rate is set.
+        other_fees:
+          allOf:
+            - $ref: "#/components/schemas/Amount"
+          description: >
+            Anything else credited to `fee_revenue` -- an operator adjustment
+            posted against the account, or a fee source added later that this
+            report does not know about yet. Zero in normal operation; it exists
+            so revenue can never be silently missing from `net`.
+        gas_expense:
+          allOf:
+            - $ref: "#/components/schemas/Amount"
+          description: >
+            Every `gas_expense` debit in the period: withdrawals, sweeps and
+            nonce fills alike. It is what the exchange paid the chain, whatever
+            the reason, and it is always in the native coin.
+        net:
+          allOf:
+            - $ref: "#/components/schemas/Amount"
+          description: All the fees above minus `gas_expense`, within this asset only.
+        trades:
+          type: integer
+          format: int64
+          description: >
+            Trades charged in this asset, including those charged zero -- which
+            is every trade until an operator sets a rate.
+        withdrawals:
+          type: integer
+          format: int64
+          description: >
+            Withdrawals that paid a fee. Zero-fee withdrawals post nothing and
+            so cannot be counted here. Divide `gas_expense` by this to price
+            the fee against what a withdrawal actually costs (§23.3).
+        deposits:
+          type: integer
+          format: int64
+          description: Deposits that paid a fee.
 
     ReconciliationReportList:
       type: object

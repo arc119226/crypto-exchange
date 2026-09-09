@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"time"
 
@@ -1331,6 +1332,52 @@ type ReloadRequest struct {
 	Reason string `json:"reason"`
 }
 
+// RevenueLine One asset's revenue and cost. Every amount is denominated in `asset` and nothing is converted between assets.
+type RevenueLine struct {
+	Asset string `json:"asset"`
+
+	// DepositFees Taken out of arriving deposits. Zero unless a rate is set.
+	DepositFees Amount `json:"deposit_fees"`
+
+	// Deposits Deposits that paid a fee.
+	Deposits int64 `json:"deposits"`
+
+	// GasExpense Every `gas_expense` debit in the period: withdrawals, sweeps and nonce fills alike. It is what the exchange paid the chain, whatever the reason, and it is always in the native coin.
+	GasExpense Amount `json:"gas_expense"`
+
+	// MakerFees Summed from the trade rows, which are the only record that knows which side was the maker.
+	MakerFees Amount `json:"maker_fees"`
+
+	// Net All the fees above minus `gas_expense`, within this asset only.
+	Net Amount `json:"net"`
+
+	// OtherFees Anything else credited to `fee_revenue` -- an operator adjustment posted against the account, or a fee source added later that this report does not know about yet. Zero in normal operation; it exists so revenue can never be silently missing from `net`.
+	OtherFees Amount `json:"other_fees"`
+
+	// TakerFees Decimal serialized as a string (NUMERIC(36,18)); never a JSON number.
+	//
+	// Example: 1990.00
+	TakerFees Amount `json:"taker_fees"`
+
+	// Trades Trades charged in this asset, including those charged zero -- which is every trade until an operator sets a rate.
+	Trades int64 `json:"trades"`
+
+	// WithdrawalFees Credited to `fee_revenue` when a withdrawal confirmed. A withdrawal that was refunded or never broadcast contributes nothing, because its fee went back to the account.
+	WithdrawalFees Amount `json:"withdrawal_fees"`
+
+	// Withdrawals Withdrawals that paid a fee. Zero-fee withdrawals post nothing and so cannot be counted here. Divide `gas_expense` by this to price the fee against what a withdrawal actually costs (§23.3).
+	Withdrawals int64 `json:"withdrawals"`
+}
+
+// RevenueReport defines model for RevenueReport.
+type RevenueReport struct {
+	From  time.Time     `json:"from"`
+	Lines []RevenueLine `json:"lines"`
+
+	// To Exclusive.
+	To time.Time `json:"to"`
+}
+
 // RotateSecretRequest defines model for RotateSecretRequest.
 type RotateSecretRequest struct {
 	// GraceHours How long the old secret keeps signing alongside the new one.
@@ -1642,6 +1689,15 @@ type MarketSymbol = string
 // Offset defines model for Offset.
 type Offset = int32
 
+// RevenueAsset defines model for RevenueAsset.
+type RevenueAsset = string
+
+// RevenueFrom defines model for RevenueFrom.
+type RevenueFrom = time.Time
+
+// RevenueTo defines model for RevenueTo.
+type RevenueTo = time.Time
+
 // UserID defines model for UserID.
 type UserID = string
 
@@ -1720,6 +1776,30 @@ type ListReconciliationBreaksParams struct {
 type ListReconciliationReportsParams struct {
 	Limit  *Limit  `form:"limit,omitempty" json:"limit,omitempty"`
 	Offset *Offset `form:"offset,omitempty" json:"offset,omitempty"`
+}
+
+// GetRevenueReportParams defines parameters for GetRevenueReport.
+type GetRevenueReportParams struct {
+	// From Start of the period, inclusive. Defaults to 30 days before `to`.
+	From *RevenueFrom `form:"from,omitempty" json:"from,omitempty"`
+
+	// To End of the period, exclusive. Defaults to now, so a report asked for twice in one day covers slightly different windows -- the boundary is the request, not the calendar.
+	To *RevenueTo `form:"to,omitempty" json:"to,omitempty"`
+
+	// Asset Narrow to one asset. Omit for every asset that had activity. Note that narrowing to an ERC-20 hides the gas its withdrawals cost, because gas is booked against the chain's native coin.
+	Asset *RevenueAsset `form:"asset,omitempty" json:"asset,omitempty"`
+}
+
+// GetRevenueReportCsvParams defines parameters for GetRevenueReportCsv.
+type GetRevenueReportCsvParams struct {
+	// From Start of the period, inclusive. Defaults to 30 days before `to`.
+	From *RevenueFrom `form:"from,omitempty" json:"from,omitempty"`
+
+	// To End of the period, exclusive. Defaults to now, so a report asked for twice in one day covers slightly different windows -- the boundary is the request, not the calendar.
+	To *RevenueTo `form:"to,omitempty" json:"to,omitempty"`
+
+	// Asset Narrow to one asset. Omit for every asset that had activity. Note that narrowing to an ERC-20 hides the gas its withdrawals cost, because gas is booked against the chain's native coin.
+	Asset *RevenueAsset `form:"asset,omitempty" json:"asset,omitempty"`
 }
 
 // ListSweepsParams defines parameters for ListSweeps.
@@ -1896,6 +1976,12 @@ type ServerInterface interface {
 	// ListReconciliationReports Reconciliation passes, newest first
 	// (GET /admin/v1/reconciliation/reports)
 	ListReconciliationReports(w http.ResponseWriter, r *http.Request, params ListReconciliationReportsParams)
+	// GetRevenueReport What the exchange earned and what it paid the chain, per asset
+	// (GET /admin/v1/reports/revenue)
+	GetRevenueReport(w http.ResponseWriter, r *http.Request, params GetRevenueReportParams)
+	// GetRevenueReportCsv The same report as a CSV download
+	// (GET /admin/v1/reports/revenue.csv)
+	GetRevenueReportCsv(w http.ResponseWriter, r *http.Request, params GetRevenueReportCsvParams)
 	// ListSweeps Recent collections into the hot wallet
 	// (GET /admin/v1/sweeps)
 	ListSweeps(w http.ResponseWriter, r *http.Request, params ListSweepsParams)
@@ -2121,6 +2207,18 @@ func (_ Unimplemented) ListReconciliationBreaks(w http.ResponseWriter, r *http.R
 // ListReconciliationReports Reconciliation passes, newest first
 // (GET /admin/v1/reconciliation/reports)
 func (_ Unimplemented) ListReconciliationReports(w http.ResponseWriter, r *http.Request, params ListReconciliationReportsParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetRevenueReport What the exchange earned and what it paid the chain, per asset
+// (GET /admin/v1/reports/revenue)
+func (_ Unimplemented) GetRevenueReport(w http.ResponseWriter, r *http.Request, params GetRevenueReportParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetRevenueReportCsv The same report as a CSV download
+// (GET /admin/v1/reports/revenue.csv)
+func (_ Unimplemented) GetRevenueReportCsv(w http.ResponseWriter, r *http.Request, params GetRevenueReportCsvParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -3076,6 +3174,124 @@ func (siw *ServerInterfaceWrapper) ListReconciliationReports(w http.ResponseWrit
 	handler.ServeHTTP(w, r)
 }
 
+// GetRevenueReport operation middleware
+func (siw *ServerInterfaceWrapper) GetRevenueReport(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetRevenueReportParams
+
+	// ------------- Optional query parameter "from" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "from", r.URL.Query(), &params.From, runtime.BindQueryParameterOptions{Type: "string", Format: "date-time"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "from"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "from", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "to" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "to", r.URL.Query(), &params.To, runtime.BindQueryParameterOptions{Type: "string", Format: "date-time"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "to"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "to", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "asset" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "asset", r.URL.Query(), &params.Asset, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "asset"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "asset", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetRevenueReport(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetRevenueReportCsv operation middleware
+func (siw *ServerInterfaceWrapper) GetRevenueReportCsv(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetRevenueReportCsvParams
+
+	// ------------- Optional query parameter "from" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "from", r.URL.Query(), &params.From, runtime.BindQueryParameterOptions{Type: "string", Format: "date-time"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "from"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "from", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "to" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "to", r.URL.Query(), &params.To, runtime.BindQueryParameterOptions{Type: "string", Format: "date-time"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "to"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "to", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "asset" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "asset", r.URL.Query(), &params.Asset, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "asset"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "asset", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetRevenueReportCsv(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ListSweeps operation middleware
 func (siw *ServerInterfaceWrapper) ListSweeps(w http.ResponseWriter, r *http.Request) {
 
@@ -3830,6 +4046,12 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/admin/v1/hot-wallet", wrapper.GetHotWallet)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/admin/v1/reports/revenue", wrapper.GetRevenueReport)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/admin/v1/reports/revenue.csv", wrapper.GetRevenueReportCsv)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/admin/v1/reconciliation/reports", wrapper.ListReconciliationReports)
@@ -5882,6 +6104,152 @@ func (response ListReconciliationReports500ApplicationProblemPlusJSONResponse) V
 	return err
 }
 
+type GetRevenueReportRequestObject struct {
+	Params GetRevenueReportParams
+}
+
+type GetRevenueReportResponseObject interface {
+	VisitGetRevenueReportResponse(w http.ResponseWriter) error
+}
+
+type GetRevenueReport200JSONResponse RevenueReport
+
+func (response GetRevenueReport200JSONResponse) VisitGetRevenueReportResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetRevenueReport400ApplicationProblemPlusJSONResponse struct {
+	BadRequestApplicationProblemPlusJSONResponse
+}
+
+func (response GetRevenueReport400ApplicationProblemPlusJSONResponse) VisitGetRevenueReportResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetRevenueReport401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response GetRevenueReport401ApplicationProblemPlusJSONResponse) VisitGetRevenueReportResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetRevenueReport500ApplicationProblemPlusJSONResponse struct {
+	InternalErrorApplicationProblemPlusJSONResponse
+}
+
+func (response GetRevenueReport500ApplicationProblemPlusJSONResponse) VisitGetRevenueReportResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetRevenueReportCsvRequestObject struct {
+	Params GetRevenueReportCsvParams
+}
+
+type GetRevenueReportCsvResponseObject interface {
+	VisitGetRevenueReportCsvResponse(w http.ResponseWriter) error
+}
+
+type GetRevenueReportCsv200TextCsvResponse struct {
+	Body          io.Reader
+	ContentLength int64
+}
+
+func (response GetRevenueReportCsv200TextCsvResponse) VisitGetRevenueReportCsvResponse(w http.ResponseWriter) error {
+
+	w.Header().Set("Content-Type", "text/csv")
+	if response.ContentLength != 0 {
+		w.Header().Set("Content-Length", fmt.Sprint(response.ContentLength))
+	}
+	w.WriteHeader(200)
+
+	if closer, ok := response.Body.(io.ReadCloser); ok {
+		defer closer.Close()
+	}
+	_, err := io.Copy(w, response.Body)
+	return err
+}
+
+type GetRevenueReportCsv400ApplicationProblemPlusJSONResponse struct {
+	BadRequestApplicationProblemPlusJSONResponse
+}
+
+func (response GetRevenueReportCsv400ApplicationProblemPlusJSONResponse) VisitGetRevenueReportCsvResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetRevenueReportCsv401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response GetRevenueReportCsv401ApplicationProblemPlusJSONResponse) VisitGetRevenueReportCsvResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetRevenueReportCsv500ApplicationProblemPlusJSONResponse struct {
+	InternalErrorApplicationProblemPlusJSONResponse
+}
+
+func (response GetRevenueReportCsv500ApplicationProblemPlusJSONResponse) VisitGetRevenueReportCsvResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type ListSweepsRequestObject struct {
 	Params ListSweepsParams
 }
@@ -7332,6 +7700,12 @@ type StrictServerInterface interface {
 	// ListReconciliationReports Reconciliation passes, newest first
 	// (GET /admin/v1/reconciliation/reports)
 	ListReconciliationReports(ctx context.Context, request ListReconciliationReportsRequestObject) (ListReconciliationReportsResponseObject, error)
+	// GetRevenueReport What the exchange earned and what it paid the chain, per asset
+	// (GET /admin/v1/reports/revenue)
+	GetRevenueReport(ctx context.Context, request GetRevenueReportRequestObject) (GetRevenueReportResponseObject, error)
+	// GetRevenueReportCsv The same report as a CSV download
+	// (GET /admin/v1/reports/revenue.csv)
+	GetRevenueReportCsv(ctx context.Context, request GetRevenueReportCsvRequestObject) (GetRevenueReportCsvResponseObject, error)
 	// ListSweeps Recent collections into the hot wallet
 	// (GET /admin/v1/sweeps)
 	ListSweeps(ctx context.Context, request ListSweepsRequestObject) (ListSweepsResponseObject, error)
@@ -8206,6 +8580,58 @@ func (sh *strictHandler) ListReconciliationReports(w http.ResponseWriter, r *htt
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(ListReconciliationReportsResponseObject); ok {
 		if err := validResponse.VisitListReconciliationReportsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetRevenueReport operation middleware
+func (sh *strictHandler) GetRevenueReport(w http.ResponseWriter, r *http.Request, params GetRevenueReportParams) {
+	var request GetRevenueReportRequestObject
+
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetRevenueReport(ctx, request.(GetRevenueReportRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetRevenueReport")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetRevenueReportResponseObject); ok {
+		if err := validResponse.VisitGetRevenueReportResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetRevenueReportCsv operation middleware
+func (sh *strictHandler) GetRevenueReportCsv(w http.ResponseWriter, r *http.Request, params GetRevenueReportCsvParams) {
+	var request GetRevenueReportCsvRequestObject
+
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetRevenueReportCsv(ctx, request.(GetRevenueReportCsvRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetRevenueReportCsv")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetRevenueReportCsvResponseObject); ok {
+		if err := validResponse.VisitGetRevenueReportCsvResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

@@ -1332,6 +1332,52 @@ type ReloadRequest struct {
 	Reason string `json:"reason"`
 }
 
+// RevenueLine One asset's revenue and cost. Every amount is denominated in `asset` and nothing is converted between assets.
+type RevenueLine struct {
+	Asset string `json:"asset"`
+
+	// DepositFees Taken out of arriving deposits. Zero unless a rate is set.
+	DepositFees Amount `json:"deposit_fees"`
+
+	// Deposits Deposits that paid a fee.
+	Deposits int64 `json:"deposits"`
+
+	// GasExpense Every `gas_expense` debit in the period: withdrawals, sweeps and nonce fills alike. It is what the exchange paid the chain, whatever the reason, and it is always in the native coin.
+	GasExpense Amount `json:"gas_expense"`
+
+	// MakerFees Summed from the trade rows, which are the only record that knows which side was the maker.
+	MakerFees Amount `json:"maker_fees"`
+
+	// Net All the fees above minus `gas_expense`, within this asset only.
+	Net Amount `json:"net"`
+
+	// OtherFees Anything else credited to `fee_revenue` -- an operator adjustment posted against the account, or a fee source added later that this report does not know about yet. Zero in normal operation; it exists so revenue can never be silently missing from `net`.
+	OtherFees Amount `json:"other_fees"`
+
+	// TakerFees Decimal serialized as a string (NUMERIC(36,18)); never a JSON number.
+	//
+	// Example: 1990.00
+	TakerFees Amount `json:"taker_fees"`
+
+	// Trades Trades charged in this asset, including those charged zero -- which is every trade until an operator sets a rate.
+	Trades int64 `json:"trades"`
+
+	// WithdrawalFees Credited to `fee_revenue` when a withdrawal confirmed. A withdrawal that was refunded or never broadcast contributes nothing, because its fee went back to the account.
+	WithdrawalFees Amount `json:"withdrawal_fees"`
+
+	// Withdrawals Withdrawals that paid a fee. Zero-fee withdrawals post nothing and so cannot be counted here. Divide `gas_expense` by this to price the fee against what a withdrawal actually costs (§23.3).
+	Withdrawals int64 `json:"withdrawals"`
+}
+
+// RevenueReport defines model for RevenueReport.
+type RevenueReport struct {
+	From  time.Time     `json:"from"`
+	Lines []RevenueLine `json:"lines"`
+
+	// To Exclusive.
+	To time.Time `json:"to"`
+}
+
 // RotateSecretRequest defines model for RotateSecretRequest.
 type RotateSecretRequest struct {
 	// GraceHours How long the old secret keeps signing alongside the new one.
@@ -1643,6 +1689,15 @@ type MarketSymbol = string
 // Offset defines model for Offset.
 type Offset = int32
 
+// RevenueAsset defines model for RevenueAsset.
+type RevenueAsset = string
+
+// RevenueFrom defines model for RevenueFrom.
+type RevenueFrom = time.Time
+
+// RevenueTo defines model for RevenueTo.
+type RevenueTo = time.Time
+
 // UserID defines model for UserID.
 type UserID = string
 
@@ -1721,6 +1776,30 @@ type ListReconciliationBreaksParams struct {
 type ListReconciliationReportsParams struct {
 	Limit  *Limit  `form:"limit,omitempty" json:"limit,omitempty"`
 	Offset *Offset `form:"offset,omitempty" json:"offset,omitempty"`
+}
+
+// GetRevenueReportParams defines parameters for GetRevenueReport.
+type GetRevenueReportParams struct {
+	// From Start of the period, inclusive. Defaults to 30 days before `to`.
+	From *RevenueFrom `form:"from,omitempty" json:"from,omitempty"`
+
+	// To End of the period, exclusive. Defaults to now, so a report asked for twice in one day covers slightly different windows -- the boundary is the request, not the calendar.
+	To *RevenueTo `form:"to,omitempty" json:"to,omitempty"`
+
+	// Asset Narrow to one asset. Omit for every asset that had activity. Note that narrowing to an ERC-20 hides the gas its withdrawals cost, because gas is booked against the chain's native coin.
+	Asset *RevenueAsset `form:"asset,omitempty" json:"asset,omitempty"`
+}
+
+// GetRevenueReportCsvParams defines parameters for GetRevenueReportCsv.
+type GetRevenueReportCsvParams struct {
+	// From Start of the period, inclusive. Defaults to 30 days before `to`.
+	From *RevenueFrom `form:"from,omitempty" json:"from,omitempty"`
+
+	// To End of the period, exclusive. Defaults to now, so a report asked for twice in one day covers slightly different windows -- the boundary is the request, not the calendar.
+	To *RevenueTo `form:"to,omitempty" json:"to,omitempty"`
+
+	// Asset Narrow to one asset. Omit for every asset that had activity. Note that narrowing to an ERC-20 hides the gas its withdrawals cost, because gas is booked against the chain's native coin.
+	Asset *RevenueAsset `form:"asset,omitempty" json:"asset,omitempty"`
 }
 
 // ListSweepsParams defines parameters for ListSweeps.
@@ -2238,6 +2317,41 @@ type ClientInterface interface {
 	//
 	// Corresponds with GET /admin/v1/reconciliation/reports (the `ListReconciliationReports` operationId).
 	ListReconciliationReports(ctx context.Context, params *ListReconciliationReportsParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetRevenueReport What the exchange earned and what it paid the chain, per asset
+	//
+	// The three fee sources and the gas they cost, over a half-open period
+	// `[from, to)`, one row per asset (docs/plan-v1.0.md §23.5).
+	//
+	// **Trading fees come from the trade rows, not the ledger.** A settle
+	// entry credits `fee_revenue` with the same two numbers each trade
+	// carries, so counting both would double them -- and only the trade row
+	// records which side was the maker. Withdrawal and deposit fees are read
+	// from `fee_revenue` instead, because those have no other record.
+	//
+	// **Nothing is converted between assets.** Gas is paid in the chain's
+	// native coin whatever was withdrawn, so a USDC row shows fee revenue
+	// with no gas beneath it and the ETH row carries the gas for every
+	// withdrawal on the chain. `net` is the subtraction within one asset and
+	// means nothing across two; converting would need a price source, which
+	// v1.1 does not have.
+	//
+	// **Two clocks.** A trade is counted at the engine's command timestamp; a
+	// withdrawal or deposit fee at the moment the ledger booked it. A
+	// withdrawal is therefore counted when it *confirmed*, not when the user
+	// asked, so one that spans the end of the period lands in the next one.
+	//
+	// Omitting both bounds reports the last 30 days ending now.
+	//
+	// Corresponds with GET /admin/v1/reports/revenue (the `GetRevenueReport` operationId).
+	GetRevenueReport(ctx context.Context, params *GetRevenueReportParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetRevenueReportCsv The same report as a CSV download
+	//
+	// Identical numbers to `GET /admin/v1/reports/revenue`, one header row and one row per asset, amounts as the same decimal strings. Provided because a revenue report is something an operator takes somewhere else.
+	//
+	// Corresponds with GET /admin/v1/reports/revenue.csv (the `GetRevenueReportCsv` operationId).
+	GetRevenueReportCsv(ctx context.Context, params *GetRevenueReportCsvParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// ListSweeps Recent collections into the hot wallet
 	//
@@ -3249,6 +3363,61 @@ func (c *Client) ListReconciliationBreaks(ctx context.Context, params *ListRecon
 // Corresponds with GET /admin/v1/reconciliation/reports (the `ListReconciliationReports` operationId).
 func (c *Client) ListReconciliationReports(ctx context.Context, params *ListReconciliationReportsParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewListReconciliationReportsRequest(c.Server, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// GetRevenueReport What the exchange earned and what it paid the chain, per asset
+//
+// The three fee sources and the gas they cost, over a half-open period
+// `[from, to)`, one row per asset (docs/plan-v1.0.md §23.5).
+//
+// **Trading fees come from the trade rows, not the ledger.** A settle
+// entry credits `fee_revenue` with the same two numbers each trade
+// carries, so counting both would double them -- and only the trade row
+// records which side was the maker. Withdrawal and deposit fees are read
+// from `fee_revenue` instead, because those have no other record.
+//
+// **Nothing is converted between assets.** Gas is paid in the chain's
+// native coin whatever was withdrawn, so a USDC row shows fee revenue
+// with no gas beneath it and the ETH row carries the gas for every
+// withdrawal on the chain. `net` is the subtraction within one asset and
+// means nothing across two; converting would need a price source, which
+// v1.1 does not have.
+//
+// **Two clocks.** A trade is counted at the engine's command timestamp; a
+// withdrawal or deposit fee at the moment the ledger booked it. A
+// withdrawal is therefore counted when it *confirmed*, not when the user
+// asked, so one that spans the end of the period lands in the next one.
+//
+// Omitting both bounds reports the last 30 days ending now.
+//
+// Corresponds with GET /admin/v1/reports/revenue (the `GetRevenueReport` operationId).
+func (c *Client) GetRevenueReport(ctx context.Context, params *GetRevenueReportParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetRevenueReportRequest(c.Server, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// GetRevenueReportCsv The same report as a CSV download
+//
+// Identical numbers to `GET /admin/v1/reports/revenue`, one header row and one row per asset, amounts as the same decimal strings. Provided because a revenue report is something an operator takes somewhere else.
+//
+// Corresponds with GET /admin/v1/reports/revenue.csv (the `GetRevenueReportCsv` operationId).
+func (c *Client) GetRevenueReportCsv(ctx context.Context, params *GetRevenueReportCsvParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetRevenueReportCsvRequest(c.Server, params)
 	if err != nil {
 		return nil, err
 	}
@@ -5135,6 +5304,162 @@ func NewListReconciliationReportsRequest(server string, params *ListReconciliati
 	return req, nil
 }
 
+// NewGetRevenueReportRequest constructs an http.Request for the GetRevenueReport method
+func NewGetRevenueReportRequest(server string, params *GetRevenueReportParams) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/admin/v1/reports/revenue")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		// queryValues collects non-styled parameters (passthrough, JSON)
+		// that are safe to round-trip through url.Values.Encode().
+		queryValues := queryURL.Query()
+		// rawQueryFragments collects pre-encoded query fragments from
+		// styled parameters, preserving literal commas as delimiters
+		// per the OpenAPI spec (e.g. "color=blue,black,brown").
+		var rawQueryFragments []string
+
+		if params.From != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "from", *params.From, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: "date-time"}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.To != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "to", *params.To, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: "date-time"}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.Asset != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "asset", *params.Asset, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if encoded := queryValues.Encode(); encoded != "" {
+			rawQueryFragments = append(rawQueryFragments, encoded)
+		}
+		queryURL.RawQuery = strings.Join(rawQueryFragments, "&")
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewGetRevenueReportCsvRequest constructs an http.Request for the GetRevenueReportCsv method
+func NewGetRevenueReportCsvRequest(server string, params *GetRevenueReportCsvParams) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/admin/v1/reports/revenue.csv")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		// queryValues collects non-styled parameters (passthrough, JSON)
+		// that are safe to round-trip through url.Values.Encode().
+		queryValues := queryURL.Query()
+		// rawQueryFragments collects pre-encoded query fragments from
+		// styled parameters, preserving literal commas as delimiters
+		// per the OpenAPI spec (e.g. "color=blue,black,brown").
+		var rawQueryFragments []string
+
+		if params.From != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "from", *params.From, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: "date-time"}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.To != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "to", *params.To, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: "date-time"}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.Asset != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "asset", *params.Asset, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if encoded := queryValues.Encode(); encoded != "" {
+			rawQueryFragments = append(rawQueryFragments, encoded)
+		}
+		queryURL.RawQuery = strings.Join(rawQueryFragments, "&")
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
 // NewListSweepsRequest constructs an http.Request for the ListSweeps method
 func NewListSweepsRequest(server string, params *ListSweepsParams) (*http.Request, error) {
 	var err error
@@ -6426,6 +6751,45 @@ type ClientWithResponsesInterface interface {
 	//
 	// Corresponds with GET /admin/v1/reconciliation/reports (the `ListReconciliationReports` operationId).
 	ListReconciliationReportsWithResponse(ctx context.Context, params *ListReconciliationReportsParams, reqEditors ...RequestEditorFn) (*ListReconciliationReportsResponse, error)
+
+	// GetRevenueReportWithResponse What the exchange earned and what it paid the chain, per asset
+	//
+	// The three fee sources and the gas they cost, over a half-open period
+	// `[from, to)`, one row per asset (docs/plan-v1.0.md §23.5).
+	//
+	// **Trading fees come from the trade rows, not the ledger.** A settle
+	// entry credits `fee_revenue` with the same two numbers each trade
+	// carries, so counting both would double them -- and only the trade row
+	// records which side was the maker. Withdrawal and deposit fees are read
+	// from `fee_revenue` instead, because those have no other record.
+	//
+	// **Nothing is converted between assets.** Gas is paid in the chain's
+	// native coin whatever was withdrawn, so a USDC row shows fee revenue
+	// with no gas beneath it and the ETH row carries the gas for every
+	// withdrawal on the chain. `net` is the subtraction within one asset and
+	// means nothing across two; converting would need a price source, which
+	// v1.1 does not have.
+	//
+	// **Two clocks.** A trade is counted at the engine's command timestamp; a
+	// withdrawal or deposit fee at the moment the ledger booked it. A
+	// withdrawal is therefore counted when it *confirmed*, not when the user
+	// asked, so one that spans the end of the period lands in the next one.
+	//
+	// Omitting both bounds reports the last 30 days ending now.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /admin/v1/reports/revenue (the `GetRevenueReport` operationId).
+	GetRevenueReportWithResponse(ctx context.Context, params *GetRevenueReportParams, reqEditors ...RequestEditorFn) (*GetRevenueReportResponse, error)
+
+	// GetRevenueReportCsvWithResponse The same report as a CSV download
+	//
+	// Identical numbers to `GET /admin/v1/reports/revenue`, one header row and one row per asset, amounts as the same decimal strings. Provided because a revenue report is something an operator takes somewhere else.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /admin/v1/reports/revenue.csv (the `GetRevenueReportCsv` operationId).
+	GetRevenueReportCsvWithResponse(ctx context.Context, params *GetRevenueReportCsvParams, reqEditors ...RequestEditorFn) (*GetRevenueReportCsvResponse, error)
 
 	// ListSweepsWithResponse Recent collections into the hot wallet
 	//
@@ -8468,6 +8832,123 @@ func (r ListReconciliationReportsResponse) ContentType() string {
 	return ""
 }
 
+type GetRevenueReportResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *RevenueReport
+	// ApplicationProblemJSON400 the response for an HTTP 400 `application/problem+json` response
+	ApplicationProblemJSON400 *BadRequest
+	// ApplicationProblemJSON401 the response for an HTTP 401 `application/problem+json` response
+	ApplicationProblemJSON401 *Unauthorized
+	// ApplicationProblemJSON500 the response for an HTTP 500 `application/problem+json` response
+	ApplicationProblemJSON500 *InternalError
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r GetRevenueReportResponse) GetJSON200() *RevenueReport {
+	return r.JSON200
+}
+
+// GetApplicationProblemJSON400 returns the response for an HTTP 400 `application/problem+json` response
+func (r GetRevenueReportResponse) GetApplicationProblemJSON400() *BadRequest {
+	return r.ApplicationProblemJSON400
+}
+
+// GetApplicationProblemJSON401 returns the response for an HTTP 401 `application/problem+json` response
+func (r GetRevenueReportResponse) GetApplicationProblemJSON401() *Unauthorized {
+	return r.ApplicationProblemJSON401
+}
+
+// GetApplicationProblemJSON500 returns the response for an HTTP 500 `application/problem+json` response
+func (r GetRevenueReportResponse) GetApplicationProblemJSON500() *InternalError {
+	return r.ApplicationProblemJSON500
+}
+
+// GetBody returns the raw response body bytes
+func (r GetRevenueReportResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r GetRevenueReportResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetRevenueReportResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r GetRevenueReportResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type GetRevenueReportCsvResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// ApplicationProblemJSON400 the response for an HTTP 400 `application/problem+json` response
+	ApplicationProblemJSON400 *BadRequest
+	// ApplicationProblemJSON401 the response for an HTTP 401 `application/problem+json` response
+	ApplicationProblemJSON401 *Unauthorized
+	// ApplicationProblemJSON500 the response for an HTTP 500 `application/problem+json` response
+	ApplicationProblemJSON500 *InternalError
+}
+
+// GetApplicationProblemJSON400 returns the response for an HTTP 400 `application/problem+json` response
+func (r GetRevenueReportCsvResponse) GetApplicationProblemJSON400() *BadRequest {
+	return r.ApplicationProblemJSON400
+}
+
+// GetApplicationProblemJSON401 returns the response for an HTTP 401 `application/problem+json` response
+func (r GetRevenueReportCsvResponse) GetApplicationProblemJSON401() *Unauthorized {
+	return r.ApplicationProblemJSON401
+}
+
+// GetApplicationProblemJSON500 returns the response for an HTTP 500 `application/problem+json` response
+func (r GetRevenueReportCsvResponse) GetApplicationProblemJSON500() *InternalError {
+	return r.ApplicationProblemJSON500
+}
+
+// GetBody returns the raw response body bytes
+func (r GetRevenueReportCsvResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r GetRevenueReportCsvResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetRevenueReportCsvResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r GetRevenueReportCsvResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
 type ListSweepsResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -10252,6 +10733,57 @@ func (c *ClientWithResponses) ListReconciliationReportsWithResponse(ctx context.
 	return ParseListReconciliationReportsResponse(rsp)
 }
 
+// GetRevenueReportWithResponse What the exchange earned and what it paid the chain, per asset
+//
+// The three fee sources and the gas they cost, over a half-open period
+// `[from, to)`, one row per asset (docs/plan-v1.0.md §23.5).
+//
+// **Trading fees come from the trade rows, not the ledger.** A settle
+// entry credits `fee_revenue` with the same two numbers each trade
+// carries, so counting both would double them -- and only the trade row
+// records which side was the maker. Withdrawal and deposit fees are read
+// from `fee_revenue` instead, because those have no other record.
+//
+// **Nothing is converted between assets.** Gas is paid in the chain's
+// native coin whatever was withdrawn, so a USDC row shows fee revenue
+// with no gas beneath it and the ETH row carries the gas for every
+// withdrawal on the chain. `net` is the subtraction within one asset and
+// means nothing across two; converting would need a price source, which
+// v1.1 does not have.
+//
+// **Two clocks.** A trade is counted at the engine's command timestamp; a
+// withdrawal or deposit fee at the moment the ledger booked it. A
+// withdrawal is therefore counted when it *confirmed*, not when the user
+// asked, so one that spans the end of the period lands in the next one.
+//
+// Omitting both bounds reports the last 30 days ending now.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /admin/v1/reports/revenue (the `GetRevenueReport` operationId).
+func (c *ClientWithResponses) GetRevenueReportWithResponse(ctx context.Context, params *GetRevenueReportParams, reqEditors ...RequestEditorFn) (*GetRevenueReportResponse, error) {
+	rsp, err := c.GetRevenueReport(ctx, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetRevenueReportResponse(rsp)
+}
+
+// GetRevenueReportCsvWithResponse The same report as a CSV download
+//
+// Identical numbers to `GET /admin/v1/reports/revenue`, one header row and one row per asset, amounts as the same decimal strings. Provided because a revenue report is something an operator takes somewhere else.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /admin/v1/reports/revenue.csv (the `GetRevenueReportCsv` operationId).
+func (c *ClientWithResponses) GetRevenueReportCsvWithResponse(ctx context.Context, params *GetRevenueReportCsvParams, reqEditors ...RequestEditorFn) (*GetRevenueReportCsvResponse, error) {
+	rsp, err := c.GetRevenueReportCsv(ctx, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetRevenueReportCsvResponse(rsp)
+}
+
 // ListSweepsWithResponse Recent collections into the hot wallet
 //
 // Sweeps move deposits from the per-account addresses they landed on to the hot wallet withdrawals are paid from (docs/plan-v1.0.md §6.4.3). No user balance is involved: a sweep moves the exchange's own custody between two of its own house accounts.
@@ -12014,6 +12546,93 @@ func ParseListReconciliationReportsResponse(rsp *http.Response) (*ListReconcilia
 			return nil, err
 		}
 		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON500 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetRevenueReportResponse parses an HTTP response from a GetRevenueReportWithResponse call
+func ParseGetRevenueReportResponse(rsp *http.Response) (*GetRevenueReportResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetRevenueReportResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest RevenueReport
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest BadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON500 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetRevenueReportCsvResponse parses an HTTP response from a GetRevenueReportCsvWithResponse call
+func ParseGetRevenueReportCsvResponse(rsp *http.Response) (*GetRevenueReportCsvResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetRevenueReportCsvResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest BadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON400 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
 		var dest Unauthorized

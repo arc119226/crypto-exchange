@@ -297,7 +297,7 @@ func (w *Worker) settleFailed(ctx context.Context, row sqlcgen.ChainWithdrawal, 
 	}
 	return inTx(ctx, w.db, func(tx pgx.Tx) error {
 		if _, _, err := w.ledger.Post(ctx, tx, ledger.Entry{
-			IdempotencyKey: fmt.Sprintf("withdrawal:%s:%s", p.Action, row.ID), Kind: "withdrawal",
+			IdempotencyKey: fmt.Sprintf("withdrawal:%s:%s", p.Action, row.ID), Kind: ledger.KindWithdrawal,
 			RefType: "withdrawal", RefID: row.ID, Reason: string(p.Action) + " after an on-chain failure",
 			CorrelationID: deref(row.CorrelationID),
 			Postings:      postings,
@@ -382,7 +382,7 @@ func (w *Worker) settleCancelled(ctx context.Context, row sqlcgen.ChainWithdrawa
 	}
 	return inTx(ctx, w.db, func(tx pgx.Tx) error {
 		if _, _, err := w.ledger.Post(ctx, tx, ledger.Entry{
-			IdempotencyKey: "withdrawal:cancelled:" + row.ID, Kind: "withdrawal",
+			IdempotencyKey: "withdrawal:cancelled:" + row.ID, Kind: ledger.KindWithdrawal,
 			RefType: "withdrawal", RefID: row.ID, Reason: "cancelled by a same-nonce transaction",
 			CorrelationID: deref(row.CorrelationID),
 			Postings:      cancellationPostings(row, pending, amount, fee),

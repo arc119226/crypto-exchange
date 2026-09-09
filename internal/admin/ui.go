@@ -121,6 +121,8 @@ func (u *UI) mount(r chi.Router) {
 			admin.Get("/admin/ledger", u.ledger)
 			admin.Post("/admin/ledger/adjustments", u.createAdjustment)
 			admin.Post("/admin/ledger/house-adjustments", u.createHouseAdjustment)
+			admin.Get("/admin/revenue", u.revenue)
+			admin.Get("/admin/revenue.csv", u.revenueCSV)
 			admin.Get("/admin/withdrawals", u.withdrawals)
 			admin.Post("/admin/withdrawals/{id}/review", u.reviewWithdrawalPage)
 			admin.Post("/admin/withdrawals/{id}/resolve", u.resolveWithdrawalPage)

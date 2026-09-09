@@ -331,7 +331,7 @@ func (s *Scanner) credit(ctx context.Context, row sqlcgen.ChainDeposit, confirma
 	return s.inTx(ctx, func(tx pgx.Tx) error {
 		if _, _, err := s.ledger.Post(ctx, tx, ledger.Entry{
 			IdempotencyKey: fmt.Sprintf("deposit:%d:%s:%d", row.ChainID, row.TxHash, row.LogIndex),
-			Kind:           "deposit",
+			Kind:           ledger.KindDeposit,
 			RefType:        "deposit", RefID: row.ID, Reason: "on-chain deposit",
 			CorrelationID: deref(row.CorrelationID),
 			Postings:      postings,

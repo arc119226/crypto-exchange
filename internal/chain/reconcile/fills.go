@@ -79,7 +79,7 @@ func (w *Worker) bookOneFill(ctx context.Context, fill sqlcgen.ChainNonceFill, h
 		if gas.IsPositive() {
 			if _, _, err := w.ledger.Post(ctx, tx, ledger.Entry{
 				IdempotencyKey: fmt.Sprintf("nonce_fill:gas:%d:%d", fill.ChainID, fill.Nonce),
-				Kind:           "gas", RefType: "nonce_fill", RefID: fmt.Sprint(fill.ID),
+				Kind:           ledger.KindGas, RefType: "nonce_fill", RefID: fmt.Sprint(fill.ID),
 				Reason: "gas for a nonce gap fill",
 				Postings: []ledger.Posting{
 					{AccountID: gasAccount, Asset: w.cfg.NativeAsset, Bucket: ledger.BucketHouse, Direction: ledger.Debit, Amount: gas},
