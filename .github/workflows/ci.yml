@@ -350,6 +350,25 @@ jobs:
       # the stack from `make e2e` is still up (KEEP=1): register in the
       # browser, fund through the admin faucet, trade, watch both streams
       - name: web/trade — Playwright smoke against the compose stack
+        env:
+          # Two different things hide inside `playwright install --with-deps`,
+          # and only one of them is a problem on a self-hosted runner:
+          #
+          #   the browser binary   no privileges, no distro dependency, and a
+          #                        no-op once ~/.cache/ms-playwright has it
+          #   --with-deps          shells out to `sudo -- sh -c "apt-get ..."`,
+          #                        and only knows the Ubuntu releases Playwright
+          #                        ships a package list for
+          #
+          # On a GitHub-hosted runner both are free: the VM is root-capable and
+          # discarded afterwards. On somebody's actual computer the second one
+          # would mean granting the runner's account passwordless sudo, so the
+          # machine installs those libraries once at setup
+          # (docs/guides/self-hosted-runner.md) and CI asks for the browser
+          # alone. Asking for the browser every run rather than skipping the
+          # step entirely is deliberate: a runner whose cache was wiped heals
+          # itself instead of going red.
+          PLAYWRIGHT_INSTALL_DEPS: ${{ vars.CI_RUNNER == '' && '1' || '0' }}
         run: make web-e2e
       # the stack is still up: back it up into the compose MinIO, restore the
       # dump into a throwaway database, check it, and print the RTO
