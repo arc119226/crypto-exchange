@@ -91,6 +91,15 @@ func TestInputValidation(t *testing.T) {
 	badM = m
 	badM.SelfTradePolicy = "reject"
 	assert.ErrorIs(t, badM.Validate(), ErrInvalid)
+	// The engine implements cancel_newest and nothing else: matching rejects
+	// cancel_oldest outright, and allow suppresses nothing, so a market saved
+	// with either is a market the engine cannot run. Validation is the only
+	// place that can say so before the row exists.
+	for _, stp := range []string{STPCancelOldest, STPAllow} {
+		badM = m
+		badM.SelfTradePolicy = stp
+		assert.ErrorIs(t, badM.Validate(), ErrInvalid, "self_trade_policy %q is not implemented", stp)
+	}
 	badM = m
 	badM.Status = "open"
 	assert.ErrorIs(t, badM.Validate(), ErrInvalid)

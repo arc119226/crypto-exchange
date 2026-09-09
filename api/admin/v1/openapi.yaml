@@ -1842,6 +1842,10 @@ components:
           type: string
         self_trade_policy:
           type: string
+          enum: [cancel_newest]
+          description: >
+            The only policy the engine implements. The Market response stays an
+            unconstrained string so rows written before this enum can be read.
         status:
           $ref: "#/components/schemas/MarketStatus"
         reason:

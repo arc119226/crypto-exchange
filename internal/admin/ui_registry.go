@@ -19,8 +19,11 @@ import (
 var (
 	assetStatuses  = []string{registry.AssetActive, registry.AssetDisabled}
 	marketStatuses = []string{registry.MarketActive, registry.MarketHalted, registry.MarketCancelOnly, registry.MarketDelisted}
-	stpPolicies    = []string{registry.STPCancelNewest, registry.STPCancelOldest, registry.STPAllow}
-	kycLevels      = []int{0, 1, 2}
+	// One entry, not three: cancel_oldest and allow are strings the column
+	// accepts but the engine cannot run (see registry.MarketInput.Validate).
+	// Offering them here was a way to take every market down from a dropdown.
+	stpPolicies = []string{registry.STPCancelNewest}
+	kycLevels   = []int{0, 1, 2}
 )
 
 type assetsData struct {
