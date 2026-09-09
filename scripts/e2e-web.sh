@@ -5,11 +5,20 @@
 # (admin) with the .env that gen-dev-secrets wrote; on a laptop point
 # API_URL / WS_URL / ADMIN_URL / ADMIN_API_KEY at whatever is running.
 #
-# Playwright is pinned in web/trade/package.json; the Chromium it needs is
-# installed here unless PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD says a matching one
-# already exists (PLAYWRIGHT_BROWSERS_PATH).
+# Playwright is pinned in web/trade/package.json, and its Chromium used to be
+# downloaded twice: once by @playwright/test's postinstall during `npm ci`,
+# and again by `playwright install` below. The postinstall copy was never the
+# one used, because only the explicit install can also fetch the system
+# libraries the browser needs, so it is switched off unconditionally.
+#
+# `playwright install` is a no-op when a matching browser is already in
+# PLAYWRIGHT_BROWSERS_PATH (~/.cache/ms-playwright by default), so on a
+# machine that keeps its home directory between runs -- a laptop, or a
+# self-hosted CI runner -- the download happens once, ever.
 set -euo pipefail
 cd "$(dirname "$0")/../web/trade"
+
+export PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
 
 export API_URL="${API_URL:-http://localhost:8080}"
 export WS_URL="${WS_URL:-ws://localhost:8081}"
@@ -21,8 +30,6 @@ fi
 [[ -n "${ADMIN_API_KEY:-}" ]] || { echo "e2e-web: ADMIN_API_KEY is required (the faucet)" >&2; exit 2; }
 
 npm ci --no-fund --no-audit
-if [[ "${PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD:-0}" != "1" ]]; then
-  npx playwright install --with-deps chromium
-fi
+npx playwright install --with-deps chromium
 npm run build
 npx playwright test "$@"

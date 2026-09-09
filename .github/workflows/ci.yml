@@ -357,11 +357,15 @@ jobs:
       - name: backup and restore drill
         shell: bash
         run: make backup-drill 2>&1 | tee backup-drill.log
+      # Every artifact here is for reading a failure. The repository default
+      # retention is 90 days, and the drill log used to upload on success too,
+      # where the RTO it reports is already in the step output above.
       - uses: actions/upload-artifact@v4
-        if: always()
+        if: failure()
         with:
           name: backup-drill-log
           path: backup-drill.log
+          retention-days: 7
           if-no-files-found: ignore
       - uses: actions/upload-artifact@v4
         if: failure()
@@ -370,6 +374,7 @@ jobs:
           path: |
             web/trade/playwright-report
             web/trade/test-results
+          retention-days: 7
           if-no-files-found: ignore
       - name: collect container logs
         if: always()
@@ -379,6 +384,7 @@ jobs:
         with:
           name: e2e-compose-logs
           path: compose-logs.txt
+          retention-days: 7
           if-no-files-found: ignore
       - name: tear down
         if: always()
@@ -488,6 +494,7 @@ jobs:
         with:
           name: helm-kind-logs
           path: kind-logs
+          retention-days: 7
           if-no-files-found: ignore
       - name: delete the cluster
         if: always()
