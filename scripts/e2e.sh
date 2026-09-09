@@ -71,7 +71,7 @@ export EXCHANGE_API_URL="$API_URL" EXCHANGE_ADMIN_URL="$ADMIN_URL" EXCHANGE_ADMI
 CTL=./bin/exchangectl
 
 log "starting infra + one container per role"
-"${COMPOSE[@]}" up -d --build --wait
+"${COMPOSE[@]}" up -d --build --wait --wait-timeout 600
 "${COMPOSE[@]}" ps
 
 log "the engine serves the command bus"
@@ -429,7 +429,7 @@ EXCHANGE_TOKEN=$(echo "$session" | jq -r .access_token)
 before=$("$CTL" book ETH-USDC --output json | jq -S 'del(.last_seq)')
 
 docker kill -s KILL "$("${COMPOSE[@]}" ps -q exchange-engine)"
-"${COMPOSE[@]}" up -d --wait exchange-engine
+"${COMPOSE[@]}" up -d --wait --wait-timeout 180 exchange-engine
 after=""
 for _ in $(seq 1 30); do
   after=$("$CTL" book ETH-USDC --output json 2>/dev/null | jq -S 'del(.last_seq)' || true)
@@ -454,7 +454,7 @@ EXCHANGE_API_URL="$API_URL" EXCHANGE_WS_URL="${WS_URL:-ws://localhost:8081}" EXC
 burst=$!
 sleep 4
 docker kill -s KILL "$("${COMPOSE[@]}" ps -q exchange-engine)"
-"${COMPOSE[@]}" up -d --wait exchange-engine
+"${COMPOSE[@]}" up -d --wait --wait-timeout 180 exchange-engine
 wait "$burst" || { echo "loadgen failed during the burst"; cat "$burst_dir/burst.err"; exit 1; }
 jq '{orders_sent, orders_ok, unavailable_503, errors}' "$burst_dir/burst.json"
 psql_check() {
