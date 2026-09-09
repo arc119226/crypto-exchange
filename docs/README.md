@@ -208,6 +208,7 @@ docs                  計畫、審查、ADR、領域文件、runbooks/(四段式
 | [`docs/loadtest.md`](loadtest.md) | 本機壓測:Phase 6 的四組 run、瓶頸(每命令 17 次往返);§8 Phase 7 group commit 之後再量一次(3 次往返、266 orders/s) |
 | [`docs/runbooks/`](runbooks/) | 九本四段式(症狀 / 檢查指令 / 處置 / 驗證)營運手冊:engine 重啟、卡住的提現、reorg 告警、熱錢包低水位、對帳差異、備份還原、密鑰輪替、beta 部署、admin TOTP |
 | [`docs/guides/sepolia.md`](guides/sepolia.md) | 從零到 Sepolia 實跑的教學(4d 的逐筆交易、gas 與區塊) |
+| [`docs/guides/self-hosted-runner.md`](guides/self-hosted-runner.md) | 把 CI 搬到自己的機器:為什麼私有倉庫的帳單是額度的 7.8 倍、Windows 11 + WSL2 + Docker Desktop 的完整步驟(Linux VPS 亦可)、`vars.CI_RUNNER` 一鍵切換與回退、共用 daemon 的安全清理 |
 | [`docs/beta-checklist.md`](beta-checklist.md) | Beta 上線檢查表:這個 beta 的限制(單機、RPO 24h、無 PITR)、上線前的勾選項、運維節奏、刻意沒做的 |
 | [`docs/release.md`](release.md) | 發布:`vX.Y.Z` tag 做什麼、版本斷言、`make release-check`、失敗時怎麼辦 |
 | [`docs/screenshots/`](screenshots/) | 後台每一頁的截圖(`make screenshots` 產生)與參考前台的交易頁 / 錢包頁;新手 README 引用其中兩張 |

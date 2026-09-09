@@ -64,6 +64,27 @@ on:
 #
 # Tags are untouched: a release is verified on its own, in full.
 
+# Where the jobs run.
+#
+# This repository is private, so every minute of a GitHub-hosted runner is
+# billed. Measured over the first 3.2 days, 88 runs: 2,492 billable minutes,
+# which annualises to about 23,400 a month against a 3,000-minute allowance.
+# The arithmetic does not work at any optimisation level -- 810 runs a month
+# into 3,000 minutes is 3.7 minutes per run, and one `go build -race` plus a
+# testcontainers suite is already past that. So the default is a self-hosted
+# runner, and the workflow only needs a repository variable to say so:
+#
+#   Settings -> Secrets and variables -> Actions -> Variables
+#   CI_RUNNER = exchange-ci        (the label given to the runner)
+#
+# Unset the variable and every job falls back to ubuntu-latest, so a dead
+# VPS costs money rather than a red X, and recovery is one click with no
+# commit. docs/guides/self-hosted-runner.md has the machine setup.
+#
+# release stays pinned to ubuntu-latest: it publishes to ghcr and cuts the
+# GitHub Release, it runs a handful of times a month, and a release should
+# not depend on one person's spare machine being awake.
+
 # Every job carries a timeout-minutes about 2.5x its measured average. The
 # default is 360 minutes, and this workflow waits on things that have no upper
 # bound of their own -- compose --wait, kubectl --wait=true, and the two until
@@ -86,7 +107,7 @@ jobs:
   lint:
     name: lint
     timeout-minutes: 15
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
     # Not run on a merge to main -- see "what a merge to main runs" at the
     # top of this file. Tags still run everything.
     if: ${{ github.event_name != 'push' || github.ref != 'refs/heads/main' }}
@@ -114,7 +135,7 @@ jobs:
   unit:
     name: unit
     timeout-minutes: 20
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
     # Not run on a merge to main -- see "what a merge to main runs" at the
     # top of this file. Tags still run everything.
     if: ${{ github.event_name != 'push' || github.ref != 'refs/heads/main' }}
@@ -167,7 +188,7 @@ jobs:
     # unit is skipped on a merge to main, and a skipped dependency would
     # otherwise skip this too -- which is the one job the merge exists for.
     if: ${{ !cancelled() && github.event_name == 'push' && (needs.unit.result == 'success' || needs.unit.result == 'skipped') }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -195,7 +216,7 @@ jobs:
   fast-checks:
     name: fast-checks
     timeout-minutes: 15
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
     # Not run on a merge to main -- see "what a merge to main runs" at the
     # top of this file. Tags still run everything.
     if: ${{ github.event_name != 'push' || github.ref != 'refs/heads/main' }}
@@ -252,7 +273,7 @@ jobs:
     name: integration
     timeout-minutes: 30
     needs: [lint, unit]
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
     # Not run on a merge to main -- see "what a merge to main runs" at the
     # top of this file. Tags still run everything.
     if: ${{ github.event_name != 'push' || github.ref != 'refs/heads/main' }}
@@ -268,12 +289,16 @@ jobs:
         env:
           CI: "true" # a missing Docker daemon fails instead of skipping
         run: make test-integration
+      # a self-hosted runner keeps everything this job built; see the action
+      - name: reclaim disk
+        if: ${{ always() && vars.CI_RUNNER != '' }}
+        uses: ./.github/actions/reclaim-disk
 
   e2e:
     name: e2e
     timeout-minutes: 25
     needs: [integration]
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
     # Not run on a merge to main -- see "what a merge to main runs" at the
     # top of this file. Tags still run everything.
     if: ${{ github.event_name != 'push' || github.ref != 'refs/heads/main' }}
@@ -335,12 +360,16 @@ jobs:
       - name: tear down
         if: always()
         run: docker compose -f deploy/compose/compose.yaml --env-file .env --profile infra --profile app --profile backup down -v --remove-orphans || true
+      # a self-hosted runner keeps everything this job built; see the action
+      - name: reclaim disk
+        if: ${{ always() && vars.CI_RUNNER != '' }}
+        uses: ./.github/actions/reclaim-disk
 
   helm:
     name: helm
     timeout-minutes: 25
     needs: [integration]
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
     # Not run on a merge to main -- see "what a merge to main runs" at the
     # top of this file. Tags still run everything.
     if: ${{ github.event_name != 'push' || github.ref != 'refs/heads/main' }}
@@ -431,6 +460,10 @@ jobs:
       - name: delete the cluster
         if: always()
         run: kind delete cluster --name "$KIND_CLUSTER" || true
+      # a self-hosted runner keeps everything this job built; see the action
+      - name: reclaim disk
+        if: ${{ always() && vars.CI_RUNNER != '' }}
+        uses: ./.github/actions/reclaim-disk
 
   image:
     name: image
@@ -440,7 +473,7 @@ jobs:
     # a merge to main. A real integration failure still stops it, and
     # !cancelled() rather than always() so a cancelled run cannot publish.
     if: ${{ !cancelled() && (needs.integration.result == 'success' || needs.integration.result == 'skipped') }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
     permissions:
       contents: read
       packages: write
@@ -564,6 +597,10 @@ jobs:
           tags: ${{ steps.meta-backup.outputs.tags }}
           labels: ${{ steps.meta-backup.outputs.labels }}
           cache-from: type=gha,scope=backup
+      # a self-hosted runner keeps everything this job built; see the action
+      - name: reclaim disk
+        if: ${{ always() && vars.CI_RUNNER != '' }}
+        uses: ./.github/actions/reclaim-disk
 
   # A v* tag is a release (docs/release.md): the images are already on ghcr
   # (image pushes on every push event, a tag included), the chart has run on
