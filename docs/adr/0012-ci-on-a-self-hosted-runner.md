@@ -60,7 +60,7 @@ runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
 
 **第三個實例只買到約半分鐘**,因為它只是讓 `image` 不必等 `e2e`,而兩者相加仍短於 `helm`。所以是兩個,不是三個。
 
-兩個實例共用同一個 Docker daemon,所以**每一個 prune 都必須帶 `until` 過濾**:`image` job 裡一句沒有過濾的 `docker system prune -a` 會刪掉旁邊 `e2e` job 正在用的容器與 image。`.github/actions/reclaim-disk/action.yml` 因此是 `container prune --filter until=6h`、`image prune --filter until=72h`、`builder prune --filter until=72h`,而且完全不碰 volume——`docker volume prune` 沒有 `until`,分不出死的和活的。volume 交給 `compose down -v`、testcontainers 的 Ryuk,和停掉 runner 之後的每週深度清理。
+兩個實例共用同一個 Docker daemon,所以**每一個 prune 都必須帶 `until` 過濾**:`image` job 裡一句沒有過濾的 `docker system prune -a` 會刪掉旁邊 `e2e` job 正在用的容器與 image。`.github/actions/reclaim-disk/action.yml` 因此是 `container prune --filter until=6h`、`image prune --filter until=72h`、`builder prune --filter until=72h`、`network prune --filter until=6h`,而且完全不碰 volume——`docker volume prune` 沒有 `until`,分不出死的和活的。volume 交給 `compose down -v`、testcontainers 的 Ryuk,和停掉 runner 之後的每週深度清理。
 
 清理步驟只在 `vars.CI_RUNNER != ''` 時執行:托管 runner 整台都會被丟掉,在上面清理是花錢整理一台即將刪除的 VM。
 
