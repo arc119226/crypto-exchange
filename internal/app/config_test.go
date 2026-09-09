@@ -21,6 +21,7 @@ func clearEnv(t *testing.T) {
 	for _, k := range []string{"EXCHANGE_ENV", "TENANT_ID", "LOG_LEVEL", "OPS_ADDR", "HTTP_ADDR", "DATABASE_URL", "DATABASE_URL_FILE",
 		"DATABASE_MAX_CONNS", "DATABASE_CONNECT_TIMEOUT", "NATS_URL", "REDIS_ADDR", "REDIS_PASSWORD", "ETH_RPC_URL", "ETH_CHAIN_ID",
 		"ETH_RECONCILE_INTERVAL", "ETH_RECONCILE_ENABLED", "ETH_HOT_WALLET_MIN", "ETH_SWEEP_INTERVAL",
+		"MAINNET_ACKNOWLEDGED", "WALLET_SIGNER_KIND",
 		"JWT_PRIVATE_KEY_FILE", "JWT_JWKS_URL", "SHUTDOWN_DRAIN_DELAY", "SHUTDOWN_TIMEOUT"} {
 		t.Setenv(k, "")
 		_ = os.Unsetenv(k)
@@ -237,5 +238,104 @@ func TestLoadConfigRefusesAMeaninglessPreviousKey(t *testing.T) {
 		}
 		assert.Contains(t, fmt.Sprint(cfg.LogValue()), "api_key_master_key_previous_set=true")
 		assert.NotContains(t, fmt.Sprint(cfg.LogValue()), other)
+	})
+}
+
+// Principle 0 says v1 does not touch real money (docs/plan-v1.0.md §4). Until
+// the gate existed the only things saying so were compose files, Helm values
+// and prose -- none of which is present when somebody runs the binary with an
+// environment of their own. These assert that the binary itself refuses.
+func TestLoadConfigRefusesAKnownMainnet(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		env  map[string]string
+		want string
+	}{
+		{
+			"nothing acknowledged",
+			map[string]string{"ETH_CHAIN_ID": "1"},
+			"MAINNET_ACKNOWLEDGED must be true",
+		},
+		{
+			"acknowledged but still dev",
+			map[string]string{"ETH_CHAIN_ID": "1", "MAINNET_ACKNOWLEDGED": "true"},
+			"EXCHANGE_ENV must be prod",
+		},
+		{
+			"acknowledged and prod, but the keys are a file on disk",
+			map[string]string{"ETH_CHAIN_ID": "1", "MAINNET_ACKNOWLEDGED": "true", "EXCHANGE_ENV": "prod"},
+			"WALLET_SIGNER_KIND must not be keystore",
+		},
+		{
+			"a mainnet that is not Ethereum",
+			map[string]string{"ETH_CHAIN_ID": "8453"},
+			"8453 is Base mainnet",
+		},
+		{
+			"Arbitrum One",
+			map[string]string{"ETH_CHAIN_ID": "42161"},
+			"42161 is Arbitrum One mainnet",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			clearEnv(t)
+			t.Setenv("DATABASE_URL", "postgres://x")
+			for k, v := range tc.env {
+				t.Setenv(k, v)
+			}
+			_, err := LoadConfig()
+			require.ErrorContains(t, err, tc.want)
+		})
+	}
+
+	// Every unmet condition at once, because config validation has no logger
+	// and an operator who learns them one restart at a time learns the same
+	// thing three times.
+	t.Run("one message names all three", func(t *testing.T) {
+		clearEnv(t)
+		t.Setenv("DATABASE_URL", "postgres://x")
+		t.Setenv("ETH_CHAIN_ID", "1")
+		_, err := LoadConfig()
+		require.Error(t, err)
+		for _, want := range []string{"MAINNET_ACKNOWLEDGED", "EXCHANGE_ENV", "WALLET_SIGNER_KIND"} {
+			assert.ErrorContains(t, err, want)
+		}
+	})
+
+	// The one that matters most. Satisfying all three conditions is not a way
+	// through: the only signer kind that would satisfy the third is refused by
+	// this build, so mainnet is unreachable rather than merely discouraged.
+	// Wiring a real KMS (§22.1 gate 2) is what changes this, and it should be
+	// a deliberate act that deletes this assertion.
+	t.Run("satisfying all three still does not start", func(t *testing.T) {
+		clearEnv(t)
+		t.Setenv("DATABASE_URL", "postgres://x")
+		t.Setenv("ETH_CHAIN_ID", "1")
+		t.Setenv("MAINNET_ACKNOWLEDGED", "true")
+		t.Setenv("EXCHANGE_ENV", "prod")
+		t.Setenv("WALLET_SIGNER_KIND", "kms")
+		_, err := LoadConfig()
+		require.ErrorContains(t, err, "no KMS signer")
+	})
+
+	// The chains v1 actually runs on are untouched by any of it.
+	t.Run("anvil and Sepolia are unaffected", func(t *testing.T) {
+		for _, id := range []string{"31337", "11155111"} {
+			clearEnv(t)
+			t.Setenv("DATABASE_URL", "postgres://x")
+			t.Setenv("ETH_CHAIN_ID", id)
+			cfg, err := LoadConfig()
+			require.NoError(t, err, "chain %s", id)
+			assert.Equal(t, SignerKeystore, cfg.Wallet.SignerKind)
+			assert.False(t, cfg.MainnetAcknowledged)
+		}
+	})
+
+	t.Run("an unknown signer kind is a typo, not a new implementation", func(t *testing.T) {
+		clearEnv(t)
+		t.Setenv("DATABASE_URL", "postgres://x")
+		t.Setenv("WALLET_SIGNER_KIND", "hsm")
+		_, err := LoadConfig()
+		require.ErrorContains(t, err, "WALLET_SIGNER_KIND must be")
 	})
 }

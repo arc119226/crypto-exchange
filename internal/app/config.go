@@ -36,8 +36,13 @@ type Config struct {
 	Redis  RedisConfig  `envPrefix:"REDIS_"`
 	Chain  ChainConfig  `envPrefix:"ETH_"`
 	Wallet WalletConfig `envPrefix:"WALLET_"`
-	JWT    JWTConfig    `envPrefix:"JWT_"`
-	Auth   AuthConfig   `envPrefix:"AUTH_"`
+	// MainnetAcknowledged is one of the three things a known mainnet chain id
+	// needs before this binary starts (docs/plan-v1.0.md §4 principle 0). It
+	// is deliberately outside every prefix: it is not a setting that tunes
+	// anything, it is a signature on a decision.
+	MainnetAcknowledged bool       `env:"MAINNET_ACKNOWLEDGED"`
+	JWT                 JWTConfig  `envPrefix:"JWT_"`
+	Auth                AuthConfig `envPrefix:"AUTH_"`
 	// APIKeyMasterKey (API_KEY_MASTER_KEY, 32 bytes hex) encrypts API key
 	// secrets at rest; the api role needs it (ADR-0006).
 	APIKeyMasterKey telemetry.Secret `env:"API_KEY_MASTER_KEY"`
@@ -194,6 +199,52 @@ type AdminConfig struct {
 	// admin listener has no TLS of its own, so "when the connection is TLS"
 	// would never fire; the flag says what the deployment in front of it does.
 	CookieSecure string `env:"COOKIE_SECURE" envDefault:""`
+}
+
+// knownMainnets are chain ids this project recognises as real-money networks.
+//
+// It is a list of mainnets, not a list of chains the engine supports: v1.1
+// still serves one EVM chain, and none of these is it. Being on the list only
+// means "refuse unless every condition in §22.1 gate 1 holds"; being off it
+// means nothing, so a mainnet not listed here is caught by the other gates,
+// not by this one (docs/plan-v1.0.md §22.1).
+var knownMainnets = map[int64]string{
+	1:     "Ethereum",
+	10:    "Optimism",
+	137:   "Polygon",
+	8453:  "Base",
+	42161: "Arbitrum One",
+}
+
+// validateMainnetGate refuses to start against a known mainnet unless all
+// three of §22.1 gate 1 hold. Principle 0 says v1 does not touch real money;
+// until this existed, the only things enforcing it were compose files, Helm
+// values and prose, none of which is present when someone runs the binary.
+//
+// It reports every unmet condition rather than the first. Config validation
+// has no logger -- the error string is the only channel it has -- and an
+// operator who fixes one condition only to be refused for the next learns
+// the same thing three times over three restarts.
+func (c Config) validateMainnetGate() error {
+	name, isMainnet := knownMainnets[c.Chain.ChainID]
+	if !isMainnet {
+		return nil
+	}
+	var unmet []string
+	if !c.MainnetAcknowledged {
+		unmet = append(unmet, "MAINNET_ACKNOWLEDGED must be true")
+	}
+	if c.Env != "prod" {
+		unmet = append(unmet, fmt.Sprintf("EXCHANGE_ENV must be prod (it is %q)", c.Env))
+	}
+	if c.Wallet.SignerKind == SignerKeystore {
+		unmet = append(unmet, "WALLET_SIGNER_KIND must not be keystore: an encrypted file and a passphrase are for test assets")
+	}
+	if len(unmet) == 0 {
+		return nil
+	}
+	return fmt.Errorf("config: ETH_CHAIN_ID=%d is %s mainnet and this build will not start against it: %s. See docs/plan-v1.0.md §22.1",
+		c.Chain.ChainID, name, strings.Join(unmet, "; "))
 }
 
 // validate checks the stream settings; "*" origins are a dev convenience.
@@ -413,7 +464,20 @@ type WalletConfig struct {
 	// SignerTimeout bounds one signing round trip. Signing is CPU-cheap; the
 	// budget is for the signer being busy or restarting, not for the maths.
 	SignerTimeout time.Duration `env:"SIGNER_TIMEOUT" envDefault:"10s"`
+	// SignerKind names which Signer implementation holds the keys. Only
+	// SignerKeystore is buildable today; SignerKMS is refused by Validate
+	// rather than accepted and left to fail at the first withdrawal. It
+	// exists so the mainnet gate below has something to read, and so that
+	// wiring a real KMS is adding a case rather than inventing a concept
+	// (docs/plan-v1.0.md §22.1 gate 2, internal/chain/signer/kms.go).
+	SignerKind string `env:"SIGNER_KIND" envDefault:"keystore"`
 }
+
+// Signer implementations WALLET_SIGNER_KIND can name.
+const (
+	SignerKeystore = "keystore"
+	SignerKMS      = "kms"
+)
 
 // JWTConfig locates the signing key (api role only) and the JWKS URL.
 type JWTConfig struct {
@@ -584,6 +648,15 @@ func (c Config) Validate() error {
 	}
 	if c.Chain.ChainID <= 0 {
 		return fmt.Errorf("config: ETH_CHAIN_ID must be positive")
+	}
+	if c.Wallet.SignerKind != SignerKeystore && c.Wallet.SignerKind != SignerKMS {
+		return fmt.Errorf("config: WALLET_SIGNER_KIND must be %q or %q", SignerKeystore, SignerKMS)
+	}
+	if c.Wallet.SignerKind == SignerKMS {
+		return fmt.Errorf("config: WALLET_SIGNER_KIND=%s, but this build has no KMS signer: internal/chain/signer/kms.go is a compiled stub that refuses every request. Wiring one is gate 2 of docs/plan-v1.0.md §22.1", SignerKMS)
+	}
+	if err := c.validateMainnetGate(); err != nil {
+		return err
 	}
 	if c.Chain.ScanInterval <= 0 {
 		return fmt.Errorf("config: ETH_SCAN_INTERVAL must be positive")

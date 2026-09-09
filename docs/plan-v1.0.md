@@ -1430,7 +1430,7 @@ scripts/backup.sh && scripts/restore-drill.sh
 **目標**:讓 §22.1 的九道閘門每一道都有可驗證的產出。這個 Phase 不以天數估,以閘門通過數計;沒有全部通過,`ETH_CHAIN_ID` 不設主網。
 
 **任務**(對應 §22.1 的編號):
-- [ ] 1 程式閘門:`internal/app/config.go` 的主網 id 清單;命中時要求 `MAINNET_ACKNOWLEDGED=true`、`EXCHANGE_ENV=prod`、signer 種類 ≠ keystore,否則啟動失敗並列出未通過項;測試斷言(0.5 d;**可提前到 v1.1 做**)
+- [x] 1 程式閘門:`internal/app/config.go` 的主網 id 清單;命中時要求 `MAINNET_ACKNOWLEDGED=true`、`EXCHANGE_ENV=prod`、signer 種類 ≠ keystore,否則啟動失敗並列出未通過項;測試斷言(0.5 d;**可提前到 v1.1 做**)——**v1.1 做了**。`WALLET_SIGNER_KIND` 是新的設定(`keystore` / `kms`),而 `kms` 在 `Validate()` 就被拒絕,因為這個 build 沒有 KMS 實作。所以三個條件全部滿足**仍然**啟動不了:v1.1 到不了主網不是靠自律,是結構性的。接上真的 KMS(閘門 2)時才把那個拒絕拿掉
 - [ ] 2 密鑰託管:`KMSSigner`(AWS KMS / GCP KMS / HSM / MPC 擇一)實作 `Signer`;熱錢包私鑰不落主機檔案;冷錢包 + `HOT_WALLET_MAX` 自動轉冷
 - [ ] 3 外部安全審計與滲透測試,高風險項關閉
 - [ ] 4 法遵:KYC/AML 供應商寫 `kyc_level`;地址篩查 hook 進 `policy.WithdrawalPolicy`;Travel Rule 依轄區
