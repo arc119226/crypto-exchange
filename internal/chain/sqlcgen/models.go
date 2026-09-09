@@ -74,6 +74,8 @@ type ChainDeposit struct {
 	Version         int32
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
+	Fee             pgtype.Numeric
+	CreditedAmount  pgtype.Numeric
 }
 
 type ChainDepositAddress struct {
@@ -194,4 +196,6 @@ type ChainWithdrawal struct {
 	ResolveRequestedBy *string
 	ResolveRequestedAt pgtype.Timestamptz
 	ResolveError       *string
+	Fee                pgtype.Numeric
+	FeeAsset           string
 }

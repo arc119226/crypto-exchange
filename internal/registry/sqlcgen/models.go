@@ -31,6 +31,8 @@ type RegistryAsset struct {
 	Version               int32
 	CreatedAt             time.Time
 	UpdatedAt             time.Time
+	WithdrawalFeeBps      int32
+	DepositFeeBps         int32
 }
 
 type RegistryFeeSchedule struct {

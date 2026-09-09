@@ -135,7 +135,7 @@ func (q *Queries) GetChainState(ctx context.Context, arg GetChainStateParams) (C
 }
 
 const getDepositForUpdate = `-- name: GetDepositForUpdate :one
-SELECT id, tenant_id, chain_id, tx_hash, log_index, address, account_id, asset, amount, block_number, block_hash, confirmations, status, orphaned_at_block, credited_at, correlation_id, version, created_at, updated_at FROM chain.deposits
+SELECT id, tenant_id, chain_id, tx_hash, log_index, address, account_id, asset, amount, block_number, block_hash, confirmations, status, orphaned_at_block, credited_at, correlation_id, version, created_at, updated_at, fee, credited_amount FROM chain.deposits
 WHERE tenant_id = $1 AND chain_id = $2 AND tx_hash = $3 AND log_index = $4
 FOR UPDATE
 `
@@ -178,6 +178,8 @@ func (q *Queries) GetDepositForUpdate(ctx context.Context, arg GetDepositForUpda
 		&i.Version,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Fee,
+		&i.CreditedAmount,
 	)
 	return i, err
 }
@@ -235,7 +237,7 @@ INSERT INTO chain.deposits (
     tenant_id, chain_id, tx_hash, log_index, address, account_id, asset, amount,
     block_number, block_hash, confirmations, status, correlation_id
 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
-RETURNING id, tenant_id, chain_id, tx_hash, log_index, address, account_id, asset, amount, block_number, block_hash, confirmations, status, orphaned_at_block, credited_at, correlation_id, version, created_at, updated_at
+RETURNING id, tenant_id, chain_id, tx_hash, log_index, address, account_id, asset, amount, block_number, block_hash, confirmations, status, orphaned_at_block, credited_at, correlation_id, version, created_at, updated_at, fee, credited_amount
 `
 
 type InsertDepositParams struct {
@@ -291,12 +293,14 @@ func (q *Queries) InsertDeposit(ctx context.Context, arg InsertDepositParams) (C
 		&i.Version,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Fee,
+		&i.CreditedAmount,
 	)
 	return i, err
 }
 
 const listDeposits = `-- name: ListDeposits :many
-SELECT id, tenant_id, chain_id, tx_hash, log_index, address, account_id, asset, amount, block_number, block_hash, confirmations, status, orphaned_at_block, credited_at, correlation_id, version, created_at, updated_at FROM chain.deposits
+SELECT id, tenant_id, chain_id, tx_hash, log_index, address, account_id, asset, amount, block_number, block_hash, confirmations, status, orphaned_at_block, credited_at, correlation_id, version, created_at, updated_at, fee, credited_amount FROM chain.deposits
 WHERE tenant_id = $1
   AND ($4::text = '' OR status = $4::text)
   AND ($5::text = '' OR asset = $5::text)
@@ -347,6 +351,8 @@ func (q *Queries) ListDeposits(ctx context.Context, arg ListDepositsParams) ([]C
 			&i.Version,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Fee,
+			&i.CreditedAmount,
 		); err != nil {
 			return nil, err
 		}
@@ -359,7 +365,7 @@ func (q *Queries) ListDeposits(ctx context.Context, arg ListDepositsParams) ([]C
 }
 
 const listDepositsByAccount = `-- name: ListDepositsByAccount :many
-SELECT id, tenant_id, chain_id, tx_hash, log_index, address, account_id, asset, amount, block_number, block_hash, confirmations, status, orphaned_at_block, credited_at, correlation_id, version, created_at, updated_at FROM chain.deposits
+SELECT id, tenant_id, chain_id, tx_hash, log_index, address, account_id, asset, amount, block_number, block_hash, confirmations, status, orphaned_at_block, credited_at, correlation_id, version, created_at, updated_at, fee, credited_amount FROM chain.deposits
 WHERE tenant_id = $1 AND account_id = $2
 ORDER BY created_at DESC, id
 LIMIT $3 OFFSET $4
@@ -406,6 +412,8 @@ func (q *Queries) ListDepositsByAccount(ctx context.Context, arg ListDepositsByA
 			&i.Version,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Fee,
+			&i.CreditedAmount,
 		); err != nil {
 			return nil, err
 		}
@@ -418,7 +426,7 @@ func (q *Queries) ListDepositsByAccount(ctx context.Context, arg ListDepositsByA
 }
 
 const listExpiredOrphans = `-- name: ListExpiredOrphans :many
-SELECT id, tenant_id, chain_id, tx_hash, log_index, address, account_id, asset, amount, block_number, block_hash, confirmations, status, orphaned_at_block, credited_at, correlation_id, version, created_at, updated_at FROM chain.deposits
+SELECT id, tenant_id, chain_id, tx_hash, log_index, address, account_id, asset, amount, block_number, block_hash, confirmations, status, orphaned_at_block, credited_at, correlation_id, version, created_at, updated_at, fee, credited_amount FROM chain.deposits
 WHERE tenant_id = $1 AND chain_id = $2 AND status = 'orphaned' AND orphaned_at_block <= $3
 ORDER BY id
 `
@@ -458,6 +466,8 @@ func (q *Queries) ListExpiredOrphans(ctx context.Context, arg ListExpiredOrphans
 			&i.Version,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Fee,
+			&i.CreditedAmount,
 		); err != nil {
 			return nil, err
 		}
@@ -470,7 +480,7 @@ func (q *Queries) ListExpiredOrphans(ctx context.Context, arg ListExpiredOrphans
 }
 
 const listMaturingDeposits = `-- name: ListMaturingDeposits :many
-SELECT id, tenant_id, chain_id, tx_hash, log_index, address, account_id, asset, amount, block_number, block_hash, confirmations, status, orphaned_at_block, credited_at, correlation_id, version, created_at, updated_at FROM chain.deposits
+SELECT id, tenant_id, chain_id, tx_hash, log_index, address, account_id, asset, amount, block_number, block_hash, confirmations, status, orphaned_at_block, credited_at, correlation_id, version, created_at, updated_at, fee, credited_amount FROM chain.deposits
 WHERE tenant_id = $1 AND chain_id = $2 AND status IN ('detected', 'confirming')
 ORDER BY block_number, id
 `
@@ -509,6 +519,8 @@ func (q *Queries) ListMaturingDeposits(ctx context.Context, arg ListMaturingDepo
 			&i.Version,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Fee,
+			&i.CreditedAmount,
 		); err != nil {
 			return nil, err
 		}
@@ -525,7 +537,7 @@ UPDATE chain.deposits
 SET status = 'credited', confirmations = $3, credited_at = now(),
     version = version + 1, updated_at = now()
 WHERE id = $1 AND tenant_id = $2 AND status <> 'credited'
-RETURNING id, tenant_id, chain_id, tx_hash, log_index, address, account_id, asset, amount, block_number, block_hash, confirmations, status, orphaned_at_block, credited_at, correlation_id, version, created_at, updated_at
+RETURNING id, tenant_id, chain_id, tx_hash, log_index, address, account_id, asset, amount, block_number, block_hash, confirmations, status, orphaned_at_block, credited_at, correlation_id, version, created_at, updated_at, fee, credited_amount
 `
 
 type MarkDepositCreditedParams struct {
@@ -557,6 +569,8 @@ func (q *Queries) MarkDepositCredited(ctx context.Context, arg MarkDepositCredit
 		&i.Version,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Fee,
+		&i.CreditedAmount,
 	)
 	return i, err
 }
@@ -582,7 +596,7 @@ UPDATE chain.deposits
 SET status = 'orphaned', orphaned_at_block = $4, version = version + 1, updated_at = now()
 WHERE tenant_id = $1 AND chain_id = $2 AND block_number >= $3
   AND status IN ('detected', 'confirming')
-RETURNING id, tenant_id, chain_id, tx_hash, log_index, address, account_id, asset, amount, block_number, block_hash, confirmations, status, orphaned_at_block, credited_at, correlation_id, version, created_at, updated_at
+RETURNING id, tenant_id, chain_id, tx_hash, log_index, address, account_id, asset, amount, block_number, block_hash, confirmations, status, orphaned_at_block, credited_at, correlation_id, version, created_at, updated_at, fee, credited_amount
 `
 
 type MarkDepositsOrphanedParams struct {
@@ -628,6 +642,8 @@ func (q *Queries) MarkDepositsOrphaned(ctx context.Context, arg MarkDepositsOrph
 			&i.Version,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Fee,
+			&i.CreditedAmount,
 		); err != nil {
 			return nil, err
 		}
@@ -663,7 +679,7 @@ UPDATE chain.deposits
 SET block_number = $3, block_hash = $4, confirmations = $5, status = $6,
     orphaned_at_block = NULL, version = version + 1, updated_at = now()
 WHERE id = $1 AND tenant_id = $2
-RETURNING id, tenant_id, chain_id, tx_hash, log_index, address, account_id, asset, amount, block_number, block_hash, confirmations, status, orphaned_at_block, credited_at, correlation_id, version, created_at, updated_at
+RETURNING id, tenant_id, chain_id, tx_hash, log_index, address, account_id, asset, amount, block_number, block_hash, confirmations, status, orphaned_at_block, credited_at, correlation_id, version, created_at, updated_at, fee, credited_amount
 `
 
 type UpdateDepositSightingParams struct {
@@ -708,6 +724,8 @@ func (q *Queries) UpdateDepositSighting(ctx context.Context, arg UpdateDepositSi
 		&i.Version,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Fee,
+		&i.CreditedAmount,
 	)
 	return i, err
 }

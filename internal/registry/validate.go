@@ -64,6 +64,8 @@ type AssetInput struct {
 	MinDeposit            money.Amount
 	MinWithdrawal         money.Amount
 	WithdrawalFee         money.Amount
+	WithdrawalFeeBps      int32
+	DepositFeeBps         int32
 	SweepThreshold        money.Amount
 	DepositEnabled        bool
 	WithdrawEnabled       bool
@@ -97,6 +99,24 @@ func (in AssetInput) Validate() error {
 		if amt.IsNegative() {
 			return fmt.Errorf("%w: asset %s %s must not be negative", ErrInvalid, in.Symbol, name)
 		}
+	}
+	// The column's CHECK stops anything outside 0..10000; this says the same
+	// thing early, in a message that names the field the operator typed.
+	//
+	// 10000 bps is 100%. It is refused for a deposit and allowed for a
+	// withdrawal, and the asymmetry is not an oversight: a 100% withdrawal
+	// fee charges the user double what they asked to send, which is
+	// extortionate but arithmetically fine, while a 100% deposit fee credits
+	// zero -- a deposit that takes the money and gives nothing back, and a
+	// ledger entry with a zero posting. Fees refuses to compute that; this
+	// refuses to store the rate that would ask for it.
+	for name, bps := range map[string]int32{"withdrawal_fee_bps": in.WithdrawalFeeBps, "deposit_fee_bps": in.DepositFeeBps} {
+		if bps < 0 || bps > 10000 {
+			return fmt.Errorf("%w: asset %s %s %d is outside [0,10000]", ErrInvalid, in.Symbol, name, bps)
+		}
+	}
+	if in.DepositFeeBps == 10000 {
+		return fmt.Errorf("%w: asset %s deposit_fee_bps 10000 would credit a depositor nothing", ErrInvalid, in.Symbol)
 	}
 	if in.Status != AssetActive && in.Status != AssetDisabled {
 		return fmt.Errorf("%w: asset %s status %q", ErrInvalid, in.Symbol, in.Status)
