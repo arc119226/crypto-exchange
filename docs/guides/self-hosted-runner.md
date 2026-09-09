@@ -581,7 +581,7 @@ GitHub 的機器每個 job 跑完就整台丟掉,自己的機器不會——每�
 
 ### 10.1 job 裡的自動清理(已經寫好了)
 
-四個會用到 Docker 的 job(`integration` `e2e` `helm` `image`)結尾都掛了一個清理步驟(`.github/actions/reclaim-disk/action.yml`),**只有在自己的機器上才跑**——前三個判斷 `CI_RUNNER` 有沒有值,`image` 因為會依事件換機器,改成問 `runner.environment` 是不是 `self-hosted`。它用的是**有時間過濾**的清法:
+四個會用到 Docker 的 job(`integration` `e2e` `helm` `image`)結尾都掛了一個清理步驟(`.github/actions/reclaim-disk/action.yml`),**只在 `CI_RUNNER` 有值時才跑**。它用的是**有時間過濾**的清法:
 
 ```sh
 docker container prune -f --filter until=6h
@@ -765,9 +765,9 @@ checks ─┬─► integration ─┬─► e2e  ─┐
 
 push 事件才會登入 ghcr 並推上去;PR 只 build 和 smoke。
 
-**這是唯一一個會依事件換機器的 job。** PR 上跑在你的機器(免費),push 上跑在 GitHub 托管的機器——因為 push 才是真的在發布,而發布不該依賴一台家用機器連不連得上 GitHub。2026-09-09 這件事真的發生過:`docker/metadata-action` 要向 `api.github.com` 拿倉庫描述去填 image 的標籤,同一台 runner 上這一步早上花 1 秒就過,中午之後連兩次 `Connect Timeout Error`。細節與取捨在 ADR-0012 決定 1。
+**PR 上的三個 metadata 步驟會被跳過。** 它們算出來的 tag 與標籤只有 push 的推送步驟在讀,所以在 PR 上是三通沒有人讀結果的 GitHub API 呼叫。2026-09-09 那三通還真的把這個 job 弄紅過兩次——根因是 DNS,寫在第 15 節的常見問題裡。
 
-**這台機器要有:** Docker + buildx——**只有 PR 的那一半需要**。
+**這台機器要有:** Docker + buildx。
 
 **PR 上的 build metadata 是固定值**(`COMMIT=dev`、`DATE=1970-01-01T00:00:00Z`),不是真的 commit。原因是 `build/Dockerfile` 把這些烤進 ldflags,每個 commit 都變的話,最後那層 `go build` 的快取**依設計不可能命中**。PR 的建置不會被發布,所以固定它沒有代價。
 
@@ -865,6 +865,50 @@ sudo -iu ghrunner        # 之後第 7 節的指令都在這個身分下做
 
 **Q: 我改了 `.wslconfig` 但好像沒作用。**
 格式錯誤的 `.wslconfig` 會被**靜默忽略**,不報錯。開 **WSL Settings** App 看它顯示的值對不對,並確認改完有跑 `wsl --shutdown`(要等約 8 秒才會真的停)。
+
+**Q: 某個步驟死於 `Connect Timeout Error`,但機器明明連得上網。**
+先不要猜,量一次。這在 2026-09-09 真的發生過,而三個看起來最像的答案全是錯的。
+
+```sh
+curl -sS -o /dev/null -w 'dns=%{time_namelookup} conn=%{time_connect} tls=%{time_appconnect} total=%{time_total}\n' \
+  https://api.github.com/repos/<owner>/<repo>
+```
+
+`total` 很大但 `conn` 減 `dns` 很小,就代表**時間全花在 DNS**,不是網路品質、不是 MTU、也不是 TLS。那次的數字是 `dns=16.092`,其餘三段加起來 0.109 秒。
+
+接著切開 A 和 AAAA:
+
+```sh
+time getent ahostsv4 api.github.com >/dev/null   # 只問 A
+time getent ahosts   api.github.com >/dev/null   # A + AAAA
+time getent ahosts   example.com    >/dev/null   # 對照組
+```
+
+那次量到 0.048s / 17.339s / 0.026s——**只有那一個名字的 AAAA 查詢沒人回答**,`example.com` 同時問兩種只要 26 ms。兇手是 `/etc/resolv.conf` 裡的 `nameserver 10.255.255.254`,也就是 WSL 自己的 DNS 代理。
+
+修法是換掉它。先看現有內容,確認沒有 `[network]` 段落再加:
+
+```sh
+cat /etc/wsl.conf
+sudo tee -a /etc/wsl.conf >/dev/null <<'EOF'
+
+[network]
+generateResolvConf = false
+EOF
+
+sudo rm -f /etc/resolv.conf
+sudo tee /etc/resolv.conf >/dev/null <<'EOF'
+nameserver 1.1.1.1
+nameserver 8.8.8.8
+options timeout:2 attempts:2 single-request-reopen
+EOF
+```
+
+然後 PowerShell `wsl --shutdown`、重開、再量一次 `dns=`。
+
+**`options timeout:2 attempts:2` 不是裝飾。** 很多 action 的 HTTP 客戶端(Node 的 undici)connect timeout 預設就是 10 秒,而 glibc 的預設是 5 秒試 2 次——一個沒人回答的查詢會拖到 17 秒,剛好落在錯的一側。改成 2 秒試 2 次之後,最糟是 4 秒,**結構上再也撞不到那個門檻**。
+
+**但書:** 寫死公共 DNS 之後,公司內網或 VPN 的名字會查不到。這台機器如果也要連內網,把 nameserver 換成你路由器的位址。
 
 **Q: 想暫時全部回到 GitHub 的機器上。**
 刪掉倉庫變數 `CI_RUNNER`。一秒生效,不用改 code。
