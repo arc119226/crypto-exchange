@@ -122,9 +122,13 @@ func TestRevenueReportEqualsADirectSum(t *testing.T) {
 		"one confirmed withdrawal charged; the refunded one charged nothing")
 	assert.EqualValues(t, 1, eth.Withdrawals)
 	assert.True(t, eth.GasExpense.IsPositive(), "three transactions were mined")
-	assert.True(t, eth.Net.IsNegative(),
-		"at 0.001125 a withdrawal the exchange is losing money on gas, which is what the report exists to show")
 	assert.True(t, eth.OtherFees.IsZero(), "nothing reached fee_revenue by a path the report does not know")
+	// The net is fees minus gas within the asset. Whether it comes out
+	// positive is a question about gas prices, not about this code, so the
+	// assertion is the identity rather than a sign -- and the identity is the
+	// thing an operator reads the column for.
+	assert.Equal(t, eth.WithdrawalFees.Sub(eth.GasExpense).Add(eth.MakerFees).Add(eth.TakerFees).Add(eth.DepositFees).String(),
+		eth.Net.String())
 
 	// Narrowing to one asset must not change that asset's row.
 	only, err := handler.Revenue(ctx, admin.RevenuePeriod{From: from, To: to}, "ETH")

@@ -122,8 +122,12 @@ func TestDepositTooSmallToChargeIsCreditedInFull(t *testing.T) {
 	h.setAssetFees(t, ctx, "ETH", "0", 0, 1)
 	account, address := h.account(t, ctx)
 
-	// One wei. A hundredth of a percent of it rounds up to one wei, which is
-	// the whole deposit.
+	// One wei. A hundredth of a percent of it is a ten-thousandth of a wei,
+	// which rounds UP to one wei -- the whole deposit. (This test only reaches
+	// the guard because the ceiling is a real ceiling: while the fee was
+	// computed by dividing at scale 18 and rounding afterwards, the same
+	// input produced zero through the ordinary path and this test passed for
+	// an unrelated reason.)
 	h.fake.mine("b1", transfer(0, address, big.NewInt(1)))
 	require.NoError(t, h.scanner.Tick(ctx))
 

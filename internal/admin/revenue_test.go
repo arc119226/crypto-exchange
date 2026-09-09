@@ -125,3 +125,28 @@ func TestRevenuePageRenders(t *testing.T) {
 			Data: revenueData{}})
 	assert.Contains(t, rec.Body.String(), "Nothing happened in this period.")
 }
+
+// A period the operator typed backwards is not an empty period. Saying
+// "nothing happened" about a query that never ran would send them looking for
+// a business problem that is a typo, so the table is not rendered at all --
+// and the rest of the filter has to survive, or fixing one field silently
+// discards another.
+func TestRevenuePageDoesNotCallABadPeriodEmpty(t *testing.T) {
+	tpl, err := loadTemplates()
+	require.NoError(t, err)
+	rec := httptest.NewRecorder()
+	tpl.render(rec, httptest.NewRequest(http.MethodGet, "/admin/revenue", nil), http.StatusBadRequest, "revenue",
+		view{Title: "revenue", Session: &auth.AdminSession{Email: "ops@example.com", TOTPEnabled: true, TOTPVerified: true},
+			Flash: &flash{Kind: "err", Text: "bad period"},
+			Data: revenueData{
+				Invalid: true,
+				Filter:  revenueFilter{From: "2026-09-08", To: "2026-09-01", Asset: "ETH"},
+				Assets:  []registry.Asset{{Symbol: "ETH"}, {Symbol: "USDC"}},
+			}})
+
+	body := rec.Body.String()
+	assert.NotContains(t, body, "Nothing happened in this period.")
+	assert.Contains(t, body, "No report was read")
+	assert.Contains(t, body, `value="2026-09-08"`, "the dates come back so they can be corrected")
+	assert.Contains(t, body, `<option value="ETH" selected>`, "and so does the asset")
+}

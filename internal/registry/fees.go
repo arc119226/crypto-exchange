@@ -31,8 +31,15 @@ func (a Asset) WithdrawalFeeFor(amount money.Amount) (money.Amount, error) {
 	if !amount.IsPositive() {
 		return money.Zero, fmt.Errorf("%w: withdrawal fee of a non-positive amount %s", ErrInvalid, amount)
 	}
-	fee := a.WithdrawalFee.Add(a.proportional(amount, a.WithdrawalFeeBps))
-	return fee, nil
+	proportional, err := a.proportional(amount, a.WithdrawalFeeBps)
+	if err != nil {
+		return money.Zero, err
+	}
+	// The flat part is added after the rounding, so the total is only
+	// representable if the flat part is too. AssetInput.Validate refuses a
+	// flat fee with more decimals than the asset has, which is what makes
+	// that true rather than hoped for.
+	return a.WithdrawalFee.Add(proportional), nil
 }
 
 // DepositFeeFor returns what a deposit of amount is charged (§23.4):
@@ -61,7 +68,10 @@ func (a Asset) DepositFeeFor(amount money.Amount) (money.Amount, error) {
 	if !amount.IsPositive() {
 		return money.Zero, fmt.Errorf("%w: deposit fee of a non-positive amount %s", ErrInvalid, amount)
 	}
-	fee := a.proportional(amount, a.DepositFeeBps)
+	fee, err := a.proportional(amount, a.DepositFeeBps)
+	if err != nil {
+		return money.Zero, err
+	}
 	if fee.Cmp(amount) >= 0 {
 		return money.Zero, fmt.Errorf("%w: asset %s deposit fee %s would leave nothing of a %s deposit",
 			ErrInvalid, a.Symbol, fee, amount)
@@ -74,17 +84,22 @@ func (a Asset) DepositFeeFor(amount money.Amount) (money.Amount, error) {
 // every asset ships at 0 bps, so this is the path every deposit and every
 // withdrawal takes until an operator changes a rate, and it must not turn a
 // representable amount into a rounded one on the way past.
-func (a Asset) proportional(amount money.Amount, bps int32) money.Amount {
+//
+// The ceiling has to happen inside the division. Dividing first and rounding
+// after does not work: a division truncates at the scale it is given, so the
+// digits the ceiling would have looked at are gone before it runs. That is not
+// hypothetical -- it is the bug this function shipped with. Dividing at scale
+// 18 and then rounding up at an 18-decimal asset's scale made the rounding a
+// no-op, so ETH fees were floored rather than ceiled and a small enough
+// withdrawal was charged nothing at all. DivRoundUp detects the remainder at
+// the division, which is the only place it still exists.
+func (a Asset) proportional(amount money.Amount, bps int32) (money.Amount, error) {
 	if bps == 0 {
-		return money.Zero
+		return money.Zero, nil
 	}
-	raw := amount.Mul(money.FromInt64(int64(bps)))
-	// Dividing by a power of ten cannot fail, and the result is exact before
-	// rounding: the division only shifts the decimal point.
-	quotient, err := raw.DivRoundDown(money.FromInt64(bpsDivisor), money.MaxScale)
+	fee, err := amount.Mul(money.FromInt64(int64(bps))).DivRoundUp(money.FromInt64(bpsDivisor), a.Scale)
 	if err != nil {
-		// Unreachable: the divisor is the constant 10000.
-		return money.Zero
+		return money.Zero, fmt.Errorf("%w: %s fee of %s: %w", ErrInvalid, a.Symbol, amount, err)
 	}
-	return quotient.RoundUp(a.Scale)
+	return fee, nil
 }

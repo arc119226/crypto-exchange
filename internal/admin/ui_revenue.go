@@ -20,6 +20,10 @@ type revenueData struct {
 	// Query is the filter re-encoded, so the CSV link asks for exactly what
 	// the table shows rather than the default window.
 	Query string
+	// Invalid means the dates did not make a period, so no report was read.
+	// The table is hidden rather than shown empty: an empty table is an
+	// answer, and there is no answer here.
+	Invalid bool
 }
 
 // revenueFilter is the form as the operator typed it: two dates and an asset.
@@ -45,21 +49,30 @@ func (u *UI) revenue(w http.ResponseWriter, r *http.Request) {
 		To:    strings.TrimSpace(r.URL.Query().Get("to")),
 		Asset: strings.TrimSpace(r.URL.Query().Get("asset")),
 	}
+	d := revenueData{Filter: f, Query: f.query()}
+	// The asset list comes first and unconditionally: the form has to render
+	// with the operator's selections intact even when the dates are wrong, or
+	// correcting one mistake silently discards the rest of the filter.
+	assets, err := u.h.registry.ListAssets(ctx, u.h.tenant)
+	if err != nil {
+		u.fail(w, r, "revenue", "assets", err)
+		return
+	}
+	d.Assets = assets
+
 	period, err := f.period(time.Now().UTC())
 	if err != nil {
+		// Bad, not empty. Rendering the table here would print "nothing
+		// happened in this period" beside the complaint -- a statement about
+		// data that was never queried.
+		d.Invalid = true
 		u.tpl.render(w, r, http.StatusBadRequest, "revenue", view{
-			Title: l.T("page.revenue"), Flash: &flash{Kind: "err", Text: l.T("revenue.bad_period")},
-			Data: revenueData{Filter: f},
+			Title: l.T("page.revenue"), Flash: &flash{Kind: "err", Text: l.T("revenue.bad_period")}, Data: d,
 		})
 		return
 	}
-	d := revenueData{Filter: f, Query: f.query()}
 	if d.Lines, err = u.h.Revenue(ctx, period, f.Asset); err != nil {
 		u.fail(w, r, "revenue", "revenue report", err)
-		return
-	}
-	if d.Assets, err = u.h.registry.ListAssets(ctx, u.h.tenant); err != nil {
-		u.fail(w, r, "revenue", "assets", err)
 		return
 	}
 	u.tpl.render(w, r, http.StatusOK, "revenue", view{Title: l.T("page.revenue"), Data: d})

@@ -92,17 +92,23 @@ func TestChainRoleCannotRewriteTheFeeSnapshot(t *testing.T) {
 
 	// Column privileges are checked when the statement is planned, so these
 	// need no fixture row: a permitted UPDATE succeeds against nothing, and a
-	// forbidden one fails before it looks.
+	// forbidden one fails before it looks. The id has to be a real uuid all
+	// the same -- chain.withdrawals.id is a uuid column, and a literal that
+	// cannot be coerced fails during parse analysis, which happens BEFORE the
+	// privilege check and would make every case here pass for the wrong
+	// reason.
+	const nobody = `'00000000-0000-0000-0000-000000000000'`
+
 	t.Run("the chain role may advance the state machine", func(t *testing.T) {
 		_, err := chainPool.Exec(ctx,
-			`UPDATE chain.withdrawals SET status = 'signed' WHERE id = 'no-such-withdrawal'`)
+			`UPDATE chain.withdrawals SET status = 'signed' WHERE id = `+nobody)
 		require.NoError(t, err)
 	})
 
 	t.Run("but not the fee it was quoted", func(t *testing.T) {
 		for _, stmt := range []string{
-			`UPDATE chain.withdrawals SET fee = 0 WHERE id = 'no-such-withdrawal'`,
-			`UPDATE chain.withdrawals SET fee_asset = 'ETH' WHERE id = 'no-such-withdrawal'`,
+			`UPDATE chain.withdrawals SET fee = 0 WHERE id = ` + nobody,
+			`UPDATE chain.withdrawals SET fee_asset = 'ETH' WHERE id = ` + nobody,
 		} {
 			_, err := chainPool.Exec(ctx, stmt)
 			var pgErr *pgconn.PgError

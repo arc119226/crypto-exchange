@@ -1383,6 +1383,7 @@ components:
         - min_withdrawal
         - withdrawal_fee
         - withdrawal_fee_bps
+        - deposit_fee_bps
         - deposit_enabled
         - withdraw_enabled
         - status
@@ -1443,6 +1444,19 @@ components:
           description: >
             The proportional part of the withdrawal fee, in basis points of
             the amount. `0` unless the operator has set a rate.
+          example: 0
+        deposit_fee_bps:
+          type: integer
+          format: int32
+          minimum: 0
+          maximum: 10000
+          description: >
+            Basis points taken out of an arriving deposit, rounded up at
+            `scale`. Unlike the withdrawal fee this one is deducted from what
+            arrives rather than added to it, so a deposit of `x` credits
+            `x - ceil(x * deposit_fee_bps / 10000)`. `0` unless the operator
+            has set a rate, and expected to stay there. Published so a
+            depositor can know the rate before sending rather than after.
           example: 0
         deposit_enabled:
           type: boolean

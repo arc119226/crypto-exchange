@@ -297,7 +297,9 @@ func (w *Worker) settleFailed(ctx context.Context, row sqlcgen.ChainWithdrawal, 
 	}
 	return inTx(ctx, w.db, func(tx pgx.Tx) error {
 		if _, _, err := w.ledger.Post(ctx, tx, ledger.Entry{
-			IdempotencyKey: fmt.Sprintf("withdrawal:%s:%s", p.Action, row.ID), Kind: ledger.KindWithdrawal,
+			// Per attempt: retry can happen more than once, and each one has
+			// to move the amount out of pending_withdrawal again.
+			IdempotencyKey: attemptKey("withdrawal:"+string(p.Action), row), Kind: ledger.KindWithdrawal,
 			RefType: "withdrawal", RefID: row.ID, Reason: string(p.Action) + " after an on-chain failure",
 			CorrelationID: deref(row.CorrelationID),
 			Postings:      postings,

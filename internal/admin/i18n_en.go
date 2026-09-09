@@ -32,6 +32,7 @@ var messagesEN = map[string]string{
 	"revenue.deposits":    "Fee-paying deposits",
 	"revenue.empty":       "Nothing happened in this period.",
 	"revenue.bad_period":  "The start of the period must come before the end.",
+	"revenue.not_run":     "No report was read, so there is nothing to show. Fix the dates and apply the filter again.",
 	"revenue.note":        "Both dates are whole UTC days and both are included. Nothing is converted between assets: gas is paid in the chain's native coin whatever was withdrawn, so an ERC-20 row shows fee revenue with no gas beneath it and the native row carries the gas for every withdrawal on the chain. Net is the subtraction within one asset and means nothing across two. A withdrawal counts in the period it confirmed, not the period it was requested. Other is anything credited to fee revenue that is not one of the three fee sources -- normally zero.",
 	"nav.withdrawals":     "Withdrawals",
 	"nav.chain":           "Chain",

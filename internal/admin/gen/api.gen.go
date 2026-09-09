@@ -1365,7 +1365,7 @@ type RevenueLine struct {
 	// WithdrawalFees Credited to `fee_revenue` when a withdrawal confirmed. A withdrawal that was refunded or never broadcast contributes nothing, because its fee went back to the account.
 	WithdrawalFees Amount `json:"withdrawal_fees"`
 
-	// Withdrawals Withdrawals that paid a fee. Zero-fee withdrawals post nothing and so cannot be counted here. Divide `gas_expense` by this to price the fee against what a withdrawal actually costs (§23.3).
+	// Withdrawals Withdrawals that paid a fee. Zero-fee withdrawals post nothing and so cannot be counted here. Note that `gas_expense` divided by this is NOT the cost of a withdrawal: that column is every gas debit in the period, sweeps and nonce fills included. Pricing the fee against per-withdrawal gas needs the `withdrawal:gas:*` entries alone (§23.3).
 	Withdrawals int64 `json:"withdrawals"`
 }
 

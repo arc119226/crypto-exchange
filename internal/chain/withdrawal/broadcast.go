@@ -233,6 +233,28 @@ func (w *Worker) pinNonce(ctx context.Context, row sqlcgen.ChainWithdrawal) (uin
 	return nonce, err
 }
 
+// attemptKey is an idempotency key for something that happens once per SEND
+// ATTEMPT rather than once per withdrawal.
+//
+// A withdrawal can legitimately be sent more than once: resolve(retry) puts a
+// reverted one back to funds_locked with a fresh nonce, and the money has to
+// move out of hold again for the new transaction. Keying that posting by the
+// withdrawal id alone made the second broadcast a replay -- ledger.Post found
+// the key, wrote nothing, and the worker marked the row broadcast anyway. The
+// amount then stayed frozen in the account's hold while confirmation debited
+// pending_withdrawal for it, so the exchange's books owed the account money
+// that was never released and no later state could release it. The trial
+// balance still netted to zero, which is why nothing caught it.
+//
+// row.Replacements is the attempt counter the signing log already keys on, so
+// this reuses it rather than inventing a second one. It is safe to change on a
+// live deployment: every posting keyed this way is written in the same
+// transaction as the state change that follows it, so a row that has already
+// passed the posting is in a state that cannot reach it again.
+func attemptKey(prefix string, row sqlcgen.ChainWithdrawal) string {
+	return fmt.Sprintf("%s:%s:%d", prefix, row.ID, row.Replacements)
+}
+
 // broadcast sends the stored bytes and moves hold -> pending_withdrawal
 // (§6.1.4 e).
 //
@@ -262,7 +284,7 @@ func (w *Worker) broadcast(ctx context.Context, row sqlcgen.ChainWithdrawal) err
 	}
 	return inTx(ctx, w.db, func(tx pgx.Tx) error {
 		if _, _, err := w.ledger.Post(ctx, tx, ledger.Entry{
-			IdempotencyKey: "withdrawal:broadcast:" + row.ID, Kind: ledger.KindWithdrawal,
+			IdempotencyKey: attemptKey("withdrawal:broadcast", row), Kind: ledger.KindWithdrawal,
 			RefType: "withdrawal", RefID: row.ID, Reason: "broadcast to the chain",
 			CorrelationID: deref(row.CorrelationID),
 			Postings: []ledger.Posting{
@@ -527,7 +549,9 @@ func (w *Worker) postGas(ctx context.Context, tx pgx.Tx, row sqlcgen.ChainWithdr
 		return nil // a scripted chain, or a receipt with no effective price
 	}
 	if _, _, err := w.ledger.Post(ctx, tx, ledger.Entry{
-		IdempotencyKey: "withdrawal:gas:" + row.ID, Kind: ledger.KindGas,
+		// Per attempt as well: a withdrawal that reverted, was retried and
+		// then confirmed burned gas twice, and the exchange paid for both.
+		IdempotencyKey: attemptKey("withdrawal:gas", row), Kind: ledger.KindGas,
 		RefType: "withdrawal", RefID: row.ID, Reason: "withdrawal gas",
 		CorrelationID: deref(row.CorrelationID),
 		Postings: []ledger.Posting{

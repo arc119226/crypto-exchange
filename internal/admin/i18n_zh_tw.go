@@ -31,6 +31,7 @@ var messagesZhTW = map[string]string{ //nolint:gosec // G101: a message catalogu
 	"revenue.deposits":    "收費充值筆數",
 	"revenue.empty":       "這段期間沒有任何進出。",
 	"revenue.bad_period":  "起始日期必須早於結束日期。",
+	"revenue.not_run":     "沒有查詢,所以沒有東西可以顯示。改好日期再套用一次。",
 	"revenue.note":        "兩個日期都以 UTC 整天計,而且都包含在內。跨資產不換算:不論提的是什麼,gas 一律以該鏈的原生幣支付,所以 ERC-20 那一列有手續費收入卻沒有對應的 gas,原生幣那一列則背著全鏈提現的 gas。淨額只在同一資產內有意義。提現算在「確認」的那段期間,不是申請的那段。「其他」是三種手續費以外進到 fee_revenue 的錢,正常情況為 0。",
 	"nav.withdrawals":     "提現",
 	"nav.chain":           "鏈上",

@@ -99,6 +99,17 @@ func (in AssetInput) Validate() error {
 		if amt.IsNegative() {
 			return fmt.Errorf("%w: asset %s %s must not be negative", ErrInvalid, in.Symbol, name)
 		}
+		// An amount with more decimals than the asset has is not a smaller
+		// amount, it is an unpayable one. It matters most for withdrawal_fee,
+		// which is added to the proportional part AFTER that part has been
+		// rounded to the scale: a flat fee of 0.0000001 on a six-decimal
+		// token would make every fee unrepresentable, and the ledger would
+		// refuse the posting at the worst possible moment -- when a
+		// withdrawal is confirming.
+		if amt.Scale() > in.Scale {
+			return fmt.Errorf("%w: asset %s %s %s has more decimals than the asset's scale %d",
+				ErrInvalid, in.Symbol, name, amt, in.Scale)
+		}
 	}
 	// The column's CHECK stops anything outside 0..10000; this says the same
 	// thing early, in a message that names the field the operator typed.

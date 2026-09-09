@@ -361,6 +361,12 @@ type Asset struct {
 	ContractAddress *string `json:"contract_address"`
 	DepositEnabled  bool    `json:"deposit_enabled"`
 
+	// DepositFeeBps Basis points taken out of an arriving deposit, rounded up at `scale`. Unlike the withdrawal fee this one is deducted from what arrives rather than added to it, so a deposit of `x` credits `x - ceil(x * deposit_fee_bps / 10000)`. `0` unless the operator has set a rate, and expected to stay there. Published so a depositor can know the rate before sending rather than after.
+	//
+	//
+	// Example: 0
+	DepositFeeBps int32 `json:"deposit_fee_bps"`
+
 	// DisplayScale Suggested number of fractional digits for display.
 	DisplayScale int32 `json:"display_scale"`
 	IsNative     bool  `json:"is_native"`

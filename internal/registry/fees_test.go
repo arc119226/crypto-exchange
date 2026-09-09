@@ -116,6 +116,47 @@ func TestDepositFeeRefusesToConsumeTheWholeDeposit(t *testing.T) {
 	assert.True(t, zero.IsZero())
 }
 
+// The case the original implementation got wrong, and the reason it was wrong:
+// it divided at scale 18 and rounded up afterwards, so for an 18-decimal asset
+// the ceiling had nothing left to round. Every test above used amounts whose
+// quotient fits in 18 digits, which is why they all passed while ETH fees were
+// silently floored -- and a small enough withdrawal was charged nothing at all.
+func TestTheCeilingBitesOnAnEighteenDecimalAsset(t *testing.T) {
+	// One wei at one basis point is a ten-thousandth of a wei, which ETH
+	// cannot represent. Rounding up is one wei; rounding down is nothing.
+	fee, err := eth("0", 1, 0).WithdrawalFeeFor(money.MustParse("0.000000000000000001"))
+	require.NoError(t, err)
+	assert.Equal(t, "0.000000000000000001", fee.String(),
+		"a fee that rounds to nothing is a fee that was not charged")
+
+	d, err := eth("0", 0, 1).DepositFeeFor(money.MustParse("0.00000000000000001"))
+	require.NoError(t, err)
+	assert.Equal(t, "0.000000000000000001", d.String())
+
+	// And a quotient that needs more than eighteen digits still rounds up
+	// when the amount is ordinary rather than dust.
+	fee, err = eth("0", 1, 0).WithdrawalFeeFor(money.MustParse("1.0000000000000001"))
+	require.NoError(t, err)
+	assert.Equal(t, "0.000100000000000001", fee.String())
+}
+
+// The three fee paths -- trading, withdrawal, deposit -- must round the same
+// way, or the same rate charges different amounts depending on which one it
+// came through.
+func TestEveryFeePathRoundsTheSameWay(t *testing.T) {
+	amount := money.MustParse("1.0000000000000001")
+	trading, err := amount.Mul(money.FromInt64(7)).DivRoundUp(money.FromInt64(10000), 18)
+	require.NoError(t, err)
+
+	withdrawal, err := eth("0", 7, 0).WithdrawalFeeFor(amount)
+	require.NoError(t, err)
+	deposit, err := eth("0", 0, 7).DepositFeeFor(amount)
+	require.NoError(t, err)
+
+	assert.Equal(t, trading.String(), withdrawal.String())
+	assert.Equal(t, trading.String(), deposit.String())
+}
+
 func TestFeesRefuseNonPositiveAmounts(t *testing.T) {
 	a := usdc("1", 10, 10)
 	for _, amount := range []string{"0", "-1"} {
