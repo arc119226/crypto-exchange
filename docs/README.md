@@ -198,7 +198,7 @@ docs                  計畫、審查、ADR、領域文件、runbooks/(四段式
 
 | 文件 | 內容 |
 |---|---|
-| [`docs/plan-v1.0.md`](plan-v1.0.md) | **分階段可執行計畫 v1.0**(定位、範圍、領域模型、契約、模組、選型、compose、Phase 0~7、測試/CI、安全、觀測、部署、風險) |
+| [`docs/plan-v1.0.md`](plan-v1.0.md) | **分階段可執行計畫 v1.1**(定位、範圍、領域模型、契約、模組、選型、compose、Phase 0~9、測試/CI、安全、觀測、部署、風險;v1.1 加 §22 v2 主網閘門、§23 營收模型與三種手續費、§24 對照;檔名維持 v1.0) |
 | [`docs/review/plan-review-2026-09.md`](review/plan-review-2026-09.md) | v0.1 規劃書審查報告(28 條合併後發現、不採納意見、對 v1.0 的結構性要求) |
 | [`docs/domain.md`](domain.md) | 領域文件:科目表、分錄、狀態機、撮合語意的逐項驗算與疑問清單;各 Phase 程式碼與計畫的對應表 |
 | [`docs/api-conventions.md`](api-conventions.md) | Public API 慣例:金額字串、problem+json、JWT / API key HMAC 簽章、限流、`client_order_id` 狀態碼(English) |
@@ -211,7 +211,7 @@ docs                  計畫、審查、ADR、領域文件、runbooks/(四段式
 | [`docs/beta-checklist.md`](beta-checklist.md) | Beta 上線檢查表:這個 beta 的限制(單機、RPO 24h、無 PITR)、上線前的勾選項、運維節奏、刻意沒做的 |
 | [`docs/release.md`](release.md) | 發布:`vX.Y.Z` tag 做什麼、版本斷言、`make release-check`、失敗時怎麼辦 |
 | [`docs/screenshots/`](screenshots/) | 後台每一頁的截圖(`make screenshots` 產生)與參考前台的交易頁 / 錢包頁;新手 README 引用其中兩張 |
-| [`docs/adr/`](adr/) | ADR-0000 需求訪談決策(8 輪 32 題);ADR-0001~0010 架構決策(單體、真相來源、租戶、數值、帳本、認證、簽名、工具鏈、beta 形態與備份政策、介面語言與新手 README) |
+| [`docs/adr/`](adr/) | ADR-0000 需求訪談決策(8 輪 32 題);ADR-0001~0011 架構決策(單體、真相來源、租戶、數值、帳本、認證、簽名、工具鏈、beta 形態與備份政策、介面語言與新手 README、營收模型與主網路線) |
 | [`docs/archive/plan-v0.1.md`](archive/plan-v0.1.md) | 原始 v0.1 規劃書(已取代,僅供對照) |
 
 ## 下一步

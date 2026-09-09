@@ -272,7 +272,7 @@ E1 是計畫的實質錯誤(會讓一條人工處置路徑在資料庫層失敗)
 4. **(Phase 2)** 手續費是否允許 0 bps 的市場(做市優惠)?`fee_schedules` CHECK 允許 0,ceil(0) = 0,守恆不受影響 → 可以。
 5. **(Phase 3)** `order.accepted` 對「同交易內立刻全部成交」的單也要發(§6.2 規則),事件順序 accepted → executed×n → filled 在 outbox 內以 `id` 排序即可;跨市場順序不保證 → 客戶端只能依 `account_seq`。
 6. **(Phase 4)** ERC-20 歸集第 1 步「精確 gas」G′ 的估算若低於實際,第 2 步失敗;建議 G′ = estimate × 1.2 並接受少量 ETH 灰塵留在充值地址(第 6 節)。
-7. **(Phase 4)** `withdrawal_fee`(v1 = 0)一旦非零,應在 `funds_locked` 時一併 Hold(X + fee),`confirmed` 時 fee 進 `fee_revenue`;計畫沒有這筆分錄,v1.1 補。
+7. **(Phase 4)** `withdrawal_fee`(v1 = 0)一旦非零,應在 `funds_locked` 時一併 Hold(X + fee),`confirmed` 時 fee 進 `fee_revenue`;計畫沒有這筆分錄,v1.1 補。→ 已補進計畫 v1.1 §6.1.4 (h)(外加、`confirmed` 入帳、請求時快照、失敗退回)與 §12 Phase 8;決策在 ADR-0011。程式仍未收費,Phase 8 實作。
 8. **(Phase 5)** 對帳報表的 `external` 明細如何呈現「已知原因」?建議 `journal_entries.kind ∈ {faucet, adjustment, write_off}` + `reason`。→ **Phase 5 答**:不加 kind。對帳頁把最近的 house adjustments(`ref_type = 'house_adjustment'`,含 `reason` 與分錄)列在 breaks 正下方,「已知原因」就是操作者在 `reason` 寫下的那句話;要分類的話是 Phase 6 報表的事(§24)。
 
 ---

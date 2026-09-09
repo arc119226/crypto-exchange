@@ -4,9 +4,9 @@
 
 | 項目 | 內容 |
 |---|---|
-| 版本 | v1.0(取代 v0.1;v0.1 自本文件生效日起作廢) |
-| 日期 | 2026-09-05 |
-| 狀態 | 定案,可執行;每完成一個 Phase 回頭修訂並升版(v1.1、v1.2 …)。勘誤:2026-09-05 §6.1.4(e)/§6.4.2 提現 `cancel_nonce` 路徑的分錄(`docs/domain.md` E1) |
+| 版本 | v1.1(2026-09-09;取代 v1.0。v0.1 已作廢) |
+| 日期 | 2026-09-05(v1.0);2026-09-09(v1.1) |
+| 狀態 | 定案,可執行;每完成一個 Phase 回頭修訂並升版。勘誤:2026-09-05 §6.1.4(e)/§6.4.2 提現 `cancel_nonce` 路徑的分錄(`docs/domain.md` E1)。**v1.1(2026-09-09,ADR-0011)**:新增 §22(v2 主網路線與閘門)、§23(營收模型)、§24(v1.0 → v1.1 對照)、§12 Phase 8 / Phase 9;修訂 §2.1、§3.1、§3.2、§4 原則 0、§6.1.4、§6.4.2、§6.6、§7.2、§7.4、§15、§16、§17、§18。檔名維持 `plan-v1.0.md`:程式註解、ADR、runbook 引用它上百處 |
 | Repo | `github.com/arc119226/crypto-exchange`(目前僅 `README.md` 與 Go 範本 `.gitignore`) |
 | 本文件位置 | `docs/plan-v1.0.md`;重大決策另以 `docs/adr/NNNN-*.md` 記錄 |
 | 語言約定 | 設計文件繁體中文;程式碼、註解、commit、API 文件、事件名、表名一律英文 |
@@ -19,6 +19,7 @@
 - 第 12 節:分階段計畫。每天照著任務清單打勾;每個 Phase 的 DoD 就是「可以進下一階段」的唯一判準。
 - 第 13–19 節:品質、安全、觀測、部署、風險、限制、名詞表。需要時查閱。
 - 第 20 節:接下來 5 個工作天。現在就看。
+- 第 22–24 節(v1.1):v2 的主網閘門、營收模型(三種手續費與報表)、v1.0 → v1.1 的變更。談上線或定價時看。
 - 第 21 節:v0.1 → v1.0 變更對照,每條對應審查 finding id。
 
 ## 2. 專案定位與目標
@@ -29,7 +30,7 @@
 
 一套部署 = 一個營運方(單租戶);資料模型帶 `tenant_id` 但 v1 不做隔離邏輯(ADR-0003)。
 
-不接主網、不碰真實資金:鏈上互動只走本地 anvil 與 Sepolia 測試網。這條底線保留自 v0.1,且是所有安全取捨的前提。
+**v1(dev、CI、beta)不接主網、不碰真實資金**:鏈上互動只走本地 anvil 與 Sepolia 測試網。這條底線保留自 v0.1,是 v1 所有安全取捨的前提,也是 v1 的程式與設定要**主動維持**的狀態(§22.1 第 1 道閘門)。**正式營運(v2)的目標就是接主網、碰真錢**——那是這個產品存在的理由;§22 列出從 beta 走到主網要通過的每一道閘門,全部通過之前,主網的 chain id 不該出現在任何設定檔裡。
 
 ### 2.2 交付物
 
@@ -95,20 +96,20 @@
 | 領域 | v1 做 | v1 不做(留 backlog) |
 |---|---|---|
 | 交易 | 現貨限價單 GTC、市價單(買以 quote 金額、賣以 base 數量,剩餘以 IOC 語意取消)、取消;部分成交;`client_order_id` 冪等;tick / step / min_notional 檢查;自成交防護 `cancel_newest`;市場狀態 `active / halted / cancel_only` | stop、post-only、FOK、iceberg、OCO;槓桿、合約;多市場撮合跨進程 |
-| 手續費 | 每市場 maker / taker bps(via `fee_schedule_id`);以「收到的資產」扣(買方扣 base、賣方扣 quote);捨入對交易所有利 | 用戶等級費率、平台幣折抵、提現手續費(欄位預留、v1 為 0) |
+| 手續費(v1.1 修訂,§23) | 交易:每市場 maker / taker bps(via `fee_schedule_id`);以「收到的資產」扣(買方扣 base、賣方扣 quote);捨入對交易所有利。**提現:每資產固定金額 `withdrawal_fee` + 可選比例 `withdrawal_fee_bps`(預設 0),外加於提現金額,`confirmed` 時進 `fee_revenue`(§6.1.4 h)。充值:`deposit_fee_bps`(預設 0),入帳時扣(§6.1.4 i)。三者後台可調、寫審計、發事件。營收報表:期間內交易 / 提現 / 充值手續費、gas 支出、淨額,依資產(§23.5)** | 用戶等級費率、平台幣折抵、動態跟 gas 計價、法幣換算的損益表(v2,§23.6) |
 | 資產 / 市場 | ETH + mock USDC(6 decimals,自行以 Foundry script 部署)+ 預留第二個 ERC-20;交易對 `ETH-USDC`;`assets / markets / fee_schedules / withdrawal_limits` 為 DB registry,後台可編輯;新增市場走受控重啟,引擎支援 `reload` 命令 | 非 EVM 鏈、多鏈 |
 | 帳戶 / 帳本 | `users` 與 `accounts` 分表;每用戶自動建立一個現貨帳戶;複式記帳、append-only journal、`balances` 快取表;house 科目;試算平衡端點;管理員調帳(有 reason、有審計) | 子帳戶、內部轉帳、法幣 |
 | 充值 | 每用戶 BIP-44 HD 地址;輪詢掃塊;確認數可設定;reorg 回退;ETH 原生轉帳 + ERC-20 `Transfer` 事件 | 合約內部轉帳(internal tx)充值、memo 型鏈 |
 | 提現 | 狀態機、限額內自動放行、超額進後台審核、先鎖資金再簽名再廣播、`Idempotency-Key`、nonce 序列化與對帳、卡單重送 | 提現白名單冷卻期(欄位預留)、雙人審核 |
 | 歸集 | 排程 sweep 到單一熱錢包;ERC-20 歸集前補 gas;歸集分錄入帳 | CREATE2 forwarder 合約 |
 | 認證 | users 目錄、email + password(argon2id)、JWT EdDSA + JWKS、refresh token、API key + HMAC、`role ∈ {user, admin}`、admin 強制 TOTP、`kyc_level` 欄位由客戶系統透過 admin API 寫入 | 用戶端 2FA、OIDC 整合、KYC 文件蒐集、第三方 KYC |
-| 後台 | 市場/資產/費率/限額設定、用戶與 kyc_level、餘額與 journal 瀏覽、試算平衡、提現審核佇列、充值列表、對帳報表、審計查詢、webhook 管理、引擎 reload | 客服工單、報表匯出排程 |
+| 後台 | 市場/資產/費率/限額設定、用戶與 kyc_level、餘額與 journal 瀏覽、試算平衡、提現審核佇列、充值列表、對帳報表、審計查詢、webhook 管理、引擎 reload;營收報表頁與 CSV(v1.1,Phase 8) | 客服工單、報表匯出排程 |
 | 整合面 | REST(`/v1`、`/admin/v1`)、WebSocket 公開(depth snapshot+delta 帶 seq、trades、ticker、kline)與私有(orders、fills、balances;重連依 seq 補齊)、出站 Webhook(HMAC 簽名、指數退避、投遞記錄)、版本化事件 catalog | 客戶直接訂閱 NATS、gRPC、FIX |
-| 部署 | compose(dev/e2e)、單台 VM compose 或單節點 k3s(beta)、Helm chart + kind 驗證 | Docker Swarm、多副本撮合、跨區 HA |
+| 部署 | compose(dev/e2e)、單台 VM compose 或單節點 k3s(beta)、Helm chart + kind 驗證 | Docker Swarm、多副本撮合、跨區 HA;主網(v2,§22) |
 
 ### 3.2 明確不做(v1 out of scope)
 
-主網與真實資金;法幣通道;合約/槓桿;進階單型(stop、post-only、FOK 以外);非 EVM 多鏈;第三方 KYC 整合;用戶端 2FA;多租戶隔離邏輯;做市機器人;行動 App;HA / 多副本撮合;mTLS 服務身分;簡訊/Email 通知內容(只出 webhook);WAF / DDoS / SIEM;安全審計與滲透測試;事後風控偵測(異常交易偵測、自動熔斷——v1 只有同步 policy 檢查與人工停牌)。
+主網與真實資金(**v1**;v2 的路線與閘門在 §22);法幣通道;合約/槓桿;進階單型(stop、post-only、FOK 以外);非 EVM 多鏈;第三方 KYC 整合;用戶端 2FA;多租戶隔離邏輯;做市機器人;行動 App;HA / 多副本撮合;mTLS 服務身分;簡訊/Email 通知內容(只出 webhook);WAF / DDoS / SIEM;安全審計與滲透測試;事後風控偵測(異常交易偵測、自動熔斷——v1 只有同步 policy 檢查與人工停牌)。
 
 ### 3.3 規模與非功能目標(設計目標,非承諾)
 
@@ -128,7 +129,7 @@
 
 ## 4. 設計原則(修訂版)
 
-0. **不接主網、不碰真錢。** 鏈上只走 anvil 與 Sepolia;keystore 中的私鑰只控制測試資產。
+0. **v1 不接主網、不碰真錢;v2 才接,而且只在 §22 的閘門全部通過之後。** v1 鏈上只走 anvil 與 Sepolia;keystore 中的私鑰只控制測試資產。v1.1 起程式要能證明這條:`ETH_CHAIN_ID` 落在已知主網 id(§22.1 第 1 道閘門的清單)時,`MAINNET_ACKNOWLEDGED=true`、`EXCHANGE_ENV=prod`、signer 不是 `KeystoreSigner` 三者缺一就拒絕啟動(Phase 9 第一項,可提前到 v1.1 做)。
 1. **正確性優先於效能。**(v0.1 保留)先確保帳本平衡與撮合正確,再談延遲;效能目標只是設計上限,不因此犧牲交易性。
 2. **事件解耦,但金錢路徑不靠事件。**(v0.1 修訂)所有影響餘額的操作在同一筆 Postgres 交易內完成並寫入 outbox;事件只用於扇出(行情、私有推播、webhook、後台投影),消費者永遠可以重放。
 3. **ledger 是餘額的唯一寫入者,凍結也是分錄。**(v0.1 修訂)`internal/ledger` 唯一擁有 `ledger.*` 表;Hold / Release / Settle / Credit / Debit 是它對外的全部寫入介面;資料庫角色權限強制執行,不是靠約定。
@@ -320,6 +321,30 @@ ERC-20 提現:資產分錄同上(asset = USDC),gas 分錄永遠是 ETH。
 
 **(g) Dev faucet / 管理員調帳**:debit `external:USDC` X / credit `user:B:available:USDC` X,需 admin、`reason`、寫審計。這個端點在 Phase 2 就存在(Phase 1–3 沒有鏈上充值時的資金來源),正式產品中就是「手動調帳」功能。
 
+**(h) 提現手續費(v1.1,外加)**:B 提 X ETH 到外部地址;資產的 `withdrawal_fee` = F(固定金額)、`withdrawal_fee_bps` = b → `fee = F + ceil(X × b / 10000)`(§6.5,捨入對交易所有利)。鏈上送出的是 X,B 總共付 X + fee;**fee 在 `requested` 時就算好並快照到 `chain.withdrawals.fee / fee_asset`**,之後後台改費率不影響在途的提現。與 (e) 的差異加粗:
+
+| 狀態轉移 | 分錄 |
+|---|---|
+| `approved → funds_locked` | debit `user:B:available:ETH` **(X + fee)** / credit `user:B:hold:ETH` **(X + fee)** |
+| `signed → broadcast` | debit `user:B:hold:ETH` X / credit `pending_withdrawal:ETH` X(fee 留在 hold) |
+| `broadcast → confirmed` | (e) 的兩筆不變;**新增一筆** `withdrawal:fee:{id}`:debit `user:B:hold:ETH` fee / credit `fee_revenue:ETH` fee |
+| `→ failed(broadcast)` | Release **(X + fee)**——平台沒送出去就不收費 |
+| `→ failed(replaced)`、`resolve(refund)` | (e) 的分錄不變;**另** debit `user:B:hold:ETH` fee / credit `user:B:available:ETH` fee |
+| `resolve(retry)` | fee 繼續留在 hold,不動 |
+| `rejected` / `policy_check` 拒絕 | 無分錄 |
+
+ERC-20 提現:fee 以該 ERC-20 計(提 USDC 收 USDC),gas 仍是 ETH 記 `gas_expense`;每筆提現的損益 = fee(提現資產)− G(ETH)。fee 的所有權在 `confirmed` 那一刻才轉移,在那之前都是用戶的 hold,所以沒有任何失敗路徑會出現「沒送出去卻收了費」。
+
+**(i) 充值手續費(v1.1)**:X ETH 到達 B 的地址且達確認數;資產的 `deposit_fee_bps` = d → `fee = ceil(X × d / 10000)`:
+
+| 科目 | 方向 | 金額 |
+|---|---|---|
+| `custody:deposit_addresses:ETH` | debit | X |
+| `user:B:available:ETH` | credit | X − fee |
+| `fee_revenue:ETH` | credit | fee |
+
+d = 0(seed 預設)時退化成 (d)。已入帳後的深度 reorg 反向分錄要連 fee 一起反向。會計恆等式(6.1.1)不變:`fee_revenue` 本來就在 equity 那一項。
+
 #### 6.1.5 帳本不變量(全部寫成測試)
 
 1. 每筆 journal entry 內每種資產 Σdebit = Σcredit。
@@ -396,19 +421,19 @@ ERC-20 提現:資產分錄同上(asset = USDC),gas 分錄永遠是 ETH。
 
 | 起點 | 觸發者 | 終點 | 動作 |
 |---|---|---|---|
-| (request) | `api` | `requested` | 基本驗證(資產可提、地址格式、`amount ≥ min_withdrawal`、available 預檢) |
+| (request) | `api` | `requested` | 基本驗證(資產可提、地址格式、`amount ≥ min_withdrawal`、available 預檢);v1.1:算 `fee`(§6.1.4 h)並快照到列上,預檢改為 `available ≥ amount + fee`,限額與 `min_withdrawal` 都看 `amount`(不含 fee),回應帶 `fee`、`fee_asset` |
 | `requested` | `chain` worker | `policy_check` → `auto_approved` / `pending_review` / `rejected` | `policy.WithdrawalPolicy`:單筆 `auto_approve_limit`、每日限額(依 `kyc_level`)、`withdraw_enabled`、帳戶凍結旗標;超額 → `pending_review` |
 | `pending_review` | admin(TOTP、寫審計、記審核者) | `approved` / `rejected` | 後台佇列 approve / reject |
-| `auto_approved` / `approved` | `chain` worker | `funds_locked` | `ledger.Hold`(`hold:withdrawal:{id}`);不足 → `failed(insufficient_balance)` |
+| `auto_approved` / `approved` | `chain` worker | `funds_locked` | `ledger.Hold`(`hold:withdrawal:{id}`;v1.1 起金額為 `amount + fee`);不足 → `failed(insufficient_balance)` |
 | `funds_locked` | `chain` worker + `NonceManager` | `signed` | 組 EIP-1559 tx(`eth_estimateGas` + `SuggestGasTipCap` / `feeHistory`,上限 `MAX_FEE_PER_GAS`)、分配 nonce、`signer.Sign(withdrawal_id, tx)`;**nonce、raw signed tx 與狀態同一交易落庫** |
 | `signed` | `chain` worker | `broadcast` | `eth_sendRawTransaction`;記 `tx_hash`;分錄 hold → pending_withdrawal;若節點回「nonce too low / already known」則查鏈上是否已有該 tx |
-| `broadcast` | `chain` tracker | `confirmed` / `failed(on_chain)` | 輪詢 receipt;`confirmations ≥ N` 且 `status = 1` → confirmed(分錄 6.1.4 e);`status = 0` → failed(on_chain),gas 入帳,資金留 pending_withdrawal 進人工處置 |
+| `broadcast` | `chain` tracker | `confirmed` / `failed(on_chain)` | 輪詢 receipt;`confirmations ≥ N` 且 `status = 1` → confirmed(分錄 6.1.4 e,v1.1 加 h 的 fee 分錄);`status = 0` → failed(on_chain),gas 入帳,資金留 pending_withdrawal 進人工處置 |
 | `broadcast` | `chain` tracker | `broadcast`(重送) | 超過 `REPLACE_AFTER`(anvil 60 s、Sepolia 3 min)未上鏈,同 nonce 費用 +≥10% 重送,最多 `MAX_REPLACEMENTS` 次後告警轉人工(狀態仍為 `broadcast`,等待 admin `resolve`) |
 | `broadcast`(重送耗盡) | admin `resolve(action=cancel_nonce)` / `resolve(action=bump)` | `failed(replaced)` / `broadcast` | `cancel_nonce`:以同 nonce 送 0 ETH 自轉(`to = hot`)取代;取代交易確認後 debit `pending_withdrawal` X / credit `user:available` X(資金此時在 `pending_withdrawal`,**不是** hold,所以不是 `Release`;取代交易的 gas 記 `gas_expense`);`bump`:允許再重送一輪。勘誤 2026-09-05,見 `docs/domain.md` E1 |
 | `signed`(重啟時) | `chain` worker | `broadcast` | 已簽未廣播 → 重播 raw tx(冪等,同 nonce) |
 | `funds_locked` / `signed` | 廣播確定失敗且 `eth_getTransactionCount(hot, latest) ≤ nonce` | `failed(broadcast)` | Release;並由 `NonceManager` **回收 nonce**:若 `nonce == next_nonce − 1` 則 `next_nonce := nonce`;否則以同 nonce 送一筆 0 ETH 自轉(`to = hot`,gas 記 `gas_expense`,寫 `chain.nonce_fills`)填補缺口,填補 tx 走與提現相同的追蹤/重送流程。沒有這步,一次廣播失敗就會讓後續所有提現卡在 `broadcast` |
 
-兩條鐵律:**帳本未先鎖定,絕不簽名;每個狀態落庫後才做下一步,重啟從狀態續跑。**
+兩條鐵律:**帳本未先鎖定,絕不簽名;每個狀態落庫後才做下一步,重啟從狀態續跑。** 第三條(v1.1):**手續費的所有權在 `confirmed` 才轉移**——之前都在用戶的 hold,每一條失敗路徑都把它還回 available(§6.1.4 h)。
 
 `NonceManager`(`internal/chain/hotwallet`,`chain` role 內單一 goroutine;`withdrawal` 與 `sweep` 的 gas 補款都經過它):`chain.hot_wallets(chain_id, address, next_nonce)`;啟動時 `pending := eth_getTransactionCount(hot, pending)`,`dbNext := next_nonce`;`pending < dbNext` 且 DB 有對應 `signed`/`broadcast` 列 → 重播;`pending < dbNext` 但 DB 找不到對應列 → 視為缺口,依上表規則以 0 ETH 自轉填補後才轉 ready;`pending > dbNext` → 有未知的外部交易使用了熱錢包私鑰 → 拒絕啟動並告警。
 
@@ -462,11 +487,11 @@ v1 實作 `KeystoreSigner`,預留 `KMSSigner` 空實作。**種子儲存**:go-et
 
 ### 6.6 Registry 欄位(`registry.*`,admin 可編輯,全部帶 `tenant_id`、`created_at`、`updated_at`、`version`)
 
-`assets`:`id`, `symbol`, `name`, `chain_id`, `contract_address`(null = 原生幣), `scale`, `display_scale`, `is_native`, `required_confirmations`, `min_deposit`, `min_withdrawal`, `withdrawal_fee`(v1 = 0), `sweep_threshold`, `deposit_enabled`, `withdraw_enabled`, `status active|disabled`。
+`assets`:`id`, `symbol`, `name`, `chain_id`, `contract_address`(null = 原生幣), `scale`, `display_scale`, `is_native`, `required_confirmations`, `min_deposit`, `min_withdrawal`, `withdrawal_fee`(固定金額;v1.1 起生效,§6.1.4 h;seed 仍為 0,營運方在後台設定), `withdrawal_fee_bps`(0–10000,預設 0;v1.1), `deposit_fee_bps`(0–10000,預設 0;v1.1,§6.1.4 i), `sweep_threshold`, `deposit_enabled`, `withdraw_enabled`, `status active|disabled`。
 
 `markets`:`id`, `symbol`(`ETH-USDC`), `base_asset_id`, `quote_asset_id`, `price_tick`, `qty_step`, `min_notional`, `max_qty`(可 null), `max_slippage_bps`(可 null), `fee_schedule_id`, `self_trade_policy cancel_newest|allow|cancel_oldest`, `status active|halted|cancel_only|delisted`。
 
-`fee_schedules`:`id`, `name`, `maker_bps`, `taker_bps`, `effective_from`。
+`fee_schedules`:`id`, `name`, `maker_bps`, `taker_bps`, `effective_from`(只記錄,不做時間排程:改了立即生效)。v1.1 仍只按市場指派;用戶等級費率(`users.fee_tier` → 覆寫 schedule)列 v2(§23.6)。
 
 `withdrawal_limits`:`asset_id`, `kyc_level`, `auto_approve_limit`(單筆), `daily_limit`, `require_manual_review bool`。
 
@@ -513,8 +538,8 @@ v1 實作 `KeystoreSigner`,預留 `KMSSigner` 空實作。**種子儲存**:go-et
 | `trade.executed` | engine | stream(trades/ticker/kline)、worker(kline)、webhook | trade_id, maker_order_id, taker_order_id, maker_account_id, taker_account_id, price, qty, quote_qty, maker_fee, taker_fee, seq |
 | `ledger.posted` | engine / chain / admin | stream(balances)、admin 投影 | entry_id, idempotency_key, postings[] |
 | `balance.updated` | engine / chain / admin | stream(private)、webhook | account_id, asset, available, hold, account_seq |
-| `deposit.detected` / `deposit.credited` / `deposit.orphaned` / `deposit.reversed` | chain | stream、webhook、admin | deposit_id, account_id, asset, amount, tx_hash, log_index, block_number, confirmations |
-| `withdrawal.state_changed` | api / chain / admin | stream、webhook、admin | withdrawal_id, account_id, asset, amount, from_state, to_state, tx_hash, reason |
+| `deposit.detected` / `deposit.credited` / `deposit.orphaned` / `deposit.reversed` | chain | stream、webhook、admin | deposit_id, account_id, asset, amount, tx_hash, log_index, block_number, confirmations;v1.1 `credited` 加 fee, credited_amount |
+| `withdrawal.state_changed` | api / chain / admin | stream、webhook、admin | withdrawal_id, account_id, asset, amount, from_state, to_state, tx_hash, reason;v1.1 加 fee, fee_asset |
 | `sweep.completed` / `sweep.failed` | chain | admin | sweep_id, asset, amount, gas_used |
 | `market.updated` / `asset.updated` / `fee_schedule.updated` | admin | engine(reload)、stream、webhook | id, changed_fields, version |
 | `user.kyc_level_updated` / `user.status_updated` | admin | webhook | user_id, kyc_level / status |
@@ -557,6 +582,7 @@ Admin(`api/admin/v1/openapi.yaml`,前綴 `/admin/v1`;所有寫入寫 `audit_even
 | users | `GET /users`、`GET /users/{id}`、`PUT /users/{id}/kyc-level`(客戶系統以 admin API key 呼叫)、`PUT /users/{id}/status` |
 | registry | `GET/POST /assets`、`PUT /assets/{id}`;`GET/POST /markets`、`PUT /markets/{id}`、`PUT /markets/{id}/status`;`GET/POST /fee-schedules`、`PUT /fee-schedules/{id}`;`GET/PUT /withdrawal-limits` |
 | ledger | `GET /ledger/trial-balance`、`GET /ledger/entries`、`GET /accounts/{id}/balances`、`POST /ledger/adjustments`(reason 必填) |
+| reports(v1.1,Phase 8) | `GET /reports/revenue?from&to&asset`(每資產:交易費 maker / taker、提現費、充值費、gas 支出、淨額、筆數)、`GET /reports/revenue.csv`(同資料;§3.1「報表匯出」的最小版) |
 | chain | `GET /withdrawals?status=pending_review`、`POST /withdrawals/{id}/approve`、`POST /withdrawals/{id}/reject`、`POST /withdrawals/{id}/resolve`(on_chain failed 處置)、`GET /deposits`、`GET /sweeps`、`GET /hot-wallet` |
 | reconciliation | `POST /reconciliation/run`、`GET /reconciliation/reports`、`GET /reconciliation/breaks` |
 | audit | `GET /audit-events` |
@@ -1377,6 +1403,45 @@ scripts/backup.sh && scripts/restore-drill.sh
 
 **風險與退路**:kind 上 anvil 與 StatefulSet 儲存問題 → 測試用 emptyDir + 每次乾淨部署;chart 複雜化 → 先單一 values 檔,不做多環境覆蓋。
 
+### Phase 8 — 手續費完整化與營收報表(v1.1 新增;ADR-0011、§23)
+
+**目標**:平台在每一筆出入金上不再虧錢,而且看得到自己有沒有賺。提現手續費真的收(現在欄位存在但沒有任何程式讀它,§23.3)、充值手續費可設定、營收報表把三種手續費與 gas 支出放在同一張表。
+
+**範圍**:做 — §6.1.4 (h)(i) 的分錄、§6.4.2 的 fee 快照與預檢、registry 的兩個新欄位、OpenAPI 與事件加欄、後台資產頁 / 提現頁 / 新「營收」頁、`GET /admin/v1/reports/revenue(.csv)`、兩個指標與一條告警。不做 — 用戶等級費率、動態 gas 計價、法幣換算(§23.6)。
+
+**任務**:
+- [ ] migration:`registry.assets.withdrawal_fee_bps`、`deposit_fee_bps`(0–10000,預設 0);`chain.withdrawals.fee`、`fee_asset`;`chain.deposits.fee`、`credited_amount`;sqlc(1 d)
+- [ ] 提現:`POST /v1/withdrawals` 算 fee 並快照、`available ≥ amount + fee` 預檢;`funds_locked` 的 `Hold(amount + fee)`;`confirmed` 的 `withdrawal:fee:{id}` 分錄;`failed(broadcast)` / `failed(replaced)` / `resolve(refund)` 的 fee 退回;`retry` 不動(1.5 d)
+- [ ] 充值:`deposit.Credit` 拆成 `X − fee` 給用戶、`fee` 進 `fee_revenue`;`reversed` 反向含 fee(0.5 d)
+- [ ] OpenAPI:`Asset` 加兩欄、`Withdrawal` 加 `fee` / `fee_asset`、`Deposit` 加 `fee` / `credited_amount`、`POST /v1/withdrawals` 回應帶 fee;事件 schema 加欄;`make gen`;前台提現表單顯示「將扣 amount + fee」(0.5 d)
+- [ ] 後台:資產頁的三個費率欄位、提現頁顯示 fee、新「營收」頁(期間、資產篩選、六欄、CSV 下載)、`exchangectl admin revenue`(1.5 d)
+- [ ] 指標與告警:`ledger_fee_revenue_total{asset,source=trade|withdrawal|deposit}`、`ledger_gas_expense_total{asset}`;Grafana Ledger 板加「手續費 vs gas」面板;`WithdrawalGasExceedsFee`(§15);`observability_test` 的指標名檢查(0.5 d)
+- [ ] 測試:ledger 不變量「同一 entry 內扣方的 fee = `fee_revenue` 的 credit」;提現每條路徑的 fee 分錄(scripted chain);充值 fee 與 reorg 反向;`exchangectl e2e` 斷言提現後 `fee_revenue` 增加 fee、`gas_expense` 增加 G、用戶少 amount + fee;營收報表的數字 = 直接 SUM `trading.trades` 與 `ledger.postings`(測試比對);restore-checks 不受影響(1.5 d)
+- [ ] 文件:`docs/domain.md` 對應段落、`docs/runbooks/stuck-withdrawal.md` 的 fee 處置、README 第 8 步的餘額(只有營運方設非零時才不同)(0.5 d)
+
+**DoD**:seed 費率全為 0 時所有既有測試與 e2e 數字不變;把 `withdrawal_fee` 與 `deposit_fee_bps` 設非零後 e2e 全綠、試算平衡為 0、營收報表與直接 SUM 一致;後台改費率後下一筆提現用新費率、在途的用舊費率(快照)。
+
+**預估工時**:6–8 天。
+
+**風險與退路**:fee 的退回路徑漏一條就是「沒送出去卻收了費」→ 每條 `failed` 路徑一個 scripted-chain 測試,不變量測試守總數;`amount + fee` 改變預檢語意 → 只加欄位、語意寫在 OpenAPI description,舊客戶端多收到一個欄位不會壞。
+
+### Phase 9 — 主網前置(v2;閘門制,不估天數;§22)
+
+**目標**:讓 §22.1 的九道閘門每一道都有可驗證的產出。這個 Phase 不以天數估,以閘門通過數計;沒有全部通過,`ETH_CHAIN_ID` 不設主網。
+
+**任務**(對應 §22.1 的編號):
+- [ ] 1 程式閘門:`internal/app/config.go` 的主網 id 清單;命中時要求 `MAINNET_ACKNOWLEDGED=true`、`EXCHANGE_ENV=prod`、signer 種類 ≠ keystore,否則啟動失敗並列出未通過項;測試斷言(0.5 d;**可提前到 v1.1 做**)
+- [ ] 2 密鑰託管:`KMSSigner`(AWS KMS / GCP KMS / HSM / MPC 擇一)實作 `Signer`;熱錢包私鑰不落主機檔案;冷錢包 + `HOT_WALLET_MAX` 自動轉冷
+- [ ] 3 外部安全審計與滲透測試,高風險項關閉
+- [ ] 4 法遵:KYC/AML 供應商寫 `kyc_level`;地址篩查 hook 進 `policy.WithdrawalPolicy`;Travel Rule 依轄區
+- [ ] 5 風控:法幣等值限額(價格來源)、全站每日出金上限、雙人審核、速率異常偵測、提現 kill switch(後台 + CLI)
+- [ ] 6 鏈基礎設施:付費 RPC ×2 failover、主網確認數、`ETH_MAX_FEE_PER_GAS` 與估價策略、`ETH_SCAN_START_BLOCK`
+- [ ] 7 真實資產:token allowlist(不再直接吃 `addresses.json`)、真 USDC 地址與 decimals 驗證、`deploy/seed-params/mainnet.json`(非零手續費)
+- [ ] 8 營運:24/7 on-call、告警通道、事件響應 runbook ×4、PITR、準備金與保險政策、對帳報表定期公開
+- [ ] 9 放量:§22.2 的第一階段(內部帳戶)跑完
+
+**DoD**:§22.1 每一列有連結指向產出(程式、報告或文件);§22.2 第一階段的每日對帳零差異持續兩週。
+
 ## 13. 測試與 CI 策略
 
 ### 13.1 測試金字塔
@@ -1466,6 +1531,7 @@ lint ──► unit ──► fuzz-smoke ──► integration ──► e2e ─
 | `event_consumer_lag{consumer}` | gauge | JetStream pending |
 | `ledger_trial_balance_diff{asset}` | gauge | 告警 ≠ 0 |
 | `ledger_entries_total{kind}` | counter | |
+| `ledger_fee_revenue_total{asset,source}` / `ledger_gas_expense_total{asset}` | counter | v1.1(Phase 8):三種手續費與 gas,同資產相減即淨額 |
 | `chain_head_block` / `chain_scanner_lag_blocks` / `chain_last_scanned_block` | gauge | |
 | `deposits_total{asset,status}` / `withdrawals_total{asset,status}` | counter | |
 | `withdrawal_state_duration_seconds{state}` | histogram | 停留時間 |
@@ -1475,7 +1541,7 @@ lint ──► unit ──► fuzz-smoke ──► integration ──► e2e ─
 
 - Trace(選用,Phase 6):OTel SDK,HTTP server/client、pgx、NATS publish/consume 各一個 span,`traceparent` 隨 NATS header 傳遞。
 - Dashboard 最小集合(JSON 進 repo):Exchange Overview(請求量/延遲/錯誤、命令佇列、outbox、consumer lag)、Ledger(試算平衡、entries/s、調帳)、Chain(head/lag、充提狀態分布、熱錢包餘額、nonce)、Stream(連線、訊息、慢客戶端)、System(容器 CPU/記憶體、PG 連線)。
-- 告警最小集合:任一 role `readyz` 失敗 > 1 min;`ledger_trial_balance_diff != 0`;`chain_scanner_lag_blocks > 20`;`outbox_backlog > 1000` 持續 5 min;`hot_wallet_balance{ETH} < 門檻`;`withdrawals_pending_review > 20`;`reconciliation_diff != 0`。
+- 告警最小集合:任一 role `readyz` 失敗 > 1 min;`ledger_trial_balance_diff != 0`;`chain_scanner_lag_blocks > 20`;`outbox_backlog > 1000` 持續 5 min;`hot_wallet_balance{ETH} < 門檻`;`withdrawals_pending_review > 20`;`reconciliation_diff != 0`;v1.1 加 `WithdrawalGasExceedsFee`:24 h 內某資產 `ledger_gas_expense_total` 的增量 > `ledger_fee_revenue_total{source="withdrawal"}` 的增量(warning,提醒調費率;§23.3)。
 
 ## 16. 部署演進路徑
 
@@ -1485,6 +1551,7 @@ lint ──► unit ──► fuzz-smoke ──► integration ──► e2e ─
 | beta(自營封閉) | 單台 VM(4 vCPU / 8 GB)compose `compose.prod.yaml`;或單節點 k3s 用 Helm | `role` 分容器、Sepolia RPC provider、每日備份、prometheus/grafana、告警接收人、`.env` 由密鑰管理工具產生 | Phase 5 全部 DoD、Phase 6 dashboards、Phase 7 備份演練 |
 | Helm(kind 驗證) | CI | chart + subchart 依賴 | Phase 7 |
 | managed K8s(beta 後段,可選) | GKE / EKS / AKS 單 region | 同一 chart,外部 managed Postgres / NATS(或 subchart)、K8s Secret / external-secrets、Ingress + TLS、NetworkPolicy | chart 在 kind 通過;engine / chain / signer Deployment `replicas: 1` + `Recreate`;PITR 備份;`terminationGracePeriodSeconds` ≥ engine drain 時間 |
+| 正式(主網,v2;§22) | 單 region managed K8s 或 VM(依 beta 的結論) | 同上,加 KMS/HSM/MPC signer、付費 RPC ×2、冷熱錢包分離、24/7 on-call | §22.1 九道閘門全部通過(Phase 9 DoD);§22.2 放量從內部帳戶開始 |
 
 「原封不動搬到 K8s」在 v1.0 改寫為可驗證的工程承諾:**可搬遷的是 image、服務邊界、API/事件契約與 12-factor 行為(env 設定、probes、graceful shutdown、依賴重試);部署描述、密鑰管理、網路隔離、服務身分在 Helm 階段預期重做。** CI 的 `helm` job 持續驗證「搬得過去」。
 
@@ -1504,12 +1571,16 @@ lint ──► unit ──► fuzz-smoke ──► integration ──► e2e ─
 | 密鑰誤入庫 | 安全事故 | `.gitignore`、`gitleaks`、`.env.example` 佔位、`gen-dev-secrets` |
 | 白牌客戶要求多租戶 / OIDC / KMS | 架構壓力 | `tenant_id` 預留、`Signer` 介面、JWT 驗證器可替換、事件契約版本化;真的出現需求再開 ADR |
 | Sepolia faucet / RPC 限流 | 4d 延遲 | 多 faucet、付費 RPC 免費層;4d 不阻塞 Phase 5 |
+| (v2)主網私鑰外洩、熱錢包被清空 | 真錢損失、信任崩塌 | 冷熱分離與熱錢包上限、KMS/HSM、雙人審核、提現 kill switch、放量 cap(§22) |
+| (v2)法遵:無牌照、AML 不合規 | 停業、法律責任 | 營運方牌照為前提;KYC/AML 供應商、地址篩查 hook、Travel Rule(§22.1 第 4 道) |
+| 手續費定價錯誤,gas 長期高於提現手續費 | 平台慢性失血 | 提現手續費後台可調、`WithdrawalGasExceedsFee` 告警、營收報表每週看(§23) |
 
 ## 18. 誠實面對的限制(修訂版)
 
 - 撮合引擎是單一實例、無熱備;重啟期間該市場不可下單(恢復目標 < 30 s);這是 v1 設計選擇,不是缺陷但也不是 HA。
-- 簽名採加密 keystore + passphrase,只適合測試資產與封閉 beta;生產必須換 KMS / HSM / MPC(透過 `Signer` adapter),且熱錢包資金管理、冷錢包流程不在 v1。
-- 沒有安全審計、滲透測試、法遵(KYC/AML)整合;`kyc_level` 只是欄位,身分驗證是客戶系統的責任;拿真錢上線前這些都是必要條件。
+- 簽名採加密 keystore + passphrase,只適合測試資產與封閉 beta;生產必須換 KMS / HSM / MPC(透過 `Signer` adapter),且熱錢包資金管理、冷錢包流程不在 v1——這是 §22.1 的第 2 道閘門。
+- 沒有安全審計、滲透測試、法遵(KYC/AML)整合;`kyc_level` 只是欄位,身分驗證是客戶系統的責任;拿真錢上線前這些都是必要條件——§22.1 的第 3、4 道閘門。
+- v1.1 的 Phase 8 之前,提現不收手續費、充值沒有手續費,每一筆提現與歸集的 gas 全由平台吸收(`gas_expense`);營收只有交易手續費,而且沒有報表可以看淨額(§23)。
 - 內部服務之間視為信任網路(無 mTLS / 服務身分),只靠 `api/stream/admin` 單一入口與 DB 角色隔離。
 - 單租戶;`tenant_id` 存在但沒有隔離邏輯與租戶級權限。
 - 資料保存不刪除、無分區;Postgres 單實例、無 PITR(beta 為每日備份 + WAL 歸檔)。
@@ -1614,3 +1685,79 @@ lint ──► unit ──► fuzz-smoke ──► integration ──► e2e ─
 | 38 | notification-service | 取消;改為 webhook dispatcher + 私有 WS | P08、P01 |
 | 39 | WebSocket 歸屬重疊 | `stream` role 終結 WS;api 只做 REST;snapshot + delta + seq | E04、C01 |
 | 40 | 多租戶未決 | 單租戶、`tenant_id` 預留、ADR-0003 | P03 |
+
+## 22. v2:接主網、碰真錢的路線與閘門(v1.1 新增)
+
+v1 的底線是「不接主網、不碰真錢」(§2.1、§4 原則 0)。那不是產品的終點,是**測試與 beta 階段的紀律**:在能證明帳本、簽名、對帳、營運都撐得住之前,不讓真錢進來。正式營運(v2)就是要接主網——本節寫的是從 beta 走到那裡要通過的每一道閘門,以及通過之後怎麼放量。每一道閘門都要有可驗證的產出(程式、外部報告或營運文件),不是「我們覺得準備好了」。
+
+### 22.1 閘門(全部通過才允許 `ETH_CHAIN_ID` 設為主網)
+
+| # | 閘門 | 產出 | 誰負責 |
+|---|---|---|---|
+| 1 | **程式閘門** | 已知主網 id 清單寫進 `internal/app/config.go`(1 Ethereum、10 Optimism、137 Polygon、8453 Base、42161 Arbitrum One;這是「已知主網」不是「支援清單」,v1.1 仍只支援單一 EVM 鏈);命中時要求 `MAINNET_ACKNOWLEDGED=true`、`EXCHANGE_ENV=prod`、signer 種類 ≠ keystore 三者同時成立,否則啟動即失敗並印出未通過的項目;測試斷言三種缺一的情況都拒絕 | 引擎(可提前到 v1.1) |
+| 2 | **密鑰託管** | `KMSSigner`(AWS KMS / GCP KMS / HSM / MPC 擇一)實作 `Signer` 介面(ADR-0007);熱錢包私鑰不落任何主機檔案;HD 種子只用於派生充值地址,充值地址的私鑰同樣不落地(或改用 CREATE2 forwarder 讓充值地址不持鑰,§3.1 backlog);冷錢包(多簽)+ 熱錢包上限 `HOT_WALLET_MAX`,超過自動轉冷、低於 `HOT_WALLET_MIN` 告警人工補 | 引擎 + 營運方 |
+| 3 | **安全審計與滲透測試** | 外部審計報告,範圍至少:簽名路徑、提現政策與 resolve、admin 登入與 TOTP、公開 API 與限流;高風險項全部關閉並複測 | 營運方委外 |
+| 4 | **法遵** | KYC/AML 供應商整合(`kyc_level` 由驗證來源透過 admin API 寫入,不再是人工欄位);提現地址篩查(制裁名單)以 hook 接進 `policy.WithdrawalPolicy`;Travel Rule 依轄區;營運方持有該轄區牌照或豁免——這是營運方的責任,引擎只提供 hook 與審計 | 營運方;引擎提供 policy hook |
+| 5 | **風控** | 提現限額改以法幣等值計(需要價格來源)、全站每日出金上限、超過門檻雙人審核(4-eyes)、提現速率異常偵測、一鍵暫停所有提現(kill switch,後台 + CLI,寫審計) | 引擎 |
+| 6 | **鏈基礎設施** | 付費 RPC provider ×2 自動 failover;主網確認數(ETH 12 以上或用 finalized tag)、`ETH_MAX_FEE_PER_GAS` 上限與 EIP-1559 估價策略、明確的 `ETH_SCAN_START_BLOCK`;`ETH_SCAN_BATCH_SIZE` 對齊 provider 的 `eth_getLogs` 上限 | 引擎 + 營運方 |
+| 7 | **真實資產** | 真 USDC 合約地址與 decimals 驗證、token allowlist(seed 不再直接吃 `addresses.json`)、`deploy/seed-params/mainnet.json`(限額、歸集門檻、**非零的提現手續費**) | 引擎 |
+| 8 | **營運** | 24/7 on-call 與告警通道;事件響應 runbook 四本(私鑰疑似外洩、熱錢包被清空、深度 reorg、provider 全掛);備份升級為 PITR(§18 的缺口);準備金與保險政策;對帳報表定期公開(proof-of-reserves 的雛形) | 營運方 + runbook |
+| 9 | **放量計畫** | §22.2 | 營運方 |
+
+### 22.2 放量
+
+1. **內部帳戶**:只有營運方自己的帳戶,小額,跑滿兩週的每日對帳零差異。
+2. **白名單用戶**:全站每日出金 cap(例如 1 ETH 等值),提現一律人工審核;每週看營收報表(§23.5)、對帳、事件,沒有異常才提高 cap。
+3. **開放**:自動放行的 `auto_approve_limit` 逐步調高。
+
+任何一道閘門失效(審計過期、provider 更換、密鑰輪替、審核人員異動)就回到上一階。
+
+### 22.3 v2 也明確不做
+
+每筆成交上鏈結算(DEX 式;gas 與延遲都不可能,而且和 §23.1 的托管模型互斥)、非托管錢包、槓桿 / 合約、法幣通道——這些各自是另一個產品。
+
+## 23. 營收模型:手續費與報表(v1.1 新增)
+
+### 23.1 一句話
+
+平台的**收入**只有三種手續費:交易、提現、充值;**支出**是 gas——提現廣播、歸集、ERC-20 歸集前補 gas、nonce 補洞,都由熱錢包出 ETH,記 `gas_expense`。gas 不是平台的收入,是付給以太坊網路的成本;提現手續費的定價就是要蓋住它再加利潤。
+
+撮合在平台內部、鏈只在充提時碰,**是現在的設計,而且是刻意的**:`internal/matching` 只依賴 `internal/money`,`internal/trading` 完全不依賴 `internal/chain`;成交是 `ledger.Settle` 的一筆分錄加一則 outbox 事件(§4 原則 3、4;§5.2;§6.1;§6.3),鏈只出現在 §6.4 的充值、提現、歸集與對帳。這叫**托管式(custodial)交易所**:用戶的餘額是平台的負債(§6.1.1 的 LIABILITY),鏈上資產是平台的資產,兩邊隨時要對得起來。代價是用戶要信任平台的帳,所以試算平衡(§6.1.5 不變量 5)、鏈上對帳(§6.4.4)、以及 v2 的 proof-of-reserves(§22.1 第 8 道)都不是可選項。
+
+### 23.2 交易手續費(既有)
+
+每市場一張 `fee_schedules`(maker / taker bps),成交時以「收到的資產」扣、進 `fee_revenue`,捨入對交易所有利(§6.1.4 b、§6.5)。後台「手續費表」頁、`PUT /admin/v1/fee-schedules/{name}`、`exchangectl admin fee-schedules set` 三處可改;改了寫審計、發 `fee_schedule.updated`、引擎每個命令重讀所以立即生效。定價是營運方的事;0 bps 的市場合法。
+
+### 23.3 提現手續費(v1.1,Phase 8)
+
+- **計法**:每資產固定金額 `withdrawal_fee`(蓋 gas)+ 可選比例 `withdrawal_fee_bps`(預設 0,大額抽成);`fee = withdrawal_fee + ceil(amount × bps / 10000)`。
+- **外加**:用戶填「要送多少」,收款方拿到整數;平台扣 `amount + fee`。預檢、限額、`min_withdrawal` 的語意見 §6.4.2。
+- **入帳時點**:`confirmed` 才進 `fee_revenue`;之前都是用戶的 hold,每一條失敗路徑都退回(§6.1.4 h)。平台沒把錢送出去就不收費。
+- **快照**:`requested` 時算好寫在提現列上,後台改費率只影響之後的請求。
+- **定價指引**:`withdrawal_fee` 至少要蓋住近 7 天該資產提現的 P90 gas 成本(`gas_expense` 的 `withdrawal:gas:*` entries 除以 confirmed 筆數);低於它 §15 的 `WithdrawalGasExceedsFee` 會提醒。ERC-20 的 fee 以該 ERC-20 計,gas 仍是 ETH,所以要看兩種資產的價格——v1.1 不做法幣換算,靠營運方判斷。
+- **不做**(v2,§23.6):跟隨即時 gas 的動態計價。
+
+### 23.4 充值手續費(v1.1,Phase 8;預設 0)
+
+`deposit_fee_bps`,入帳時扣、進 `fee_revenue`(§6.1.4 i)。業界慣例是充值免費——它是進水口,收費會擋住資金進來;充值的成本(ERC-20 歸集前要從熱錢包補 gas)靠 `min_deposit` 與 `sweep_threshold` 控制。所以 seed 為 0,欄位與分錄先做好,營運方在後台隨時可以開:當 ERC-20 歸集的 gas 明顯高於交易手續費收入時才考慮。
+
+### 23.5 營收報表(v1.1,Phase 8)
+
+- `GET /admin/v1/reports/revenue?from&to&asset` 與 `.csv`;後台「營收」頁;`exchangectl admin revenue`。
+- 每資產六欄:交易手續費(maker / taker 分開)、提現手續費、充值手續費、gas 支出、淨額、筆數。
+- 數字的定義,測試直接比對:交易費 = Σ `trading.trades.maker_fee + taker_fee` 按 fee 資產;提現 / 充值費 = `withdrawal:fee:*` / `deposit:*` entries 裡 `fee_revenue` 的 credit;gas = `gas_expense` 的 debit;淨額 = 同資產相減。**跨資產不換算法幣**(需要價格來源,列 v2),所以淨額只在同一資產內有意義。
+- 指標 `ledger_fee_revenue_total{asset,source}`、`ledger_gas_expense_total{asset}` 與 Grafana Ledger 板的「手續費 vs gas」面板是同一份數字的即時版。
+
+### 23.6 v2 backlog
+
+用戶等級費率(`users.fee_tier` → 覆寫市場的 schedule,成交雙方各自查自己的)、平台幣折抵、跟隨 gas 的動態提現計價、法幣換算的合併損益表。
+
+## 24. 附錄:v1.0 → v1.1 主要變更對照
+
+| # | v1.0 | v1.1 | 依據 |
+|---|---|---|---|
+| 1 | 「不接主網、不碰真錢」是沒有終點的鐵律 | 改為 v1 的紀律;v2 接主網,§22 九道閘門與放量計畫;§4 原則 0 加程式閘門 | 使用者 2026-09-09;ADR-0011 |
+| 2 | `withdrawal_fee` 欄位預留、v1 為 0,沒有分錄;無充值手續費 | §6.1.4 (h)(i)、§6.4.2 fee 快照與預檢、§6.6 兩個新欄位、Phase 8 | ADR-0011 |
+| 3 | 沒有營收報表、沒有手續費指標 | §7.4 reports 端點、§15 兩個 counter 與一條告警、§23.5 | ADR-0011 |
+| 4 | 鏈下撮合、鏈上只充提結算分散在四處 | §23.1 集中寫明托管模型與它的義務 | ADR-0011 |
+| 5 | §16 到 managed K8s 為止;§17 / §18 只提「生產要換 KMS」 | §16 加正式(主網)列;§17 加三項風險;§18 指向閘門並記錄 Phase 8 之前的收費缺口 | ADR-0011 |
