@@ -113,19 +113,25 @@
 
 ### 3.3 規模與非功能目標(設計目標,非承諾)
 
-| 項目 | 目標 | 量測方式 |
-|---|---|---|
-| 用戶規模 | 封閉 beta:註冊 5,000、同時線上 500、同時 WS 連線 1,000 | `exchangectl loadgen` + Prometheus |
-| 下單延遲 | `POST /v1/orders` p99 < 50 ms(`role=all`,本機 Postgres) | `http_request_duration_seconds` |
-| 撮合吞吐 | 單市場 ≥ 1,000 orders/s 持續 60 s 不積壓(每命令一筆 PG 交易的上限 ≈ 1 / 單筆交易延遲;達標手段為 runner 內 group commit:一筆交易套用 N 個命令,N ≤ 50。Phase 3 先量測單命令延遲再決定是否實作) | `trading_command_queue_depth`、loadgen |
-| 純撮合效能 | `matching.Apply` ≥ 100,000 ops/s 單執行緒(benchmark) | `go test -bench` |
-| 行情延遲 | 成交 → 私有 WS 推播 p99 < 200 ms;→ 公開 depth delta p99 < 300 ms | 事件 `occurred_at` vs 送出時間 |
-| 引擎恢復 | 100,000 筆 open orders 重建訂單簿 < 30 s | `engine_rebuild_duration_seconds` |
-| 充值入帳 | 確認數 × 出塊時間 + ≤ 10 s 掃描延遲 | `chain_scanner_lag_blocks` |
-| 提現(自動路徑) | anvil 上 requested → confirmed ≤ 2 min | 狀態停留時間指標 |
-| 資料保存 | v1 不刪除任何交易、分錄、事件;outbox 保留 30 天(供 WS resume) | — |
-| 備份 | beta:每日 `pg_dump` + WAL 歸檔;RPO ≤ 24 h、RTO ≤ 1 h(人工) | Phase 7 演練 |
-| 不追求 | 微秒級延遲、跨機 HA、多活 | — |
+**每一列都標了在什麼負載下量到什麼。** 這一節原本只有目標,讀起來像什麼都還沒量;而四個效能目標的實況不是「差多少」,是「**低負載下成立、飽和時失守**」——不寫負載就等於沒說。`實測` 欄的 `—` 是「從來沒量過」,不是「量了但沒記」。
+
+| 項目 | 目標 | 實測(`docs/loadtest.md`) | 量測方式 |
+|---|---|---|---|
+| 用戶規模 | 封閉 beta:註冊 5,000、同時線上 500、同時 WS 連線 1,000 | **達標**:1,030 條連線撐滿 60 s、0 條提前斷線(3,343 goroutine、1,184 fd、RSS 144 MB) | `exchangectl loadgen` + Prometheus |
+| 下單延遲 | `POST /v1/orders` p99 < 50 ms(`role=all`,本機 Postgres) | **未達**。Phase 7 後:100 命令/s 穩態 **548 ms**、飽和 **1,127 ms**;10 帳戶輕載 144 ms(Phase 6 量的)。Phase 6 為 1,244 / 1,183 ms | `http_request_duration_seconds` |
+| 撮合吞吐 | 單市場 ≥ 1,000 orders/s 持續 60 s 不積壓(每命令一筆 PG 交易的上限 ≈ 1 / 單筆交易延遲;達標手段為 runner 內 group commit:一筆交易套用 N 個命令,N ≤ 50) | **未達**。Phase 7 後 **266 orders/s(355 命令/s)**;Phase 6 為 126 orders/s(165 命令/s)。group commit 已於 **Phase 7** 實作 | `trading_command_queue_depth`、loadgen |
+| 純撮合效能 | `matching.Apply` ≥ 100,000 ops/s 單執行緒(benchmark) | —(沒有把 benchmark 結果記進任何文件) | `go test -bench` |
+| 行情延遲 | 成交 → 私有 WS 推播 p99 < 200 ms;→ 公開 depth delta p99 < 300 ms | **視負載而定**。Phase 6 大幅達標(24–26 / 19–21 ms,500 訂閱者扇出 46,000 則/s 時 44 ms);Phase 7 的 group commit 之後**飽和時未達**(**648 / 638 ms**),100 命令/s 穩態 524 / 445 ms | 事件 `occurred_at` vs 送出時間 |
+| 引擎恢復 | 100,000 筆 open orders 重建訂單簿 < 30 s | —(壓測跑到 59k orders,沒有針對重建計時) | `engine_rebuild_duration_seconds` |
+| 充值入帳 | 確認數 × 出塊時間 + ≤ 10 s 掃描延遲 | —(e2e 證明會入帳,沒有量延遲) | `chain_scanner_lag_blocks` |
+| 提現(自動路徑) | anvil 上 requested → confirmed ≤ 2 min | —(e2e 每次都走完整條路徑,但沒有把時間記下來) | 狀態停留時間指標 |
+| 資料保存 | v1 不刪除任何交易、分錄、事件;outbox 保留 30 天(供 WS resume) | — | — |
+| 備份 | beta:每日 `pg_dump` + WAL 歸檔;RPO ≤ 24 h、RTO ≤ 1 h(人工) | RTO **本機實測 8 秒**(25.7 MB、231k postings),CI 每個 PR 再量一次;RPO 實際就是 24 h(WAL 有歸檔但沒有 base backup,PITR 只是文件) | Phase 7 演練 |
+| 不追求 | 微秒級延遲、跨機 HA、多活 | — | — |
+
+**那四項未達標是同一件事的四個面向,不是四個獨立的失誤。** Phase 7 把引擎改成 pipeline + 群組提交,一筆交易套用 N 個命令——吞吐因此 ×2.1,`POST` p50 好 2.5×,但**事件要等該組 COMMIT 才進 outbox**,所以推播與 depth delta 的延遲在飽和時從約 20 ms 變成約 640 ms。`ENGINE_BATCH_SIZE` 就是那個旋鈕:佇列空時每組只有一個命令、延遲與單命令相同;負載高時組變大、吞吐上去、每則事件晚一點。
+
+換句話說,**這四個目標在低負載下都成立,在飽和時都失守**,而且是被同一個取捨綁在一起的:要延遲就沒有吞吐,要吞吐就沒有延遲。下一個瓶頸不再是往返數(已經從每命令 17 次降到 3 次),而是每句 SQL 的 Postgres 成本;真要同時拿到兩邊,得減少語句數或把市場分片到多個 runner。差距與讀法在 `docs/loadtest.md` §8,已知限制列在 `docs/beta-checklist.md`。
 
 ## 4. 設計原則(修訂版)
 
@@ -1214,7 +1220,7 @@ psql ... -c "select * from ledger.postings order by id desc limit 6"
 - [ ] E2E job:compose `single` profile `up --wait` → `exchangectl e2e` → `docker kill -s KILL exchange-all` → 再 `up --wait` → 驗證 open orders 與 book 一致(1 d)
 - [ ] 指標:`trading_command_queue_depth`、`trading_apply_duration_seconds`、`outbox_backlog`、`engine_rebuild_duration_seconds`、`http_request_duration_seconds`(0.5 d)
 
-**DoD(CI)**:`unit`、`integration`(含 kill/restart、冪等、事件重放、seq 連續)、`e2e` 綠;`nats stream info EX_TRADING` 顯示事件;同一帳戶登入錯第 6 次觸發 429(per account 5/min);p99 下單延遲(loadgen 100 orders/s 60 s,`--accounts 100`)< 50 ms 記錄於 PR;`docs/events.md` 與 schema 檔同步(golden 測試)。
+**DoD(CI)**:`unit`、`integration`(含 kill/restart、冪等、事件重放、seq 連續)、`e2e` 綠;`nats stream info EX_TRADING` 顯示事件;同一帳戶登入錯第 6 次觸發 429(per account 5/min);p99 下單延遲(loadgen 100 orders/s 60 s,`--accounts 100`)**記錄於 PR**——原本寫「< 50 ms」當閘門,Phase 6 實測是 1,244 ms、Phase 7 之後 548 ms,那個門檻在這個架構下過不了(§3.3),所以閘門是**量到並記錄**,不是達到某個值;`docs/events.md` 與 schema 檔同步(golden 測試)。
 
 **展示腳本**:
 
@@ -1562,7 +1568,7 @@ scripts/backup.sh && scripts/restore-drill.sh
 | anvil 狀態與 Postgres 壽命不一致 | 游標套到新鏈 | `--state` volume + `genesis_hash` 檢查 + `make reset` |
 | 範圍蔓延(多市場、進階單型、多租戶、前台功能) | 交付延後 | 3.2 不做清單;新需求先進 ADR 討論,不進本 Phase |
 | 單人開發、知識集中 | 中斷後難續 | 本文件、ADR、runbook、CI 為第二大腦;每 Phase 結束修訂文件 |
-| 效能目標未達 | beta 體驗 | 目標標為設計目標;Phase 6 壓測記錄差距;正確性優先 |
+| 效能目標未達 | beta 體驗 | 目標標為設計目標;Phase 6 壓測記錄差距,Phase 7 的 pipeline + 群組提交補回約 2.1× 吞吐、但換來飽和時推播延遲的回歸;四項的實測值與負載條件寫在 §3.3,已知限制列在 `docs/beta-checklist.md`;正確性優先 |
 | 密鑰誤入庫 | 安全事故 | `.gitignore`、`gitleaks`、`.env.example` 佔位、`gen-dev-secrets` |
 | 白牌客戶要求多租戶 / OIDC / KMS | 架構壓力 | `tenant_id` 預留、`Signer` 介面、JWT 驗證器可替換、事件契約版本化;真的出現需求再開 ADR |
 | Sepolia faucet / RPC 限流 | 4d 延遲 | 多 faucet、付費 RPC 免費層;4d 不阻塞 Phase 5 |

@@ -14,7 +14,8 @@ Beta = 自營、封閉、單台 VM、只接 Sepolia(`docs/plan-v1.0.md` §0、§
 - **對帳每 5 分鐘一輪、沒有閾值**:任何非零 `DIFF` 都是告警(`docs/runbooks/reconciliation-break.md`)。
 - **手續費的程式做好了,但費率出廠是 0**(計畫 v1.1 §23、Phase 8;ADR-0011):提現與充值都收得了費,後台的資產頁可以隨時設,`GET /admin/v1/reports/revenue`、後台的「營收」頁與 `exchangectl admin revenue` 看得到三種手續費與 gas 支出。**但三個費率的 seed 值都是 0**,所以不設就跟以前一樣:每一筆提現與歸集的 gas 記 `gas_expense`、沒有對應收入。上線前要決定的是**提現手續費要設多少** —— §23.3 的指引是至少蓋住近 7 天該資產提現的 P90 gas;設得太低 `WithdrawalGasExceedsFee` 會提醒。充值手續費照業界慣例維持 0。
 - **前台與後台是繁體中文 / 英文雙語**(ADR-0010):切換器在右上角,後台另看 `Accept-Language`。`Problem.detail`、領域驗證訊息、CLI、日誌仍是英文;runbook 對的是狀態碼,badge 的 `title` 保留原始碼。
-- **壓測數字**(`docs/loadtest.md` §8):單市場 ~266 orders/s、`POST /v1/orders` p99 在 100 orders/s 時 ~550 ms。§3.3 的 1,000 orders/s 與 50 ms p99 **未達**,beta 的流量規模應該遠低於此。
+- **壓測數字**(`docs/loadtest.md` §8):單市場 ~266 orders/s、`POST /v1/orders` p99 在 100 orders/s 時 ~548 ms。§3.3 的 1,000 orders/s 與 50 ms p99 **未達**,beta 的流量規模應該遠低於此。
+- **飽和時的推播延遲會從約 20 ms 變成約 640 ms**,行情的 depth delta 同樣(§3.3 的目標是 200 / 300 ms)。這不是退步,是 Phase 7 群組提交刻意的取捨:事件要等該組 COMMIT 才進 outbox,換來約 2.1 倍吞吐。旋鈕是 `ENGINE_BATCH_SIZE`——佇列空時每組只有一個命令,延遲就跟單命令一樣。**低負載下應該回到 20 ms 等級,但那是推論,沒有量過**;beta 期間值得拿 `stream_push_delay_seconds` 實際看一眼,而不是假設。
 
 ## 上線前
 
