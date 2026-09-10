@@ -985,6 +985,19 @@ for i in $(seq 1 20); do getent hosts ghcr.io >/dev/null && printf . || printf X
 
 **順帶一個可以重用的手法。** 當時看起來像「MSI 壞、MSI2 好」(第一次在 MSI 失敗、重跑在 MSI2 成功)。job log 的工作目錄一步就把這個方向刪掉了:一邊是 `actions-runner`、一邊是 `actions-runner2`,同一個使用者、同一個發行版,**共用同一個 Docker daemon**。一個 daemon 只有一份容器 DNS 設定,不可能一台解析得到一台解析不到——差別是時間,不是機器。裝兩個 runner 的代價之一是容易誤以為它們是兩台獨立的機器。
 
+**Q: `e2e` 死在 `dial unix /run/buildkit/buildkitd.sock: connect: no such file or directory`。**
+和上面那則相反,這一則**根因確立、也已經修掉了**;寫在這裡是因為錯誤訊息本身看不出成因。
+
+症狀:`compose up --build` 跑了二十幾個建置步驟之後,buildkit 的 socket 憑空消失;整個 job 三十幾秒就結束(正常約三分鐘),容器一個都沒起來。
+
+成因是兩個 job 搶同一份狀態。buildx 把 instance 的定義、以及「目前選取哪一個」的指標放在 `$BUILDX_CONFIG`(預設 `~/.docker/buildx`),而**兩個 runner 是同一個使用者的兩個行程,那份預設是共用的**。第三階段刻意讓 `e2e`、`helm`、`image` 並行,於是:`helm` 的 `setup-buildx-action` 建立並**選取**一個 builder → `e2e`(它沒有自己的 `setup-buildx-action`)沿用了那個選取 → `helm` 收尾時 `docker buildx rm` 把它移除,而 `e2e` 的建置還在跑。
+
+因為只有兩個 runner 對三個 job,`e2e` 常常最後起跑,剛好落進別人的收尾窗口——所以它是間歇的,而且**重跑通常會過**(那一次它獨自執行)。重跑會過正是這類問題最容易被放過的地方。
+
+修法在 `.github/workflows/ci.yml`:那三個 job 的第一步各自把 `BUILDX_CONFIG` 指到自己的 `$RUNNER_TEMP/buildx`。`RUNNER_TEMP` 是每個 runner 行程一份,而同一個 runner 上的 job 是循序的,剛好是這份狀態需要的範圍。`e2e` 因此拿到一個空的狀態目錄,退回用 `default`——daemon 自己的 builder,沒有任何 job 會建立或移除它。
+
+如果又看到這個錯誤,先確認那一步還在、而且排在 `setup-buildx-action` 前面。
+
 **Q: 想暫時全部回到 GitHub 的機器上。**
 刪掉倉庫變數 `CI_RUNNER`。一秒生效,不用改 code。
 
