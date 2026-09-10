@@ -757,6 +757,12 @@ export interface components {
              * @example 0
              */
             withdrawal_fee_bps: number;
+            /**
+             * Format: int32
+             * @description Basis points taken out of an arriving deposit, rounded up at `scale`. Unlike the withdrawal fee this one is deducted from what arrives rather than added to it, so a deposit of `x` credits `x - ceil(x * deposit_fee_bps / 10000)`. `0` unless the operator has set a rate, and expected to stay there. Published so a depositor can know the rate before sending rather than after.
+             * @example 0
+             */
+            deposit_fee_bps: number;
             deposit_enabled: boolean;
             withdraw_enabled: boolean;
             status: components["schemas"]["AssetStatus"];

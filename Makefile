@@ -70,6 +70,9 @@ GEN_DIRS := internal/api/gen internal/admin/gen cmd/exchangectl/internal/apiclie
             internal/trading/sqlcgen internal/eventbus/sqlcgen internal/auth/sqlcgen \
             internal/chain/sqlcgen internal/webhook/sqlcgen internal/marketdata/sqlcgen internal/admin/sqlcgen
 
+# Editing api/public/v1/openapi.yaml? This target does not regenerate the front
+# end's TypeScript types -- `web-gen` does, and it needs Node. `checks` runs both,
+# so a stale web/trade/src/api/schema.d.ts fails CI rather than reaching anyone.
 gen: ## Regenerate OpenAPI server/client and sqlc code (outputs are committed)
 	$(GOTOOL) oapi-codegen -config internal/api/gen/oapi-codegen.yaml api/public/v1/openapi.yaml
 	$(GOTOOL) oapi-codegen -config cmd/exchangectl/internal/apiclient/oapi-codegen.yaml api/public/v1/openapi.yaml
