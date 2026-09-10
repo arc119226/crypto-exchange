@@ -112,10 +112,15 @@ func (s *Service) AdminLogin(ctx context.Context, email, password, ip string) (A
 	}
 	if reason != "" {
 		if found {
-			_ = s.audit.Record(ctx, s.pool, audit.Event{
+			// A failed admin login is rejected regardless; the audit row is
+			// how somebody later sees it happened. Never fail the rejection
+			// over it, never lose it quietly either.
+			if err := s.audit.Record(ctx, s.pool, audit.Event{
 				ActorType: audit.ActorUser, ActorID: row.ID, Action: "auth.admin.login.failed",
 				TargetType: "user", TargetID: row.ID, IP: ip, After: map[string]any{"reason": reason},
-			})
+			}); err != nil {
+				s.log.Warn("audit write failed", "action", "auth.admin.login.failed", "user_id", row.ID, "reason", reason, "error", err)
+			}
 		}
 		return AdminSession{}, ErrInvalidCredentials
 	}
@@ -268,11 +273,13 @@ func (s *Service) recordTOTPFailure(ctx context.Context, userID, ip string, now 
 	if locked {
 		action = "auth.admin.totp.locked"
 	}
-	_ = s.audit.Record(ctx, s.pool, audit.Event{
+	if err := s.audit.Record(ctx, s.pool, audit.Event{
 		ActorType: audit.ActorUser, ActorID: userID, Action: action,
 		TargetType: "user", TargetID: userID, IP: ip,
 		After: map[string]any{"failures": res.TotpFailures},
-	})
+	}); err != nil {
+		s.log.Warn("audit write failed", "action", action, "user_id", userID, "failures", res.TotpFailures, "error", err)
+	}
 	if locked {
 		return ErrTOTPLocked
 	}
@@ -295,10 +302,12 @@ func (s *Service) AdminLogout(ctx context.Context, token, ip string) error {
 		return fmt.Errorf("auth: revoke admin session: %w", err)
 	}
 	if n == 1 {
-		_ = s.audit.Record(ctx, s.pool, audit.Event{
+		if err := s.audit.Record(ctx, s.pool, audit.Event{
 			ActorType: audit.ActorAdmin, ActorID: row.UserID, Action: "auth.admin.logout",
 			TargetType: "user", TargetID: row.UserID, IP: ip,
-		})
+		}); err != nil {
+			s.log.Warn("audit write failed", "action", "auth.admin.logout", "user_id", row.UserID, "error", err)
+		}
 	}
 	return nil
 }

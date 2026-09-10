@@ -76,6 +76,32 @@ curl -s https://$EDGE_DOMAIN/v1/markets | jq .
 - 從裡面:`exchange version` == tag;`/.well-known/jwks.json` 一個 kid;每個角色的 `readyz` 綠;signer 的 `hot_wallet` 等於 `HOT_WALLET_ADDRESS`;chain role log 有 `nonce reconciled`(DB `next_nonce` == 鏈上)。
 - 一張單成交、一筆小額提現走到 `confirmed`、後台首頁 `Last backup` 有時間、`docs/beta-checklist.md` 全部打勾。
 
+## 部署約束
+
+這一節記的是**不會變紅的東西**:兩件在 beta 的拓撲下成立、而且沒有任何告警、測試或紅燈會告訴你的限制。上線之前先知道它們存在,否則第一次遇到會以為是壞掉了。
+
+### 每一條 per-IP 限流在 edge 後面塌成同一個桶
+
+`build/edge/Caddyfile` 把 `/v1/*` 與 `/.well-known/*` 代理到 `exchange-api:8080`,而 `deploy/compose/compose.prod.yaml` 把 `exchange-api` 的 host port 清成 `ports: !override []`——**沒有第二條路徑**,每一個公開請求對 api 而言都來自 edge 那個容器。
+
+而 `auth.ClientIP`(`internal/auth/middleware.go`)刻意不讀 `X-Forwarded-For`:反向代理在 v1 的範圍外(`docs/plan-v1.0.md` §18),而相信一個誰都能偽造的標頭比不讀它更糟——任何人都可以每一次請求換一個假來源,per-IP 限流反而完全失效。兩件事加起來的結果:
+
+| 受影響的 | 實際會怎樣 |
+|---|---|
+| `LOGIN_PER_IP` | 塌成**全站共用一個桶**。它既無法把一個攻擊者跟其他人分開,反過來對方也可以把桶用完,讓所有人的登入**與註冊**都收到 429(同一個限額也管註冊) |
+| `LOGIN_PER_ACCOUNT` | **不受影響**,它的鍵是 email。針對單一帳號的密碼猜測照樣被擋下來——這是仍然有效的那一道 |
+| 稽核事件與冪等紀錄的 `ip` 欄 | 記的是 edge 的容器位址,每一位使用者都一樣 |
+
+上線前要做的:把 `LOGIN_PER_IP` 當成**全站總量**來設,放寬到不會誤傷正常流量;每個帳號的防護交給 `LOGIN_PER_ACCOUNT`。真的需要按來源位址限流,那要在 edge 上做,不是在 api 上——api 在 v1 不會相信任何標頭。
+
+### admin 是單副本,而且是從 tunnel 進來的
+
+`deploy/helm/exchange/values.yaml` 的 `roles.admin.replicas` 是 1,compose 也只有一個容器。後台的登入節流是**行程內記憶體**的權杖桶(`internal/app/admin_role.go` 的註解說明了理由,預設在 `internal/admin/ui.go`),所以把副本數調成 N,那個節流的額度就變成 N 倍,而且沒有任何訊號會告訴你。
+
+不受副本數影響的是 TOTP:鎖定記在 `auth.users.totp_locked_until`,那是共用的資料庫。**真正擋住人的是那一道**,登入節流只是不讓對方用 argon2 全速猜密碼。所以多開副本削弱的是節流,不是驗證。
+
+另一件是 `ip` 欄:admin 不在 edge 後面(`ports: !override ["127.0.0.1:8082:8082"]`),operator 是用 `ssh -L` 進來的,所以 `auth.admin_sessions.ip` 與 `audit.audit_events.ip` 對每一位 operator 都是同一個固定值。`docs/runbooks/admin-totp.md` 那句「誰什麼時候從哪裡登入過」在 beta 上只答得出前半;要知道是誰,看 `actor_id`,不要看 `ip`。
+
 ## 相關指標
 
 `exchange_ready{role}`、`up{job="exchange"}`、`node_filesystem_avail_bytes`(`DiskAlmostFull`)、`backup_last_success_timestamp_seconds`、`hot_wallet_balance{asset="ETH"}`(Sepolia faucet 的 ETH 是 gas,`HotWalletLow` 的門檻在 `compose.sepolia.yaml` 是 0.02)。

@@ -9,6 +9,7 @@ import (
 	"io"
 	"log/slog"
 	"math/big"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -137,6 +138,52 @@ func TestScriptedConfirmations(t *testing.T) {
 		assert.Equal(t, "1", h.available(t, ctx, account, "ETH").String())
 		h.assertTrialBalanceZero(t, ctx)
 	})
+}
+
+// TestScriptedDepositEventsCarryTheAssetsRequiredConfirmations asks the
+// producer, which is the part the contract tests never did.
+//
+// required_confirmations is declared required by all five deposit schemas, and
+// nothing set it: every deposit event this exchange published carried a 0. A
+// client told "2 of 0 confirmations" cannot render a progress bar, which is
+// the whole reason the field is in the payload.
+//
+// The golden envelope test did not catch it because it builds the payload by
+// hand -- deposit.Payload{..., Required: 6} -- so it proved the struct
+// serializes and never asked what the scanner puts in it. A contract test that
+// only ever sees hand-made values cannot fail on a contract the producer
+// breaks. This one reads what landed in the outbox.
+func TestScriptedDepositEventsCarryTheAssetsRequiredConfirmations(t *testing.T) {
+	h := setupScripted(t, deposit.Config{DefaultConfirmations: requiredConfirmations})
+	ctx := context.Background()
+	account, address := h.account(t, ctx)
+
+	// detected, then confirming, then credited: every event on the path.
+	h.fake.mine("b1", transfer(0, address, oneETH()))
+	require.NoError(t, h.scanner.Tick(ctx))
+	h.fake.mine("b2")
+	require.NoError(t, h.scanner.Tick(ctx))
+	h.fake.mine("b3")
+	require.NoError(t, h.scanner.Tick(ctx))
+	require.Equal(t, deposit.StatusCredited, h.status(t, ctx, account))
+
+	rows, err := h.all.Query(ctx,
+		`SELECT event_type, payload->>'required_confirmations', payload->>'confirmations'
+		   FROM eventbus.outbox
+		  WHERE event_type LIKE 'deposit.%' AND account_id = $1
+		  ORDER BY id`, account)
+	require.NoError(t, err)
+	defer rows.Close()
+	seen := 0
+	for rows.Next() {
+		var eventType, required, confirmations string
+		require.NoError(t, rows.Scan(&eventType, &required, &confirmations))
+		assert.Equal(t, strconv.Itoa(requiredConfirmations), required,
+			"%s must carry the asset's required_confirmations, not 0 (confirmations=%s)", eventType, confirmations)
+		seen++
+	}
+	require.NoError(t, rows.Err())
+	require.NotZero(t, seen, "no deposit events were emitted, so nothing was asserted")
 }
 
 // TestScriptedReorg is the drill of docs/domain.md §4, at the exact shape the

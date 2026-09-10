@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/mail"
 	"regexp"
 	"slices"
@@ -135,6 +136,12 @@ type Service struct {
 	dummy    string // hash verified for unknown emails so timing does not leak existence
 	apiKeys  secretbox.Keyring
 	totp     secretbox.Keyring
+	// log carries the audit writes this package cannot fail on. It defaults to
+	// slog.Default() rather than being injected because depguard does not let
+	// internal/auth reach internal/telemetry, and widening a deliberate module
+	// boundary for a log line is the wrong trade -- the cost is that these
+	// lines have no correlation id.
+	log *slog.Logger
 }
 
 // New wires the service. signer may be nil for roles that only verify;
@@ -156,6 +163,7 @@ func New(pool *pgxpool.Pool, cfg Config, signer *Signer, verifier *Verifier, l *
 	return &Service{
 		pool: pool, cfg: cfg, signer: signer, verifier: verifier, ledger: l, audit: a,
 		now: func() time.Time { return time.Now().UTC() }, dummy: dummy, apiKeys: apiKeys, totp: totp,
+		log: slog.Default(),
 	}, nil
 }
 
@@ -247,7 +255,13 @@ func (s *Service) Login(ctx context.Context, email, password, ip string) (Sessio
 	}
 	if !found || !ok {
 		if found {
-			_ = s.audit.Record(ctx, s.pool, audit.Event{ActorType: audit.ActorUser, ActorID: row.ID, Action: "auth.login.failed", TargetType: "user", TargetID: row.ID, IP: ip})
+			// The login is rejected either way; an audit write that fails must
+			// not turn a wrong password into a 500. But it must not vanish
+			// silently either -- these rows are what a brute-force
+			// investigation reads.
+			if err := s.audit.Record(ctx, s.pool, audit.Event{ActorType: audit.ActorUser, ActorID: row.ID, Action: "auth.login.failed", TargetType: "user", TargetID: row.ID, IP: ip}); err != nil {
+				s.log.Warn("audit write failed", "action", "auth.login.failed", "user_id", row.ID, "error", err)
+			}
 		}
 		return Session{}, ErrInvalidCredentials
 	}
@@ -255,7 +269,9 @@ func (s *Service) Login(ctx context.Context, email, password, ip string) (Sessio
 	// After the password, not before: a frozen user's wrong password is still
 	// a wrong password, and saying "frozen" to it would confirm the account.
 	if u.Status != StatusActive {
-		_ = s.audit.Record(ctx, s.pool, audit.Event{ActorType: audit.ActorUser, ActorID: u.ID, Action: "auth.login.failed", TargetType: "user", TargetID: u.ID, IP: ip, After: map[string]any{"reason": "user " + u.Status}})
+		if err := s.audit.Record(ctx, s.pool, audit.Event{ActorType: audit.ActorUser, ActorID: u.ID, Action: "auth.login.failed", TargetType: "user", TargetID: u.ID, IP: ip, After: map[string]any{"reason": "user " + u.Status}}); err != nil {
+			s.log.Warn("audit write failed", "action", "auth.login.failed", "user_id", u.ID, "reason", u.Status, "error", err)
+		}
 		return Session{}, ErrUserFrozen
 	}
 	acct, err := s.ledger.SpotAccountOf(ctx, s.pool, u.ID)
@@ -297,9 +313,25 @@ func (s *Service) Refresh(ctx context.Context, refreshToken string) (Session, er
 		// A rotated token (replaced_by set) presented again means the old
 		// token leaked: revoke the whole family. A token revoked by logout or
 		// by an earlier family revocation is simply invalid.
+		//
+		// The revocation's error is returned, not swallowed. This used to read
+		// `if _, err := ...; err == nil { audit }`, which used the error only
+		// to decide whether to write the audit row -- so a failed revocation
+		// left the thief's other tokens live, wrote nothing anywhere, and
+		// answered with the same ErrInvalidToken an ordinary expired token
+		// gets. A security response that could not be carried out must not
+		// look like one that was: the caller gets a 500 and the operator gets
+		// a real error, because the alternative is a silent, invisible
+		// compromise. AdminLogout has always done it this way.
 		if row.ReplacedBy != nil {
-			if _, err := q.RevokeUserRefreshTokens(ctx, row.UserID); err == nil {
-				_ = s.audit.Record(ctx, s.pool, audit.Event{ActorType: audit.ActorSystem, ActorID: "auth", Action: "auth.refresh.reuse_detected", TargetType: "user", TargetID: row.UserID})
+			if _, err := q.RevokeUserRefreshTokens(ctx, row.UserID); err != nil {
+				return Session{}, fmt.Errorf("auth: revoke refresh token family of %s after reuse: %w", row.UserID, err)
+			}
+			// The family is revoked by the time we get here, so the security
+			// response has happened; losing the row loses the record of why,
+			// which is worth a loud line.
+			if err := s.audit.Record(ctx, s.pool, audit.Event{ActorType: audit.ActorSystem, ActorID: "auth", Action: "auth.refresh.reuse_detected", TargetType: "user", TargetID: row.UserID}); err != nil {
+				s.log.Error("refresh token reuse detected but the audit write failed", "user_id", row.UserID, "error", err)
 			}
 		}
 		return Session{}, ErrInvalidToken

@@ -429,10 +429,23 @@ func (s *Scanner) pruneRing(ctx context.Context, head uint64) error {
 
 // emit appends a deposit event, stamping the account's next sequence so a
 // private-stream client can spot a gap.
+//
+// required_confirmations is looked up here rather than passed in. The field is
+// declared required by all five deposit schemas and was never set by anything,
+// so every deposit event this exchange has ever published carried a 0 -- a
+// client reading "3 of 0 confirmations" learns nothing, which is the opposite
+// of why the field exists. Six call sites reach this function and only one had
+// the asset index in scope, so threading a parameter would have been six
+// chances to pass the wrong thing; deposit events are a handful per block, and
+// one registry read each is not worth avoiding.
 func (s *Scanner) emit(ctx context.Context, tx pgx.Tx, eventType string, row sqlcgen.ChainDeposit) error {
 	seq, err := s.ledger.NextAccountSeq(ctx, tx, row.AccountID)
 	if err != nil {
 		return fmt.Errorf("deposit: account seq for %s: %w", row.AccountID, err)
+	}
+	required := s.cfg.DefaultConfirmations
+	if asset, err := s.registry.GetAsset(ctx, s.cfg.Tenant, row.Asset); err == nil && asset.RequiredConfirmations > 0 {
+		required = asset.RequiredConfirmations
 	}
 	amount, err := pg.AmountFromNumeric(row.Amount)
 	if err != nil {
@@ -450,7 +463,7 @@ func (s *Scanner) emit(ctx context.Context, tx pgx.Tx, eventType string, row sql
 		DepositID: row.ID, AccountID: row.AccountID, Asset: row.Asset, Amount: amount,
 		Address: row.Address, TxHash: row.TxHash, LogIndex: row.LogIndex,
 		BlockNumber: uint64(row.BlockNumber), BlockHash: row.BlockHash, //nolint:gosec // CHECKed >= 0
-		Confirmations: row.Confirmations, Status: row.Status,
+		Confirmations: row.Confirmations, Status: row.Status, Required: required,
 		Fee: fee, Credited: credited,
 	}, seq, time.Now().UTC().Truncate(time.Microsecond))
 	if err != nil {
