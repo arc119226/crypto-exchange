@@ -48,7 +48,7 @@ KIND          ?= kind
 KIND_CLUSTER  ?= exchange
 KIND_IMAGE    := crypto-exchange:ci
 
-.PHONY: help tools gen gen-check fmt tidy lint secrets-scan test test-fuzz test-integration e2e cover-money build image \
+.PHONY: help tools gen gen-check fmt tidy lint secrets-scan test docs-test test-fuzz test-integration e2e cover-money build image \
 	    up up-single up-sepolia down down-sepolia logs logs-sepolia ps ps-sepolia reset infra-up run migrate seed artifacts compose-config contracts-test \
 	    gen-dev-secrets faucet totp-enroll trace loadgen web-gen web-check web-build web-e2e \
 	    helm-lint helm-template kind-up helm-e2e kind-down backup-drill \
@@ -111,6 +111,14 @@ secrets-scan: ## gitleaks over the git history (.gitleaks.toml)
 
 test: ## Unit + property tests with the race detector
 	go test -race -short -count=1 ./...
+
+# The subset of `test` that reads the documentation rather than the code:
+# links, backticked repo paths, the four-part runbook shape, the CLI
+# subcommands and metric names runbooks tell an operator to use. Broken out
+# because a documentation-only pull request skips ci.yml entirely, so
+# .github/workflows/docs.yml runs this and nothing else.
+docs-test: ## The test/docs suite alone (what a documentation-only PR runs)
+	go test -count=1 ./test/docs/...
 
 # This used to discover targets by running `go test -list 'Fuzz.*'` over every
 # package, which reads as self-maintaining -- add a Fuzz* anywhere and CI picks

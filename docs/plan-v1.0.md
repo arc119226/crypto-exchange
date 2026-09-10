@@ -1477,8 +1477,9 @@ scripts/backup.sh && scripts/restore-drill.sh
 - **`runs-on` 必須是一個變數,而且刪掉變數就回到托管 runner。** 退路必須是一個動作(ADR-0012 決定 1)。
 - **純文件的 PR 不跑**:`pull_request` 加 `paths-ignore: ['**/*.md', 'docs/**']`。沒有任何 job 讀 `docs/**` 或 `.md`——測試載入的非 Go 檔案只有 `.env.example`、`deploy/seed-params/*.json`、`test/fixtures/*.json`,三者都不在濾除範圍內。`pull_request` 的 path filter 是對整個 PR diff 判定,所以同時碰程式與文件的分支照跑。
   **刻意不套用在 `push` 上**:在純文件 commit 上打 `v*` tag 會讓 `image` 不跑而發出沒有 image 的 release;而 main 是所有分支的基準,每個 commit 都驗過是值得一輪的性質。
-  一個已知的後果:`test/docs/` 那兩支測試因此在**合併到 main 時才跑**,不是在文件 PR 上。改文件之後本機要自己跑一次 `go test ./test/docs/...`。
-  未來若在 main 開 branch protection 並把這些檢查設為 required,純文件 PR 會因為 required check 永不回報而合不起來——那時要補一個同名 job 的 workflow 在被濾路徑上直接成功。
+  **這曾經有一個被低估的後果。** 原本寫的是「`test/docs/` 因此在合併到 main 時才跑」——那是錯的:`checks` 自己也帶著「合併到 main 不跑」的條件,所以那兩支測試實際上只在**碰到非文件路徑的 PR** 與 **`v*` tag** 上執行。也就是說,純文件改動的第一次驗證會落在發版那一刻,而那是最不該才發現 runbook 引用了不存在的指標的時候。
+  修法是 `.github/workflows/docs.yml`:它的 `paths` 正好是這裡 `paths-ignore` 的補集,只跑 `make docs-test`(十秒等級)。同一個分支同時碰程式與文件時兩個 workflow 都會觸發,重複的成本可以忽略。
+  這也順帶備好了 branch protection 的情形:若日後在 main 把這些檢查設為 required,純文件 PR 會因為 required check 永不回報而合不起來,而同名 job 的第二個 workflow 正是 GitHub 對這個問題的既定解法。
 
 ## 14. 安全邊界與密鑰清單
 
