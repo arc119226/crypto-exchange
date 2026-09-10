@@ -403,6 +403,24 @@ func (w *Worker) track(ctx context.Context, row sqlcgen.ChainSweep, asset regist
 	}
 	receipt, err := w.chain.Receipt(ctx, *row.TxHash)
 	if errors.Is(err, evm.ErrNotFound) {
+		// Same reasoning as trackGasFunding, and it belongs here more than
+		// there: a token sweep is the leg that can be dropped from the mempool
+		// through no fault of its own. Its gas comes from the funding transfer
+		// that runs first, and if that transfer is still in flight when this
+		// one is priced, the ether can arrive after this transaction has
+		// already been rejected as underfunded.
+		//
+		// This used to `return nil`, which reads as "not mined yet, look
+		// again next tick" -- but the next tick asks the same node the same
+		// question and gets the same answer, forever. Meanwhile the partial
+		// index allows no second sweep for the address and admin has no write
+		// path to these rows, so the tokens sit there until somebody edits the
+		// database by hand. Re-sending the stored bytes costs nothing when the
+		// transaction really is in flight (the node already has it and says
+		// so) and is the whole fix when it is not.
+		if err := w.chain.SendRawTransaction(ctx, row.RawTx); err != nil && !errors.Is(err, evm.ErrKnownTransaction) {
+			return fmt.Errorf("sweep: re-send %s: %w", row.ID, err)
+		}
 		return nil
 	}
 	if err != nil {

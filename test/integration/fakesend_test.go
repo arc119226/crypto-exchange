@@ -524,6 +524,31 @@ func (c *sendChain) lastSent() *types.Transaction {
 	return c.sent[len(c.sent)-1]
 }
 
+// sentTimes is how many times one transaction reached the node. More than
+// once means something re-sent it.
+func (c *sendChain) sentTimes(hash string) int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	want := common.HexToHash(hash)
+	n := 0
+	for _, tx := range c.sent {
+		if tx.Hash() == want {
+			n++
+		}
+	}
+	return n
+}
+
+// evictFromPool drops an accepted transaction without mining it, which is what
+// a node does when it reprices its mempool or when the transaction turns out
+// to be underfunded. The node then answers "no such receipt" forever, and the
+// only thing that brings it back is somebody sending the bytes again.
+func (c *sendChain) evictFromPool(hash string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	delete(c.pool, common.HexToHash(hash))
+}
+
 // sentCount is how many transactions have reached the node in total.
 func (c *sendChain) sentCount() int {
 	c.mu.Lock()

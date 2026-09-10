@@ -595,6 +595,57 @@ func TestSweepRecoversFromACrashBetweenSigningAndBroadcast(t *testing.T) {
 	assert.Equal(t, 1, signatures, "one intent, one signature")
 }
 
+// TestSweepDroppedFromTheMempoolIsSentAgain covers the strand this worker used
+// to leave.
+//
+// track() asked for the receipt, and on "no such transaction" it returned nil
+// -- which reads as "not mined yet, ask again next tick". But the next tick
+// asks the same node the same question and gets the same answer, so a sweep
+// the mempool dropped waited forever. Nothing else could rescue it either:
+// sweeps_in_flight_uniq allows no second sweep for the address, and admin has
+// no write path to these rows, so the tokens sat there until somebody edited
+// the database by hand.
+//
+// A token sweep is the leg this happens to, because its gas arrives in a
+// separate transfer that runs first -- so the ether can land after this
+// transaction has already been rejected as underfunded. trackGasFunding, 200
+// lines up, has always re-sent its stored bytes for exactly this reason.
+func TestSweepDroppedFromTheMempoolIsSentAgain(t *testing.T) {
+	h := setupSweep(t)
+	ctx := context.Background()
+	h.deposited(t, ctx, "ETH", "2")
+
+	require.NoError(t, h.worker.Tick(ctx)) // plan
+	require.NoError(t, h.worker.Tick(ctx)) // sign and broadcast
+	row := h.sweeps(t, ctx)[0]
+	require.Equal(t, sweep.StatusBroadcast, row.Status)
+	require.NotEmpty(t, row.TxHash)
+	hash := row.TxHash
+	require.Equal(t, 1, h.chain.sentTimes(hash), "broadcast sends it once")
+
+	// The node forgets it: accepted, never mined, no longer pooled.
+	h.chain.evictFromPool(hash)
+
+	require.NoError(t, h.worker.Tick(ctx))
+	assert.Equal(t, 2, h.chain.sentTimes(hash),
+		"a sweep the node no longer has must be sent again, not waited on")
+	assert.Equal(t, sweep.StatusBroadcast, h.sweeps(t, ctx)[0].Status,
+		"re-sending does not move the row: the same transaction is still the one in flight")
+
+	// And it is a real recovery, not just a second call: the re-sent bytes are
+	// back in the pool, so the next block carries them and the sweep finishes.
+	h.chain.mineAll()
+	require.NoError(t, h.worker.Tick(ctx))
+	done := h.sweeps(t, ctx)[0]
+	assert.Equal(t, sweep.StatusConfirmed, done.Status, "the sweep completes after the re-send")
+	assert.Equal(t, hash, done.TxHash, "and it is the transaction that was signed once")
+
+	var signatures int
+	require.NoError(t, h.all.QueryRow(ctx,
+		`SELECT count(*) FROM chain.signing_log WHERE kind = 'sweep' AND ref_id = $1`, row.ID).Scan(&signatures))
+	assert.Equal(t, 1, signatures, "re-sending signs nothing new")
+}
+
 // assertNoSecondSweep proves an emptied address is not swept again: the
 // remaining dust is below the threshold and the ledger ceiling is spent.
 func assertNoSecondSweep(t *testing.T, ctx context.Context, h sweepHarness) {
