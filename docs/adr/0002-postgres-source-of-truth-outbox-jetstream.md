@@ -27,7 +27,7 @@ v0.1 把成交→記帳、充值→入帳放在無持久化的 NATS core 上(at-
 ## 後果
 
 - 正面:資金路徑的正確性只依賴 Postgres 交易;`kill -9` 引擎後 book 與 hold 一致成為可自動驗證的 DoD(Phase 3);消費者永遠可以重放。
-- 負面:每個命令一筆 PG 交易,吞吐受單筆交易延遲限制(§3.3 目標 1,000 orders/s,必要時 runner 內 group commit);跨市場 / 跨帳戶的事件順序不保證,客戶端必須依 `seq` / `account_seq`。
+- 負面:每個命令一筆 PG 交易,吞吐受單筆交易延遲限制(§3.3 目標 1,000 orders/s,必要時 runner 內 group commit——**Phase 7 做了,實測 266 orders/s,而且換來飽和時的推播延遲**;§3.3 有實測欄);跨市場 / 跨帳戶的事件順序不保證,客戶端必須依 `seq` / `account_seq`。
 - 需要守住的事:`account_seq` 在寫 outbox 的同一交易內 `UPDATE ledger.accounts SET next_seq = next_seq + 1`,**不可用 outbox 的 BIGSERIAL 當序號**(取號單調但提交順序不保證)。
 - Phase 0 已落地的部分:migration 以 goose 管理、`registry` 表為 admin 可編輯的 DB 真相、`eventbus` schema 已預留。
 - Phase 3a 落地:`internal/trading`(每市場 runner、savepoint 包住 Hold + Apply、守衛式 seq、`hold_remaining` 不變量、advisory lock 單實例、重啟重建)、`internal/eventbus`(envelope、outbox、LISTEN/NOTIFY relay、`Nats-Msg-Id` 去重、streams 宣告、`processed_events`);對應表與驗證見 `docs/domain.md` §12。

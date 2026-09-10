@@ -467,7 +467,7 @@ make infra-up && make migrate && make seed && make run ROLE=api
 | [`docs/guides/sepolia.md`](guides/sepolia.md) | 從零到 Sepolia 實跑(4d 的逐筆交易、gas 與區塊) |
 | [`docs/guides/self-hosted-runner.md`](guides/self-hosted-runner.md) | **把 CI 搬到自己的機器**(工程師版):私有倉庫的帳單為什麼是額度的 7.8 倍、Windows 11 + WSL2 的完整步驟、七個 CI job 各在證明什麼、`vars.CI_RUNNER` 一鍵切換與回退、共用 daemon 的安全清理 |
 | [`docs/guides/self-hosted-runner-newcomer.md`](guides/self-hosted-runner-newcomer.md) | 同一件事的**新手版**:每一步都寫明「你會看到什麼」 |
-| [`docs/loadtest.md`](loadtest.md) | 本機壓測:Phase 6 的四組 run、瓶頸(每命令 17 次往返);§8 group commit 之後再量一次(3 次往返、266 orders/s) |
+| [`docs/loadtest.md`](loadtest.md) | 本機壓測:Phase 6 的四組 run、瓶頸(每命令 17 次往返);§8 group commit 之後再量一次(3 次往返、266 orders/s,代價是飽和時的推播延遲) |
 | [`docs/screenshots/`](screenshots/) | 後台每一頁的截圖(`make screenshots` 產生)與參考前台的交易頁 / 錢包頁 |
 | [`docs/archive/plan-v0.1.md`](archive/plan-v0.1.md) | 原始 v0.1 規劃書(已取代,僅供對照) |
 
@@ -491,4 +491,4 @@ Phase 0–7 全數完成,[`plan-v1.0.md`](plan-v1.0.md) §12 的每個 DoD 都�
 
 接下來是 beta 本身:照 [`runbooks/beta-deploy.md`](runbooks/beta-deploy.md) 起一台 VM、打勾 [`beta-checklist.md`](beta-checklist.md)、每週演練一次還原、每 90 天輪一次密鑰。
 
-已知的缺口寫在 checklist 的第一段:可還原的 RPO 是 24 小時(WAL 有歸檔但沒有 base backup)、還原後熱錢包 nonce 要人工對帳、沒有 Alertmanager、單市場 266 orders/s 離 §3.3 的 1,000 還有距離——下一個瓶頸是每句 SQL 的 Postgres 成本,不再是往返數。
+已知的缺口寫在 checklist 的第一段:可還原的 RPO 是 24 小時(WAL 有歸檔但沒有 base backup)、還原後熱錢包 nonce 要人工對帳、沒有 Alertmanager、單市場 266 orders/s 離 §3.3 的 1,000 還有距離,而且飽和時推播延遲會從約 20 ms 變成約 640 ms(群組提交拿延遲換吞吐)——下一個瓶頸是每句 SQL 的 Postgres 成本,不再是往返數。

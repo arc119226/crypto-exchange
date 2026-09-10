@@ -5,9 +5,12 @@
 // runbook tells an operator to type is one the binaries have; every metric
 // a runbook cites is one the Go code registers.
 //
-// CI's paths-ignore lets a documentation-only pull request skip this, so a
-// broken runbook shows up on the merge to main rather than on the pull
-// request. That is accepted: the alternative is a full CI run for a typo.
+// ci.yml's paths-ignore skips a documentation-only pull request, and the
+// checks job that would otherwise run this is skipped on the merge to main as
+// well -- so for a while these tests ran only on a pull request that happened
+// to touch code, and on a v* tag. That put the first execution on the release
+// itself. .github/workflows/docs.yml is the complement of that filter and runs
+// them on exactly the pull requests ci.yml declines: `make docs-test`.
 package docs
 
 import (

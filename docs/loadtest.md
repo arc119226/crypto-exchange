@@ -193,7 +193,7 @@ curl -s http://127.0.0.1:9100/metrics > metrics-after.txt
 
 1. **吞吐 ×2.1–2.5,飽和點從 165 命令/s 到 355–442。** E 組沒有推播訂閱者,是引擎本身的數字;A' 多了 20 個訂閱者的 40 萬則 delta 扇出與 10 個私有連線,分掉同一台機器的 CPU。
 2. **瓶頸換了位置:從往返次數變成每句 SQL 的執行成本。** 本機的整合測試量到:單一命令 3 次往返 3.1 ms;一組 50 個純掛單 90 ms = 每命令 1.8 ms,只比逐一快 1.7×,雖然往返從 3 次變成約 1 次。也就是說每次往返裡的 8–9 句 SQL(savepoint、hold 的分錄 / 鎖 / postings / 餘額、`InsertOrder RETURNING *`、`UpdateOrderProgress RETURNING *`、兩列 outbox、release)各花 Postgres 約 0.2 ms,往返本身已經不是主角。再往上要減句數(掛單的 INSERT 與 progress UPDATE 合一、outbox 多列一句、拿掉 `RETURNING *`)或分片市場到多個 runner,不在這一期。
-3. **群組提交把延遲換成了吞吐:飽和時推播延遲 p99 從 ~20 ms 變成 ~640 ms。** 事件在該組 COMMIT 之後才進 outbox,滿的一組(50 個命令)要 120–150 ms,加上排隊。這是設計上的取捨:`ENGINE_BATCH_SIZE` 就是那個旋鈕,佇列空時每組只有一個命令、延遲與單命令相同;負載高時組變大、吞吐上去、每則事件晚一點。loadgen 是每秒整批送出的(bursty),所以 B' 在 130 命令/s 也累出平均 34 個一組。beta 的 §3.3「depth p99 < 100 ms」在飽和時不成立,在 100 命令/s 以下的真實流量(不是每秒一整批)應該成立;沒有量,寫進 beta checklist 當已知限制。
+3. **群組提交把延遲換成了吞吐:飽和時推播延遲 p99 從 ~20 ms 變成 ~640 ms。** 事件在該組 COMMIT 之後才進 outbox,滿的一組(50 個命令)要 120–150 ms,加上排隊。這是設計上的取捨:`ENGINE_BATCH_SIZE` 就是那個旋鈕,佇列空時每組只有一個命令、延遲與單命令相同;負載高時組變大、吞吐上去、每則事件晚一點。loadgen 是每秒整批送出的(bursty),所以 B' 在 130 命令/s 也累出平均 34 個一組。§3.3 的「公開 depth delta p99 < 300 ms」在飽和時不成立(這裡原本引成「< 100 ms」,§3.3 沒有那個數字,本文件 §1 引的才是對的);在 100 命令/s 以下的真實流量(不是每秒一整批)應該成立,但**那是推論,沒有量**。已列進 `docs/beta-checklist.md` 的已知限制。
 4. **`POST` p50 好 2.5×、p99 好 2.3×(B'),但 p99 < 50 ms 仍然沒有。** 現在的 p99 幾乎全是排隊:apply 直方圖裡 ≤ 25 ms 的桶只有個位數,因為 `trading_apply_duration_seconds` 的語意變成「出佇列到該組 COMMIT」。要看服務時間本身,看 `trading_batch_duration_seconds` 除以 `trading_batch_size`。
 5. **零 fallback、零重建**:三組 run 沒有一組交易失敗,群組提交的復原路徑只在整合測試(注入故障)裡走過。
 6. **註冊很貴**:100 個帳戶的 argon2id 佔了 exchange process 13 s CPU,壓測開頭的 CPU 尖峰是它,不是引擎;profile 要避開前 15 秒。

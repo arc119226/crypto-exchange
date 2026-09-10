@@ -26,10 +26,17 @@ on:
   # Deliberately not applied to push: a v* tag cut from a docs-only commit
   # would skip the image job and ship a release with no image.
   #
+  # The one thing here that does read docs/ is test/docs/, so this filter was
+  # silencing the only tests a documentation change can fail. docs.yml is the
+  # complement -- its `paths` is exactly the two patterns below -- and runs
+  # `make docs-test` on the pull requests this filter declines. Keep the two
+  # lists in step.
+  #
   # If main ever gains branch protection with these checks marked required,
   # this filter makes docs-only PRs unmergeable: the required check never
   # reports. The fix then is GitHub's documented pattern -- a second workflow
-  # with the same job names that succeeds on the filtered paths.
+  # with the same job names that succeeds on the filtered paths, which is the
+  # shape docs.yml already has.
   pull_request:
     paths-ignore:
       - '**/*.md'

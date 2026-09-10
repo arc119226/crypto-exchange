@@ -1,0 +1,59 @@
+# The tests that guard the documentation, on the pull requests ci.yml skips.
+#
+# ci.yml carries `paths-ignore: ['**/*.md', 'docs/**']` on `pull_request`, and
+# that filter is evaluated at the event level: when every changed file matches,
+# the workflow is not triggered at all and no job is created. That is the right
+# trade for a 30-minute suite -- but `test/docs/` is the one part of it that
+# reads exactly those files, so the filter was silencing the only tests that
+# could fail on a documentation change.
+#
+# It was worse than the comments claimed. checks also carries
+# `if: github.event_name != 'push' || github.ref != 'refs/heads/main'`, so it is
+# skipped on the merge to main too. `test/docs/` therefore ran only on a pull
+# request that happened to touch a non-documentation path, and on a `v*` tag --
+# that is, first on the release itself, which is the worst possible moment to
+# learn that a runbook cites a metric nothing registers.
+#
+# This workflow is the second half of that trade, and it is the pattern ci.yml's
+# own header already anticipates for the branch-protection case. It is the
+# complement of that filter, not an overlap: `paths` here matches what
+# `paths-ignore` there excludes. A branch that touches both code and docs
+# triggers both, which is harmless -- this job is a few seconds and it re-runs
+# the same tests the checks job would.
+name: docs
+
+on:
+  pull_request:
+    paths:
+      - '**/*.md'
+      - 'docs/**'
+
+# Deliberately not `ci-${{ github.ref }}`: sharing ci.yml's group would let a
+# mixed code-and-docs push cancel one of its own two workflows.
+concurrency:
+  group: docs-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  docs:
+    name: docs
+    timeout-minutes: 10
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+          # Same reasoning as the checks job: a self-hosted runner keeps the
+          # module and build caches on its own disk.
+          cache: ${{ vars.CI_RUNNER == '' }}
+      # Link and backticked-path resolution in the three READMEs, the four-part
+      # runbook structure, every exchange/exchangectl subcommand a runbook tells
+      # an operator to type, every metric a runbook cites, and the beta
+      # checklist naming every runbook. See test/docs/.
+      - name: documentation tests
+        run: make docs-test
