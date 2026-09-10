@@ -653,7 +653,7 @@ func TestRefreshReuseThatCannotRevokeIsNotReportedAsAnOrdinaryRejection(t *testi
 	// away and put it back.
 	owner, err := pgx.Connect(ctx, h.DSN("ex_migrate"))
 	require.NoError(t, err)
-	defer owner.Close(ctx)
+	t.Cleanup(func() { _ = owner.Close(ctx) })
 	_, err = owner.Exec(ctx, `REVOKE UPDATE ON auth.refresh_tokens FROM ex_all`)
 	require.NoError(t, err)
 	restored := false
