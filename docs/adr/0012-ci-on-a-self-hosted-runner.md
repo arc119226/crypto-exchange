@@ -124,6 +124,32 @@ Docker Desktop 仍寫進 guide 當替代路線,把上面三項代價寫清楚,�
 
 **這不解決登入問題**:WSL 本身也無法在登入前啟動(Microsoft 列為已知問題,session 0 不支援),所以自動登入無論走哪條路線都是必要的。換 Docker 引擎買到的是「不會週期性斷線」與「磁碟收得回來」。
 
+### 7. 工具鏈的安裝是機器設定的一部分,不是 CI 的一部分
+
+自建 runner 上,`foundry-toolchain` 這個 action 不跑;取而代之的是一個斷言:機器上必須已經有釘住的那個版本,然後把 `~/.foundry/bin` 加進 `PATH`。托管 runner 照舊完整安裝與驗證。
+
+**這是被一次故障逼出來的,而它暴露的問題比故障本身大。**
+
+**症狀。** 2026-09-10,`checks` 連續三次死在 `foundryup`,間隔 6 分鐘與 15 分鐘,三次的訊息一字不差:
+
+```
+foundryup: found attestation for v1.8.1 version, downloading attestation artifact, checking...
+Error:
+   0: failed to download https://github.com/foundry-rs/foundry/attestations/43723610/download: HTTP 500 Internal Server Error
+```
+
+`githubstatus.com` 上沒有任何事故。同一個步驟在前一天的 PR #36 上只花 5 秒。
+
+**根因不在這台機器,也不在這個分支。** `foundryup` 會把下載的二進位檔比對 GitHub 的 artifact attestation——那是供應鏈驗證,方向是對的,但它是一通額外的對外請求。那台機器上**已經有正確版本的 forge**(log 裡 foundryup 自己說「already installed」),卻仍然為了驗證一份它不需要重新下載的東西而去打那通 API,然後被外面的故障拖下水。
+
+**為什麼這件事比一次 500 嚴重。** 它讓「工具鏈安裝」變成每一個 job、每一次執行的外部依賴,而那個依賴和這個 repo 的內容完全無關。當天紅掉的分支裡**一行 Solidity 都沒有**。同一個 action 也是 `helm` 的第 3 步,所以它擋住的是兩個 job × 每一條分支 × 每一次 push。
+
+**修法,以及它的代價。** Playwright 的系統函式庫早就是「機器設定時裝一次,CI 不碰」(`docs/guides/self-hosted-runner.md` 第 6 節),foundry 現在用同一個形狀。**版本釘沒有消失,它換了地方**:以前由安裝器保證,現在由斷言保證,而斷言失敗時直接印出要打的指令。代價很具體——升 `.env.example` 的 `FOUNDRY_TAG` 之後,那台機器要手動跟上,否則 `checks` 會紅。**這是刻意的**,總比安靜地用舊版編譯合約好。
+
+**考慮過但沒採用的:** `foundryup --force` 會跳過驗證,但 `foundry-toolchain@v1` 沒有任何 input 傳得進去(它的 input 只有 `version`、`network`、`cache`、`cache-key`、`cache-restore-keys`),所以要用它得先在兩個 job 裡把 action 換成直接呼叫;而且關掉一個供應鏈驗證來換 CI 綠燈,在一個 gitleaks 掃全歷史、工具版本全釘死的 repo 裡是反方向的。
+
+**留下來的一件事。** 那個斷言用 `vars.CI_RUNNER != ''` 當「這個 job 在自建 runner 上」的代理,而這只對 `runs-on` 寫成那個開關的 job 成立。目前兩個用到 foundry 的 job 都是;唯一釘死在托管機器上的 `release` 沒有 foundry 步驟。**加第三個 foundry job 時要重新確認這件事**,否則它會在托管機器上走進「機器上已經有了」那條路然後找不到 forge。
+
 ## 後果
 
 - **workflow 層面的優化實測只省了 1 分鐘,不是原本預估的 15 分鐘。** 拿 run #86(改動前)對 run #89(改動後),同一條分支、同樣是 PR 事件,逐 job 比:
@@ -159,6 +185,19 @@ Docker Desktop 仍寫進 guide 當替代路線,把上面三項代價寫清楚,�
   - **`actions/setup-go` 兩端都是 0 秒**(還原與 `Post Run` 都是)。上一條推論「10 GB 快取配額被三個 `type=gha,mode=max` 擠爆」並預測 `cache: ${{ vars.CI_RUNNER == '' }}` 會讓 e2e 那 249 秒消失——**量到 0 秒,預測成立**。
   - **Playwright 那一步 10 秒**。`PLAYWRIGHT_INSTALL_DEPS` 只關掉 `--with-deps`、保留瀏覽器下載,而瀏覽器已在 `~/.cache/ms-playwright`,所以整步是 no-op。上面那條被撤銷的 Chromium 猜測,正確的版本長這樣。
   - **同一個 app image 在一次 run 裡建了兩次**:`helm` 的「build the image under test」4m19s、`image` 的「build (load locally)」2m40s,合計約 7 分鐘,佔 25 分鐘牆鐘的 **28%**。這是下面「沒做但值得做」那一項第一次有數字。
+- **兩個 runner 的第一次全綠 run,牆鐘落在決定 2 推算的區間上——但組成不同。** run 34426360810(`e2e` 與 `image` 同時在 01:48:42 起跑,所以確實是兩台):
+
+  | job | 耗時 |
+  |---|---|
+  | checks | 45s |
+  | integration | 8m06 |
+  | e2e | 3m43 |
+  | image | 3m32 |
+  | helm | 4m49 |
+  | **牆鐘** | **17m21**(01:39:45 → 01:57:06) |
+  | **計費** | **0 分鐘** |
+
+  決定 2 的表用依賴圖推「兩個 runner → 約 18m」,量到 17m21。**但這不是 `setup-go` 那種強度的驗證**:那個 18m 是拿一台 runner 時的 job 秒數推的(`helm` 7m12、`e2e` 3m26、`image` 4m15),而這次 `helm` 只有 **4m49**、快了 2m23,`integration` 反而慢了 27 秒。總數對上是因為快取更熱,不是因為每一段都預測準了。誠實的說法是**牆鐘落在預測值上,各段的組成不同**;要真的驗證那張表,得在同一批快取狀態下比一台與兩台。
 - 預期每月計費從約 23,400 分鐘降到 **50~100 分鐘**(只剩 `release`),額度使用率 780% → 約 3%。
 - **`checks` 是循序的**:lint 失敗會擋住 unit,要多推一次才知道第二個失敗。這是刻意的取捨——失敗的 run 佔帳單 28%,提早停損比一次報完所有失敗值錢。步驟因此照「最便宜、最常失敗」排序。
 - **摘要列的名字變少**:紅燈寫 `checks` 而不是 `contracts`。GitHub 仍會指出失敗的 step,失去的只是摘要那一行的名字。
