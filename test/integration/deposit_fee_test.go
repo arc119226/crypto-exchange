@@ -41,7 +41,7 @@ func (h ledgerHarness) assertDepositFeesMatchRevenue(t require.TestingT, ctx con
 		        COALESCE(SUM(p.amount) FILTER (WHERE p.direction = 'credit'), 0)::text
 		   FROM chain.deposits d
 		   LEFT JOIN ledger.journal_entries e
-		          ON e.tenant_id = d.tenant_id AND e.ref_type = 'deposit' AND e.ref_id = d.id
+		          ON e.tenant_id = d.tenant_id AND e.ref_type = 'deposit' AND e.ref_id = d.id::text
 		   LEFT JOIN ledger.postings p
 		          ON p.entry_id = e.id AND p.account_id = $1
 		  GROUP BY d.id, d.status, d.fee`, feeRevenue)

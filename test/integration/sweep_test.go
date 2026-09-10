@@ -129,13 +129,20 @@ func (h sweepHarness) creditLedger(t *testing.T, ctx context.Context, account, a
 // system cannot reach.
 func (h sweepHarness) insertDeposit(t *testing.T, ctx context.Context, account, address, asset, amount, status string) {
 	t.Helper()
-	// credited_at is not decoration: 0009 requires it to be set exactly when
-	// the status is credited.
+	// The three CASE columns are not decoration, they are the row's own
+	// consistency rules. 0009 requires credited_at to be set exactly when the
+	// status is credited; 0023 requires fee and credited_amount to be present
+	// once the ledger has moved, and absent while it has not. A credited
+	// deposit at the shipped rate of zero is charged nothing and credited the
+	// whole of what arrived, which is what the scanner writes here.
 	_, err := h.all.Exec(ctx, `INSERT INTO chain.deposits
 		(tenant_id, chain_id, account_id, address, asset, amount, tx_hash, log_index,
-		 block_number, block_hash, confirmations, status, credited_at)
+		 block_number, block_hash, confirmations, status, credited_at,
+		 fee, credited_amount)
 		VALUES ('default', $1, $2, $3, $4, $5::numeric, $6, -1, 1, $7, 1, $8,
-		        CASE WHEN $8 = 'credited' THEN now() END)`,
+		        CASE WHEN $8 = 'credited' THEN now() END,
+		        CASE WHEN $8 = 'credited' THEN 0::numeric END,
+		        CASE WHEN $8 = 'credited' THEN $5::numeric END)`,
 		anvilChainID, account, strings.ToLower(address), asset, amount,
 		labelHash("tx-"+address+asset+amount), labelHash("block-1"), status)
 	require.NoError(t, err)
@@ -143,8 +150,12 @@ func (h sweepHarness) insertDeposit(t *testing.T, ctx context.Context, account, 
 
 // creditPending credits a deposit that was left confirming.
 func (h sweepHarness) creditPending(ctx context.Context, account, address, asset, amount string) error {
+	// fee and credited_amount move with the status, for the reason spelled out
+	// on insertDeposit: 0023 ties them to the ledger having moved, not to when
+	// the row was written.
 	if _, err := h.all.Exec(ctx,
-		`UPDATE chain.deposits SET status = 'credited', credited_at = now()
+		`UPDATE chain.deposits SET status = 'credited', credited_at = now(),
+		        fee = 0, credited_amount = amount
 		 WHERE address = $1 AND asset = $2 AND amount = $3::numeric`,
 		strings.ToLower(address), asset, amount); err != nil {
 		return err
