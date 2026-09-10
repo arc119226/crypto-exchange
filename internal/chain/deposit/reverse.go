@@ -62,21 +62,33 @@ const reversalBatch = 16
 // reverse undoes one credited deposit: the exact mirror of the three postings
 // credit made (§6.1.4 i), in one transaction with the status and the event.
 //
-// The idempotency key is the credit's own with a prefix, so a crash between
-// the post and the commit replays into the same entry rather than a second
-// one.
+// The idempotency key is derived from the deposit's id, so a crash between the
+// post and the commit replays into the same entry rather than a second one. It
+// is not the credit's key with a prefix: the credit is keyed by the on-chain
+// coordinates it was found at, and those are exactly what a reorg took away.
 func (s *Scanner) reverse(ctx context.Context, row sqlcgen.ChainDeposit) error {
 	amount, err := pg.AmountFromNumeric(row.Amount)
 	if err != nil {
 		return fmt.Errorf("deposit: amount of %s: %w", row.ID, err)
 	}
+	// Both columns are NOT NULL for anything the ledger has touched, by the
+	// CHECKs 0024 re-tied to that rather than to credited_at -- which is what
+	// makes them still readable here, after the reversal clears credited_at. A
+	// nil is therefore a broken row, not a missing optional, and it is reported
+	// separately from a malformed one because the two mean different things.
 	credited, err := pg.NullableAmountFromNumeric(row.CreditedAmount)
-	if err != nil || credited == nil {
-		return fmt.Errorf("deposit: %s was credited without recording how much: %w", row.ID, err)
+	if err != nil {
+		return fmt.Errorf("deposit: credited amount of %s: %w", row.ID, err)
+	}
+	if credited == nil {
+		return fmt.Errorf("deposit: %s was credited without recording how much", row.ID)
 	}
 	fee, err := pg.NullableAmountFromNumeric(row.Fee)
-	if err != nil || fee == nil {
-		return fmt.Errorf("deposit: %s was credited without recording its fee: %w", row.ID, err)
+	if err != nil {
+		return fmt.Errorf("deposit: fee of %s: %w", row.ID, err)
+	}
+	if fee == nil {
+		return fmt.Errorf("deposit: %s was credited without recording its fee", row.ID)
 	}
 	custody, err := s.ledger.HouseAccount(ledger.HouseCustodyDepositAddresses)
 	if err != nil {
