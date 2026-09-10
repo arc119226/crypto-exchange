@@ -955,6 +955,36 @@ EOF
 
 **但書:** 寫死公共 DNS 之後,公司內網或 VPN 的名字會查不到。這台機器如果也要連內網,把 nameserver 換成你路由器的位址。
 
+**Q: `image` job 的 `push` 死在 `lookup ghcr.io on 8.8.8.8:53: no such host`。**
+和上面那則是同一個主題的不同一層,而且**根因到現在沒有確立**——這則記的是排除過程,不是答案。
+
+2026-09-10 發生過一次:三個 image 全部 build 成功、三個 smoke 全過,**第 13 步 `login to ghcr` 花 7 秒成功**,第 14 步 `push` 在 0 秒後就死在上面那行。重跑就過,而且機器上什麼都沒改。
+
+關鍵的對照是那兩步的落差:`docker/login-action` 跑在**主機**上,它確實連到了 ghcr.io;`push` 跑在 buildx 的 **builder 容器**裡(job log 尾端的 `docker buildx rm builder-...` 就是它)。所以第一個假設是「主機和容器用的不是同一個 resolver」。
+
+**那個假設被實測推翻了。** 量一次就知道:
+
+```sh
+cat /etc/resolv.conf                              # 主機
+docker run --rm alpine cat /etc/resolv.conf       # 容器
+```
+
+兩份**一模一樣**,而且容器那份自己寫著 `# Based on host file: '/etc/resolv.conf' (legacy)` 與 `# Overrides: []`——Docker 原封不動照抄,沒有替換任何東西。「Docker 因為 loopback 而自己換成 8.8.8.8」在這台機器上不成立:`8.8.8.8` 正是上面那則 FAQ 叫你寫進 `/etc/resolv.conf` 的**次要** resolver。
+
+所以那行訊息真正的意思是:**它是最後被試的那一個,也就是連 `1.1.1.1` 都沒答出來。** 兩個互不相干的公共 resolver 同時失效,指向的是封包出不去那一段(WSL 的 NAT 或 Windows 端),不是任何一個 resolver。
+
+因為是間歇的,看設定看不出來,要量「穩不穩」:
+
+```sh
+docker run --rm alpine sh -c \
+  'for i in $(seq 1 20); do nslookup ghcr.io >/dev/null 2>&1 && printf . || printf X; done; echo'
+for i in $(seq 1 20); do getent hosts ghcr.io >/dev/null && printf . || printf X; done; echo
+```
+
+事故之後量,容器與主機**都是 20/20 成功**,重現不出來。所以目前的處置就是重跑那個 job,並且知道它可能再發生。真的要根治,方向是讓 builder 不要多走 bridge 到 NAT 那一跳,而不是再去動 resolver。
+
+**順帶一個可以重用的手法。** 當時看起來像「MSI 壞、MSI2 好」(第一次在 MSI 失敗、重跑在 MSI2 成功)。job log 的工作目錄一步就把這個方向刪掉了:一邊是 `actions-runner`、一邊是 `actions-runner2`,同一個使用者、同一個發行版,**共用同一個 Docker daemon**。一個 daemon 只有一份容器 DNS 設定,不可能一台解析得到一台解析不到——差別是時間,不是機器。裝兩個 runner 的代價之一是容易誤以為它們是兩台獨立的機器。
+
 **Q: 想暫時全部回到 GitHub 的機器上。**
 刪掉倉庫變數 `CI_RUNNER`。一秒生效,不用改 code。
 
