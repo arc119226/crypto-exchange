@@ -998,6 +998,10 @@ for i in $(seq 1 20); do getent hosts ghcr.io >/dev/null && printf . || printf X
 
 如果又看到這個錯誤,先確認那一步還在、而且排在 `setup-buildx-action` 前面。
 
+**而且不只 buildx。** 一個 daemon 之下,**任何**「兩個 job 各自假設自己獨佔」的資源都會撞。修完 buildx 之後就撞到了第二個:`helm` 與 `image` 都把自己建的 image 標成 `crypto-exchange:ci`,推進同一個 daemon,而且 `VERSION` build-arg 不同——誰的 `--load` 最後落地誰就擁有那個 tag。`helm` 會斷言 pod 裡的版本等於 chart 的 appVersion,所以搶輸的時候它會紅;`image` 的 smoke 只跑 `version` 不比對輸出,所以它搶輸的時候**靜靜地跑了別人的 binary 也照樣綠**。兩邊都中了,只有一邊看得見。
+
+修法是給 `helm` 自己的 tag(`crypto-exchange:ci-helm`)。看到類似的症狀時,先問的不是「這個 job 壞了嗎」,而是「這一輪還有誰在用同一個 daemon 上的同一個名字」。
+
 **Q: 想暫時全部回到 GitHub 的機器上。**
 刪掉倉庫變數 `CI_RUNNER`。一秒生效,不用改 code。
 

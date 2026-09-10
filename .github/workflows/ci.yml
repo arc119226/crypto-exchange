@@ -573,7 +573,14 @@ jobs:
           context: .
           file: build/Dockerfile
           load: true
-          tags: crypto-exchange:ci
+          # NOT crypto-exchange:ci. The image job builds that same tag, into
+          # this same daemon, at this same time, with VERSION=dev -- while this
+          # job needs the chart's appVersion baked in. Whichever `--load`
+          # landed last owned the tag, and helm-e2e.sh's version assertion
+          # only passed when this one did. The image job's smoke never noticed
+          # it could be running this job's binary, because it does not assert
+          # the version it prints.
+          tags: crypto-exchange:ci-helm
           build-args: |
             VERSION=${{ steps.appv.outputs.version }}
             # Fixed on a pull request. These are baked into the binary's
@@ -592,7 +599,7 @@ jobs:
           node_image: kindest/node:v1.31.6
           cluster_name: ${{ env.KIND_CLUSTER }}
       - name: load the image into the cluster
-        run: kind load docker-image crypto-exchange:ci --name "$KIND_CLUSTER"
+        run: kind load docker-image crypto-exchange:ci-helm --name "$KIND_CLUSTER"
       # the JWT key and the keystore are generated with the binary itself
       - name: build exchange
         run: make build
@@ -604,6 +611,10 @@ jobs:
       - name: install the chart and run the in-cluster e2e
         env:
           APP_VERSION: ${{ steps.appv.outputs.version }}
+          # helm-e2e.sh defaults to `ci`, which is right for `make kind-e2e` on
+          # a laptop where nothing else is building. In this workflow it has to
+          # match the tag above.
+          IMAGE_TAG: ci-helm
         run: scripts/helm-e2e.sh
       - name: collect cluster state
         if: always()
