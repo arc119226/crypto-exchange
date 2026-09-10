@@ -614,11 +614,20 @@ type AdminDeposit struct {
 	CreditedAt     *time.Time `json:"credited_at,omitempty"`
 
 	// Fee Taken out of the amount at credit time, so it is null until the deposit is credited. Unlike a withdrawal fee it is not charged on top: `amount` stays what the chain delivered.
-	Fee      *Amount            `json:"fee,omitempty"`
-	ID       string             `json:"id"`
-	LogIndex int32              `json:"log_index"`
-	Status   AdminDepositStatus `json:"status"`
-	TxHash   string             `json:"tx_hash"`
+	Fee      *Amount `json:"fee,omitempty"`
+	ID       string  `json:"id"`
+	LogIndex int32   `json:"log_index"`
+
+	// ReorgedAtBlock The height a reorg rewound to after this deposit had been credited. Set means the chain no longer shows it and it is waiting for a decision; the status stays `credited` until the reversing entry is posted.
+	ReorgedAtBlock *int64 `json:"reorged_at_block,omitempty"`
+
+	// ReversalError Why the last attempt could not be posted. In practice there is one reason: the account has already spent what it was credited.
+	ReversalError       *string            `json:"reversal_error,omitempty"`
+	ReversalNote        *string            `json:"reversal_note,omitempty"`
+	ReversalRequestedBy *string            `json:"reversal_requested_by,omitempty"`
+	ReversedAt          *time.Time         `json:"reversed_at,omitempty"`
+	Status              AdminDepositStatus `json:"status"`
+	TxHash              string             `json:"tx_hash"`
 }
 
 // AdminDepositStatus defines model for AdminDeposit.Status.
@@ -1378,6 +1387,12 @@ type RevenueReport struct {
 	To time.Time `json:"to"`
 }
 
+// ReverseDepositRequest defines model for ReverseDepositRequest.
+type ReverseDepositRequest struct {
+	// Reason Why this deposit is being undone. Recorded in the audit trail and carried on the reversing journal entry, which is where somebody reading the ledger a year later will find it.
+	Reason string `json:"reason"`
+}
+
 // RotateSecretRequest defines model for RotateSecretRequest.
 type RotateSecretRequest struct {
 	// GraceHours How long the old secret keeps signing alongside the new one.
@@ -1674,6 +1689,9 @@ type AssetPath = string
 // AssetSymbol Example: USDC
 type AssetSymbol = string
 
+// DepositID defines model for DepositID.
+type DepositID = string
+
 // FeeScheduleName Example: default
 type FeeScheduleName = string
 
@@ -1757,6 +1775,12 @@ type ListDepositsParams struct {
 // ListDepositsParamsStatus defines parameters for ListDeposits.
 type ListDepositsParamsStatus string
 
+// ListDepositsAwaitingReversalParams defines parameters for ListDepositsAwaitingReversal.
+type ListDepositsAwaitingReversalParams struct {
+	Limit  *Limit  `form:"limit,omitempty" json:"limit,omitempty"`
+	Offset *Offset `form:"offset,omitempty" json:"offset,omitempty"`
+}
+
 // ListEntriesParams defines parameters for ListEntries.
 type ListEntriesParams struct {
 	AccountID *string `form:"account_id,omitempty" json:"account_id,omitempty"`
@@ -1838,6 +1862,9 @@ type CreateAssetJSONRequestBody = CreateAssetRequest
 
 // UpdateAssetJSONRequestBody defines body for UpdateAsset for application/json ContentType.
 type UpdateAssetJSONRequestBody = AssetRequest
+
+// ReverseDepositJSONRequestBody defines body for ReverseDeposit for application/json ContentType.
+type ReverseDepositJSONRequestBody = ReverseDepositRequest
 
 // RequestReloadJSONRequestBody defines body for RequestReload for application/json ContentType.
 type RequestReloadJSONRequestBody = ReloadRequest
@@ -2066,6 +2093,59 @@ type ClientInterface interface {
 	//
 	// Corresponds with GET /admin/v1/deposits (the `ListDeposits` operationId).
 	ListDeposits(ctx context.Context, params *ListDepositsParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ListDepositsAwaitingReversal Credited deposits a reorg took away, waiting for a decision
+	//
+	// A deposit the ledger credited whose block was later abandoned by a reorg deeper than the asset's confirmations (docs/plan-v1.0.md §6.4.1). The status is still `credited` and the account still holds the balance -- the ledger cannot un-say it on its own, because the money may already have been spent. Each of these is a decision waiting for a person. In a healthy exchange this list is empty; anything in it means an account holds a balance the chain does not back, and reconciliation will report the difference as a break.
+	//
+	// Corresponds with GET /admin/v1/deposits/awaiting-reversal (the `ListDepositsAwaitingReversal` operationId).
+	ListDepositsAwaitingReversal(ctx context.Context, params *ListDepositsAwaitingReversalParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ReverseDepositWithBody Confirm that a reorged deposit should be undone
+	//
+	// Records the decision; it moves no money. The admin role has no node and
+	// no view of the chain, so the chain role posts the reversing entry on
+	// its next tick -- the exact mirror of the three postings that credited
+	// it, including the fee.
+	//
+	// There is no matching reject: leaving a reorged deposit alone is what
+	// happens if nobody acts, so asking is the whole decision. The reason is
+	// required and is recorded in the audit trail and on the entry.
+	//
+	// The reversal can still be refused after this returns, for one reason:
+	// the account no longer has what it was credited. Balances may not go
+	// negative, and an account that owes the exchange is not something this
+	// system can represent. The deposit then stays in the queue with
+	// `reversal_error` explaining, and the choice goes back to a person --
+	// `docs/runbooks/reorg-alert.md` has the options.
+	//
+	// Takes any type of body and a specified content type.
+	//
+	// Corresponds with POST /admin/v1/deposits/{id}/reverse (the `ReverseDeposit` operationId).
+	ReverseDepositWithBody(ctx context.Context, id DepositID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ReverseDeposit Confirm that a reorged deposit should be undone
+	//
+	// Records the decision; it moves no money. The admin role has no node and
+	// no view of the chain, so the chain role posts the reversing entry on
+	// its next tick -- the exact mirror of the three postings that credited
+	// it, including the fee.
+	//
+	// There is no matching reject: leaving a reorged deposit alone is what
+	// happens if nobody acts, so asking is the whole decision. The reason is
+	// required and is recorded in the audit trail and on the entry.
+	//
+	// The reversal can still be refused after this returns, for one reason:
+	// the account no longer has what it was credited. Balances may not go
+	// negative, and an account that owes the exchange is not something this
+	// system can represent. The deposit then stays in the queue with
+	// `reversal_error` explaining, and the choice goes back to a person --
+	// `docs/runbooks/reorg-alert.md` has the options.
+	//
+	// Takes a body of the `application/json` content type.
+	//
+	// Corresponds with POST /admin/v1/deposits/{id}/reverse (the `ReverseDeposit` operationId).
+	ReverseDeposit(ctx context.Context, id DepositID, body ReverseDepositJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// RequestReloadWithBody Ask every engine to reload its registry cache
 	//
@@ -2862,6 +2942,89 @@ func (c *Client) ListAuditEvents(ctx context.Context, params *ListAuditEventsPar
 // Corresponds with GET /admin/v1/deposits (the `ListDeposits` operationId).
 func (c *Client) ListDeposits(ctx context.Context, params *ListDepositsParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewListDepositsRequest(c.Server, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// ListDepositsAwaitingReversal Credited deposits a reorg took away, waiting for a decision
+//
+// A deposit the ledger credited whose block was later abandoned by a reorg deeper than the asset's confirmations (docs/plan-v1.0.md §6.4.1). The status is still `credited` and the account still holds the balance -- the ledger cannot un-say it on its own, because the money may already have been spent. Each of these is a decision waiting for a person. In a healthy exchange this list is empty; anything in it means an account holds a balance the chain does not back, and reconciliation will report the difference as a break.
+//
+// Corresponds with GET /admin/v1/deposits/awaiting-reversal (the `ListDepositsAwaitingReversal` operationId).
+func (c *Client) ListDepositsAwaitingReversal(ctx context.Context, params *ListDepositsAwaitingReversalParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListDepositsAwaitingReversalRequest(c.Server, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// ReverseDepositWithBody Confirm that a reorged deposit should be undone
+//
+// Records the decision; it moves no money. The admin role has no node and
+// no view of the chain, so the chain role posts the reversing entry on
+// its next tick -- the exact mirror of the three postings that credited
+// it, including the fee.
+//
+// There is no matching reject: leaving a reorged deposit alone is what
+// happens if nobody acts, so asking is the whole decision. The reason is
+// required and is recorded in the audit trail and on the entry.
+//
+// The reversal can still be refused after this returns, for one reason:
+// the account no longer has what it was credited. Balances may not go
+// negative, and an account that owes the exchange is not something this
+// system can represent. The deposit then stays in the queue with
+// `reversal_error` explaining, and the choice goes back to a person --
+// `docs/runbooks/reorg-alert.md` has the options.
+//
+// Takes any type of body and a specified content type.
+//
+// Corresponds with POST /admin/v1/deposits/{id}/reverse (the `ReverseDeposit` operationId).
+func (c *Client) ReverseDepositWithBody(ctx context.Context, id DepositID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewReverseDepositRequestWithBody(c.Server, id, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// ReverseDeposit Confirm that a reorged deposit should be undone
+//
+// Records the decision; it moves no money. The admin role has no node and
+// no view of the chain, so the chain role posts the reversing entry on
+// its next tick -- the exact mirror of the three postings that credited
+// it, including the fee.
+//
+// There is no matching reject: leaving a reorged deposit alone is what
+// happens if nobody acts, so asking is the whole decision. The reason is
+// required and is recorded in the audit trail and on the entry.
+//
+// The reversal can still be refused after this returns, for one reason:
+// the account no longer has what it was credited. Balances may not go
+// negative, and an account that owes the exchange is not something this
+// system can represent. The deposit then stays in the queue with
+// `reversal_error` explaining, and the choice goes back to a person --
+// `docs/runbooks/reorg-alert.md` has the options.
+//
+// Takes a body of the `application/json` content type.
+//
+// Corresponds with POST /admin/v1/deposits/{id}/reverse (the `ReverseDeposit` operationId).
+func (c *Client) ReverseDeposit(ctx context.Context, id DepositID, body ReverseDepositJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewReverseDepositRequest(c.Server, id, body)
 	if err != nil {
 		return nil, err
 	}
@@ -4556,6 +4719,119 @@ func NewListDepositsRequest(server string, params *ListDepositsParams) (*http.Re
 	if err != nil {
 		return nil, err
 	}
+
+	return req, nil
+}
+
+// NewListDepositsAwaitingReversalRequest constructs an http.Request for the ListDepositsAwaitingReversal method
+func NewListDepositsAwaitingReversalRequest(server string, params *ListDepositsAwaitingReversalParams) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/admin/v1/deposits/awaiting-reversal")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		// queryValues collects non-styled parameters (passthrough, JSON)
+		// that are safe to round-trip through url.Values.Encode().
+		queryValues := queryURL.Query()
+		// rawQueryFragments collects pre-encoded query fragments from
+		// styled parameters, preserving literal commas as delimiters
+		// per the OpenAPI spec (e.g. "color=blue,black,brown").
+		var rawQueryFragments []string
+
+		if params.Limit != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "limit", *params.Limit, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "integer", Format: "int32"}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.Offset != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "offset", *params.Offset, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "integer", Format: "int32"}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if encoded := queryValues.Encode(); encoded != "" {
+			rawQueryFragments = append(rawQueryFragments, encoded)
+		}
+		queryURL.RawQuery = strings.Join(rawQueryFragments, "&")
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewReverseDepositRequest calls the generic ReverseDeposit builder with application/json body
+func NewReverseDepositRequest(server string, id DepositID, body ReverseDepositJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewReverseDepositRequestWithBody(server, id, "application/json", bodyReader)
+}
+
+// NewReverseDepositRequestWithBody constructs an http.Request for the ReverseDeposit method, with any body, and a specified content type
+func NewReverseDepositRequestWithBody(server string, id DepositID, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "id", id, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/admin/v1/deposits/%s/reverse", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
 
 	return req, nil
 }
@@ -6483,6 +6759,61 @@ type ClientWithResponsesInterface interface {
 	// Corresponds with GET /admin/v1/deposits (the `ListDeposits` operationId).
 	ListDepositsWithResponse(ctx context.Context, params *ListDepositsParams, reqEditors ...RequestEditorFn) (*ListDepositsResponse, error)
 
+	// ListDepositsAwaitingReversalWithResponse Credited deposits a reorg took away, waiting for a decision
+	//
+	// A deposit the ledger credited whose block was later abandoned by a reorg deeper than the asset's confirmations (docs/plan-v1.0.md §6.4.1). The status is still `credited` and the account still holds the balance -- the ledger cannot un-say it on its own, because the money may already have been spent. Each of these is a decision waiting for a person. In a healthy exchange this list is empty; anything in it means an account holds a balance the chain does not back, and reconciliation will report the difference as a break.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /admin/v1/deposits/awaiting-reversal (the `ListDepositsAwaitingReversal` operationId).
+	ListDepositsAwaitingReversalWithResponse(ctx context.Context, params *ListDepositsAwaitingReversalParams, reqEditors ...RequestEditorFn) (*ListDepositsAwaitingReversalResponse, error)
+
+	// ReverseDepositWithBodyWithResponse Confirm that a reorged deposit should be undone
+	//
+	// Records the decision; it moves no money. The admin role has no node and
+	// no view of the chain, so the chain role posts the reversing entry on
+	// its next tick -- the exact mirror of the three postings that credited
+	// it, including the fee.
+	//
+	// There is no matching reject: leaving a reorged deposit alone is what
+	// happens if nobody acts, so asking is the whole decision. The reason is
+	// required and is recorded in the audit trail and on the entry.
+	//
+	// The reversal can still be refused after this returns, for one reason:
+	// the account no longer has what it was credited. Balances may not go
+	// negative, and an account that owes the exchange is not something this
+	// system can represent. The deposit then stays in the queue with
+	// `reversal_error` explaining, and the choice goes back to a person --
+	// `docs/runbooks/reorg-alert.md` has the options.
+	//
+	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /admin/v1/deposits/{id}/reverse (the `ReverseDeposit` operationId).
+	ReverseDepositWithBodyWithResponse(ctx context.Context, id DepositID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ReverseDepositResponse, error)
+
+	// ReverseDepositWithResponse Confirm that a reorged deposit should be undone
+	//
+	// Records the decision; it moves no money. The admin role has no node and
+	// no view of the chain, so the chain role posts the reversing entry on
+	// its next tick -- the exact mirror of the three postings that credited
+	// it, including the fee.
+	//
+	// There is no matching reject: leaving a reorged deposit alone is what
+	// happens if nobody acts, so asking is the whole decision. The reason is
+	// required and is recorded in the audit trail and on the entry.
+	//
+	// The reversal can still be refused after this returns, for one reason:
+	// the account no longer has what it was credited. Balances may not go
+	// negative, and an account that owes the exchange is not something this
+	// system can represent. The deposit then stays in the queue with
+	// `reversal_error` explaining, and the choice goes back to a person --
+	// `docs/runbooks/reorg-alert.md` has the options.
+	//
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /admin/v1/deposits/{id}/reverse (the `ReverseDeposit` operationId).
+	ReverseDepositWithResponse(ctx context.Context, id DepositID, body ReverseDepositJSONRequestBody, reqEditors ...RequestEditorFn) (*ReverseDepositResponse, error)
+
 	// RequestReloadWithBodyWithResponse Ask every engine to reload its registry cache
 	//
 	// Publishes registry.reload with no row changed: after a seed, or when in doubt. 202: the request is in the outbox; the engine's reload consumer acts on it.
@@ -7744,6 +8075,130 @@ func (r ListDepositsResponse) StatusCode() int {
 
 // ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
 func (r ListDepositsResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type ListDepositsAwaitingReversalResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *AdminDepositList
+	// ApplicationProblemJSON401 the response for an HTTP 401 `application/problem+json` response
+	ApplicationProblemJSON401 *Unauthorized
+	// ApplicationProblemJSON500 the response for an HTTP 500 `application/problem+json` response
+	ApplicationProblemJSON500 *InternalError
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r ListDepositsAwaitingReversalResponse) GetJSON200() *AdminDepositList {
+	return r.JSON200
+}
+
+// GetApplicationProblemJSON401 returns the response for an HTTP 401 `application/problem+json` response
+func (r ListDepositsAwaitingReversalResponse) GetApplicationProblemJSON401() *Unauthorized {
+	return r.ApplicationProblemJSON401
+}
+
+// GetApplicationProblemJSON500 returns the response for an HTTP 500 `application/problem+json` response
+func (r ListDepositsAwaitingReversalResponse) GetApplicationProblemJSON500() *InternalError {
+	return r.ApplicationProblemJSON500
+}
+
+// GetBody returns the raw response body bytes
+func (r ListDepositsAwaitingReversalResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r ListDepositsAwaitingReversalResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListDepositsAwaitingReversalResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r ListDepositsAwaitingReversalResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type ReverseDepositResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON202 the response for an HTTP 202 `application/json` response
+	JSON202 *AdminDeposit
+	// ApplicationProblemJSON400 the response for an HTTP 400 `application/problem+json` response
+	ApplicationProblemJSON400 *BadRequest
+	// ApplicationProblemJSON401 the response for an HTTP 401 `application/problem+json` response
+	ApplicationProblemJSON401 *Unauthorized
+	// ApplicationProblemJSON409 the response for an HTTP 409 `application/problem+json` response
+	ApplicationProblemJSON409 *Problem
+	// ApplicationProblemJSON500 the response for an HTTP 500 `application/problem+json` response
+	ApplicationProblemJSON500 *InternalError
+}
+
+// GetJSON202 returns the response for an HTTP 202 `application/json` response
+func (r ReverseDepositResponse) GetJSON202() *AdminDeposit {
+	return r.JSON202
+}
+
+// GetApplicationProblemJSON400 returns the response for an HTTP 400 `application/problem+json` response
+func (r ReverseDepositResponse) GetApplicationProblemJSON400() *BadRequest {
+	return r.ApplicationProblemJSON400
+}
+
+// GetApplicationProblemJSON401 returns the response for an HTTP 401 `application/problem+json` response
+func (r ReverseDepositResponse) GetApplicationProblemJSON401() *Unauthorized {
+	return r.ApplicationProblemJSON401
+}
+
+// GetApplicationProblemJSON409 returns the response for an HTTP 409 `application/problem+json` response
+func (r ReverseDepositResponse) GetApplicationProblemJSON409() *Problem {
+	return r.ApplicationProblemJSON409
+}
+
+// GetApplicationProblemJSON500 returns the response for an HTTP 500 `application/problem+json` response
+func (r ReverseDepositResponse) GetApplicationProblemJSON500() *InternalError {
+	return r.ApplicationProblemJSON500
+}
+
+// GetBody returns the raw response body bytes
+func (r ReverseDepositResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r ReverseDepositResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ReverseDepositResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r ReverseDepositResponse) ContentType() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Header.Get("Content-Type")
 	}
@@ -10314,6 +10769,79 @@ func (c *ClientWithResponses) ListDepositsWithResponse(ctx context.Context, para
 	return ParseListDepositsResponse(rsp)
 }
 
+// ListDepositsAwaitingReversalWithResponse Credited deposits a reorg took away, waiting for a decision
+//
+// A deposit the ledger credited whose block was later abandoned by a reorg deeper than the asset's confirmations (docs/plan-v1.0.md §6.4.1). The status is still `credited` and the account still holds the balance -- the ledger cannot un-say it on its own, because the money may already have been spent. Each of these is a decision waiting for a person. In a healthy exchange this list is empty; anything in it means an account holds a balance the chain does not back, and reconciliation will report the difference as a break.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /admin/v1/deposits/awaiting-reversal (the `ListDepositsAwaitingReversal` operationId).
+func (c *ClientWithResponses) ListDepositsAwaitingReversalWithResponse(ctx context.Context, params *ListDepositsAwaitingReversalParams, reqEditors ...RequestEditorFn) (*ListDepositsAwaitingReversalResponse, error) {
+	rsp, err := c.ListDepositsAwaitingReversal(ctx, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListDepositsAwaitingReversalResponse(rsp)
+}
+
+// ReverseDepositWithBodyWithResponse Confirm that a reorged deposit should be undone
+//
+// Records the decision; it moves no money. The admin role has no node and
+// no view of the chain, so the chain role posts the reversing entry on
+// its next tick -- the exact mirror of the three postings that credited
+// it, including the fee.
+//
+// There is no matching reject: leaving a reorged deposit alone is what
+// happens if nobody acts, so asking is the whole decision. The reason is
+// required and is recorded in the audit trail and on the entry.
+//
+// The reversal can still be refused after this returns, for one reason:
+// the account no longer has what it was credited. Balances may not go
+// negative, and an account that owes the exchange is not something this
+// system can represent. The deposit then stays in the queue with
+// `reversal_error` explaining, and the choice goes back to a person --
+// `docs/runbooks/reorg-alert.md` has the options.
+//
+// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /admin/v1/deposits/{id}/reverse (the `ReverseDeposit` operationId).
+func (c *ClientWithResponses) ReverseDepositWithBodyWithResponse(ctx context.Context, id DepositID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ReverseDepositResponse, error) {
+	rsp, err := c.ReverseDepositWithBody(ctx, id, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseReverseDepositResponse(rsp)
+}
+
+// ReverseDepositWithResponse Confirm that a reorged deposit should be undone
+//
+// Records the decision; it moves no money. The admin role has no node and
+// no view of the chain, so the chain role posts the reversing entry on
+// its next tick -- the exact mirror of the three postings that credited
+// it, including the fee.
+//
+// There is no matching reject: leaving a reorged deposit alone is what
+// happens if nobody acts, so asking is the whole decision. The reason is
+// required and is recorded in the audit trail and on the entry.
+//
+// The reversal can still be refused after this returns, for one reason:
+// the account no longer has what it was credited. Balances may not go
+// negative, and an account that owes the exchange is not something this
+// system can represent. The deposit then stays in the queue with
+// `reversal_error` explaining, and the choice goes back to a person --
+// `docs/runbooks/reorg-alert.md` has the options.
+//
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /admin/v1/deposits/{id}/reverse (the `ReverseDeposit` operationId).
+func (c *ClientWithResponses) ReverseDepositWithResponse(ctx context.Context, id DepositID, body ReverseDepositJSONRequestBody, reqEditors ...RequestEditorFn) (*ReverseDepositResponse, error) {
+	rsp, err := c.ReverseDeposit(ctx, id, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseReverseDepositResponse(rsp)
+}
+
 // RequestReloadWithBodyWithResponse Ask every engine to reload its registry cache
 //
 // Publishes registry.reload with no row changed: after a seed, or when in doubt. 202: the request is in the outbox; the engine's reload consumer acts on it.
@@ -11726,6 +12254,100 @@ func ParseListDepositsResponse(rsp *http.Response) (*ListDepositsResponse, error
 			return nil, err
 		}
 		response.ApplicationProblemJSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON500 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseListDepositsAwaitingReversalResponse parses an HTTP response from a ListDepositsAwaitingReversalWithResponse call
+func ParseListDepositsAwaitingReversalResponse(rsp *http.Response) (*ListDepositsAwaitingReversalResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListDepositsAwaitingReversalResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest AdminDepositList
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON500 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseReverseDepositResponse parses an HTTP response from a ReverseDepositWithResponse call
+func ParseReverseDepositResponse(rsp *http.Response) (*ReverseDepositResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ReverseDepositResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 202:
+		var dest AdminDeposit
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON202 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest BadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest Problem
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON409 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
 		var dest InternalError

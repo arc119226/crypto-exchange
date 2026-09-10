@@ -127,6 +127,7 @@ func (u *UI) mount(r chi.Router) {
 			admin.Post("/admin/withdrawals/{id}/review", u.reviewWithdrawalPage)
 			admin.Post("/admin/withdrawals/{id}/resolve", u.resolveWithdrawalPage)
 			admin.Get("/admin/chain", u.chain)
+			admin.Post("/admin/deposits/{id}/reverse", u.reverseDepositPage)
 			admin.Get("/admin/reconciliation", u.reconciliation)
 			admin.Get("/admin/audit", u.audit)
 			admin.Get("/admin/webhooks", u.webhooks)

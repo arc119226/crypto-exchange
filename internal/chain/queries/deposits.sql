@@ -122,3 +122,71 @@ GROUP BY asset, status;
 -- The dashboard's "deposits still confirming" tile.
 SELECT count(*) FROM chain.deposits
 WHERE tenant_id = $1 AND status = ANY(@statuses::text[]);
+
+-- name: MarkDepositsReorged :many
+-- Credited deposits whose block was abandoned by a reorg. The status stays
+-- 'credited' -- the ledger still holds the credit and must until a reversing
+-- entry is posted -- so this only stamps the height, which is what puts the
+-- row in the operator's queue. Already-stamped rows are left alone: the first
+-- reorg is the one that matters, and a later, shallower one must not move the
+-- mark to a height the deposit was never valid at.
+UPDATE chain.deposits
+SET reorged_at_block = $4, version = version + 1, updated_at = now()
+WHERE tenant_id = $1 AND chain_id = $2 AND block_number >= $3
+  AND status = 'credited' AND reorged_at_block IS NULL
+RETURNING *;
+
+-- name: ListDepositsAwaitingReversal :many
+-- The operator's queue: credited deposits the chain no longer shows, with no
+-- decision recorded yet.
+SELECT * FROM chain.deposits
+WHERE tenant_id = $1 AND status = 'credited' AND reorged_at_block IS NOT NULL
+  AND reversal_requested_at IS NULL
+ORDER BY reorged_at_block, id
+LIMIT $2 OFFSET $3;
+
+-- name: CountDepositsAwaitingReversal :one
+-- Everything that has been stamped and not yet reversed, whether or not a
+-- person has decided about it. The gauge behind DepositAwaitingReversal: this
+-- number being anything but zero means an account holds a balance the chain
+-- does not back.
+SELECT count(*) FROM chain.deposits
+WHERE tenant_id = $1 AND status = 'credited' AND reorged_at_block IS NOT NULL;
+
+-- name: RequestDepositReversal :one
+-- The admin role's only write to this table. It records a decision; it cannot
+-- move money, change the status, or touch a deposit the scanner has not marked.
+UPDATE chain.deposits
+SET reversal_requested_by = $3, reversal_requested_at = now(), reversal_note = $4,
+    version = version + 1, updated_at = now()
+WHERE id = $1 AND tenant_id = $2
+  AND status = 'credited' AND reorged_at_block IS NOT NULL
+  AND reversal_requested_at IS NULL
+RETURNING *;
+
+-- name: ClaimDepositReversals :many
+-- What the chain role should reverse on this tick.
+SELECT * FROM chain.deposits
+WHERE tenant_id = $1 AND status = 'credited' AND reversal_requested_at IS NOT NULL
+ORDER BY reversal_requested_at
+LIMIT $2;
+
+-- name: MarkDepositReversed :one
+-- Applied. credited_at goes because 0009 ties it to the status; fee and
+-- credited_amount stay, because 0024 tied them to "the ledger moved" instead
+-- and they are the record of what was undone.
+UPDATE chain.deposits
+SET status = 'reversed', reversed_at = now(), credited_at = NULL,
+    reversal_requested_at = NULL, reversal_error = NULL,
+    version = version + 1, updated_at = now()
+WHERE id = $1 AND tenant_id = $2 AND status = 'credited'
+RETURNING *;
+
+-- name: RecordDepositReversalError :exec
+-- The reversal could not be posted -- almost always because the account has
+-- already spent the money. The request is cleared so the worker does not spin
+-- on it, and the reason stays for the person who asked.
+UPDATE chain.deposits
+SET reversal_requested_at = NULL, reversal_error = $3,
+    version = version + 1, updated_at = now()
+WHERE id = $1 AND tenant_id = $2;

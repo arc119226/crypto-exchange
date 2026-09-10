@@ -43,6 +43,9 @@ type Handler struct {
 	webhooks *webhook.Store
 	// deposits reads chain.deposits; nil without a chain.
 	deposits *deposit.Reader
+	// depositReviewer is the reversal queue of §6.4.1 -- the admin half of
+	// undoing a credited deposit a reorg took away. nil without a chain.
+	depositReviewer *deposit.Reviewer
 	// users is the directory and the two edits an operator makes to a
 	// person: KYC level and status. The same auth.Service the pages log in
 	// with; nil turns the user endpoints into 500s.
@@ -65,6 +68,12 @@ func NewHandler(pool *pgxpool.Pool, l *ledger.Service, r *registry.Store, a *aud
 
 // WithChainID names the chain whose reconciliation reports this handler reads.
 func (h *Handler) WithChainID(id int64) *Handler { h.chainID = id; return h }
+
+// WithDepositReviewer enables the deposit reversal queue.
+func (h *Handler) WithDepositReviewer(r *deposit.Reviewer) *Handler {
+	h.depositReviewer = r
+	return h
+}
 
 // WithWithdrawals enables the withdrawal review queue.
 func (h *Handler) WithWithdrawals(r *withdrawal.Reviewer) *Handler {

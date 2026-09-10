@@ -13,6 +13,7 @@ type Metrics struct {
 	reorgs      prometheus.Counter
 	unreadable  prometheus.Counter
 	credited    *prometheus.CounterVec
+	awaitingRev prometheus.Gauge
 }
 
 // NewMetrics registers the collectors. A nil registerer returns unregistered
@@ -41,9 +42,13 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 		credited: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "deposits_credited_total", Help: "Deposits credited to an account.",
 		}, []string{"asset"}),
+		awaitingRev: prometheus.NewGauge(prometheus.GaugeOpts{
+			Name: "deposits_awaiting_reversal",
+			Help: "Credited deposits whose block a reorg took away. Anything but zero means an account holds a balance the chain does not back.",
+		}),
 	}
 	if reg != nil {
-		reg.MustRegister(m.head, m.lastScanned, m.lag, m.watched, m.reorgs, m.unreadable, m.credited)
+		reg.MustRegister(m.head, m.lastScanned, m.lag, m.watched, m.reorgs, m.unreadable, m.credited, m.awaitingRev)
 	}
 	return m
 }
@@ -63,4 +68,11 @@ func (m *Metrics) observeScanned(block, lag uint64) {
 
 func (m *Metrics) observeWatched(n int) {
 	m.watched.Set(float64(n)) //nolint:forbidigo // Prometheus gauge, not money
+}
+
+// observeAwaitingReversal is the queue depth of §6.4.1's reversed path. It is
+// a gauge rather than a counter because it goes back down: an operator
+// confirming a reversal is what empties it.
+func (m *Metrics) observeAwaitingReversal(n int64) {
+	m.awaitingRev.Set(float64(n)) //nolint:forbidigo // Prometheus gauge, not money
 }

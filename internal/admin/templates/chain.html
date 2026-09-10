@@ -16,6 +16,33 @@
   <p class="muted">{{T "chain.no_hot_wallet"}}</p>
   {{end}}
 </section>
+{{if .AwaitingReversal}}
+<section class="card">
+  <h2>{{T "chain.awaiting_reversal"}}</h2>
+  <p class="muted">{{T "chain.awaiting_reversal.hint"}}</p>
+  <table>
+    <thead><tr><th>{{T "col.account"}}</th><th class="num">{{T "col.amount"}}</th><th class="num">{{T "chain.credited_amount"}}</th><th>{{T "col.tx"}}</th><th class="num">{{T "chain.reorged_at"}}</th><th>{{T "withdrawals.decision"}}</th></tr></thead>
+    <tbody>
+    {{range .AwaitingReversal}}
+    <tr>
+      <td class="mono">{{.AccountID}}</td>
+      <td class="num">{{amount .Amount}} {{.Asset}}</td>
+      <td class="num">{{if .Credited}}{{amount .Credited}}{{else}}-{{end}}</td>
+      <td class="mono">{{.TxHash}}<br><span class="muted">{{T "col.block"}} {{.BlockNumber}}</span></td>
+      <td class="num">{{if .ReorgedAtBlock}}{{.ReorgedAtBlock}}{{end}}</td>
+      <td>
+        {{if .ReversalError}}<p class="error">{{.ReversalError}}</p>{{end}}
+        <form method="post" action="/admin/deposits/{{.ID}}/reverse" class="row">
+          <input type="text" name="reason" required placeholder="{{T "form.reason.placeholder"}}">
+          <button type="submit">{{T "chain.reverse"}}</button>
+        </form>
+      </td>
+    </tr>
+    {{end}}
+    </tbody>
+  </table>
+</section>
+{{end}}
 <section class="card">
   <h2>{{T "chain.deposits"}}</h2>
   <form method="get" action="/admin/chain" class="row">

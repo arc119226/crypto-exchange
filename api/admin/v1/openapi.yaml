@@ -995,6 +995,86 @@ paths:
         "500":
           $ref: "#/components/responses/InternalError"
 
+  /admin/v1/deposits/awaiting-reversal:
+    get:
+      tags: [chain]
+      operationId: listDepositsAwaitingReversal
+      summary: Credited deposits a reorg took away, waiting for a decision
+      description: >
+        A deposit the ledger credited whose block was later abandoned by a
+        reorg deeper than the asset's confirmations (docs/plan-v1.0.md
+        §6.4.1). The status is still `credited` and the account still holds the
+        balance -- the ledger cannot un-say it on its own, because the money
+        may already have been spent. Each of these is a decision waiting for a
+        person. In a healthy exchange this list is empty; anything in it means
+        an account holds a balance the chain does not back, and reconciliation
+        will report the difference as a break.
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+      responses:
+        "200":
+          description: The queue
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminDepositList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /admin/v1/deposits/{id}/reverse:
+    post:
+      tags: [chain]
+      operationId: reverseDeposit
+      summary: Confirm that a reorged deposit should be undone
+      description: |
+        Records the decision; it moves no money. The admin role has no node and
+        no view of the chain, so the chain role posts the reversing entry on
+        its next tick -- the exact mirror of the three postings that credited
+        it, including the fee.
+
+        There is no matching reject: leaving a reorged deposit alone is what
+        happens if nobody acts, so asking is the whole decision. The reason is
+        required and is recorded in the audit trail and on the entry.
+
+        The reversal can still be refused after this returns, for one reason:
+        the account no longer has what it was credited. Balances may not go
+        negative, and an account that owes the exchange is not something this
+        system can represent. The deposit then stays in the queue with
+        `reversal_error` explaining, and the choice goes back to a person --
+        `docs/runbooks/reorg-alert.md` has the options.
+      parameters:
+        - $ref: "#/components/parameters/DepositID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReverseDepositRequest"
+      responses:
+        "202":
+          description: Recorded; the chain role will apply it
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminDeposit"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "409":
+          description: >
+            Not awaiting a reversal: no reorg took its block away, it has
+            already been reversed, or somebody has already asked.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
   /admin/v1/hot-wallet:
     get:
       tags: [chain]
@@ -1539,6 +1619,13 @@ components:
         minimum: 0
         default: 0
     WithdrawalID:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+
+    DepositID:
       name: id
       in: path
       required: true
@@ -2608,6 +2695,31 @@ components:
         credited_at:
           type: string
           format: date-time
+        reorged_at_block:
+          type: integer
+          format: int64
+          nullable: true
+          description: >
+            The height a reorg rewound to after this deposit had been credited.
+            Set means the chain no longer shows it and it is waiting for a
+            decision; the status stays `credited` until the reversing entry is
+            posted.
+        reversal_requested_by:
+          type: string
+          nullable: true
+        reversal_note:
+          type: string
+          nullable: true
+        reversal_error:
+          type: string
+          nullable: true
+          description: >
+            Why the last attempt could not be posted. In practice there is one
+            reason: the account has already spent what it was credited.
+        reversed_at:
+          type: string
+          format: date-time
+          nullable: true
         created_at:
           type: string
           format: date-time
@@ -2656,6 +2768,18 @@ components:
         updated_at:
           type: string
           format: date-time
+
+    ReverseDepositRequest:
+      type: object
+      required: [reason]
+      properties:
+        reason:
+          type: string
+          minLength: 1
+          description: >
+            Why this deposit is being undone. Recorded in the audit trail and
+            carried on the reversing journal entry, which is where somebody
+            reading the ledger a year later will find it.
 
     RevenueReport:
       type: object

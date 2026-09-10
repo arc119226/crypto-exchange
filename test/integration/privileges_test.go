@@ -117,3 +117,44 @@ func TestChainRoleCannotRewriteTheFeeSnapshot(t *testing.T) {
 		}
 	})
 }
+
+// The deposit reversal of §6.4.1 is split across two roles on purpose: admin
+// records a person's decision, chain acts on it. Migration 0024 makes that a
+// grant rather than a convention, and this is the test that says so -- every
+// other test connects as ex_all, where the split is invisible.
+func TestAdminMayAskForADepositReversalAndNothingElse(t *testing.T) {
+	h := setupLedger(t)
+	ctx := context.Background()
+
+	adminPool, err := pg.Open(ctx, pg.PoolConfig{DSN: h.DSN("ex_admin"), MaxConns: 2})
+	require.NoError(t, err)
+	defer adminPool.Close()
+
+	// A real uuid: the id column is one, and a literal that cannot be coerced
+	// fails during parse analysis, before the privilege check.
+	const nobody = `'00000000-0000-0000-0000-000000000000'`
+
+	t.Run("the admin role may record the request", func(t *testing.T) {
+		_, err := adminPool.Exec(ctx,
+			`UPDATE chain.deposits SET reversal_requested_by = 'ops', reversal_requested_at = now(),
+			        reversal_note = 'reorg' WHERE id = `+nobody)
+		require.NoError(t, err)
+	})
+
+	t.Run("but may not reverse anything itself", func(t *testing.T) {
+		// Each of these would let the admin role move money, or make a
+		// deposit look reversed without an entry ever being posted.
+		for _, stmt := range []string{
+			`UPDATE chain.deposits SET status = 'reversed' WHERE id = ` + nobody,
+			`UPDATE chain.deposits SET reversed_at = now() WHERE id = ` + nobody,
+			`UPDATE chain.deposits SET credited_at = NULL WHERE id = ` + nobody,
+			`UPDATE chain.deposits SET amount = 0 WHERE id = ` + nobody,
+			`UPDATE chain.deposits SET reorged_at_block = 1 WHERE id = ` + nobody,
+		} {
+			_, err := adminPool.Exec(ctx, stmt)
+			var pgErr *pgconn.PgError
+			require.ErrorAs(t, err, &pgErr, stmt)
+			assert.Equal(t, "42501", pgErr.Code, stmt)
+		}
+	})
+}

@@ -97,6 +97,21 @@ groups:
           summary: "{{ $value }} withdrawals are waiting for an operator"
           description: "Review them in the back office (Withdrawals page) before customers start asking."
 
+      # A deep reorg took away a block the ledger had already credited from
+      # (docs/plan-v1.0.md §6.4.1, the `reversed` row). Until somebody
+      # confirms the reversal, an account holds a balance the chain does not
+      # back and reconciliation will report the difference as a break with
+      # nothing able to resolve it. Rare enough that any non-zero value is
+      # worth waking someone; `for: 0m` because the scanner sets this gauge
+      # only after it has already rewound past the block.
+      - alert: DepositAwaitingReversal
+        expr: deposits_awaiting_reversal > 0
+        for: 0m
+        labels: { severity: critical }
+        annotations:
+          summary: "{{ $value }} credited deposits were reorged away and are waiting for a decision"
+          description: "The chain no longer shows money the ledger credited. Review them in the back office (Chain page) and confirm the reversal; docs/runbooks/reorg-alert.md has the procedure and what to do when the account has already spent it."
+
       - alert: ReconciliationBreak
         expr: reconciliation_diff != 0
         for: 0m

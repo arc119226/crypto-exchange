@@ -25,6 +25,10 @@ const (
 	StatusCredited   = "credited"
 	StatusOrphaned   = "orphaned"
 	StatusDropped    = "dropped"
+	// StatusReversed is a credited deposit undone after a reorg took its
+	// block away. It is the only status a person has to ask for: the money
+	// may already have been spent, so the machine will not decide it.
+	StatusReversed = "reversed"
 )
 
 // NativeLogIndex marks a deposit that arrived as a plain value transfer rather
@@ -263,6 +267,9 @@ func (s *Scanner) Tick(ctx context.Context) error {
 	if err := s.expireOrphans(ctx, head); err != nil {
 		return err
 	}
+	if err := s.applyReversals(ctx); err != nil {
+		return err
+	}
 	return s.pruneRing(ctx, head)
 }
 
@@ -369,8 +376,14 @@ func (s *Scanner) commonAncestor(ctx context.Context, start uint64) (uint64, err
 }
 
 // rewind drops the abandoned branch and orphans the deposits that were on it.
-// Credited deposits are left alone: undoing those is the manual reversed path
-// (§6.4.1), because the funds may already have been spent.
+//
+// Credited deposits are not orphaned -- the ledger holds their credit and must
+// go on holding it until a reversing entry is posted -- but they are no longer
+// left in silence either. They are stamped with the height the reorg reached,
+// which puts them in the operator's queue and lifts the
+// deposits_awaiting_reversal gauge. Undoing one is a decision for a person
+// (§6.4.1): the funds may already have been spent, and the machine must not
+// guess what to do about that.
 func (s *Scanner) rewind(ctx context.Context, ancestor uint64) error {
 	return s.inTx(ctx, func(tx pgx.Tx) error {
 		q := sqlcgen.New(tx)
@@ -387,6 +400,22 @@ func (s *Scanner) rewind(ctx context.Context, ancestor uint64) error {
 			if err := s.emit(ctx, tx, EventOrphaned, d); err != nil {
 				return err
 			}
+		}
+		//nolint:gosec // bounded by the chain head
+		reorged, err := q.MarkDepositsReorged(ctx, sqlcgen.MarkDepositsReorgedParams{
+			TenantID: s.cfg.Tenant, ChainID: s.cfg.ChainID,
+			BlockNumber: int64(ancestor + 1), ReorgedAtBlock: ptrInt64(int64(ancestor)),
+		})
+		if err != nil {
+			return fmt.Errorf("deposit: mark deposits reorged above %d: %w", ancestor, err)
+		}
+		for _, d := range reorged {
+			// Deliberately not deposit.reversed: nothing has been reversed.
+			// The event that says so is emitted when the reversing entry is
+			// actually posted.
+			s.log.Error("a credited deposit was reorged away and needs a decision",
+				slog.String("deposit_id", d.ID), slog.String("account_id", d.AccountID),
+				slog.String("asset", d.Asset), slog.Int64("block", d.BlockNumber))
 		}
 		if _, err := q.DeleteBlocksFrom(ctx, sqlcgen.DeleteBlocksFromParams{
 			TenantID: s.cfg.Tenant, ChainID: s.cfg.ChainID, Number: int64(ancestor + 1), //nolint:gosec // bounded

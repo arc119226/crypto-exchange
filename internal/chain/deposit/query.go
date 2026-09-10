@@ -30,7 +30,17 @@ type Record struct {
 	Fee        *money.Amount
 	Credited   *money.Amount
 	CreditedAt *time.Time
-	CreatedAt  time.Time
+	// ReorgedAtBlock is set when a reorg took this deposit's block away after
+	// it was credited (§6.4.1). The status stays credited until somebody
+	// confirms the reversal, so this is what tells the two apart.
+	ReorgedAtBlock      *int64
+	ReversalRequestedBy string
+	ReversalNote        string
+	// ReversalError is why the last attempt could not be posted, which in
+	// practice means the account has already spent the money.
+	ReversalError string
+	ReversedAt    *time.Time
+	CreatedAt     time.Time
 }
 
 // Reader lists deposits. It is separate from the Scanner because the api and
@@ -85,6 +95,14 @@ func records(rows []sqlcgen.ChainDeposit) ([]Record, error) {
 			Address: row.Address, TxHash: row.TxHash, LogIndex: row.LogIndex,
 			BlockNumber: row.BlockNumber, Confirmations: row.Confirmations,
 			Status: row.Status, Fee: fee, Credited: credited, CreatedAt: row.CreatedAt,
+			ReorgedAtBlock:      row.ReorgedAtBlock,
+			ReversalRequestedBy: deref(row.ReversalRequestedBy),
+			ReversalNote:        deref(row.ReversalNote),
+			ReversalError:       deref(row.ReversalError),
+		}
+		if row.ReversedAt.Valid {
+			at := row.ReversedAt.Time
+			rec.ReversedAt = &at
 		}
 		if row.CreditedAt.Valid {
 			at := row.CreditedAt.Time

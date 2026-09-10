@@ -138,8 +138,15 @@ event type. `deposit.detected` is **not** money — nothing is credited until
 `deposit.credited`, and a reorg before that point produces `deposit.orphaned`
 instead. The same deposit can be detected more than once: after an orphan it
 reappears under the same `deposit_id`, with a different `block_number`.
-`deposit.reversed` is an alert rather than a completed reversal — the
-reversing entry is made by hand once an operator confirms it (§6.4.1).
+`deposit.reversed` reports a completed reversal, not a warning about one: by
+the time it is emitted the reversing entry has been posted, mirroring the three
+postings that credited the deposit. Getting there takes a person. A reorg
+deeper than the asset's confirmations leaves the deposit `credited` and marks
+it; the alert is `DepositAwaitingReversal` on
+`deposits_awaiting_reversal`, and an operator confirms in the back office
+(§6.4.1). The machine never decides it, because the account may already have
+spent the money — and if it has, the reversal is refused and the choice goes
+back to a person.
 
 `fee` and `credited_amount` appear once the deposit is credited and are absent
 before that: a deposit fee comes *out of* what arrived (§6.1.4 i), so `amount`

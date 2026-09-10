@@ -614,11 +614,20 @@ type AdminDeposit struct {
 	CreditedAt     *time.Time `json:"credited_at,omitempty"`
 
 	// Fee Taken out of the amount at credit time, so it is null until the deposit is credited. Unlike a withdrawal fee it is not charged on top: `amount` stays what the chain delivered.
-	Fee      *Amount            `json:"fee,omitempty"`
-	ID       string             `json:"id"`
-	LogIndex int32              `json:"log_index"`
-	Status   AdminDepositStatus `json:"status"`
-	TxHash   string             `json:"tx_hash"`
+	Fee      *Amount `json:"fee,omitempty"`
+	ID       string  `json:"id"`
+	LogIndex int32   `json:"log_index"`
+
+	// ReorgedAtBlock The height a reorg rewound to after this deposit had been credited. Set means the chain no longer shows it and it is waiting for a decision; the status stays `credited` until the reversing entry is posted.
+	ReorgedAtBlock *int64 `json:"reorged_at_block,omitempty"`
+
+	// ReversalError Why the last attempt could not be posted. In practice there is one reason: the account has already spent what it was credited.
+	ReversalError       *string            `json:"reversal_error,omitempty"`
+	ReversalNote        *string            `json:"reversal_note,omitempty"`
+	ReversalRequestedBy *string            `json:"reversal_requested_by,omitempty"`
+	ReversedAt          *time.Time         `json:"reversed_at,omitempty"`
+	Status              AdminDepositStatus `json:"status"`
+	TxHash              string             `json:"tx_hash"`
 }
 
 // AdminDepositStatus defines model for AdminDeposit.Status.
@@ -1378,6 +1387,12 @@ type RevenueReport struct {
 	To time.Time `json:"to"`
 }
 
+// ReverseDepositRequest defines model for ReverseDepositRequest.
+type ReverseDepositRequest struct {
+	// Reason Why this deposit is being undone. Recorded in the audit trail and carried on the reversing journal entry, which is where somebody reading the ledger a year later will find it.
+	Reason string `json:"reason"`
+}
+
 // RotateSecretRequest defines model for RotateSecretRequest.
 type RotateSecretRequest struct {
 	// GraceHours How long the old secret keeps signing alongside the new one.
@@ -1674,6 +1689,9 @@ type AssetPath = string
 // AssetSymbol Example: USDC
 type AssetSymbol = string
 
+// DepositID defines model for DepositID.
+type DepositID = string
+
 // FeeScheduleName Example: default
 type FeeScheduleName = string
 
@@ -1757,6 +1775,12 @@ type ListDepositsParams struct {
 // ListDepositsParamsStatus defines parameters for ListDeposits.
 type ListDepositsParamsStatus string
 
+// ListDepositsAwaitingReversalParams defines parameters for ListDepositsAwaitingReversal.
+type ListDepositsAwaitingReversalParams struct {
+	Limit  *Limit  `form:"limit,omitempty" json:"limit,omitempty"`
+	Offset *Offset `form:"offset,omitempty" json:"offset,omitempty"`
+}
+
 // ListEntriesParams defines parameters for ListEntries.
 type ListEntriesParams struct {
 	AccountID *string `form:"account_id,omitempty" json:"account_id,omitempty"`
@@ -1838,6 +1862,9 @@ type CreateAssetJSONRequestBody = CreateAssetRequest
 
 // UpdateAssetJSONRequestBody defines body for UpdateAsset for application/json ContentType.
 type UpdateAssetJSONRequestBody = AssetRequest
+
+// ReverseDepositJSONRequestBody defines body for ReverseDeposit for application/json ContentType.
+type ReverseDepositJSONRequestBody = ReverseDepositRequest
 
 // RequestReloadJSONRequestBody defines body for RequestReload for application/json ContentType.
 type RequestReloadJSONRequestBody = ReloadRequest
@@ -1925,6 +1952,12 @@ type ServerInterface interface {
 	// ListDeposits Deposits the chain role has seen, newest first
 	// (GET /admin/v1/deposits)
 	ListDeposits(w http.ResponseWriter, r *http.Request, params ListDepositsParams)
+	// ListDepositsAwaitingReversal Credited deposits a reorg took away, waiting for a decision
+	// (GET /admin/v1/deposits/awaiting-reversal)
+	ListDepositsAwaitingReversal(w http.ResponseWriter, r *http.Request, params ListDepositsAwaitingReversalParams)
+	// ReverseDeposit Confirm that a reorged deposit should be undone
+	// (POST /admin/v1/deposits/{id}/reverse)
+	ReverseDeposit(w http.ResponseWriter, r *http.Request, id DepositID)
 	// RequestReload Ask every engine to reload its registry cache
 	// (POST /admin/v1/engine/reload)
 	RequestReload(w http.ResponseWriter, r *http.Request)
@@ -2105,6 +2138,18 @@ func (_ Unimplemented) ListAuditEvents(w http.ResponseWriter, r *http.Request, p
 // ListDeposits Deposits the chain role has seen, newest first
 // (GET /admin/v1/deposits)
 func (_ Unimplemented) ListDeposits(w http.ResponseWriter, r *http.Request, params ListDepositsParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ListDepositsAwaitingReversal Credited deposits a reorg took away, waiting for a decision
+// (GET /admin/v1/deposits/awaiting-reversal)
+func (_ Unimplemented) ListDepositsAwaitingReversal(w http.ResponseWriter, r *http.Request, params ListDepositsAwaitingReversalParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ReverseDeposit Confirm that a reorged deposit should be undone
+// (POST /admin/v1/deposits/{id}/reverse)
+func (_ Unimplemented) ReverseDeposit(w http.ResponseWriter, r *http.Request, id DepositID) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -2744,6 +2789,78 @@ func (siw *ServerInterfaceWrapper) ListDeposits(w http.ResponseWriter, r *http.R
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ListDeposits(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListDepositsAwaitingReversal operation middleware
+func (siw *ServerInterfaceWrapper) ListDepositsAwaitingReversal(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListDepositsAwaitingReversalParams
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: "int32"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "offset" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "offset", r.URL.Query(), &params.Offset, runtime.BindQueryParameterOptions{Type: "integer", Format: "int32"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "offset"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "offset", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListDepositsAwaitingReversal(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ReverseDeposit operation middleware
+func (siw *ServerInterfaceWrapper) ReverseDeposit(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id DepositID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ReverseDeposit(w, r, id)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -4045,6 +4162,12 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Get(options.BaseURL+"/admin/v1/deposits", wrapper.ListDeposits)
 	})
 	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/admin/v1/deposits/awaiting-reversal", wrapper.ListDepositsAwaitingReversal)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/admin/v1/deposits/{id}/reverse", wrapper.ReverseDeposit)
+	})
+	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/admin/v1/hot-wallet", wrapper.GetHotWallet)
 	})
 	r.Group(func(r chi.Router) {
@@ -4847,6 +4970,145 @@ type ListDeposits500ApplicationProblemPlusJSONResponse struct {
 }
 
 func (response ListDeposits500ApplicationProblemPlusJSONResponse) VisitListDepositsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListDepositsAwaitingReversalRequestObject struct {
+	Params ListDepositsAwaitingReversalParams
+}
+
+type ListDepositsAwaitingReversalResponseObject interface {
+	VisitListDepositsAwaitingReversalResponse(w http.ResponseWriter) error
+}
+
+type ListDepositsAwaitingReversal200JSONResponse AdminDepositList
+
+func (response ListDepositsAwaitingReversal200JSONResponse) VisitListDepositsAwaitingReversalResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListDepositsAwaitingReversal401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response ListDepositsAwaitingReversal401ApplicationProblemPlusJSONResponse) VisitListDepositsAwaitingReversalResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListDepositsAwaitingReversal500ApplicationProblemPlusJSONResponse struct {
+	InternalErrorApplicationProblemPlusJSONResponse
+}
+
+func (response ListDepositsAwaitingReversal500ApplicationProblemPlusJSONResponse) VisitListDepositsAwaitingReversalResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReverseDepositRequestObject struct {
+	ID   DepositID `json:"id"`
+	Body *ReverseDepositJSONRequestBody
+}
+
+type ReverseDepositResponseObject interface {
+	VisitReverseDepositResponse(w http.ResponseWriter) error
+}
+
+type ReverseDeposit202JSONResponse AdminDeposit
+
+func (response ReverseDeposit202JSONResponse) VisitReverseDepositResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(202)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReverseDeposit400ApplicationProblemPlusJSONResponse struct {
+	BadRequestApplicationProblemPlusJSONResponse
+}
+
+func (response ReverseDeposit400ApplicationProblemPlusJSONResponse) VisitReverseDepositResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReverseDeposit401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response ReverseDeposit401ApplicationProblemPlusJSONResponse) VisitReverseDepositResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReverseDeposit409ApplicationProblemPlusJSONResponse Problem
+
+func (response ReverseDeposit409ApplicationProblemPlusJSONResponse) VisitReverseDepositResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReverseDeposit500ApplicationProblemPlusJSONResponse struct {
+	InternalErrorApplicationProblemPlusJSONResponse
+}
+
+func (response ReverseDeposit500ApplicationProblemPlusJSONResponse) VisitReverseDepositResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
@@ -7649,6 +7911,12 @@ type StrictServerInterface interface {
 	// ListDeposits Deposits the chain role has seen, newest first
 	// (GET /admin/v1/deposits)
 	ListDeposits(ctx context.Context, request ListDepositsRequestObject) (ListDepositsResponseObject, error)
+	// ListDepositsAwaitingReversal Credited deposits a reorg took away, waiting for a decision
+	// (GET /admin/v1/deposits/awaiting-reversal)
+	ListDepositsAwaitingReversal(ctx context.Context, request ListDepositsAwaitingReversalRequestObject) (ListDepositsAwaitingReversalResponseObject, error)
+	// ReverseDeposit Confirm that a reorged deposit should be undone
+	// (POST /admin/v1/deposits/{id}/reverse)
+	ReverseDeposit(ctx context.Context, request ReverseDepositRequestObject) (ReverseDepositResponseObject, error)
 	// RequestReload Ask every engine to reload its registry cache
 	// (POST /admin/v1/engine/reload)
 	RequestReload(ctx context.Context, request RequestReloadRequestObject) (RequestReloadResponseObject, error)
@@ -8102,6 +8370,65 @@ func (sh *strictHandler) ListDeposits(w http.ResponseWriter, r *http.Request, pa
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(ListDepositsResponseObject); ok {
 		if err := validResponse.VisitListDepositsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListDepositsAwaitingReversal operation middleware
+func (sh *strictHandler) ListDepositsAwaitingReversal(w http.ResponseWriter, r *http.Request, params ListDepositsAwaitingReversalParams) {
+	var request ListDepositsAwaitingReversalRequestObject
+
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListDepositsAwaitingReversal(ctx, request.(ListDepositsAwaitingReversalRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListDepositsAwaitingReversal")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListDepositsAwaitingReversalResponseObject); ok {
+		if err := validResponse.VisitListDepositsAwaitingReversalResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ReverseDeposit operation middleware
+func (sh *strictHandler) ReverseDeposit(w http.ResponseWriter, r *http.Request, id DepositID) {
+	var request ReverseDepositRequestObject
+
+	request.ID = id
+
+	var body ReverseDepositJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ReverseDeposit(ctx, request.(ReverseDepositRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ReverseDeposit")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ReverseDepositResponseObject); ok {
+		if err := validResponse.VisitReverseDepositResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

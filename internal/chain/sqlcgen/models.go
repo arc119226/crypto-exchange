@@ -55,27 +55,33 @@ type ChainChainState struct {
 }
 
 type ChainDeposit struct {
-	ID              string
-	TenantID        string
-	ChainID         int64
-	TxHash          string
-	LogIndex        int32
-	Address         string
-	AccountID       string
-	Asset           string
-	Amount          pgtype.Numeric
-	BlockNumber     int64
-	BlockHash       string
-	Confirmations   int32
-	Status          string
-	OrphanedAtBlock *int64
-	CreditedAt      pgtype.Timestamptz
-	CorrelationID   *string
-	Version         int32
-	CreatedAt       time.Time
-	UpdatedAt       time.Time
-	Fee             pgtype.Numeric
-	CreditedAmount  pgtype.Numeric
+	ID                  string
+	TenantID            string
+	ChainID             int64
+	TxHash              string
+	LogIndex            int32
+	Address             string
+	AccountID           string
+	Asset               string
+	Amount              pgtype.Numeric
+	BlockNumber         int64
+	BlockHash           string
+	Confirmations       int32
+	Status              string
+	OrphanedAtBlock     *int64
+	CreditedAt          pgtype.Timestamptz
+	CorrelationID       *string
+	Version             int32
+	CreatedAt           time.Time
+	UpdatedAt           time.Time
+	Fee                 pgtype.Numeric
+	CreditedAmount      pgtype.Numeric
+	ReorgedAtBlock      *int64
+	ReversalRequestedBy *string
+	ReversalRequestedAt pgtype.Timestamptz
+	ReversalNote        *string
+	ReversalError       *string
+	ReversedAt          pgtype.Timestamptz
 }
 
 type ChainDepositAddress struct {

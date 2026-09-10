@@ -279,7 +279,9 @@ func TestAlertRules(t *testing.T) {
 		"BackupStale", "WalArchiveStale", "BackupNeverTaken", "DiskAlmostFull",
 		// Phase 8 (docs/plan-v1.0.md §23.3): the withdrawal fee is priced to
 		// cover gas, and this is what says it stopped doing so.
-		"WithdrawalGasExceedsFee"}
+		"WithdrawalGasExceedsFee",
+		// §6.4.1's reversed path: a credited deposit the chain took back.
+		"DepositAwaitingReversal"}
 	assert.Equal(t, len(want), n, "every alert is listed here so a new one is a deliberate addition")
 	for _, w := range want {
 		assert.True(t, seen[w], "missing alert %s", w)
