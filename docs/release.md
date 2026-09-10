@@ -27,10 +27,25 @@ make release-check TAG=v0.1.0
 
 | 紅在哪 | 怎麼辦 |
 |---|---|
-| `image` / `helm` / `e2e` | 跟 PR 上一樣修,合併到 main,打**新的** tag |
+| `image` / `helm` / `e2e`,而且是**程式的問題** | 跟 PR 上一樣修,合併到 main,打**新的** tag |
+| `image` / `helm` / `e2e`,但**不是這個 commit 的問題**(基礎設施、flaky test) | **Re-run failed jobs,tag 不用換。** 這三個 job 在失敗時什麼都還沒發布出去,重跑是從同一個 commit 重做一次;就算某個 image 已經推成功,重推同樣的 bytes 是同一個 digest。`v0.1.0` 就走過這條:`integration` 掉在一個 flaky 的 WebSocket 測試上,重跑即綠 |
 | `release` 的版本斷言 | `build/Dockerfile` 的 `VERSION` build-arg 或 chart 的 `--app-version` 沒接上;修好、新 tag |
 | `helm push` 403 | `packages: write` 權限或 ghcr 的 chart 套件可見性;修設定後**重跑 job**(chart 版本還沒推上去時可以重跑;推上去了就要新 tag,OCI chart 版本同樣不可覆蓋) |
 | GitHub Release 建立失敗 | `contents: write`;重跑 job(`action-gh-release` 對已存在的 release 是更新) |
+
+## 這條路徑第一次執行:`v0.1.0`(2026-09-10)
+
+在那之前這份文件整份都是**推論**——`release` job 從來沒有跑過,只被 `make release-check` 的本機乾跑與 `image` job 的 build 驗過。`v0.1.0` 是第一次真的執行它,結果是:**發布邏輯本身零缺陷,四個斷言與四個產物第一次就全對。**
+
+| 項目 | 實測 |
+|---|---|
+| 牆鐘 | 從推 tag 到 Release 發出來共 **30m54**,其中重跑那一輪是 19m44。**兩個數字要一起看**:19m44 那一輪的 `checks` 與 `fuzz-smoke` 沿用了前一次的結果沒有重跑,所以它不是一次乾淨的完整跑;30m54 才是「打了 tag 之後實際等多久」,而它包含了下面那次 flake |
+| `release` 跑在哪 | GitHub 托管的機器,照第 1 節釘的——發布不依賴自建 runner |
+| 版本斷言 | 通過。它是**把已經推上去的 image 拉下來**跑 `version --json` 比對,不是拿本機 build 的結果推論 |
+| chart | `helm push` 成功,`appVersion` 等於 tag |
+| GitHub Release | 四個附件:chart 的 `.tgz`、`exchangectl` 的 linux-amd64 與 darwin-arm64、`SHA256SUMS` |
+
+唯一一次紅燈是 `integration` 掉在一個 flaky 的 WebSocket 測試(慢速客戶端被斷線之後,連線數的斷言沒有等伺服器回收),重跑就過,**tag 沒有換**。那個競態已經修掉了;它出現在發布這一次,正好說明上面那張表為什麼要把「程式的問題」和「不是這個 commit 的問題」分開寫——在發布當下最不該做的事,就是花時間判斷一個紅燈是不是真的。
 
 ## 之後
 

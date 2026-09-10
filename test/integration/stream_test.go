@@ -484,10 +484,17 @@ func TestStreamSlowClientIsDisconnectedOthersUnaffected(t *testing.T) {
 		assert.Equal(t, websocket.StatusPolicyViolation, code)
 		assert.Equal(t, "slow_consumer", reason)
 	}
+	// Both halves have to be waited for, and the counter is the earlier of the
+	// two: conn.trySend increments ws_slow_client_disconnects_total the moment
+	// it decides to drop the client, while Hub.remove runs later, in the
+	// teardown Server.run defers until c.serve has unwound. Asserting the
+	// connection count bare -- right after the counter reaches 1 -- reads that
+	// window and sees 2. It is a real race in the test, not in the server, and
+	// it failed the v0.1.0 release run.
 	require.Eventually(t, func() bool {
-		return testutil.ToFloat64(&gatheredCounter{reg: h.reg, name: "ws_slow_client_disconnects_total"}) == 1
-	}, 5*time.Second, 50*time.Millisecond)
-	assert.Equal(t, 1, h.server.Connections(), "only the reading client is left")
+		return testutil.ToFloat64(&gatheredCounter{reg: h.reg, name: "ws_slow_client_disconnects_total"}) == 1 &&
+			h.server.Connections() == 1
+	}, 5*time.Second, 50*time.Millisecond, "the slow client is dropped and only the reading client is left")
 }
 
 // TestStreamTradesTickerKline: a trade reaches the trades channel at once

@@ -370,6 +370,23 @@ jobs:
     # top of this file. Tags still run everything.
     if: ${{ github.event_name != 'push' || github.ref != 'refs/heads/main' }}
     steps:
+      # buildx keeps its instances -- and the pointer to the selected one -- in
+      # $BUILDX_CONFIG, which defaults to ~/.docker/buildx. The two self-hosted
+      # runners are two processes under one user on one machine, so that
+      # default is a single shared directory, and this stage deliberately runs
+      # e2e, helm and image at once. This job has no setup-buildx-action of its
+      # own, so `compose up --build` uses whichever builder is selected: on run
+      # 34448309366 helm selected one, this job inherited it, and helm's post
+      # step removed it mid-build -- "dial unix /run/buildkit/buildkitd.sock:
+      # no such file or directory", 24 build steps in. RUNNER_TEMP is per
+      # runner process and jobs on one runner are sequential, which is exactly
+      # the scope this state needs. With nothing defined in it, buildx falls
+      # back to `default`, the daemon's own builder, which no job creates or
+      # removes.
+      - name: this job gets its own buildx state
+        run: |
+          mkdir -p "$RUNNER_TEMP/buildx"
+          echo "BUILDX_CONFIG=$RUNNER_TEMP/buildx" >> "$GITHUB_ENV"
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
@@ -472,6 +489,12 @@ jobs:
     env:
       KIND_CLUSTER: exchange
     steps:
+      # Its own buildx state, so `--use` here and the post step's `buildx rm`
+      # cannot reach into a concurrent job. See the e2e job for the incident.
+      - name: this job gets its own buildx state
+        run: |
+          mkdir -p "$RUNNER_TEMP/buildx"
+          echo "BUILDX_CONFIG=$RUNNER_TEMP/buildx" >> "$GITHUB_ENV"
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
@@ -550,7 +573,14 @@ jobs:
           context: .
           file: build/Dockerfile
           load: true
-          tags: crypto-exchange:ci
+          # NOT crypto-exchange:ci. The image job builds that same tag, into
+          # this same daemon, at this same time, with VERSION=dev -- while this
+          # job needs the chart's appVersion baked in. Whichever `--load`
+          # landed last owned the tag, and helm-e2e.sh's version assertion
+          # only passed when this one did. The image job's smoke never noticed
+          # it could be running this job's binary, because it does not assert
+          # the version it prints.
+          tags: crypto-exchange:ci-helm
           build-args: |
             VERSION=${{ steps.appv.outputs.version }}
             # Fixed on a pull request. These are baked into the binary's
@@ -569,7 +599,7 @@ jobs:
           node_image: kindest/node:v1.31.6
           cluster_name: ${{ env.KIND_CLUSTER }}
       - name: load the image into the cluster
-        run: kind load docker-image crypto-exchange:ci --name "$KIND_CLUSTER"
+        run: kind load docker-image crypto-exchange:ci-helm --name "$KIND_CLUSTER"
       # the JWT key and the keystore are generated with the binary itself
       - name: build exchange
         run: make build
@@ -581,6 +611,10 @@ jobs:
       - name: install the chart and run the in-cluster e2e
         env:
           APP_VERSION: ${{ steps.appv.outputs.version }}
+          # helm-e2e.sh defaults to `ci`, which is right for `make kind-e2e` on
+          # a laptop where nothing else is building. In this workflow it has to
+          # match the tag above.
+          IMAGE_TAG: ci-helm
         run: scripts/helm-e2e.sh
       - name: collect cluster state
         if: always()
@@ -629,6 +663,12 @@ jobs:
       contents: read
       packages: write
     steps:
+      # Its own buildx state, so `--use` here and the post step's `buildx rm`
+      # cannot reach into a concurrent job. See the e2e job for the incident.
+      - name: this job gets its own buildx state
+        run: |
+          mkdir -p "$RUNNER_TEMP/buildx"
+          echo "BUILDX_CONFIG=$RUNNER_TEMP/buildx" >> "$GITHUB_ENV"
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
       - name: image metadata
