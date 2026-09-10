@@ -1078,21 +1078,21 @@ Makefile 目標:
 
 **任務清單**:
 
-- [ ] 讀 Fowler Accounting、TigerBeetle Dr/Cr、Harris 訂單簿章節(1.5 d)
-- [ ] 寫 `docs/domain.md`:逐條驗算第 6.1.4 的分錄、6.2 轉移表、6.4 狀態機;找出至少一處本文件的錯誤並修正(1 d)
-- [ ] 寫 ADR 0001–0008(見第 20 節清單)(1 d)
-- [ ] `go mod init github.com/arc119226/crypto-exchange`;`cmd/exchange`(cobra:`serve`、`migrate`、`healthcheck`、`version`);`internal/app`:typed config、run loop、`/healthz` `/readyz` `/metrics`、SIGTERM drain、依賴指數退避重試(1.5 d)
-- [ ] `internal/telemetry`:slog JSON、`CorrelationMiddleware`(`X-Request-Id` → context → log 欄位)、Prometheus registry(1 d)
-- [ ] `internal/money`:`Amount`、`Asset`、`ParseAmount`、`Add/Sub/Mul/Cmp`、`RoundUp/RoundDown/Truncate(scale)`、`IsMultipleOf(step)`、JSON string 序列化;`internal/platform/pg`:`pgtype.Numeric` ↔ `money.Amount` helper(`money` 本身不 import pgx);table tests 含 0、負數、1 wei、2^256−1、`Exp ≠ 0`(1.5 d)
-- [ ] `.golangci.yml`:depguard(第 8 節規則)、forbidigo(禁 float)、errcheck、staticcheck、gosec(0.5 d)
-- [ ] `build/Dockerfile` multi-stage(先 `COPY go.mod go.sum` + `go mod download`)、`exchange healthcheck` 子命令(0.5 d)
-- [ ] `deploy/compose/compose.yaml` 第 11 節;`infra/postgres/initdb/01-roles.sh`;`infra/contracts`(`MockUSDC.sol` 6 decimals、`Deploy.s.sol` 冪等部署 + 注資 + 輸出 `addresses.json`);`.env.example`;`scripts/gen-dev-secrets.sh`(2 d)
-- [ ] goose `0001_bootstrap.sql`(schemas、`tenant` 慣例、house accounts seed 留給 Phase 2)、`0002_registry.sql`(assets、markets、fee_schedules、withdrawal_limits);`sqlc.yaml` + `registry` 查詢;`exchange seed`(讀 `addresses.json` upsert ETH、USDC、ETH-USDC、預設 fee schedule)(1 d)
-- [ ] `api/public/v1/openapi.yaml` 初版(`GET /v1/assets`、`GET /v1/markets`、`GET /v1/markets/{symbol}`、問題型別、金額 string pattern + `x-go-type`);`oapi-codegen` chi strict-server;`internal/api` 實作(1 d)
-- [ ] `test/integration`:testcontainers Postgres → 跑完整 migration → seed → HTTP 呼叫 `GET /v1/markets`(1 d)
-- [ ] `.github/workflows/ci.yml`:靜態檢查、單元、整合、`docker compose config`、image build;`make gen && git diff --exit-code` 檢查產物同步(0.5 d)
-- [ ] `cmd/exchangectl`(cobra + 產生的 client):`markets list`、`assets list`(0.5 d)
-- [ ] `README.md`:產品邊界一段、`make up` 快速開始(0.5 d)
+- [x] 讀 Fowler Accounting、TigerBeetle Dr/Cr、Harris 訂單簿章節(1.5 d)
+- [x] 寫 `docs/domain.md`:逐條驗算第 6.1.4 的分錄、6.2 轉移表、6.4 狀態機;找出至少一處本文件的錯誤並修正(1 d)
+- [x] 寫 ADR 0001–0008(見第 20 節清單)(1 d)
+- [x] `go mod init github.com/arc119226/crypto-exchange`;`cmd/exchange`(cobra:`serve`、`migrate`、`healthcheck`、`version`);`internal/app`:typed config、run loop、`/healthz` `/readyz` `/metrics`、SIGTERM drain、依賴指數退避重試(1.5 d)
+- [x] `internal/telemetry`:slog JSON、`CorrelationMiddleware`(`X-Request-Id` → context → log 欄位)、Prometheus registry(1 d)
+- [x] `internal/money`:`Amount`、`Asset`、`ParseAmount`、`Add/Sub/Mul/Cmp`、`RoundUp/RoundDown/Truncate(scale)`、`IsMultipleOf(step)`、JSON string 序列化;`internal/platform/pg`:`pgtype.Numeric` ↔ `money.Amount` helper(`money` 本身不 import pgx);table tests 含 0、負數、1 wei、2^256−1、`Exp ≠ 0`(1.5 d)
+- [x] `.golangci.yml`:depguard(第 8 節規則)、forbidigo(禁 float)、errcheck、staticcheck、gosec(0.5 d)
+- [x] `build/Dockerfile` multi-stage(先 `COPY go.mod go.sum` + `go mod download`)、`exchange healthcheck` 子命令(0.5 d)
+- [x] `deploy/compose/compose.yaml` 第 11 節;`infra/postgres/initdb/01-roles.sh`;`infra/contracts`(`MockUSDC.sol` 6 decimals、`Deploy.s.sol` 冪等部署 + 注資 + 輸出 `addresses.json`);`.env.example`;`scripts/gen-dev-secrets.sh`(2 d)
+- [x] goose `0001_bootstrap.sql`(schemas、`tenant` 慣例、house accounts seed 留給 Phase 2)、`0002_registry.sql`(assets、markets、fee_schedules、withdrawal_limits);`sqlc.yaml` + `registry` 查詢;`exchange seed`(讀 `addresses.json` upsert ETH、USDC、ETH-USDC、預設 fee schedule)(1 d)
+- [x] `api/public/v1/openapi.yaml` 初版(`GET /v1/assets`、`GET /v1/markets`、`GET /v1/markets/{symbol}`、問題型別、金額 string pattern + `x-go-type`);`oapi-codegen` chi strict-server;`internal/api` 實作(1 d)
+- [x] `test/integration`:testcontainers Postgres → 跑完整 migration → seed → HTTP 呼叫 `GET /v1/markets`(1 d)
+- [x] `.github/workflows/ci.yml`:靜態檢查、單元、整合、`docker compose config`、image build;`make gen && git diff --exit-code` 檢查產物同步(0.5 d)
+- [x] `cmd/exchangectl`(cobra + 產生的 client):`markets list`、`assets list`(0.5 d)
+- [x] `README.md`:產品邊界一段、`make up` 快速開始(0.5 d)
 
 **DoD(CI)**——按能力寫,不按 job 名寫,因為 job 後來合併過(§13.3):depguard 與 forbidigo 生效並有一個故意違規的測試檔證明會被擋(合併前移除)、`internal/money` 覆蓋率 ≥ 95%、migration + seed 後 `GET /v1/markets` 回 `ETH-USDC`(`price_tick = "0.01"`)、`docker compose config` 三種 profile 都算得出來、三個 image build 得起來;`docker compose --profile infra --profile single up --wait` 全部 healthy(含 anvil、contracts-deployer 完成、`addresses.json` 存在);`docs/domain.md` 與 8 份 ADR 合併。
 
@@ -1124,18 +1124,18 @@ cast call $USDC_ADDRESS "decimals()(uint8)" --rpc-url localhost:8545     # 6
 
 **任務清單**:
 
-- [ ] 型別:`Side`、`OrderType`、`TimeInForce`、`Command{NewOrder, Cancel}`、`Event{Accepted, Filled(Trade), Updated, Cancelled, Rejected}`、`RestingOrder`;所有金額 `money.Amount`(0.5 d)
-- [ ] 資料結構:`level{price, fifo}`、`side{levels map, sorted prices}`、`Book{bids, asks, byID}`;`insert/remove/best`(1 d)
-- [ ] 限價撮合:吃單迴圈、部分成交、剩餘掛簿;成交價 = maker 價(1 d)
-- [ ] 市價買(quote)/市價賣(base)、IOC 剩餘取消、空簿拒單、`max_slippage_bps`(1 d)
-- [ ] 取消、STP `cancel_newest`(`allow` 供測試)(0.5 d)
-- [ ] tick/step/min_notional 驗證函式(`money.IsMultipleOf`)(0.5 d)
-- [ ] `Restore([]RestingOrder)`、`Snapshot()`(depth N 與完整)、`Equal`(0.5 d)
-- [ ] table-driven 測試:第 6.1.4 例、6.2 每個轉移、價差情境、跨多價位掃單、同價位 FIFO(1.5 d)
-- [ ] `rapid` 屬性測試:第 6.3 全部不變量(1 d)
-- [ ] `FuzzApply`:隨機命令序列不 panic、重放一致、守恆(0.5 d)
-- [ ] benchmark:10 萬掛單簿上 `Apply` 延遲;`pprof` 看一次熱點(0.5 d)
-- [ ] `exchangectl replay --file cmds.jsonl [--snapshot]`;golden files 進 `test/fixtures`(1 d)
+- [x] 型別:`Side`、`OrderType`、`TimeInForce`、`Command{NewOrder, Cancel}`、`Event{Accepted, Filled(Trade), Updated, Cancelled, Rejected}`、`RestingOrder`;所有金額 `money.Amount`(0.5 d)
+- [x] 資料結構:`level{price, fifo}`、`side{levels map, sorted prices}`、`Book{bids, asks, byID}`;`insert/remove/best`(1 d)
+- [x] 限價撮合:吃單迴圈、部分成交、剩餘掛簿;成交價 = maker 價(1 d)
+- [x] 市價買(quote)/市價賣(base)、IOC 剩餘取消、空簿拒單、`max_slippage_bps`(1 d)
+- [x] 取消、STP `cancel_newest`(`allow` 供測試)(0.5 d)
+- [x] tick/step/min_notional 驗證函式(`money.IsMultipleOf`)(0.5 d)
+- [x] `Restore([]RestingOrder)`、`Snapshot()`(depth N 與完整)、`Equal`(0.5 d)
+- [x] table-driven 測試:第 6.1.4 例、6.2 每個轉移、價差情境、跨多價位掃單、同價位 FIFO(1.5 d)
+- [x] `rapid` 屬性測試:第 6.3 全部不變量(1 d)
+- [x] `FuzzApply`:隨機命令序列不 panic、重放一致、守恆(0.5 d)
+- [x] benchmark:10 萬掛單簿上 `Apply` 延遲;`pprof` 看一次熱點(0.5 d)
+- [x] `exchangectl replay --file cmds.jsonl [--snapshot]`;golden files 進 `test/fixtures`(1 d)
 
 **DoD(CI)**:`unit`:`go test -race ./internal/matching` 綠、`rapid` 每個屬性 ≥ 1,000 案例;`fuzz-smoke`:`FuzzApply` 30 s 無失敗;benchmark 單執行緒 ≥ 100,000 `Apply`/s(記錄數字,不阻擋);`replay` 對 5 個 golden fixture 輸出逐位元一致;學習檢查點(寫在 PR 描述):能解釋為何每價位 FIFO 而非單一排序 slice、為何 `Apply` 不能呼叫 `time.Now()`。
 
@@ -1165,17 +1165,17 @@ go test -fuzz=FuzzApply -fuzztime=30s ./internal/matching
 
 **任務清單**:
 
-- [ ] `0003_ledger.sql`:`accounts`、`journal_entries(id, tenant_id, idempotency_key UNIQUE, kind, ref_type, ref_id, correlation_id, created_at)`、`postings(entry_id, account_id, asset, bucket available|hold|house, direction, amount)`、`balances`;deferred trigger 檢查每資產借貸相等;權限用「只 GRANT 需要的」而非 REVOKE(Postgres 對表不預設授 PUBLIC 權限,`REVOKE … FROM PUBLIC` 是 no-op):`GRANT SELECT, INSERT ON ledger.postings, ledger.journal_entries TO ex_engine, ex_chain, ex_admin, ex_all`、`GRANT SELECT … TO ex_api, ex_stream, ex_worker`、`GRANT INSERT ON ledger.accounts TO ex_api`(註冊建帳戶);不授任何角色 UPDATE/DELETE;app 角色不得為 owner(1 d)
-- [ ] house 科目 seed(每個 `house_code` 一列,與資產無關;asset 在 posting 上);`Accounts.CreateSpot(user_id)`(0.5 d)
-- [ ] `Post(tx, entry)`:應用層 sum-zero assert、冪等命中回原 entry、balances 更新(先按 `(account_id, asset)` 排序再 `FOR UPDATE`)、`CHECK` 違反 → `ErrInsufficient`(1.5 d)
-- [ ] `Hold/Release/Settle/Credit` 包裝;`Settle(tx, trade, ledger.FeeParams{MakerBps, TakerBps, BaseScale, QuoteScale}) (makerFee, takerFee, error)` 自算手續費與價差 release(`FeeParams` 為 ledger 自有型別,由 trading 從 registry 轉換);`SettleBatch`(同一交易多筆)(1.5 d)
-- [ ] `TrialBalance`、`Balances`、`Entries` 查詢(sqlc)(0.5 d)
-- [ ] `internal/audit`:`audit_events` 表 + `Record`(0.5 d)
-- [ ] `api/admin/v1/openapi.yaml` 初版 + `internal/admin` REST 實作(調帳、試算平衡、餘額)(1 d)
-- [ ] 單元測試(以 6.1.4 每個範例為案例)+ testcontainers 整合測試(1 d)
-- [ ] `rapid` 屬性測試:隨機 Hold/Release/Settle/Credit 序列(含故意重放)→ 試算平衡 = 0、快取 = 推導、hold 不變量(1 d)
-- [ ] 併發測試:`errgroup` 100 goroutine 對同兩帳戶互轉,`-race` 通過、無死鎖(0.5 d)
-- [ ] `exchangectl admin fund --account A --asset USDC --amount 10000 --reason dev`(0.5 d)
+- [x] `0003_ledger.sql`:`accounts`、`journal_entries(id, tenant_id, idempotency_key UNIQUE, kind, ref_type, ref_id, correlation_id, created_at)`、`postings(entry_id, account_id, asset, bucket available|hold|house, direction, amount)`、`balances`;deferred trigger 檢查每資產借貸相等;權限用「只 GRANT 需要的」而非 REVOKE(Postgres 對表不預設授 PUBLIC 權限,`REVOKE … FROM PUBLIC` 是 no-op):`GRANT SELECT, INSERT ON ledger.postings, ledger.journal_entries TO ex_engine, ex_chain, ex_admin, ex_all`、`GRANT SELECT … TO ex_api, ex_stream, ex_worker`、`GRANT INSERT ON ledger.accounts TO ex_api`(註冊建帳戶);不授任何角色 UPDATE/DELETE;app 角色不得為 owner(1 d)
+- [x] house 科目 seed(每個 `house_code` 一列,與資產無關;asset 在 posting 上);`Accounts.CreateSpot(user_id)`(0.5 d)
+- [x] `Post(tx, entry)`:應用層 sum-zero assert、冪等命中回原 entry、balances 更新(先按 `(account_id, asset)` 排序再 `FOR UPDATE`)、`CHECK` 違反 → `ErrInsufficient`(1.5 d)
+- [x] `Hold/Release/Settle/Credit` 包裝;`Settle(tx, trade, ledger.FeeParams{MakerBps, TakerBps, BaseScale, QuoteScale}) (makerFee, takerFee, error)` 自算手續費與價差 release(`FeeParams` 為 ledger 自有型別,由 trading 從 registry 轉換);`SettleBatch`(同一交易多筆)(1.5 d)
+- [x] `TrialBalance`、`Balances`、`Entries` 查詢(sqlc)(0.5 d)
+- [x] `internal/audit`:`audit_events` 表 + `Record`(0.5 d)
+- [x] `api/admin/v1/openapi.yaml` 初版 + `internal/admin` REST 實作(調帳、試算平衡、餘額)(1 d)
+- [x] 單元測試(以 6.1.4 每個範例為案例)+ testcontainers 整合測試(1 d)
+- [x] `rapid` 屬性測試:隨機 Hold/Release/Settle/Credit 序列(含故意重放)→ 試算平衡 = 0、快取 = 推導、hold 不變量(1 d)
+- [x] 併發測試:`errgroup` 100 goroutine 對同兩帳戶互轉,`-race` 通過、無死鎖(0.5 d)
+- [x] `exchangectl admin fund --account A --asset USDC --amount 10000 --reason dev`(0.5 d)
 
 **DoD(CI)**:`unit` + `integration` 綠;屬性測試 ≥ 500 序列;「同一 `idempotency_key` 重放兩次餘額不變」「試算平衡恆為 0」「`available < 0` 必被拒」為明確測試名稱;admin 調帳寫入 `audit_events`;`ledger_trial_balance_diff` 指標存在。
 
@@ -1205,20 +1205,20 @@ psql ... -c "select * from ledger.postings order by id desc limit 6"
 
 **任務清單**:
 
-- [ ] `0004_trading.sql`:`orders`(第 6.2 欄位、UNIQUE `(tenant_id, account_id, client_order_id)`、索引 `(market_id, status)`)、`trades`、`market_sequences(market_id, last_seq)`;`0005_eventbus.sql`:`outbox`、`processed_events`(0.5 d)
-- [ ] `eventbus`:`Envelope`、`Outbox.Append(tx, ...)`、`Relay`(LISTEN/NOTIFY + 輪詢、順序發布、`Nats-Msg-Id`)、JetStream stream/consumer 宣告(冪等建立)、`Subscriber` 含 `processed_events` 冪等模板(2 d)
-- [ ] `trading` 狀態機與 repo:`PlaceOrder` 驗證 → policy → 送命令;`CancelOrder`;查詢(1.5 d)
-- [ ] per-market runner:goroutine + channel、交易流程(第 5.2 步驟 4)、seq 分配、commit 失敗重建、`Start` 時 `Restore` open orders、advisory lock、`Reload`(2 d)
-- [ ] `CommandBus`:in-proc;NATS request-reply 實作(`cmd.trading.{tenant}.{market}`,逾時 → 503)(1 d)
-- [ ] `policy.OrderPolicy`(市場狀態、`ledger.accounts.status`——引擎不認識 user;admin 凍結用戶時同步把其所有帳戶設為 `frozen`、預留限額)(0.5 d)
-- [ ] `PUT /admin/v1/markets/{id}/status` 最小實作(暫以 admin API key 保護,發 `market.updated`),供 engine `reload` 整合測試;完整 registry 後台在 Phase 5(0.5 d)
-- [ ] `auth`:schema、register/login、argon2id、Ed25519 JWT(15 min)+ refresh(7 d,hash 存 `auth.refresh_tokens`,撤銷 = 刪列,不用 Redis)、JWKS、API key(`X-API-KEY/TIMESTAMP/SIGNATURE`,±30 s,scopes;API key 請求由 `api` 鑄 5 分鐘內部 JWT(`aud=internal`)後轉發給 engine/chain)、`RequireUser/RequireScope` 中介層、`exchange admin bootstrap`(2 d)
-- [ ] `api`:全部 public 端點(第 7.4)、RFC 7807 錯誤、`client_order_id` 冪等回原單(200)、Redis token bucket 限流(無 Redis 降級 in-memory)(2 d)
-- [ ] `api/events/v1/*.json` + `docs/events.md` + golden-file 序列化測試(1 d)
-- [ ] 整合測試:testcontainers PG + NATS(-js);「殺 engine 再啟動,book 與 hold 一致」(用 `Book.Equal` 對比 kill 前快照與重建結果)、「重放同一批事件兩次餘額不變」、「seq 連續無缺口」、「同一 `client_order_id` 重送 10 次只產生一張單一筆 hold」(2 d)
-- [ ] `exchangectl`:`user register/login`、`order place/cancel/list`、`book`、`balances`、`e2e`(register×2 → fund → 限價/市價互下 → 驗餘額與試算平衡)(1.5 d)
-- [ ] E2E job:compose `single` profile `up --wait` → `exchangectl e2e` → `docker kill -s KILL exchange-all` → 再 `up --wait` → 驗證 open orders 與 book 一致(1 d)
-- [ ] 指標:`trading_command_queue_depth`、`trading_apply_duration_seconds`、`outbox_backlog`、`engine_rebuild_duration_seconds`、`http_request_duration_seconds`(0.5 d)
+- [x] `0004_trading.sql`:`orders`(第 6.2 欄位、UNIQUE `(tenant_id, account_id, client_order_id)`、索引 `(market_id, status)`)、`trades`、`market_sequences(market_id, last_seq)`;`0005_eventbus.sql`:`outbox`、`processed_events`(0.5 d)
+- [x] `eventbus`:`Envelope`、`Outbox.Append(tx, ...)`、`Relay`(LISTEN/NOTIFY + 輪詢、順序發布、`Nats-Msg-Id`)、JetStream stream/consumer 宣告(冪等建立)、`Subscriber` 含 `processed_events` 冪等模板(2 d)
+- [x] `trading` 狀態機與 repo:`PlaceOrder` 驗證 → policy → 送命令;`CancelOrder`;查詢(1.5 d)
+- [x] per-market runner:goroutine + channel、交易流程(第 5.2 步驟 4)、seq 分配、commit 失敗重建、`Start` 時 `Restore` open orders、advisory lock、`Reload`(2 d)
+- [x] `CommandBus`:in-proc;NATS request-reply 實作(`cmd.trading.{tenant}.{market}`,逾時 → 503)(1 d)
+- [x] `policy.OrderPolicy`(市場狀態、`ledger.accounts.status`——引擎不認識 user;admin 凍結用戶時同步把其所有帳戶設為 `frozen`、預留限額)(0.5 d)
+- [x] `PUT /admin/v1/markets/{id}/status` 最小實作(暫以 admin API key 保護,發 `market.updated`),供 engine `reload` 整合測試;完整 registry 後台在 Phase 5(0.5 d)
+- [x] `auth`:schema、register/login、argon2id、Ed25519 JWT(15 min)+ refresh(7 d,hash 存 `auth.refresh_tokens`,撤銷 = 刪列,不用 Redis)、JWKS、API key(`X-API-KEY/TIMESTAMP/SIGNATURE`,±30 s,scopes;API key 請求由 `api` 鑄 5 分鐘內部 JWT(`aud=internal`)後轉發給 engine/chain)、`RequireUser/RequireScope` 中介層、`exchange admin bootstrap`(2 d)
+- [x] `api`:全部 public 端點(第 7.4)、RFC 7807 錯誤、`client_order_id` 冪等回原單(200)、Redis token bucket 限流(無 Redis 降級 in-memory)(2 d)
+- [x] `api/events/v1/*.json` + `docs/events.md` + golden-file 序列化測試(1 d)
+- [x] 整合測試:testcontainers PG + NATS(-js);「殺 engine 再啟動,book 與 hold 一致」(用 `Book.Equal` 對比 kill 前快照與重建結果)、「重放同一批事件兩次餘額不變」、「seq 連續無缺口」、「同一 `client_order_id` 重送 10 次只產生一張單一筆 hold」(2 d)
+- [x] `exchangectl`:`user register/login`、`order place/cancel/list`、`book`、`balances`、`e2e`(register×2 → fund → 限價/市價互下 → 驗餘額與試算平衡)(1.5 d)
+- [x] E2E job:compose `single` profile `up --wait` → `exchangectl e2e` → `docker kill -s KILL exchange-all` → 再 `up --wait` → 驗證 open orders 與 book 一致(1 d)
+- [x] 指標:`trading_command_queue_depth`、`trading_apply_duration_seconds`、`outbox_backlog`、`engine_rebuild_duration_seconds`、`http_request_duration_seconds`(0.5 d)
 
 **DoD(CI)**:`unit`、`integration`(含 kill/restart、冪等、事件重放、seq 連續)、`e2e` 綠;`nats stream info EX_TRADING` 顯示事件;同一帳戶登入錯第 6 次觸發 429(per account 5/min);p99 下單延遲(loadgen 100 orders/s 60 s,`--accounts 100`)**記錄於 PR**——原本寫「< 50 ms」當閘門,Phase 6 實測是 1,244 ms、Phase 7 之後 548 ms,那個門檻在這個架構下過不了(§3.3),所以閘門是**量到並記錄**,不是達到某個值;`docs/events.md` 與 schema 檔同步(golden 測試)。
 
@@ -1254,22 +1254,22 @@ exchangectl book ETH-USDC                       # 與 kill 前一致
 
 **任務清單**:
 
-- [ ] `0006_chain.sql`:`deposit_addresses`、`deposits`(UNIQUE `(chain_id, tx_hash, log_index)`)、`scan_cursors`、`blocks`、`chain_state`、`withdrawals`、`hot_wallets`、`idempotency_keys`、`sweeps`、`signing_log`(1 d)
-- [ ] `chain/evm`:client 封裝、`ToWei/FromWei` round-trip 測試、fee 估算、receipt 輪詢 helper(1 d)
-- [ ] `chain/hdwallet` + `exchange keys import-mnemonic`:讀 `secrets/dev-mnemonic.txt` → 以 scrypt + AES-256-GCM 寫 `secrets/keystore/hd-seed.json`;啟動解密後派生 `m/44'/60'/0'/0/{i}` 與熱錢包 `m/44'/60'/1'/0/0`;已知測試向量單元測試;`EnsurePool(min)` 地址池補充(1.5 d)
-- [ ] `abigen` MockUSDC binding;`make gen` 納入(0.5 d)
-- [ ] scanner:游標、批次掃描、兩條路徑、`blocks` 環與 parent_hash 檢查、reorg 回退、確認數推進、`Credit` 同交易、地址集合刷新(2.5 d)
-- [ ] anvil 整合測試(testcontainers `GenericContainer`,`--no-mining` + `anvil_mine` 精準控制):N 確認後才入帳;`anvil_reorg` 後未入帳充值 orphaned、游標回退;`evm_snapshot/revert` 時同步 truncate DB(1.5 d)
-- [ ] `WithdrawalPolicy` + `withdrawal_limits` 讀取 + 每日累計查詢(1 d)
-- [ ] 提現 API(`Idempotency-Key` 中介層,存 request hash + response)(1 d)
-- [ ] `chain/hotwallet.NonceManager`:啟動對帳、缺口回收(0 ETH 自轉填補、`nonce_fills`);`KeystoreSigner`(`SignRequest` 三種 kind 的政策檢查、`signing_log(kind, ref_id)` UNIQUE 防重簽、審計)+ `signer` role 的 NATS request-reply 服務(`cmd.signer.sign.{tenant}`)與 in-proc 版;`KMSSigner` stub(2 d)
-- [ ] 提現 worker:每個狀態一個 handler、狀態與 nonce/raw tx 同交易、廣播、追蹤、重送、`failed` 分流、Release/pending_withdrawal 分錄(2.5 d)
-- [ ] admin REST:pending_review 佇列、approve/reject/resolve(寫審計、記審核者);`exchangectl admin withdrawals ...`(1 d)
-- [ ] 整合測試:限額內自動出金到 confirmed;超額進 pending_review → approve → confirmed;`evm_setAutomine false` 卡單 → 重送;worker `kill` 於 `signed` 後重啟不重複廣播(同 nonce);`Idempotency-Key` 重送 5 次一筆提現(2 d)
-- [ ] sweeper(ETH、ERC-20 兩段)、custody 分錄、低水位事件;整合測試「歸集後用戶餘額不變、custody 總額不變」(2 d)
-- [ ] 對帳查詢 + `exchangectl admin reconcile`;指標 `hot_wallet_balance`、`withdrawals_pending_review`、`withdrawal_state_duration_seconds`(1 d)
-- [ ] `exchangectl e2e` 擴為完整:充值(`cast send` 到用戶地址 / USDC `transfer`)→ 入帳 → 下單成交 → 提現 → 確認 → 歸集 → 對帳零差異(1 d)
-- [~] 4d Sepolia:設定、部署、runbook 已備(4d-1);手動實跑與結果記錄待 4d-2(2–4 d)
+- [x] `0006_chain.sql`:`deposit_addresses`、`deposits`(UNIQUE `(chain_id, tx_hash, log_index)`)、`scan_cursors`、`blocks`、`chain_state`、`withdrawals`、`hot_wallets`、`idempotency_keys`、`sweeps`、`signing_log`(1 d)
+- [x] `chain/evm`:client 封裝、`ToWei/FromWei` round-trip 測試、fee 估算、receipt 輪詢 helper(1 d)
+- [x] `chain/hdwallet` + `exchange keys import-mnemonic`:讀 `secrets/dev-mnemonic.txt` → 以 scrypt + AES-256-GCM 寫 `secrets/keystore/hd-seed.json`;啟動解密後派生 `m/44'/60'/0'/0/{i}` 與熱錢包 `m/44'/60'/1'/0/0`;已知測試向量單元測試;`EnsurePool(min)` 地址池補充(1.5 d)
+- [ ] `abigen` MockUSDC binding;`make gen` 納入(0.5 d)——**沒做,而且是刻意的**:v1 只呼叫 ERC-20 的 `transfer` 與 `balanceOf` 兩個方法,`internal/chain/evm/send.go` 直接算 4 位元組 selector 再接參數,理由寫在該檔與 `client.go:173`(「4c 真的呼叫 ERC-20 方法時,abigen 才划算」)。要加第三個方法時再回來看這一項。
+- [x] scanner:游標、批次掃描、兩條路徑、`blocks` 環與 parent_hash 檢查、reorg 回退、確認數推進、`Credit` 同交易、地址集合刷新(2.5 d)
+- [x] anvil 整合測試(testcontainers `GenericContainer`,`--no-mining` + `anvil_mine` 精準控制):N 確認後才入帳;`anvil_reorg` 後未入帳充值 orphaned、游標回退;`evm_snapshot/revert` 時同步 truncate DB(1.5 d)
+- [x] `WithdrawalPolicy` + `withdrawal_limits` 讀取 + 每日累計查詢(1 d)
+- [x] 提現 API(`Idempotency-Key` 中介層,存 request hash + response)(1 d)
+- [x] `chain/hotwallet.NonceManager`:啟動對帳、缺口回收(0 ETH 自轉填補、`nonce_fills`);`KeystoreSigner`(`SignRequest` 三種 kind 的政策檢查、`signing_log(kind, ref_id)` UNIQUE 防重簽、審計)+ `signer` role 的 NATS request-reply 服務(`cmd.signer.sign.{tenant}`)與 in-proc 版;`KMSSigner` stub(2 d)
+- [x] 提現 worker:每個狀態一個 handler、狀態與 nonce/raw tx 同交易、廣播、追蹤、重送、`failed` 分流、Release/pending_withdrawal 分錄(2.5 d)
+- [x] admin REST:pending_review 佇列、approve/reject/resolve(寫審計、記審核者);`exchangectl admin withdrawals ...`(1 d)
+- [x] 整合測試:限額內自動出金到 confirmed;超額進 pending_review → approve → confirmed;`evm_setAutomine false` 卡單 → 重送;worker `kill` 於 `signed` 後重啟不重複廣播(同 nonce);`Idempotency-Key` 重送 5 次一筆提現(2 d)
+- [x] sweeper(ETH、ERC-20 兩段)、custody 分錄、低水位事件;整合測試「歸集後用戶餘額不變、custody 總額不變」(2 d)
+- [x] 對帳查詢 + `exchangectl admin reconcile`;指標 `hot_wallet_balance`、`withdrawals_pending_review`、`withdrawal_state_duration_seconds`(1 d)
+- [x] `exchangectl e2e` 擴為完整:充值(`cast send` 到用戶地址 / USDC `transfer`)→ 入帳 → 下單成交 → 提現 → 確認 → 歸集 → 對帳零差異(1 d)
+- [x] 4d Sepolia:設定、部署、runbook 已備(4d-1);手動實跑與結果記錄(4d-2)(2–4 d)——`docs/guides/sepolia.md` 有 7 個相異的 tx hash,正是 DoD 要求的「Sepolia runbook 含 tx hash 記錄」
 
 **DoD(CI)**:`integration` 新增 anvil 套件全綠(確認數、reorg、卡單重送、重啟不重複廣播、提現冪等、歸集守恆);`e2e` 跑完 2.3 第 1 條全流程且 `reconcile` 差異為 0;無私鑰進 log:整合測試以 `gen-dev-secrets` 產生的測試私鑰、助記詞、passphrase 為已知字串,啟動全流程後斷言所有容器 log 不含這些字串(含去 `0x` 形式),且 `internal/telemetry` 對 `SignRequest`、`*ecdsa.PrivateKey`、raw tx bytes 實作 `slog.LogValuer` 回 `[redacted]` 並有單元測試(tx hash / block hash 本來就會出現在 log,不能用「不含 0x + 64 hex」斷言;`gosec` 是靜態掃描,不檢查執行期 log);Sepolia runbook 含 tx hash 記錄。
 
@@ -1411,7 +1411,7 @@ scripts/backup.sh && scripts/restore-drill.sh
 
 ### Phase 8 — 手續費完整化與營收報表(v1.1 新增;ADR-0011、§23)
 
-**目標**:平台在每一筆出入金上不再虧錢,而且看得到自己有沒有賺。提現手續費真的收(現在欄位存在但沒有任何程式讀它,§23.3)、充值手續費可設定、營收報表把三種手續費與 gas 支出放在同一張表。
+**目標**:平台在每一筆出入金上不再虧錢,而且看得到自己有沒有賺。提現手續費真的收(動工前 `withdrawal_fee` 欄位自 migration 0002 就存在、後台改得動、API 也回傳,但提現路徑上沒有任何一行程式讀它,§23.3)、充值手續費可設定、營收報表把三種手續費與 gas 支出放在同一張表。
 
 **範圍**:做 — §6.1.4 (h)(i) 的分錄、§6.4.2 的 fee 快照與預檢、registry 的兩個新欄位、OpenAPI 與事件加欄、後台資產頁 / 提現頁 / 新「營收」頁、`GET /admin/v1/reports/revenue(.csv)`、兩個指標與一條告警。不做 — 用戶等級費率、動態 gas 計價、法幣換算(§23.6)。
 
@@ -1425,7 +1425,7 @@ scripts/backup.sh && scripts/restore-drill.sh
 - [x] 測試:ledger 不變量「同一 entry 內扣方的 fee = `fee_revenue` 的 credit」;提現每條路徑的 fee 分錄(scripted chain);充值 fee 與 reorg 反向;`exchangectl e2e` 斷言提現後 `fee_revenue` 增加 fee、`gas_expense` 增加 G、用戶少 amount + fee;營收報表的數字 = 直接 SUM `trading.trades` 與 `ledger.postings`(測試比對);restore-checks 不受影響(1.5 d)——兩處偏離:提現的 fee/gas 斷言寫在 `scripts/e2e.sh`(`exchangectl e2e` 只跑交易,提現那一段本來就在 shell 裡),「reorg 反向」現在有兩層:一層仍然斷言掃描器**不會**自己反向(已入帳的充值在 reorg 之後仍是 credited、fee 不變),一層斷言人確認之後的鏡像分錄與餘額不足時的拒絕;restore-checks 只數列數,不受新欄位影響
 - [x] 文件:`docs/domain.md` 對應段落、`docs/runbooks/stuck-withdrawal.md` 的 fee 處置、README 第 8 步的餘額(只有營運方設非零時才不同)(0.5 d)
 
-**DoD**:seed 費率全為 0 時所有既有測試與 e2e 數字不變;把 `withdrawal_fee` 與 `deposit_fee_bps` 設非零後 e2e 全綠、試算平衡為 0、營收報表與直接 SUM 一致;後台改費率後下一筆提現用新費率、在途的用舊費率(快照)。
+**DoD**:seed 費率全為 0 時所有既有測試與 e2e 數字不變;把 `withdrawal_fee` 與 `deposit_fee_bps` 設非零後 e2e 全綠、試算平衡為 0、營收報表與直接 SUM 一致;後台改費率後下一筆提現用新費率、在途的用舊費率(快照)。——**達成**,由 PR #37 的 run 34426360810 證明(五個 job 全綠):`e2e` 在跑到一半把 ETH 設成 `0.001` + 25 bps,送 0.05 到一個從未持有過任何東西的地址,斷言收款方拿到完整的 0.05、`fee_revenue` 收到的字串**恰好是 `0.001125`**,走真的簽名、真的 nonce、真的上鏈交易;`integration` 涵蓋四條提現結束路徑的 fee 去向、充值的三 posting 分錄、快照不重算、報表與直接 SUM 一致,以及四個 `reversed` 測試。**這是整個 Phase 8 第一次在有 Docker 的環境執行**,一次抓到三個缺陷(充值 fixture 沒跟上 0023 的兩個新欄位、兩個不變量 helper 把 `text` 和 `uuid` 相等、migration 數量寫死 22),但沒有一個是手續費算錯——每個失敗都落在測試的最後一行,前面的餘額斷言全過。
 
 **預估工時**:6–8 天。
 
