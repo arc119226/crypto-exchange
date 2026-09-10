@@ -297,10 +297,21 @@ func (s *Service) Refresh(ctx context.Context, refreshToken string) (Session, er
 		// A rotated token (replaced_by set) presented again means the old
 		// token leaked: revoke the whole family. A token revoked by logout or
 		// by an earlier family revocation is simply invalid.
+		//
+		// The revocation's error is returned, not swallowed. This used to read
+		// `if _, err := ...; err == nil { audit }`, which used the error only
+		// to decide whether to write the audit row -- so a failed revocation
+		// left the thief's other tokens live, wrote nothing anywhere, and
+		// answered with the same ErrInvalidToken an ordinary expired token
+		// gets. A security response that could not be carried out must not
+		// look like one that was: the caller gets a 500 and the operator gets
+		// a real error, because the alternative is a silent, invisible
+		// compromise. AdminLogout has always done it this way.
 		if row.ReplacedBy != nil {
-			if _, err := q.RevokeUserRefreshTokens(ctx, row.UserID); err == nil {
-				_ = s.audit.Record(ctx, s.pool, audit.Event{ActorType: audit.ActorSystem, ActorID: "auth", Action: "auth.refresh.reuse_detected", TargetType: "user", TargetID: row.UserID})
+			if _, err := q.RevokeUserRefreshTokens(ctx, row.UserID); err != nil {
+				return Session{}, fmt.Errorf("auth: revoke refresh token family of %s after reuse: %w", row.UserID, err)
 			}
+			_ = s.audit.Record(ctx, s.pool, audit.Event{ActorType: audit.ActorSystem, ActorID: "auth", Action: "auth.refresh.reuse_detected", TargetType: "user", TargetID: row.UserID})
 		}
 		return Session{}, ErrInvalidToken
 	}

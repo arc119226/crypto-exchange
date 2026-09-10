@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -613,6 +614,69 @@ func TestPublicAPI(t *testing.T) {
 		assert.EqualValues(t, 4, counts["auth.api_key.create"], counts)
 		assert.EqualValues(t, 1, counts["auth.api_key.revoke"], counts)
 	})
+}
+
+// TestRefreshReuseThatCannotRevokeIsNotReportedAsAnOrdinaryRejection covers
+// the failure mode the reuse path used to hide.
+//
+// Presenting a rotated refresh token means the old one leaked, and the answer
+// is to revoke every token the user has. That revocation is a database write,
+// and a database write can fail. The code used to read
+//
+//	if _, err := q.RevokeUserRefreshTokens(...); err == nil { audit }
+//
+// which used the error only to decide whether to write the audit row. So a
+// failed revocation left the thief's other tokens live, recorded nothing, and
+// answered 401 -- identical to an ordinary expired token. The compromise was
+// both unhandled and invisible.
+//
+// The revocation is made to fail by taking UPDATE away from the role the
+// service connects as, which is the narrowest way to break exactly that
+// statement and nothing else. 401 here would mean the bug is back.
+func TestRefreshReuseThatCannotRevokeIsNotReportedAsAnOrdinaryRejection(t *testing.T) {
+	h := setupAPI(t)
+	ctx := context.Background()
+
+	r := h.do(t, http.MethodPost, "/v1/auth/register", cred{}, map[string]any{"email": "thief@example.com", "password": password})
+	require.Equal(t, http.StatusCreated, r.status, string(r.body))
+	r = h.do(t, http.MethodPost, "/v1/auth/login", cred{}, map[string]any{"email": "thief@example.com", "password": password})
+	require.Equal(t, http.StatusOK, r.status, string(r.body))
+	first := decode[gen.Session](t, r)
+
+	// Rotate while the grant is still in place, so the reused token below is
+	// genuinely a rotated one rather than merely unknown.
+	r = h.do(t, http.MethodPost, "/v1/auth/refresh", cred{}, map[string]any{"refresh_token": first.RefreshToken})
+	require.Equal(t, http.StatusOK, r.status, string(r.body))
+	second := decode[gen.Session](t, r)
+
+	// ex_migrate owns the database, so it is the one that can take the grant
+	// away and put it back.
+	owner, err := pgx.Connect(ctx, h.DSN("ex_migrate"))
+	require.NoError(t, err)
+	defer owner.Close(ctx)
+	_, err = owner.Exec(ctx, `REVOKE UPDATE ON auth.refresh_tokens FROM ex_all`)
+	require.NoError(t, err)
+	restored := false
+	restore := func() {
+		if restored {
+			return
+		}
+		_, err := owner.Exec(ctx, `GRANT UPDATE ON auth.refresh_tokens TO ex_all`)
+		require.NoError(t, err)
+		restored = true
+	}
+	defer restore()
+
+	r = h.do(t, http.MethodPost, "/v1/auth/refresh", cred{}, map[string]any{"refresh_token": first.RefreshToken})
+	assert.Equal(t, http.StatusInternalServerError, r.status,
+		"a reuse whose revocation failed must not answer like an ordinary invalid token: %s", string(r.body))
+
+	// And with the grant back, the same reuse revokes the family as it should.
+	restore()
+	r = h.do(t, http.MethodPost, "/v1/auth/refresh", cred{}, map[string]any{"refresh_token": first.RefreshToken})
+	assert.Equal(t, http.StatusUnauthorized, r.status, string(r.body))
+	r = h.do(t, http.MethodPost, "/v1/auth/refresh", cred{}, map[string]any{"refresh_token": second.RefreshToken})
+	assert.Equal(t, http.StatusUnauthorized, r.status, "the descendant is revoked once the revocation succeeds")
 }
 
 // TestAdminBootstrap covers `exchange admin bootstrap`: idempotent, and the
