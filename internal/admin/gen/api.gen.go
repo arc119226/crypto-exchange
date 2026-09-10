@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"time"
 
@@ -602,16 +603,31 @@ type AdminDeposit struct {
 	// Amount Decimal serialized as a string (NUMERIC(36,18)); never a JSON number.
 	//
 	// Example: 1990.00
-	Amount        Amount             `json:"amount"`
-	Asset         string             `json:"asset"`
-	BlockNumber   int64              `json:"block_number"`
-	Confirmations int32              `json:"confirmations"`
-	CreatedAt     time.Time          `json:"created_at"`
-	CreditedAt    *time.Time         `json:"credited_at,omitempty"`
-	ID            string             `json:"id"`
-	LogIndex      int32              `json:"log_index"`
-	Status        AdminDepositStatus `json:"status"`
-	TxHash        string             `json:"tx_hash"`
+	Amount        Amount    `json:"amount"`
+	Asset         string    `json:"asset"`
+	BlockNumber   int64     `json:"block_number"`
+	Confirmations int32     `json:"confirmations"`
+	CreatedAt     time.Time `json:"created_at"`
+
+	// CreditedAmount What became the account's balance: `amount - fee`. Null until credited.
+	CreditedAmount *Amount    `json:"credited_amount,omitempty"`
+	CreditedAt     *time.Time `json:"credited_at,omitempty"`
+
+	// Fee Taken out of the amount at credit time, so it is null until the deposit is credited. Unlike a withdrawal fee it is not charged on top: `amount` stays what the chain delivered.
+	Fee      *Amount `json:"fee,omitempty"`
+	ID       string  `json:"id"`
+	LogIndex int32   `json:"log_index"`
+
+	// ReorgedAtBlock The height a reorg rewound to after this deposit had been credited. Set means the chain no longer shows it and it is waiting for a decision; the status stays `credited` until the reversing entry is posted.
+	ReorgedAtBlock *int64 `json:"reorged_at_block,omitempty"`
+
+	// ReversalError Why the last attempt could not be posted. In practice there is one reason: the account has already spent what it was credited.
+	ReversalError       *string            `json:"reversal_error,omitempty"`
+	ReversalNote        *string            `json:"reversal_note,omitempty"`
+	ReversalRequestedBy *string            `json:"reversal_requested_by,omitempty"`
+	ReversedAt          *time.Time         `json:"reversed_at,omitempty"`
+	Status              AdminDepositStatus `json:"status"`
+	TxHash              string             `json:"tx_hash"`
 }
 
 // AdminDepositStatus defines model for AdminDeposit.Status.
@@ -629,17 +645,23 @@ type AdminWithdrawal struct {
 	// Amount Decimal serialized as a string (NUMERIC(36,18)); never a JSON number.
 	//
 	// Example: 1990.00
-	Amount        Amount     `json:"amount"`
-	Asset         string     `json:"asset"`
-	ChainID       int64      `json:"chain_id"`
-	CreatedAt     time.Time  `json:"created_at"`
-	FailureReason *string    `json:"failure_reason,omitempty"`
-	ID            string     `json:"id"`
-	ReviewNote    *string    `json:"review_note,omitempty"`
-	ReviewedAt    *time.Time `json:"reviewed_at,omitempty"`
-	ReviewedBy    *string    `json:"reviewed_by,omitempty"`
-	Status        string     `json:"status"`
-	ToAddress     string     `json:"to_address"`
+	Amount        Amount    `json:"amount"`
+	Asset         string    `json:"asset"`
+	ChainID       int64     `json:"chain_id"`
+	CreatedAt     time.Time `json:"created_at"`
+	FailureReason *string   `json:"failure_reason,omitempty"`
+
+	// Fee What was quoted when the request was accepted, charged on top of the amount. It stays in the account's hold until the transaction confirms, and comes back on every path that does not confirm, so a withdrawal in the review queue can still be refunded in full after a rate change.
+	Fee Amount `json:"fee"`
+
+	// FeeAsset The asset the fee is charged in, which today is `asset`.
+	FeeAsset   string     `json:"fee_asset"`
+	ID         string     `json:"id"`
+	ReviewNote *string    `json:"review_note,omitempty"`
+	ReviewedAt *time.Time `json:"reviewed_at,omitempty"`
+	ReviewedBy *string    `json:"reviewed_by,omitempty"`
+	Status     string     `json:"status"`
+	ToAddress  string     `json:"to_address"`
 
 	// TxHash The transaction now representing this withdrawal: the displacement while a cancellation is in flight, otherwise the withdrawal's own.
 	TxHash    *string    `json:"tx_hash,omitempty"`
@@ -664,9 +686,15 @@ type Asset struct {
 	ContractAddress *string   `json:"contract_address,omitempty"`
 	CreatedAt       time.Time `json:"created_at"`
 	DepositEnabled  bool      `json:"deposit_enabled"`
-	DisplayScale    int32     `json:"display_scale"`
-	ID              string    `json:"id"`
-	IsNative        bool      `json:"is_native"`
+
+	// DepositFeeBps Basis points taken out of an arriving deposit. There is no flat part: a flat deposit fee makes small deposits arbitrarily expensive. 10000 is refused for this one -- it would credit a depositor nothing. Deposits are the inlet and this ships at 0; the column exists in case sweep gas ever exceeds what trading brings in.
+	//
+	//
+	// Example: 0
+	DepositFeeBps int32  `json:"deposit_fee_bps"`
+	DisplayScale  int32  `json:"display_scale"`
+	ID            string `json:"id"`
+	IsNative      bool   `json:"is_native"`
 
 	// MinDeposit Decimal serialized as a string (NUMERIC(36,18)); never a JSON number.
 	//
@@ -695,6 +723,12 @@ type Asset struct {
 	//
 	// Example: 1990.00
 	WithdrawalFee Amount `json:"withdrawal_fee"`
+
+	// WithdrawalFeeBps The proportional part of the withdrawal fee, in basis points of the amount. The total charged is `withdrawal_fee + ceil(amount * withdrawal_fee_bps / 10000)`, rounded up at the asset's scale, and it is charged on top of the amount rather than taken out of it.
+	//
+	//
+	// Example: 0
+	WithdrawalFeeBps int32 `json:"withdrawal_fee_bps"`
 }
 
 // AssetList defines model for AssetList.
@@ -707,8 +741,14 @@ type AssetRequest struct {
 	ChainID         int64   `json:"chain_id"`
 	ContractAddress *string `json:"contract_address,omitempty"`
 	DepositEnabled  bool    `json:"deposit_enabled"`
-	DisplayScale    int32   `json:"display_scale"`
-	IsNative        bool    `json:"is_native"`
+
+	// DepositFeeBps Basis points taken out of an arriving deposit. There is no flat part: a flat deposit fee makes small deposits arbitrarily expensive. 10000 is refused for this one -- it would credit a depositor nothing. Deposits are the inlet and this ships at 0; the column exists in case sweep gas ever exceeds what trading brings in.
+	//
+	//
+	// Example: 0
+	DepositFeeBps int32 `json:"deposit_fee_bps"`
+	DisplayScale  int32 `json:"display_scale"`
+	IsNative      bool  `json:"is_native"`
 
 	// MinDeposit Decimal serialized as a string (NUMERIC(36,18)); never a JSON number.
 	//
@@ -735,6 +775,12 @@ type AssetRequest struct {
 	//
 	// Example: 1990.00
 	WithdrawalFee Amount `json:"withdrawal_fee"`
+
+	// WithdrawalFeeBps The proportional part of the withdrawal fee, in basis points of the amount. The total charged is `withdrawal_fee + ceil(amount * withdrawal_fee_bps / 10000)`, rounded up at the asset's scale, and it is charged on top of the amount rather than taken out of it.
+	//
+	//
+	// Example: 0
+	WithdrawalFeeBps int32 `json:"withdrawal_fee_bps"`
 }
 
 // AssetStatus defines model for AssetStatus.
@@ -852,8 +898,14 @@ type CreateAssetRequest struct {
 	ChainID         int64   `json:"chain_id"`
 	ContractAddress *string `json:"contract_address,omitempty"`
 	DepositEnabled  bool    `json:"deposit_enabled"`
-	DisplayScale    int32   `json:"display_scale"`
-	IsNative        bool    `json:"is_native"`
+
+	// DepositFeeBps Basis points taken out of an arriving deposit. There is no flat part: a flat deposit fee makes small deposits arbitrarily expensive. 10000 is refused for this one -- it would credit a depositor nothing. Deposits are the inlet and this ships at 0; the column exists in case sweep gas ever exceeds what trading brings in.
+	//
+	//
+	// Example: 0
+	DepositFeeBps int32 `json:"deposit_fee_bps"`
+	DisplayScale  int32 `json:"display_scale"`
+	IsNative      bool  `json:"is_native"`
 
 	// MinDeposit Decimal serialized as a string (NUMERIC(36,18)); never a JSON number.
 	//
@@ -883,6 +935,12 @@ type CreateAssetRequest struct {
 	//
 	// Example: 1990.00
 	WithdrawalFee Amount `json:"withdrawal_fee"`
+
+	// WithdrawalFeeBps The proportional part of the withdrawal fee, in basis points of the amount. The total charged is `withdrawal_fee + ceil(amount * withdrawal_fee_bps / 10000)`, rounded up at the asset's scale, and it is charged on top of the amount rather than taken out of it.
+	//
+	//
+	// Example: 0
+	WithdrawalFeeBps int32 `json:"withdrawal_fee_bps"`
 }
 
 // CreateFeeScheduleRequest defines model for CreateFeeScheduleRequest.
@@ -1283,6 +1341,58 @@ type ReloadRequest struct {
 	Reason string `json:"reason"`
 }
 
+// RevenueLine One asset's revenue and cost. Every amount is denominated in `asset` and nothing is converted between assets.
+type RevenueLine struct {
+	Asset string `json:"asset"`
+
+	// DepositFees Taken out of arriving deposits. Zero unless a rate is set.
+	DepositFees Amount `json:"deposit_fees"`
+
+	// Deposits Deposits that paid a fee.
+	Deposits int64 `json:"deposits"`
+
+	// GasExpense Every `gas_expense` debit in the period: withdrawals, sweeps and nonce fills alike. It is what the exchange paid the chain, whatever the reason, and it is always in the native coin.
+	GasExpense Amount `json:"gas_expense"`
+
+	// MakerFees Summed from the trade rows, which are the only record that knows which side was the maker.
+	MakerFees Amount `json:"maker_fees"`
+
+	// Net All the fees above minus `gas_expense`, within this asset only.
+	Net Amount `json:"net"`
+
+	// OtherFees Anything else credited to `fee_revenue` -- an operator adjustment posted against the account, or a fee source added later that this report does not know about yet. Zero in normal operation; it exists so revenue can never be silently missing from `net`.
+	OtherFees Amount `json:"other_fees"`
+
+	// TakerFees Decimal serialized as a string (NUMERIC(36,18)); never a JSON number.
+	//
+	// Example: 1990.00
+	TakerFees Amount `json:"taker_fees"`
+
+	// Trades Trades charged in this asset, including those charged zero -- which is every trade until an operator sets a rate.
+	Trades int64 `json:"trades"`
+
+	// WithdrawalFees Credited to `fee_revenue` when a withdrawal confirmed. A withdrawal that was refunded or never broadcast contributes nothing, because its fee went back to the account.
+	WithdrawalFees Amount `json:"withdrawal_fees"`
+
+	// Withdrawals Withdrawals that paid a fee. Zero-fee withdrawals post nothing and so cannot be counted here. Note that `gas_expense` divided by this is NOT the cost of a withdrawal: that column is every gas debit in the period, sweeps and nonce fills included. Pricing the fee against per-withdrawal gas needs the `withdrawal:gas:*` entries alone (§23.3).
+	Withdrawals int64 `json:"withdrawals"`
+}
+
+// RevenueReport defines model for RevenueReport.
+type RevenueReport struct {
+	From  time.Time     `json:"from"`
+	Lines []RevenueLine `json:"lines"`
+
+	// To Exclusive.
+	To time.Time `json:"to"`
+}
+
+// ReverseDepositRequest defines model for ReverseDepositRequest.
+type ReverseDepositRequest struct {
+	// Reason Why this deposit is being undone. Recorded in the audit trail and carried on the reversing journal entry, which is where somebody reading the ledger a year later will find it.
+	Reason string `json:"reason"`
+}
+
 // RotateSecretRequest defines model for RotateSecretRequest.
 type RotateSecretRequest struct {
 	// GraceHours How long the old secret keeps signing alongside the new one.
@@ -1579,6 +1689,9 @@ type AssetPath = string
 // AssetSymbol Example: USDC
 type AssetSymbol = string
 
+// DepositID defines model for DepositID.
+type DepositID = string
+
 // FeeScheduleName Example: default
 type FeeScheduleName = string
 
@@ -1593,6 +1706,15 @@ type MarketSymbol = string
 
 // Offset defines model for Offset.
 type Offset = int32
+
+// RevenueAsset defines model for RevenueAsset.
+type RevenueAsset = string
+
+// RevenueFrom defines model for RevenueFrom.
+type RevenueFrom = time.Time
+
+// RevenueTo defines model for RevenueTo.
+type RevenueTo = time.Time
 
 // UserID defines model for UserID.
 type UserID = string
@@ -1653,6 +1775,12 @@ type ListDepositsParams struct {
 // ListDepositsParamsStatus defines parameters for ListDeposits.
 type ListDepositsParamsStatus string
 
+// ListDepositsAwaitingReversalParams defines parameters for ListDepositsAwaitingReversal.
+type ListDepositsAwaitingReversalParams struct {
+	Limit  *Limit  `form:"limit,omitempty" json:"limit,omitempty"`
+	Offset *Offset `form:"offset,omitempty" json:"offset,omitempty"`
+}
+
 // ListEntriesParams defines parameters for ListEntries.
 type ListEntriesParams struct {
 	AccountID *string `form:"account_id,omitempty" json:"account_id,omitempty"`
@@ -1672,6 +1800,30 @@ type ListReconciliationBreaksParams struct {
 type ListReconciliationReportsParams struct {
 	Limit  *Limit  `form:"limit,omitempty" json:"limit,omitempty"`
 	Offset *Offset `form:"offset,omitempty" json:"offset,omitempty"`
+}
+
+// GetRevenueReportParams defines parameters for GetRevenueReport.
+type GetRevenueReportParams struct {
+	// From Start of the period, inclusive. Defaults to 30 days before `to`.
+	From *RevenueFrom `form:"from,omitempty" json:"from,omitempty"`
+
+	// To End of the period, exclusive. Defaults to now, so a report asked for twice in one day covers slightly different windows -- the boundary is the request, not the calendar.
+	To *RevenueTo `form:"to,omitempty" json:"to,omitempty"`
+
+	// Asset Narrow to one asset. Omit for every asset that had activity. Note that narrowing to an ERC-20 hides the gas its withdrawals cost, because gas is booked against the chain's native coin.
+	Asset *RevenueAsset `form:"asset,omitempty" json:"asset,omitempty"`
+}
+
+// GetRevenueReportCsvParams defines parameters for GetRevenueReportCsv.
+type GetRevenueReportCsvParams struct {
+	// From Start of the period, inclusive. Defaults to 30 days before `to`.
+	From *RevenueFrom `form:"from,omitempty" json:"from,omitempty"`
+
+	// To End of the period, exclusive. Defaults to now, so a report asked for twice in one day covers slightly different windows -- the boundary is the request, not the calendar.
+	To *RevenueTo `form:"to,omitempty" json:"to,omitempty"`
+
+	// Asset Narrow to one asset. Omit for every asset that had activity. Note that narrowing to an ERC-20 hides the gas its withdrawals cost, because gas is booked against the chain's native coin.
+	Asset *RevenueAsset `form:"asset,omitempty" json:"asset,omitempty"`
 }
 
 // ListSweepsParams defines parameters for ListSweeps.
@@ -1710,6 +1862,9 @@ type CreateAssetJSONRequestBody = CreateAssetRequest
 
 // UpdateAssetJSONRequestBody defines body for UpdateAsset for application/json ContentType.
 type UpdateAssetJSONRequestBody = AssetRequest
+
+// ReverseDepositJSONRequestBody defines body for ReverseDeposit for application/json ContentType.
+type ReverseDepositJSONRequestBody = ReverseDepositRequest
 
 // RequestReloadJSONRequestBody defines body for RequestReload for application/json ContentType.
 type RequestReloadJSONRequestBody = ReloadRequest
@@ -1797,6 +1952,12 @@ type ServerInterface interface {
 	// ListDeposits Deposits the chain role has seen, newest first
 	// (GET /admin/v1/deposits)
 	ListDeposits(w http.ResponseWriter, r *http.Request, params ListDepositsParams)
+	// ListDepositsAwaitingReversal Credited deposits a reorg took away, waiting for a decision
+	// (GET /admin/v1/deposits/awaiting-reversal)
+	ListDepositsAwaitingReversal(w http.ResponseWriter, r *http.Request, params ListDepositsAwaitingReversalParams)
+	// ReverseDeposit Confirm that a reorged deposit should be undone
+	// (POST /admin/v1/deposits/{id}/reverse)
+	ReverseDeposit(w http.ResponseWriter, r *http.Request, id DepositID)
 	// RequestReload Ask every engine to reload its registry cache
 	// (POST /admin/v1/engine/reload)
 	RequestReload(w http.ResponseWriter, r *http.Request)
@@ -1848,6 +2009,12 @@ type ServerInterface interface {
 	// ListReconciliationReports Reconciliation passes, newest first
 	// (GET /admin/v1/reconciliation/reports)
 	ListReconciliationReports(w http.ResponseWriter, r *http.Request, params ListReconciliationReportsParams)
+	// GetRevenueReport What the exchange earned and what it paid the chain, per asset
+	// (GET /admin/v1/reports/revenue)
+	GetRevenueReport(w http.ResponseWriter, r *http.Request, params GetRevenueReportParams)
+	// GetRevenueReportCsv The same report as a CSV download
+	// (GET /admin/v1/reports/revenue.csv)
+	GetRevenueReportCsv(w http.ResponseWriter, r *http.Request, params GetRevenueReportCsvParams)
 	// ListSweeps Recent collections into the hot wallet
 	// (GET /admin/v1/sweeps)
 	ListSweeps(w http.ResponseWriter, r *http.Request, params ListSweepsParams)
@@ -1974,6 +2141,18 @@ func (_ Unimplemented) ListDeposits(w http.ResponseWriter, r *http.Request, para
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// ListDepositsAwaitingReversal Credited deposits a reorg took away, waiting for a decision
+// (GET /admin/v1/deposits/awaiting-reversal)
+func (_ Unimplemented) ListDepositsAwaitingReversal(w http.ResponseWriter, r *http.Request, params ListDepositsAwaitingReversalParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ReverseDeposit Confirm that a reorged deposit should be undone
+// (POST /admin/v1/deposits/{id}/reverse)
+func (_ Unimplemented) ReverseDeposit(w http.ResponseWriter, r *http.Request, id DepositID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // RequestReload Ask every engine to reload its registry cache
 // (POST /admin/v1/engine/reload)
 func (_ Unimplemented) RequestReload(w http.ResponseWriter, r *http.Request) {
@@ -2073,6 +2252,18 @@ func (_ Unimplemented) ListReconciliationBreaks(w http.ResponseWriter, r *http.R
 // ListReconciliationReports Reconciliation passes, newest first
 // (GET /admin/v1/reconciliation/reports)
 func (_ Unimplemented) ListReconciliationReports(w http.ResponseWriter, r *http.Request, params ListReconciliationReportsParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetRevenueReport What the exchange earned and what it paid the chain, per asset
+// (GET /admin/v1/reports/revenue)
+func (_ Unimplemented) GetRevenueReport(w http.ResponseWriter, r *http.Request, params GetRevenueReportParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetRevenueReportCsv The same report as a CSV download
+// (GET /admin/v1/reports/revenue.csv)
+func (_ Unimplemented) GetRevenueReportCsv(w http.ResponseWriter, r *http.Request, params GetRevenueReportCsvParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -2607,6 +2798,78 @@ func (siw *ServerInterfaceWrapper) ListDeposits(w http.ResponseWriter, r *http.R
 	handler.ServeHTTP(w, r)
 }
 
+// ListDepositsAwaitingReversal operation middleware
+func (siw *ServerInterfaceWrapper) ListDepositsAwaitingReversal(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListDepositsAwaitingReversalParams
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: "int32"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "offset" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "offset", r.URL.Query(), &params.Offset, runtime.BindQueryParameterOptions{Type: "integer", Format: "int32"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "offset"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "offset", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListDepositsAwaitingReversal(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ReverseDeposit operation middleware
+func (siw *ServerInterfaceWrapper) ReverseDeposit(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id DepositID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ReverseDeposit(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // RequestReload operation middleware
 func (siw *ServerInterfaceWrapper) RequestReload(w http.ResponseWriter, r *http.Request) {
 
@@ -3019,6 +3282,124 @@ func (siw *ServerInterfaceWrapper) ListReconciliationReports(w http.ResponseWrit
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ListReconciliationReports(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetRevenueReport operation middleware
+func (siw *ServerInterfaceWrapper) GetRevenueReport(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetRevenueReportParams
+
+	// ------------- Optional query parameter "from" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "from", r.URL.Query(), &params.From, runtime.BindQueryParameterOptions{Type: "string", Format: "date-time"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "from"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "from", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "to" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "to", r.URL.Query(), &params.To, runtime.BindQueryParameterOptions{Type: "string", Format: "date-time"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "to"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "to", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "asset" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "asset", r.URL.Query(), &params.Asset, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "asset"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "asset", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetRevenueReport(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetRevenueReportCsv operation middleware
+func (siw *ServerInterfaceWrapper) GetRevenueReportCsv(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetRevenueReportCsvParams
+
+	// ------------- Optional query parameter "from" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "from", r.URL.Query(), &params.From, runtime.BindQueryParameterOptions{Type: "string", Format: "date-time"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "from"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "from", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "to" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "to", r.URL.Query(), &params.To, runtime.BindQueryParameterOptions{Type: "string", Format: "date-time"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "to"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "to", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "asset" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "asset", r.URL.Query(), &params.Asset, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "asset"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "asset", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetRevenueReportCsv(w, r, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -3781,7 +4162,19 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Get(options.BaseURL+"/admin/v1/deposits", wrapper.ListDeposits)
 	})
 	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/admin/v1/deposits/awaiting-reversal", wrapper.ListDepositsAwaitingReversal)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/admin/v1/deposits/{id}/reverse", wrapper.ReverseDeposit)
+	})
+	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/admin/v1/hot-wallet", wrapper.GetHotWallet)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/admin/v1/reports/revenue", wrapper.GetRevenueReport)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/admin/v1/reports/revenue.csv", wrapper.GetRevenueReportCsv)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/admin/v1/reconciliation/reports", wrapper.ListReconciliationReports)
@@ -4577,6 +4970,145 @@ type ListDeposits500ApplicationProblemPlusJSONResponse struct {
 }
 
 func (response ListDeposits500ApplicationProblemPlusJSONResponse) VisitListDepositsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListDepositsAwaitingReversalRequestObject struct {
+	Params ListDepositsAwaitingReversalParams
+}
+
+type ListDepositsAwaitingReversalResponseObject interface {
+	VisitListDepositsAwaitingReversalResponse(w http.ResponseWriter) error
+}
+
+type ListDepositsAwaitingReversal200JSONResponse AdminDepositList
+
+func (response ListDepositsAwaitingReversal200JSONResponse) VisitListDepositsAwaitingReversalResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListDepositsAwaitingReversal401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response ListDepositsAwaitingReversal401ApplicationProblemPlusJSONResponse) VisitListDepositsAwaitingReversalResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListDepositsAwaitingReversal500ApplicationProblemPlusJSONResponse struct {
+	InternalErrorApplicationProblemPlusJSONResponse
+}
+
+func (response ListDepositsAwaitingReversal500ApplicationProblemPlusJSONResponse) VisitListDepositsAwaitingReversalResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReverseDepositRequestObject struct {
+	ID   DepositID `json:"id"`
+	Body *ReverseDepositJSONRequestBody
+}
+
+type ReverseDepositResponseObject interface {
+	VisitReverseDepositResponse(w http.ResponseWriter) error
+}
+
+type ReverseDeposit202JSONResponse AdminDeposit
+
+func (response ReverseDeposit202JSONResponse) VisitReverseDepositResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(202)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReverseDeposit400ApplicationProblemPlusJSONResponse struct {
+	BadRequestApplicationProblemPlusJSONResponse
+}
+
+func (response ReverseDeposit400ApplicationProblemPlusJSONResponse) VisitReverseDepositResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReverseDeposit401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response ReverseDeposit401ApplicationProblemPlusJSONResponse) VisitReverseDepositResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReverseDeposit409ApplicationProblemPlusJSONResponse Problem
+
+func (response ReverseDeposit409ApplicationProblemPlusJSONResponse) VisitReverseDepositResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReverseDeposit500ApplicationProblemPlusJSONResponse struct {
+	InternalErrorApplicationProblemPlusJSONResponse
+}
+
+func (response ReverseDeposit500ApplicationProblemPlusJSONResponse) VisitReverseDepositResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
@@ -5823,6 +6355,152 @@ type ListReconciliationReports500ApplicationProblemPlusJSONResponse struct {
 }
 
 func (response ListReconciliationReports500ApplicationProblemPlusJSONResponse) VisitListReconciliationReportsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetRevenueReportRequestObject struct {
+	Params GetRevenueReportParams
+}
+
+type GetRevenueReportResponseObject interface {
+	VisitGetRevenueReportResponse(w http.ResponseWriter) error
+}
+
+type GetRevenueReport200JSONResponse RevenueReport
+
+func (response GetRevenueReport200JSONResponse) VisitGetRevenueReportResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetRevenueReport400ApplicationProblemPlusJSONResponse struct {
+	BadRequestApplicationProblemPlusJSONResponse
+}
+
+func (response GetRevenueReport400ApplicationProblemPlusJSONResponse) VisitGetRevenueReportResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetRevenueReport401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response GetRevenueReport401ApplicationProblemPlusJSONResponse) VisitGetRevenueReportResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetRevenueReport500ApplicationProblemPlusJSONResponse struct {
+	InternalErrorApplicationProblemPlusJSONResponse
+}
+
+func (response GetRevenueReport500ApplicationProblemPlusJSONResponse) VisitGetRevenueReportResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetRevenueReportCsvRequestObject struct {
+	Params GetRevenueReportCsvParams
+}
+
+type GetRevenueReportCsvResponseObject interface {
+	VisitGetRevenueReportCsvResponse(w http.ResponseWriter) error
+}
+
+type GetRevenueReportCsv200TextCsvResponse struct {
+	Body          io.Reader
+	ContentLength int64
+}
+
+func (response GetRevenueReportCsv200TextCsvResponse) VisitGetRevenueReportCsvResponse(w http.ResponseWriter) error {
+
+	w.Header().Set("Content-Type", "text/csv")
+	if response.ContentLength != 0 {
+		w.Header().Set("Content-Length", fmt.Sprint(response.ContentLength))
+	}
+	w.WriteHeader(200)
+
+	if closer, ok := response.Body.(io.ReadCloser); ok {
+		defer closer.Close()
+	}
+	_, err := io.Copy(w, response.Body)
+	return err
+}
+
+type GetRevenueReportCsv400ApplicationProblemPlusJSONResponse struct {
+	BadRequestApplicationProblemPlusJSONResponse
+}
+
+func (response GetRevenueReportCsv400ApplicationProblemPlusJSONResponse) VisitGetRevenueReportCsvResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetRevenueReportCsv401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response GetRevenueReportCsv401ApplicationProblemPlusJSONResponse) VisitGetRevenueReportCsvResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetRevenueReportCsv500ApplicationProblemPlusJSONResponse struct {
+	InternalErrorApplicationProblemPlusJSONResponse
+}
+
+func (response GetRevenueReportCsv500ApplicationProblemPlusJSONResponse) VisitGetRevenueReportCsvResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
@@ -7233,6 +7911,12 @@ type StrictServerInterface interface {
 	// ListDeposits Deposits the chain role has seen, newest first
 	// (GET /admin/v1/deposits)
 	ListDeposits(ctx context.Context, request ListDepositsRequestObject) (ListDepositsResponseObject, error)
+	// ListDepositsAwaitingReversal Credited deposits a reorg took away, waiting for a decision
+	// (GET /admin/v1/deposits/awaiting-reversal)
+	ListDepositsAwaitingReversal(ctx context.Context, request ListDepositsAwaitingReversalRequestObject) (ListDepositsAwaitingReversalResponseObject, error)
+	// ReverseDeposit Confirm that a reorged deposit should be undone
+	// (POST /admin/v1/deposits/{id}/reverse)
+	ReverseDeposit(ctx context.Context, request ReverseDepositRequestObject) (ReverseDepositResponseObject, error)
 	// RequestReload Ask every engine to reload its registry cache
 	// (POST /admin/v1/engine/reload)
 	RequestReload(ctx context.Context, request RequestReloadRequestObject) (RequestReloadResponseObject, error)
@@ -7284,6 +7968,12 @@ type StrictServerInterface interface {
 	// ListReconciliationReports Reconciliation passes, newest first
 	// (GET /admin/v1/reconciliation/reports)
 	ListReconciliationReports(ctx context.Context, request ListReconciliationReportsRequestObject) (ListReconciliationReportsResponseObject, error)
+	// GetRevenueReport What the exchange earned and what it paid the chain, per asset
+	// (GET /admin/v1/reports/revenue)
+	GetRevenueReport(ctx context.Context, request GetRevenueReportRequestObject) (GetRevenueReportResponseObject, error)
+	// GetRevenueReportCsv The same report as a CSV download
+	// (GET /admin/v1/reports/revenue.csv)
+	GetRevenueReportCsv(ctx context.Context, request GetRevenueReportCsvRequestObject) (GetRevenueReportCsvResponseObject, error)
 	// ListSweeps Recent collections into the hot wallet
 	// (GET /admin/v1/sweeps)
 	ListSweeps(ctx context.Context, request ListSweepsRequestObject) (ListSweepsResponseObject, error)
@@ -7680,6 +8370,65 @@ func (sh *strictHandler) ListDeposits(w http.ResponseWriter, r *http.Request, pa
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(ListDepositsResponseObject); ok {
 		if err := validResponse.VisitListDepositsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListDepositsAwaitingReversal operation middleware
+func (sh *strictHandler) ListDepositsAwaitingReversal(w http.ResponseWriter, r *http.Request, params ListDepositsAwaitingReversalParams) {
+	var request ListDepositsAwaitingReversalRequestObject
+
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListDepositsAwaitingReversal(ctx, request.(ListDepositsAwaitingReversalRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListDepositsAwaitingReversal")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListDepositsAwaitingReversalResponseObject); ok {
+		if err := validResponse.VisitListDepositsAwaitingReversalResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ReverseDeposit operation middleware
+func (sh *strictHandler) ReverseDeposit(w http.ResponseWriter, r *http.Request, id DepositID) {
+	var request ReverseDepositRequestObject
+
+	request.ID = id
+
+	var body ReverseDepositJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ReverseDeposit(ctx, request.(ReverseDepositRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ReverseDeposit")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ReverseDepositResponseObject); ok {
+		if err := validResponse.VisitReverseDepositResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
@@ -8158,6 +8907,58 @@ func (sh *strictHandler) ListReconciliationReports(w http.ResponseWriter, r *htt
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(ListReconciliationReportsResponseObject); ok {
 		if err := validResponse.VisitListReconciliationReportsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetRevenueReport operation middleware
+func (sh *strictHandler) GetRevenueReport(w http.ResponseWriter, r *http.Request, params GetRevenueReportParams) {
+	var request GetRevenueReportRequestObject
+
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetRevenueReport(ctx, request.(GetRevenueReportRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetRevenueReport")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetRevenueReportResponseObject); ok {
+		if err := validResponse.VisitGetRevenueReportResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetRevenueReportCsv operation middleware
+func (sh *strictHandler) GetRevenueReportCsv(w http.ResponseWriter, r *http.Request, params GetRevenueReportCsvParams) {
+	var request GetRevenueReportCsvRequestObject
+
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetRevenueReportCsv(ctx, request.(GetRevenueReportCsvRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetRevenueReportCsv")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetRevenueReportCsvResponseObject); ok {
+		if err := validResponse.VisitGetRevenueReportCsvResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

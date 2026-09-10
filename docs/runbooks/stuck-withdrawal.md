@@ -81,6 +81,34 @@ exchangectl admin withdrawals resolve <id> retry        --note "destination fixe
 
 對 `broadcast` 的提現用這兩個會得到 409,反之亦然。
 
+### 手續費在這幾條路上跑去哪
+
+如果那個資產設了非零的提現手續費(§23.3),提現列上有一份 `fee` 快照,而它跟金額**不在同一個地方**。金額在 `funds_locked` 時進 `hold`,廣播時搬到 `pending_withdrawal`;**手續費從頭到尾留在 `hold`**,一直到交易確認才轉給 `fee_revenue`。
+
+所以卡住的提現看起來會是這樣:
+
+| 狀態 | 金額在哪 | 手續費在哪 |
+|---|---|---|
+| `funds_locked` / `signed` | 使用者的 `hold` | 使用者的 `hold` |
+| `broadcast` | `pending_withdrawal` | 使用者的 `hold` |
+| `confirmed` | 已經上鏈 | `fee_revenue` |
+| `failed(broadcast)` | 已退回 `available` | 已退回 `available` |
+| `failed(on_chain)` | `pending_withdrawal`(等你決定) | 使用者的 `hold`(等你決定) |
+| `failed(replaced)` | 已退回 `available` | 已退回 `available` |
+
+**看到一筆 `failed(on_chain)` 的提現在使用者的 `hold` 裡留著一小筆錢,那不是漏帳,是還沒結案。** `refund` 會把兩邊一起還回去;`retry` 兩邊都不動,手續費繼續留在 `hold`,等這筆提現真的送出去時才收一次——重試不會收兩次。
+
+`bump` 與 `cancel_nonce` 同樣不收費:前者連帳本都不動,後者退回時會**同時**從 `pending_withdrawal` 拿回金額、從 `hold` 拿回手續費,寫成同一筆分錄。原則只有一句:**交易所沒把錢送出去就不收費**,所以除了 `confirmed` 以外的每一個結局都會把手續費還給使用者。
+
+要確認某一筆到底收了沒有:
+
+```sh
+exchangectl admin entries --ref-type withdrawal --ref-id <id> --output json \
+  | jq '.entries[] | {kind, key: .idempotency_key, postings}'
+```
+
+有 `kind` 是 `fee`、key 是 `withdrawal:fee:<id>` 的那一筆才代表收了。沒有那一筆,就是還沒收或已經退回。
+
 ### nonce 缺口
 
 一個沒有交易在用的 nonce 會讓它**後面所有**提現都挖不出來,而每一筆看起來都像「手續費太低」。先用檢查指令裡的三個 `cast nonce` / `next_nonce` 確認這才是實際原因。

@@ -12,7 +12,7 @@ Beta = 自營、封閉、單台 VM、只接 Sepolia(`docs/plan-v1.0.md` §0、§
 - **後台只在 127.0.0.1:8082**,經 SSH tunnel;沒有 VPN、mTLS、WAF。
 - **secrets 是主機上的檔案**(`secrets/prod/`),沒有 Vault/KMS;丟了 VM 又沒有 escrow,seed 就沒了。
 - **對帳每 5 分鐘一輪、沒有閾值**:任何非零 `DIFF` 都是告警(`docs/runbooks/reconciliation-break.md`)。
-- **提現尚未收手續費、充值沒有手續費,gas 全由平台吸收**(計畫 v1.1 §23、Phase 8;ADR-0011):`withdrawal_fee` 欄位存在但沒有程式收它,每一筆提現與歸集的 gas 記 `gas_expense`、沒有對應收入;beta 期間把它當營運成本看,Phase 8 之後才有營收報表。
+- **手續費的程式做好了,但費率出廠是 0**(計畫 v1.1 §23、Phase 8;ADR-0011):提現與充值都收得了費,後台的資產頁可以隨時設,`GET /admin/v1/reports/revenue`、後台的「營收」頁與 `exchangectl admin revenue` 看得到三種手續費與 gas 支出。**但三個費率的 seed 值都是 0**,所以不設就跟以前一樣:每一筆提現與歸集的 gas 記 `gas_expense`、沒有對應收入。上線前要決定的是**提現手續費要設多少** —— §23.3 的指引是至少蓋住近 7 天該資產提現的 P90 gas;設得太低 `WithdrawalGasExceedsFee` 會提醒。充值手續費照業界慣例維持 0。
 - **前台與後台是繁體中文 / 英文雙語**(ADR-0010):切換器在右上角,後台另看 `Accept-Language`。`Problem.detail`、領域驗證訊息、CLI、日誌仍是英文;runbook 對的是狀態碼,badge 的 `title` 保留原始碼。
 - **壓測數字**(`docs/loadtest.md` §8):單市場 ~266 orders/s、`POST /v1/orders` p99 在 100 orders/s 時 ~550 ms。§3.3 的 1,000 orders/s 與 50 ms p99 **未達**,beta 的流量規模應該遠低於此。
 

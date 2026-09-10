@@ -53,7 +53,8 @@ func (h *Handler) CreateAsset(ctx context.Context, req gen.CreateAssetRequestObj
 	in := assetInput(b.Symbol, gen.AssetRequest{
 		Name: b.Name, ChainID: b.ChainID, ContractAddress: b.ContractAddress, IsNative: b.IsNative,
 		Scale: b.Scale, DisplayScale: b.DisplayScale, RequiredConfirmations: b.RequiredConfirmations,
-		MinDeposit: b.MinDeposit, MinWithdrawal: b.MinWithdrawal, WithdrawalFee: b.WithdrawalFee, SweepThreshold: b.SweepThreshold,
+		MinDeposit: b.MinDeposit, MinWithdrawal: b.MinWithdrawal, WithdrawalFee: b.WithdrawalFee,
+		WithdrawalFeeBps: b.WithdrawalFeeBps, DepositFeeBps: b.DepositFeeBps, SweepThreshold: b.SweepThreshold,
 		DepositEnabled: b.DepositEnabled, WithdrawEnabled: b.WithdrawEnabled, Status: b.Status,
 	})
 	a, err := h.upsertAsset(ctx, in, true, b.Reason)
@@ -295,7 +296,8 @@ func assetInput(symbol string, b gen.AssetRequest) registry.AssetInput {
 	return registry.AssetInput{
 		Symbol: symbol, Name: b.Name, ChainID: b.ChainID, ContractAddress: b.ContractAddress, IsNative: b.IsNative,
 		Scale: b.Scale, DisplayScale: b.DisplayScale, RequiredConfirmations: b.RequiredConfirmations,
-		MinDeposit: b.MinDeposit, MinWithdrawal: b.MinWithdrawal, WithdrawalFee: b.WithdrawalFee, SweepThreshold: b.SweepThreshold,
+		MinDeposit: b.MinDeposit, MinWithdrawal: b.MinWithdrawal, WithdrawalFee: b.WithdrawalFee,
+		WithdrawalFeeBps: b.WithdrawalFeeBps, DepositFeeBps: b.DepositFeeBps, SweepThreshold: b.SweepThreshold,
 		DepositEnabled: b.DepositEnabled, WithdrawEnabled: b.WithdrawEnabled, Status: string(b.Status),
 	}
 }
@@ -312,7 +314,8 @@ func toAsset(a registry.Asset) gen.Asset {
 	return gen.Asset{
 		ID: a.ID, Symbol: a.Symbol, Name: a.Name, ChainID: a.ChainID, ContractAddress: a.ContractAddress, IsNative: a.IsNative,
 		Scale: a.Scale, DisplayScale: a.DisplayScale, RequiredConfirmations: a.RequiredConfirmations,
-		MinDeposit: a.MinDeposit, MinWithdrawal: a.MinWithdrawal, WithdrawalFee: a.WithdrawalFee, SweepThreshold: a.SweepThreshold,
+		MinDeposit: a.MinDeposit, MinWithdrawal: a.MinWithdrawal, WithdrawalFee: a.WithdrawalFee,
+		WithdrawalFeeBps: a.WithdrawalFeeBps, DepositFeeBps: a.DepositFeeBps, SweepThreshold: a.SweepThreshold,
 		DepositEnabled: a.DepositEnabled, WithdrawEnabled: a.WithdrawEnabled, Status: gen.AssetStatus(a.Status),
 		Version: a.Version, CreatedAt: a.CreatedAt, UpdatedAt: a.UpdatedAt,
 	}

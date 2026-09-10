@@ -61,6 +61,34 @@ groups:
           summary: "Hot wallet holds {{ $value }} ETH"
           description: "Withdrawals and sweeps need gas. Top up the hot wallet (docs/runbooks)."
 
+      # Fee pricing (docs/plan-v1.0.md §23.3). The withdrawal fee exists to
+      # cover the gas a withdrawal costs; if it does not, the exchange loses
+      # money on every one, quietly and forever. The comparison is per asset
+      # and that is what makes it work: gas is only ever booked against the
+      # chain's native coin, so no ERC-20 has a gas series and only the native
+      # row can fire.
+      #
+      # Two caveats an operator reading this should know. The gas side is
+      # every gas_expense debit, sweeps and nonce fills included -- §23.5
+      # defines it that way, on the grounds that they are all the cost of
+      # custody the fee has to cover. And the `or ... * 0` is deliberate: with
+      # the rate at zero there is no fee series at all, and a bare comparison
+      # would go silent in exactly the case the alert is for. A stack running
+      # at the shipped rates therefore fires this once it has paid any gas,
+      # which is the correct answer to "the fee is below what a withdrawal
+      # costs" -- zero is below it.
+      - alert: WithdrawalGasExceedsFee
+        expr: >
+          sum by (asset) (increase(ledger_gas_expense_total[24h]))
+          >
+          (sum by (asset) (increase(ledger_fee_revenue_total{source="withdrawal"}[24h]))
+           or sum by (asset) (increase(ledger_gas_expense_total[24h])) * 0)
+        for: 1h
+        labels: { severity: warning }
+        annotations:
+          summary: "{{ $labels.asset }} gas over 24h exceeds the withdrawal fees collected"
+          description: "Raise withdrawal_fee or withdrawal_fee_bps for the assets being withdrawn (back office, Assets). The revenue page has the exact figures and the per-withdrawal cost; these counters are float approximations for alerting."
+
       - alert: WithdrawalsPendingReview
         expr: withdrawals_pending_review > 20
         for: 10m
@@ -68,6 +96,21 @@ groups:
         annotations:
           summary: "{{ $value }} withdrawals are waiting for an operator"
           description: "Review them in the back office (Withdrawals page) before customers start asking."
+
+      # A deep reorg took away a block the ledger had already credited from
+      # (docs/plan-v1.0.md §6.4.1, the `reversed` row). Until somebody
+      # confirms the reversal, an account holds a balance the chain does not
+      # back and reconciliation will report the difference as a break with
+      # nothing able to resolve it. Rare enough that any non-zero value is
+      # worth waking someone; `for: 0m` because the scanner sets this gauge
+      # only after it has already rewound past the block.
+      - alert: DepositAwaitingReversal
+        expr: deposits_awaiting_reversal > 0
+        for: 0m
+        labels: { severity: critical }
+        annotations:
+          summary: "{{ $value }} credited deposits were reorged away and are waiting for a decision"
+          description: "The chain no longer shows money the ledger credited. Review them in the back office (Chain page) and confirm the reversal; docs/runbooks/reorg-alert.md has the procedure and what to do when the account has already spent it."
 
       - alert: ReconciliationBreak
         expr: reconciliation_diff != 0

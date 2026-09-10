@@ -13,7 +13,7 @@ import (
 )
 
 const getAssetBySymbol = `-- name: GetAssetBySymbol :one
-SELECT id, tenant_id, symbol, name, chain_id, contract_address, is_native, scale, display_scale, required_confirmations, min_deposit, min_withdrawal, withdrawal_fee, sweep_threshold, deposit_enabled, withdraw_enabled, status, version, created_at, updated_at FROM registry.assets
+SELECT id, tenant_id, symbol, name, chain_id, contract_address, is_native, scale, display_scale, required_confirmations, min_deposit, min_withdrawal, withdrawal_fee, sweep_threshold, deposit_enabled, withdraw_enabled, status, version, created_at, updated_at, withdrawal_fee_bps, deposit_fee_bps FROM registry.assets
 WHERE tenant_id = $1 AND symbol = $2
 `
 
@@ -46,6 +46,8 @@ func (q *Queries) GetAssetBySymbol(ctx context.Context, arg GetAssetBySymbolPara
 		&i.Version,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.WithdrawalFeeBps,
+		&i.DepositFeeBps,
 	)
 	return i, err
 }
@@ -201,7 +203,7 @@ func (q *Queries) GetWithdrawalLimit(ctx context.Context, arg GetWithdrawalLimit
 
 const listAssets = `-- name: ListAssets :many
 
-SELECT id, tenant_id, symbol, name, chain_id, contract_address, is_native, scale, display_scale, required_confirmations, min_deposit, min_withdrawal, withdrawal_fee, sweep_threshold, deposit_enabled, withdraw_enabled, status, version, created_at, updated_at FROM registry.assets
+SELECT id, tenant_id, symbol, name, chain_id, contract_address, is_native, scale, display_scale, required_confirmations, min_deposit, min_withdrawal, withdrawal_fee, sweep_threshold, deposit_enabled, withdraw_enabled, status, version, created_at, updated_at, withdrawal_fee_bps, deposit_fee_bps FROM registry.assets
 WHERE tenant_id = $1
 ORDER BY symbol
 `
@@ -237,6 +239,8 @@ func (q *Queries) ListAssets(ctx context.Context, tenantID string) ([]RegistryAs
 			&i.Version,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.WithdrawalFeeBps,
+			&i.DepositFeeBps,
 		); err != nil {
 			return nil, err
 		}
@@ -447,9 +451,10 @@ func (q *Queries) SetMarketStatus(ctx context.Context, arg SetMarketStatusParams
 const upsertAsset = `-- name: UpsertAsset :exec
 INSERT INTO registry.assets (
     tenant_id, symbol, name, chain_id, contract_address, is_native, scale, display_scale,
-    required_confirmations, min_deposit, min_withdrawal, withdrawal_fee, sweep_threshold,
+    required_confirmations, min_deposit, min_withdrawal, withdrawal_fee,
+    withdrawal_fee_bps, deposit_fee_bps, sweep_threshold,
     deposit_enabled, withdraw_enabled, status
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
 ON CONFLICT (tenant_id, symbol) DO UPDATE
 SET name                   = EXCLUDED.name,
     chain_id               = EXCLUDED.chain_id,
@@ -461,6 +466,8 @@ SET name                   = EXCLUDED.name,
     min_deposit            = EXCLUDED.min_deposit,
     min_withdrawal         = EXCLUDED.min_withdrawal,
     withdrawal_fee         = EXCLUDED.withdrawal_fee,
+    withdrawal_fee_bps     = EXCLUDED.withdrawal_fee_bps,
+    deposit_fee_bps        = EXCLUDED.deposit_fee_bps,
     sweep_threshold        = EXCLUDED.sweep_threshold,
     deposit_enabled        = EXCLUDED.deposit_enabled,
     withdraw_enabled       = EXCLUDED.withdraw_enabled,
@@ -470,12 +477,14 @@ SET name                   = EXCLUDED.name,
 WHERE (registry.assets.name, registry.assets.chain_id, registry.assets.contract_address, registry.assets.is_native,
        registry.assets.scale, registry.assets.display_scale, registry.assets.required_confirmations,
        registry.assets.min_deposit, registry.assets.min_withdrawal, registry.assets.withdrawal_fee,
+       registry.assets.withdrawal_fee_bps, registry.assets.deposit_fee_bps,
        registry.assets.sweep_threshold, registry.assets.deposit_enabled, registry.assets.withdraw_enabled,
        registry.assets.status)
       IS DISTINCT FROM
       (EXCLUDED.name, EXCLUDED.chain_id, EXCLUDED.contract_address, EXCLUDED.is_native,
        EXCLUDED.scale, EXCLUDED.display_scale, EXCLUDED.required_confirmations,
        EXCLUDED.min_deposit, EXCLUDED.min_withdrawal, EXCLUDED.withdrawal_fee,
+       EXCLUDED.withdrawal_fee_bps, EXCLUDED.deposit_fee_bps,
        EXCLUDED.sweep_threshold, EXCLUDED.deposit_enabled, EXCLUDED.withdraw_enabled,
        EXCLUDED.status)
 `
@@ -493,6 +502,8 @@ type UpsertAssetParams struct {
 	MinDeposit            pgtype.Numeric
 	MinWithdrawal         pgtype.Numeric
 	WithdrawalFee         pgtype.Numeric
+	WithdrawalFeeBps      int32
+	DepositFeeBps         int32
 	SweepThreshold        pgtype.Numeric
 	DepositEnabled        bool
 	WithdrawEnabled       bool
@@ -513,6 +524,8 @@ func (q *Queries) UpsertAsset(ctx context.Context, arg UpsertAssetParams) error 
 		arg.MinDeposit,
 		arg.MinWithdrawal,
 		arg.WithdrawalFee,
+		arg.WithdrawalFeeBps,
+		arg.DepositFeeBps,
 		arg.SweepThreshold,
 		arg.DepositEnabled,
 		arg.WithdrawEnabled,

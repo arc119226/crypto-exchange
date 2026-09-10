@@ -240,7 +240,7 @@ func (w *Worker) markGasFunded(ctx context.Context, row sqlcgen.ChainSweep, gas 
 	return inTx(ctx, w.db, func(tx pgx.Tx) error {
 		if funding.IsPositive() {
 			if _, _, err := w.ledger.Post(ctx, tx, ledger.Entry{
-				IdempotencyKey: "sweep:gas_funding:" + row.ID, Kind: "sweep",
+				IdempotencyKey: "sweep:gas_funding:" + row.ID, Kind: ledger.KindSweep,
 				RefType: "sweep", RefID: row.ID, Reason: "funding a deposit address for its own sweep",
 				CorrelationID: deref(row.CorrelationID),
 				Postings: []ledger.Posting{
@@ -454,7 +454,7 @@ func (w *Worker) confirm(ctx context.Context, row sqlcgen.ChainSweep, block uint
 	}
 	return inTx(ctx, w.db, func(tx pgx.Tx) error {
 		if _, _, err := w.ledger.Post(ctx, tx, ledger.Entry{
-			IdempotencyKey: "sweep:confirm:" + row.ID, Kind: "sweep",
+			IdempotencyKey: "sweep:confirm:" + row.ID, Kind: ledger.KindSweep,
 			RefType: "sweep", RefID: row.ID, Reason: "swept into the hot wallet",
 			CorrelationID: deref(row.CorrelationID),
 			Postings: []ledger.Posting{
@@ -553,7 +553,7 @@ func (w *Worker) postGas(ctx context.Context, tx pgx.Tx, row sqlcgen.ChainSweep,
 		return nil // a scripted chain, or a receipt with no effective price
 	}
 	if _, _, err := w.ledger.Post(ctx, tx, ledger.Entry{
-		IdempotencyKey: key, Kind: "gas",
+		IdempotencyKey: key, Kind: ledger.KindGas,
 		RefType: "sweep", RefID: row.ID, Reason: "sweep gas",
 		CorrelationID: deref(row.CorrelationID),
 		Postings: []ledger.Posting{

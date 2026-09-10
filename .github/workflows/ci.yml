@@ -243,8 +243,47 @@ jobs:
         id: foundry
         run: echo "tag=$(sed -n 's/^FOUNDRY_TAG=//p' .env.example)" >> "$GITHUB_OUTPUT"
       - uses: foundry-rs/foundry-toolchain@v1
+        if: ${{ vars.CI_RUNNER == '' }}
         with:
           version: ${{ steps.foundry.outputs.tag }}
+      # A machine that already carries the pinned toolchain is not asked to
+      # fetch it again. foundryup verifies every download against a GitHub
+      # artifact attestation, and on 2026-09-10 that endpoint answered 500 for
+      # a quarter of an hour and took down every job that needs forge -- on
+      # branches whose diff contains no Solidity at all. The install is the
+      # only thing in either job that reaches outside for a toolchain, so it is
+      # the only thing that outage could reach. Installed once at setup, like
+      # Playwright's system libraries and for the same reason
+      # (docs/guides/self-hosted-runner.md).
+      #
+      # The pin is not lost, it moves: the installer enforced it before, the
+      # assertion below enforces it now, and it fails loudly with the command
+      # to run rather than quietly building against whatever is on the disk.
+      - name: foundry is already on this machine
+        if: ${{ vars.CI_RUNNER != '' }}
+        run: |
+          bin="$HOME/.foundry/bin"
+          tag='${{ steps.foundry.outputs.tag }}'
+          want="${tag#v}"
+          if [ ! -x "$bin/forge" ]; then
+            echo "no forge at $bin. This runner needs the toolchain installed once:"
+            echo "    foundryup --install $tag"
+            exit 1
+          fi
+          # || true so a forge that runs but exits non-zero reaches the case
+          # below and prints what it said, rather than dying under `bash -e`
+          # with its output swallowed by the substitution.
+          have=$("$bin/forge" --version 2>&1 || true)
+          printf '%s\n' "$have"
+          case "$have" in
+            *"$want"[!0-9]*|*"$want") ;;
+            *)
+              echo "forge on this runner is not the pinned $tag. Reinstall it:"
+              echo "    foundryup --install $tag"
+              exit 1
+              ;;
+          esac
+          echo "$bin" >> "$GITHUB_PATH"
       # working-directory is per-step, not a job default: a job-level default
       # would send make gen-check and make compose-config into infra/contracts.
       - name: forge build
@@ -441,8 +480,47 @@ jobs:
         run: echo "tag=$(sed -n 's/^FOUNDRY_TAG=//p' .env.example)" >> "$GITHUB_OUTPUT"
       # kind-secrets.sh derives the throwaway hot wallet with cast
       - uses: foundry-rs/foundry-toolchain@v1
+        if: ${{ vars.CI_RUNNER == '' }}
         with:
           version: ${{ steps.foundry.outputs.tag }}
+      # A machine that already carries the pinned toolchain is not asked to
+      # fetch it again. foundryup verifies every download against a GitHub
+      # artifact attestation, and on 2026-09-10 that endpoint answered 500 for
+      # a quarter of an hour and took down every job that needs forge -- on
+      # branches whose diff contains no Solidity at all. The install is the
+      # only thing in either job that reaches outside for a toolchain, so it is
+      # the only thing that outage could reach. Installed once at setup, like
+      # Playwright's system libraries and for the same reason
+      # (docs/guides/self-hosted-runner.md).
+      #
+      # The pin is not lost, it moves: the installer enforced it before, the
+      # assertion below enforces it now, and it fails loudly with the command
+      # to run rather than quietly building against whatever is on the disk.
+      - name: foundry is already on this machine
+        if: ${{ vars.CI_RUNNER != '' }}
+        run: |
+          bin="$HOME/.foundry/bin"
+          tag='${{ steps.foundry.outputs.tag }}'
+          want="${tag#v}"
+          if [ ! -x "$bin/forge" ]; then
+            echo "no forge at $bin. This runner needs the toolchain installed once:"
+            echo "    foundryup --install $tag"
+            exit 1
+          fi
+          # || true so a forge that runs but exits non-zero reaches the case
+          # below and prints what it said, rather than dying under `bash -e`
+          # with its output swallowed by the substitution.
+          have=$("$bin/forge" --version 2>&1 || true)
+          printf '%s\n' "$have"
+          case "$have" in
+            *"$want"[!0-9]*|*"$want") ;;
+            *)
+              echo "forge on this runner is not the pinned $tag. Reinstall it:"
+              echo "    foundryup --install $tag"
+              exit 1
+              ;;
+          esac
+          echo "$bin" >> "$GITHUB_PATH"
       - uses: azure/setup-helm@v4
         with:
           version: ${{ env.HELM_VERSION }}

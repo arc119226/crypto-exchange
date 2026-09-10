@@ -22,7 +22,7 @@ func newAdminCmd() *cobra.Command {
 	c.PersistentFlags().String("admin-key", envOr("EXCHANGE_ADMIN_API_KEY", ""), "admin API key (X-Admin-Api-Key); env EXCHANGE_ADMIN_API_KEY")
 	c.AddCommand(newAdminAccountsCmd(), newAdminBalancesCmd(), newAdminFundCmd(), newAdminAdjustCmd(), newAdminTrialBalanceCmd(), newAdminEntriesCmd(), newAdminAuditCmd(), newAdminMarketsCmd(), newAdminWithdrawalsCmd(), newAdminSweepsCmd(), newAdminReconcileCmd(), newAdminHouseAdjustCmd(), newAdminWebhooksCmd(),
 		newAdminUsersCmd(), newAdminAssetsCmd(), newAdminFeeSchedulesCmd(), newAdminWithdrawalLimitsCmd(), newAdminDepositsCmd(),
-		newAdminHotWalletCmd(), newAdminBreaksCmd(), newAdminReloadCmd())
+		newAdminHotWalletCmd(), newAdminBreaksCmd(), newAdminReloadCmd(), newAdminRevenueCmd())
 	return c
 }
 

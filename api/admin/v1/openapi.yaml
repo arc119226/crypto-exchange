@@ -37,6 +37,7 @@ tags:
   - name: withdrawals
   - name: chain
   - name: reconciliation
+  - name: reports
   - name: webhooks
   - name: system
 
@@ -994,6 +995,86 @@ paths:
         "500":
           $ref: "#/components/responses/InternalError"
 
+  /admin/v1/deposits/awaiting-reversal:
+    get:
+      tags: [chain]
+      operationId: listDepositsAwaitingReversal
+      summary: Credited deposits a reorg took away, waiting for a decision
+      description: >
+        A deposit the ledger credited whose block was later abandoned by a
+        reorg deeper than the asset's confirmations (docs/plan-v1.0.md
+        §6.4.1). The status is still `credited` and the account still holds the
+        balance -- the ledger cannot un-say it on its own, because the money
+        may already have been spent. Each of these is a decision waiting for a
+        person. In a healthy exchange this list is empty; anything in it means
+        an account holds a balance the chain does not back, and reconciliation
+        will report the difference as a break.
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+      responses:
+        "200":
+          description: The queue
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminDepositList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /admin/v1/deposits/{id}/reverse:
+    post:
+      tags: [chain]
+      operationId: reverseDeposit
+      summary: Confirm that a reorged deposit should be undone
+      description: |
+        Records the decision; it moves no money. The admin role has no node and
+        no view of the chain, so the chain role posts the reversing entry on
+        its next tick -- the exact mirror of the three postings that credited
+        it, including the fee.
+
+        There is no matching reject: leaving a reorged deposit alone is what
+        happens if nobody acts, so asking is the whole decision. The reason is
+        required and is recorded in the audit trail and on the entry.
+
+        The reversal can still be refused after this returns, for one reason:
+        the account no longer has what it was credited. Balances may not go
+        negative, and an account that owes the exchange is not something this
+        system can represent. The deposit then stays in the queue with
+        `reversal_error` explaining, and the choice goes back to a person --
+        `docs/runbooks/reorg-alert.md` has the options.
+      parameters:
+        - $ref: "#/components/parameters/DepositID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReverseDepositRequest"
+      responses:
+        "202":
+          description: Recorded; the chain role will apply it
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminDeposit"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "409":
+          description: >
+            Not awaiting a reversal: no reorg took its block away, it has
+            already been reversed, or somebody has already asked.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
   /admin/v1/hot-wallet:
     get:
       tags: [chain]
@@ -1015,6 +1096,79 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "404":
           $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /admin/v1/reports/revenue:
+    get:
+      tags: [reports]
+      operationId: getRevenueReport
+      summary: What the exchange earned and what it paid the chain, per asset
+      description: |
+        The three fee sources and the gas they cost, over a half-open period
+        `[from, to)`, one row per asset (docs/plan-v1.0.md §23.5).
+
+        **Trading fees come from the trade rows, not the ledger.** A settle
+        entry credits `fee_revenue` with the same two numbers each trade
+        carries, so counting both would double them -- and only the trade row
+        records which side was the maker. Withdrawal and deposit fees are read
+        from `fee_revenue` instead, because those have no other record.
+
+        **Nothing is converted between assets.** Gas is paid in the chain's
+        native coin whatever was withdrawn, so a USDC row shows fee revenue
+        with no gas beneath it and the ETH row carries the gas for every
+        withdrawal on the chain. `net` is the subtraction within one asset and
+        means nothing across two; converting would need a price source, which
+        v1.1 does not have.
+
+        **Two clocks.** A trade is counted at the engine's command timestamp; a
+        withdrawal or deposit fee at the moment the ledger booked it. A
+        withdrawal is therefore counted when it *confirmed*, not when the user
+        asked, so one that spans the end of the period lands in the next one.
+
+        Omitting both bounds reports the last 30 days ending now.
+      parameters:
+        - $ref: "#/components/parameters/RevenueFrom"
+        - $ref: "#/components/parameters/RevenueTo"
+        - $ref: "#/components/parameters/RevenueAsset"
+      responses:
+        "200":
+          description: One row per asset that had any activity in the period
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RevenueReport"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /admin/v1/reports/revenue.csv:
+    get:
+      tags: [reports]
+      operationId: getRevenueReportCsv
+      summary: The same report as a CSV download
+      description: >
+        Identical numbers to `GET /admin/v1/reports/revenue`, one header row
+        and one row per asset, amounts as the same decimal strings. Provided
+        because a revenue report is something an operator takes somewhere else.
+      parameters:
+        - $ref: "#/components/parameters/RevenueFrom"
+        - $ref: "#/components/parameters/RevenueTo"
+        - $ref: "#/components/parameters/RevenueAsset"
+      responses:
+        "200":
+          description: CSV
+          content:
+            text/csv:
+              schema:
+                type: string
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "500":
           $ref: "#/components/responses/InternalError"
 
@@ -1471,6 +1625,41 @@ components:
       schema:
         type: string
 
+    DepositID:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+
+    RevenueFrom:
+      name: from
+      in: query
+      description: >
+        Start of the period, inclusive. Defaults to 30 days before `to`.
+      schema:
+        type: string
+        format: date-time
+    RevenueTo:
+      name: to
+      in: query
+      description: >
+        End of the period, exclusive. Defaults to now, so a report asked for
+        twice in one day covers slightly different windows -- the boundary is
+        the request, not the calendar.
+      schema:
+        type: string
+        format: date-time
+    RevenueAsset:
+      name: asset
+      in: query
+      description: >
+        Narrow to one asset. Omit for every asset that had activity. Note that
+        narrowing to an ERC-20 hides the gas its withdrawals cost, because gas
+        is booked against the chain's native coin.
+      schema:
+        type: string
+
     WebhookEndpointID:
       name: id
       in: path
@@ -1528,13 +1717,25 @@ components:
 
     AdminWithdrawal:
       type: object
-      required: [id, account_id, asset, amount, to_address, chain_id, status, created_at]
+      required: [id, account_id, asset, amount, fee, fee_asset, to_address, chain_id, status, created_at]
       properties:
         id: { type: string }
         account_id: { type: string }
         asset: { type: string }
         amount:
           $ref: "#/components/schemas/Amount"
+        fee:
+          allOf:
+            - $ref: "#/components/schemas/Amount"
+          description: >
+            What was quoted when the request was accepted, charged on top of
+            the amount. It stays in the account's hold until the transaction
+            confirms, and comes back on every path that does not confirm, so
+            a withdrawal in the review queue can still be refunded in full
+            after a rate change.
+        fee_asset:
+          type: string
+          description: The asset the fee is charged in, which today is `asset`.
         to_address: { type: string }
         chain_id: { type: integer, format: int64 }
         status: { type: string }
@@ -1868,7 +2069,7 @@ components:
 
     Asset:
       type: object
-      required: [id, symbol, name, chain_id, is_native, scale, display_scale, required_confirmations, min_deposit, min_withdrawal, withdrawal_fee, sweep_threshold, deposit_enabled, withdraw_enabled, status, version, created_at, updated_at]
+      required: [id, symbol, name, chain_id, is_native, scale, display_scale, required_confirmations, min_deposit, min_withdrawal, withdrawal_fee, withdrawal_fee_bps, deposit_fee_bps, sweep_threshold, deposit_enabled, withdraw_enabled, status, version, created_at, updated_at]
       properties:
         id:
           type: string
@@ -1900,6 +2101,31 @@ components:
           $ref: "#/components/schemas/Amount"
         withdrawal_fee:
           $ref: "#/components/schemas/Amount"
+        withdrawal_fee_bps:
+          type: integer
+          format: int32
+          minimum: 0
+          maximum: 10000
+          description: >
+            The proportional part of the withdrawal fee, in basis points of
+            the amount. The total charged is
+            `withdrawal_fee + ceil(amount * withdrawal_fee_bps / 10000)`,
+            rounded up at the asset's scale, and it is charged on top of the
+            amount rather than taken out of it.
+          example: 0
+        deposit_fee_bps:
+          type: integer
+          format: int32
+          minimum: 0
+          maximum: 10000
+          description: >
+            Basis points taken out of an arriving deposit. There is no flat
+            part: a flat deposit fee makes small deposits arbitrarily
+            expensive. 10000 is refused for this one -- it would credit a
+            depositor nothing. Deposits are the inlet and this ships at 0;
+            the column exists in case sweep gas ever exceeds what trading
+            brings in.
+          example: 0
         sweep_threshold:
           $ref: "#/components/schemas/Amount"
         deposit_enabled:
@@ -1929,7 +2155,7 @@ components:
 
     AssetRequest:
       type: object
-      required: [name, chain_id, is_native, scale, display_scale, required_confirmations, min_deposit, min_withdrawal, withdrawal_fee, sweep_threshold, deposit_enabled, withdraw_enabled, status, reason]
+      required: [name, chain_id, is_native, scale, display_scale, required_confirmations, min_deposit, min_withdrawal, withdrawal_fee, withdrawal_fee_bps, deposit_fee_bps, sweep_threshold, deposit_enabled, withdraw_enabled, status, reason]
       properties:
         name:
           type: string
@@ -1956,6 +2182,31 @@ components:
           $ref: "#/components/schemas/Amount"
         withdrawal_fee:
           $ref: "#/components/schemas/Amount"
+        withdrawal_fee_bps:
+          type: integer
+          format: int32
+          minimum: 0
+          maximum: 10000
+          description: >
+            The proportional part of the withdrawal fee, in basis points of
+            the amount. The total charged is
+            `withdrawal_fee + ceil(amount * withdrawal_fee_bps / 10000)`,
+            rounded up at the asset's scale, and it is charged on top of the
+            amount rather than taken out of it.
+          example: 0
+        deposit_fee_bps:
+          type: integer
+          format: int32
+          minimum: 0
+          maximum: 10000
+          description: >
+            Basis points taken out of an arriving deposit. There is no flat
+            part: a flat deposit fee makes small deposits arbitrarily
+            expensive. 10000 is refused for this one -- it would credit a
+            depositor nothing. Deposits are the inlet and this ships at 0;
+            the column exists in case sweep gas ever exceeds what trading
+            brings in.
+          example: 0
         sweep_threshold:
           $ref: "#/components/schemas/Amount"
         deposit_enabled:
@@ -2410,6 +2661,21 @@ components:
           type: string
         amount:
           $ref: "#/components/schemas/Amount"
+        fee:
+          allOf:
+            - $ref: "#/components/schemas/Amount"
+          nullable: true
+          description: >
+            Taken out of the amount at credit time, so it is null until the
+            deposit is credited. Unlike a withdrawal fee it is not charged on
+            top: `amount` stays what the chain delivered.
+        credited_amount:
+          allOf:
+            - $ref: "#/components/schemas/Amount"
+          nullable: true
+          description: >
+            What became the account's balance: `amount - fee`. Null until
+            credited.
         address:
           type: string
         tx_hash:
@@ -2429,6 +2695,31 @@ components:
         credited_at:
           type: string
           format: date-time
+        reorged_at_block:
+          type: integer
+          format: int64
+          nullable: true
+          description: >
+            The height a reorg rewound to after this deposit had been credited.
+            Set means the chain no longer shows it and it is waiting for a
+            decision; the status stays `credited` until the reversing entry is
+            posted.
+        reversal_requested_by:
+          type: string
+          nullable: true
+        reversal_note:
+          type: string
+          nullable: true
+        reversal_error:
+          type: string
+          nullable: true
+          description: >
+            Why the last attempt could not be posted. In practice there is one
+            reason: the account has already spent what it was credited.
+        reversed_at:
+          type: string
+          format: date-time
+          nullable: true
         created_at:
           type: string
           format: date-time
@@ -2477,6 +2768,104 @@ components:
         updated_at:
           type: string
           format: date-time
+
+    ReverseDepositRequest:
+      type: object
+      required: [reason]
+      properties:
+        reason:
+          type: string
+          minLength: 1
+          description: >
+            Why this deposit is being undone. Recorded in the audit trail and
+            carried on the reversing journal entry, which is where somebody
+            reading the ledger a year later will find it.
+
+    RevenueReport:
+      type: object
+      required: [from, to, lines]
+      properties:
+        from:
+          type: string
+          format: date-time
+        to:
+          type: string
+          format: date-time
+          description: Exclusive.
+        lines:
+          type: array
+          items:
+            $ref: "#/components/schemas/RevenueLine"
+
+    RevenueLine:
+      type: object
+      description: >
+        One asset's revenue and cost. Every amount is denominated in `asset`
+        and nothing is converted between assets.
+      required:
+        [asset, maker_fees, taker_fees, withdrawal_fees, deposit_fees,
+         other_fees, gas_expense, net, trades, withdrawals, deposits]
+      properties:
+        asset:
+          type: string
+        maker_fees:
+          allOf:
+            - $ref: "#/components/schemas/Amount"
+          description: >
+            Summed from the trade rows, which are the only record that knows
+            which side was the maker.
+        taker_fees:
+          $ref: "#/components/schemas/Amount"
+        withdrawal_fees:
+          allOf:
+            - $ref: "#/components/schemas/Amount"
+          description: >
+            Credited to `fee_revenue` when a withdrawal confirmed. A withdrawal
+            that was refunded or never broadcast contributes nothing, because
+            its fee went back to the account.
+        deposit_fees:
+          allOf:
+            - $ref: "#/components/schemas/Amount"
+          description: Taken out of arriving deposits. Zero unless a rate is set.
+        other_fees:
+          allOf:
+            - $ref: "#/components/schemas/Amount"
+          description: >
+            Anything else credited to `fee_revenue` -- an operator adjustment
+            posted against the account, or a fee source added later that this
+            report does not know about yet. Zero in normal operation; it exists
+            so revenue can never be silently missing from `net`.
+        gas_expense:
+          allOf:
+            - $ref: "#/components/schemas/Amount"
+          description: >
+            Every `gas_expense` debit in the period: withdrawals, sweeps and
+            nonce fills alike. It is what the exchange paid the chain, whatever
+            the reason, and it is always in the native coin.
+        net:
+          allOf:
+            - $ref: "#/components/schemas/Amount"
+          description: All the fees above minus `gas_expense`, within this asset only.
+        trades:
+          type: integer
+          format: int64
+          description: >
+            Trades charged in this asset, including those charged zero -- which
+            is every trade until an operator sets a rate.
+        withdrawals:
+          type: integer
+          format: int64
+          description: >
+            Withdrawals that paid a fee. Zero-fee withdrawals post nothing and
+            so cannot be counted here. Note that `gas_expense` divided by this
+            is NOT the cost of a withdrawal: that column is every gas debit in
+            the period, sweeps and nonce fills included. Pricing the fee
+            against per-withdrawal gas needs the `withdrawal:gas:*` entries
+            alone (§23.3).
+        deposits:
+          type: integer
+          format: int64
+          description: Deposits that paid a fee.
 
     ReconciliationReportList:
       type: object

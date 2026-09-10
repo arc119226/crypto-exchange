@@ -11,6 +11,83 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const claimDepositReversals = `-- name: ClaimDepositReversals :many
+SELECT id, tenant_id, chain_id, tx_hash, log_index, address, account_id, asset, amount, block_number, block_hash, confirmations, status, orphaned_at_block, credited_at, correlation_id, version, created_at, updated_at, fee, credited_amount, reorged_at_block, reversal_requested_by, reversal_requested_at, reversal_note, reversal_error, reversed_at FROM chain.deposits
+WHERE tenant_id = $1 AND status = 'credited' AND reversal_requested_at IS NOT NULL
+ORDER BY reversal_requested_at
+LIMIT $2
+`
+
+type ClaimDepositReversalsParams struct {
+	TenantID string
+	Limit    int32
+}
+
+// What the chain role should reverse on this tick.
+func (q *Queries) ClaimDepositReversals(ctx context.Context, arg ClaimDepositReversalsParams) ([]ChainDeposit, error) {
+	rows, err := q.db.Query(ctx, claimDepositReversals, arg.TenantID, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ChainDeposit{}
+	for rows.Next() {
+		var i ChainDeposit
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.ChainID,
+			&i.TxHash,
+			&i.LogIndex,
+			&i.Address,
+			&i.AccountID,
+			&i.Asset,
+			&i.Amount,
+			&i.BlockNumber,
+			&i.BlockHash,
+			&i.Confirmations,
+			&i.Status,
+			&i.OrphanedAtBlock,
+			&i.CreditedAt,
+			&i.CorrelationID,
+			&i.Version,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Fee,
+			&i.CreditedAmount,
+			&i.ReorgedAtBlock,
+			&i.ReversalRequestedBy,
+			&i.ReversalRequestedAt,
+			&i.ReversalNote,
+			&i.ReversalError,
+			&i.ReversedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const countDepositsAwaitingReversal = `-- name: CountDepositsAwaitingReversal :one
+SELECT count(*) FROM chain.deposits
+WHERE tenant_id = $1 AND status = 'credited' AND reorged_at_block IS NOT NULL
+`
+
+// Everything that has been stamped and not yet reversed, whether or not a
+// person has decided about it. The gauge behind DepositAwaitingReversal: this
+// number being anything but zero means an account holds a balance the chain
+// does not back.
+func (q *Queries) CountDepositsAwaitingReversal(ctx context.Context, tenantID string) (int64, error) {
+	row := q.db.QueryRow(ctx, countDepositsAwaitingReversal, tenantID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const countDepositsByStatus = `-- name: CountDepositsByStatus :many
 SELECT asset, status, count(*) AS total
 FROM chain.deposits
@@ -135,7 +212,7 @@ func (q *Queries) GetChainState(ctx context.Context, arg GetChainStateParams) (C
 }
 
 const getDepositForUpdate = `-- name: GetDepositForUpdate :one
-SELECT id, tenant_id, chain_id, tx_hash, log_index, address, account_id, asset, amount, block_number, block_hash, confirmations, status, orphaned_at_block, credited_at, correlation_id, version, created_at, updated_at FROM chain.deposits
+SELECT id, tenant_id, chain_id, tx_hash, log_index, address, account_id, asset, amount, block_number, block_hash, confirmations, status, orphaned_at_block, credited_at, correlation_id, version, created_at, updated_at, fee, credited_amount, reorged_at_block, reversal_requested_by, reversal_requested_at, reversal_note, reversal_error, reversed_at FROM chain.deposits
 WHERE tenant_id = $1 AND chain_id = $2 AND tx_hash = $3 AND log_index = $4
 FOR UPDATE
 `
@@ -178,6 +255,14 @@ func (q *Queries) GetDepositForUpdate(ctx context.Context, arg GetDepositForUpda
 		&i.Version,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Fee,
+		&i.CreditedAmount,
+		&i.ReorgedAtBlock,
+		&i.ReversalRequestedBy,
+		&i.ReversalRequestedAt,
+		&i.ReversalNote,
+		&i.ReversalError,
+		&i.ReversedAt,
 	)
 	return i, err
 }
@@ -235,7 +320,7 @@ INSERT INTO chain.deposits (
     tenant_id, chain_id, tx_hash, log_index, address, account_id, asset, amount,
     block_number, block_hash, confirmations, status, correlation_id
 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
-RETURNING id, tenant_id, chain_id, tx_hash, log_index, address, account_id, asset, amount, block_number, block_hash, confirmations, status, orphaned_at_block, credited_at, correlation_id, version, created_at, updated_at
+RETURNING id, tenant_id, chain_id, tx_hash, log_index, address, account_id, asset, amount, block_number, block_hash, confirmations, status, orphaned_at_block, credited_at, correlation_id, version, created_at, updated_at, fee, credited_amount, reorged_at_block, reversal_requested_by, reversal_requested_at, reversal_note, reversal_error, reversed_at
 `
 
 type InsertDepositParams struct {
@@ -291,12 +376,20 @@ func (q *Queries) InsertDeposit(ctx context.Context, arg InsertDepositParams) (C
 		&i.Version,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Fee,
+		&i.CreditedAmount,
+		&i.ReorgedAtBlock,
+		&i.ReversalRequestedBy,
+		&i.ReversalRequestedAt,
+		&i.ReversalNote,
+		&i.ReversalError,
+		&i.ReversedAt,
 	)
 	return i, err
 }
 
 const listDeposits = `-- name: ListDeposits :many
-SELECT id, tenant_id, chain_id, tx_hash, log_index, address, account_id, asset, amount, block_number, block_hash, confirmations, status, orphaned_at_block, credited_at, correlation_id, version, created_at, updated_at FROM chain.deposits
+SELECT id, tenant_id, chain_id, tx_hash, log_index, address, account_id, asset, amount, block_number, block_hash, confirmations, status, orphaned_at_block, credited_at, correlation_id, version, created_at, updated_at, fee, credited_amount, reorged_at_block, reversal_requested_by, reversal_requested_at, reversal_note, reversal_error, reversed_at FROM chain.deposits
 WHERE tenant_id = $1
   AND ($4::text = '' OR status = $4::text)
   AND ($5::text = '' OR asset = $5::text)
@@ -347,6 +440,78 @@ func (q *Queries) ListDeposits(ctx context.Context, arg ListDepositsParams) ([]C
 			&i.Version,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Fee,
+			&i.CreditedAmount,
+			&i.ReorgedAtBlock,
+			&i.ReversalRequestedBy,
+			&i.ReversalRequestedAt,
+			&i.ReversalNote,
+			&i.ReversalError,
+			&i.ReversedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listDepositsAwaitingReversal = `-- name: ListDepositsAwaitingReversal :many
+SELECT id, tenant_id, chain_id, tx_hash, log_index, address, account_id, asset, amount, block_number, block_hash, confirmations, status, orphaned_at_block, credited_at, correlation_id, version, created_at, updated_at, fee, credited_amount, reorged_at_block, reversal_requested_by, reversal_requested_at, reversal_note, reversal_error, reversed_at FROM chain.deposits
+WHERE tenant_id = $1 AND status = 'credited' AND reorged_at_block IS NOT NULL
+  AND reversal_requested_at IS NULL
+ORDER BY reorged_at_block, id
+LIMIT $2 OFFSET $3
+`
+
+type ListDepositsAwaitingReversalParams struct {
+	TenantID string
+	Limit    int32
+	Offset   int32
+}
+
+// The operator's queue: credited deposits the chain no longer shows, with no
+// decision recorded yet.
+func (q *Queries) ListDepositsAwaitingReversal(ctx context.Context, arg ListDepositsAwaitingReversalParams) ([]ChainDeposit, error) {
+	rows, err := q.db.Query(ctx, listDepositsAwaitingReversal, arg.TenantID, arg.Limit, arg.Offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ChainDeposit{}
+	for rows.Next() {
+		var i ChainDeposit
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.ChainID,
+			&i.TxHash,
+			&i.LogIndex,
+			&i.Address,
+			&i.AccountID,
+			&i.Asset,
+			&i.Amount,
+			&i.BlockNumber,
+			&i.BlockHash,
+			&i.Confirmations,
+			&i.Status,
+			&i.OrphanedAtBlock,
+			&i.CreditedAt,
+			&i.CorrelationID,
+			&i.Version,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Fee,
+			&i.CreditedAmount,
+			&i.ReorgedAtBlock,
+			&i.ReversalRequestedBy,
+			&i.ReversalRequestedAt,
+			&i.ReversalNote,
+			&i.ReversalError,
+			&i.ReversedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -359,7 +524,7 @@ func (q *Queries) ListDeposits(ctx context.Context, arg ListDepositsParams) ([]C
 }
 
 const listDepositsByAccount = `-- name: ListDepositsByAccount :many
-SELECT id, tenant_id, chain_id, tx_hash, log_index, address, account_id, asset, amount, block_number, block_hash, confirmations, status, orphaned_at_block, credited_at, correlation_id, version, created_at, updated_at FROM chain.deposits
+SELECT id, tenant_id, chain_id, tx_hash, log_index, address, account_id, asset, amount, block_number, block_hash, confirmations, status, orphaned_at_block, credited_at, correlation_id, version, created_at, updated_at, fee, credited_amount, reorged_at_block, reversal_requested_by, reversal_requested_at, reversal_note, reversal_error, reversed_at FROM chain.deposits
 WHERE tenant_id = $1 AND account_id = $2
 ORDER BY created_at DESC, id
 LIMIT $3 OFFSET $4
@@ -406,6 +571,14 @@ func (q *Queries) ListDepositsByAccount(ctx context.Context, arg ListDepositsByA
 			&i.Version,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Fee,
+			&i.CreditedAmount,
+			&i.ReorgedAtBlock,
+			&i.ReversalRequestedBy,
+			&i.ReversalRequestedAt,
+			&i.ReversalNote,
+			&i.ReversalError,
+			&i.ReversedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -418,7 +591,7 @@ func (q *Queries) ListDepositsByAccount(ctx context.Context, arg ListDepositsByA
 }
 
 const listExpiredOrphans = `-- name: ListExpiredOrphans :many
-SELECT id, tenant_id, chain_id, tx_hash, log_index, address, account_id, asset, amount, block_number, block_hash, confirmations, status, orphaned_at_block, credited_at, correlation_id, version, created_at, updated_at FROM chain.deposits
+SELECT id, tenant_id, chain_id, tx_hash, log_index, address, account_id, asset, amount, block_number, block_hash, confirmations, status, orphaned_at_block, credited_at, correlation_id, version, created_at, updated_at, fee, credited_amount, reorged_at_block, reversal_requested_by, reversal_requested_at, reversal_note, reversal_error, reversed_at FROM chain.deposits
 WHERE tenant_id = $1 AND chain_id = $2 AND status = 'orphaned' AND orphaned_at_block <= $3
 ORDER BY id
 `
@@ -458,6 +631,14 @@ func (q *Queries) ListExpiredOrphans(ctx context.Context, arg ListExpiredOrphans
 			&i.Version,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Fee,
+			&i.CreditedAmount,
+			&i.ReorgedAtBlock,
+			&i.ReversalRequestedBy,
+			&i.ReversalRequestedAt,
+			&i.ReversalNote,
+			&i.ReversalError,
+			&i.ReversedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -470,7 +651,7 @@ func (q *Queries) ListExpiredOrphans(ctx context.Context, arg ListExpiredOrphans
 }
 
 const listMaturingDeposits = `-- name: ListMaturingDeposits :many
-SELECT id, tenant_id, chain_id, tx_hash, log_index, address, account_id, asset, amount, block_number, block_hash, confirmations, status, orphaned_at_block, credited_at, correlation_id, version, created_at, updated_at FROM chain.deposits
+SELECT id, tenant_id, chain_id, tx_hash, log_index, address, account_id, asset, amount, block_number, block_hash, confirmations, status, orphaned_at_block, credited_at, correlation_id, version, created_at, updated_at, fee, credited_amount, reorged_at_block, reversal_requested_by, reversal_requested_at, reversal_note, reversal_error, reversed_at FROM chain.deposits
 WHERE tenant_id = $1 AND chain_id = $2 AND status IN ('detected', 'confirming')
 ORDER BY block_number, id
 `
@@ -509,6 +690,14 @@ func (q *Queries) ListMaturingDeposits(ctx context.Context, arg ListMaturingDepo
 			&i.Version,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Fee,
+			&i.CreditedAmount,
+			&i.ReorgedAtBlock,
+			&i.ReversalRequestedBy,
+			&i.ReversalRequestedAt,
+			&i.ReversalNote,
+			&i.ReversalError,
+			&i.ReversedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -523,19 +712,28 @@ func (q *Queries) ListMaturingDeposits(ctx context.Context, arg ListMaturingDepo
 const markDepositCredited = `-- name: MarkDepositCredited :one
 UPDATE chain.deposits
 SET status = 'credited', confirmations = $3, credited_at = now(),
+    fee = $4, credited_amount = $5,
     version = version + 1, updated_at = now()
 WHERE id = $1 AND tenant_id = $2 AND status <> 'credited'
-RETURNING id, tenant_id, chain_id, tx_hash, log_index, address, account_id, asset, amount, block_number, block_hash, confirmations, status, orphaned_at_block, credited_at, correlation_id, version, created_at, updated_at
+RETURNING id, tenant_id, chain_id, tx_hash, log_index, address, account_id, asset, amount, block_number, block_hash, confirmations, status, orphaned_at_block, credited_at, correlation_id, version, created_at, updated_at, fee, credited_amount, reorged_at_block, reversal_requested_by, reversal_requested_at, reversal_note, reversal_error, reversed_at
 `
 
 type MarkDepositCreditedParams struct {
-	ID            string
-	TenantID      string
-	Confirmations int32
+	ID             string
+	TenantID       string
+	Confirmations  int32
+	Fee            pgtype.Numeric
+	CreditedAmount pgtype.Numeric
 }
 
 func (q *Queries) MarkDepositCredited(ctx context.Context, arg MarkDepositCreditedParams) (ChainDeposit, error) {
-	row := q.db.QueryRow(ctx, markDepositCredited, arg.ID, arg.TenantID, arg.Confirmations)
+	row := q.db.QueryRow(ctx, markDepositCredited,
+		arg.ID,
+		arg.TenantID,
+		arg.Confirmations,
+		arg.Fee,
+		arg.CreditedAmount,
+	)
 	var i ChainDeposit
 	err := row.Scan(
 		&i.ID,
@@ -557,6 +755,14 @@ func (q *Queries) MarkDepositCredited(ctx context.Context, arg MarkDepositCredit
 		&i.Version,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Fee,
+		&i.CreditedAmount,
+		&i.ReorgedAtBlock,
+		&i.ReversalRequestedBy,
+		&i.ReversalRequestedAt,
+		&i.ReversalNote,
+		&i.ReversalError,
+		&i.ReversedAt,
 	)
 	return i, err
 }
@@ -577,12 +783,64 @@ func (q *Queries) MarkDepositDropped(ctx context.Context, arg MarkDepositDropped
 	return err
 }
 
+const markDepositReversed = `-- name: MarkDepositReversed :one
+UPDATE chain.deposits
+SET status = 'reversed', reversed_at = now(), credited_at = NULL,
+    reversal_requested_at = NULL, reversal_error = NULL,
+    version = version + 1, updated_at = now()
+WHERE id = $1 AND tenant_id = $2 AND status = 'credited'
+RETURNING id, tenant_id, chain_id, tx_hash, log_index, address, account_id, asset, amount, block_number, block_hash, confirmations, status, orphaned_at_block, credited_at, correlation_id, version, created_at, updated_at, fee, credited_amount, reorged_at_block, reversal_requested_by, reversal_requested_at, reversal_note, reversal_error, reversed_at
+`
+
+type MarkDepositReversedParams struct {
+	ID       string
+	TenantID string
+}
+
+// Applied. credited_at goes because 0009 ties it to the status; fee and
+// credited_amount stay, because 0024 tied them to "the ledger moved" instead
+// and they are the record of what was undone.
+func (q *Queries) MarkDepositReversed(ctx context.Context, arg MarkDepositReversedParams) (ChainDeposit, error) {
+	row := q.db.QueryRow(ctx, markDepositReversed, arg.ID, arg.TenantID)
+	var i ChainDeposit
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.ChainID,
+		&i.TxHash,
+		&i.LogIndex,
+		&i.Address,
+		&i.AccountID,
+		&i.Asset,
+		&i.Amount,
+		&i.BlockNumber,
+		&i.BlockHash,
+		&i.Confirmations,
+		&i.Status,
+		&i.OrphanedAtBlock,
+		&i.CreditedAt,
+		&i.CorrelationID,
+		&i.Version,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Fee,
+		&i.CreditedAmount,
+		&i.ReorgedAtBlock,
+		&i.ReversalRequestedBy,
+		&i.ReversalRequestedAt,
+		&i.ReversalNote,
+		&i.ReversalError,
+		&i.ReversedAt,
+	)
+	return i, err
+}
+
 const markDepositsOrphaned = `-- name: MarkDepositsOrphaned :many
 UPDATE chain.deposits
 SET status = 'orphaned', orphaned_at_block = $4, version = version + 1, updated_at = now()
 WHERE tenant_id = $1 AND chain_id = $2 AND block_number >= $3
   AND status IN ('detected', 'confirming')
-RETURNING id, tenant_id, chain_id, tx_hash, log_index, address, account_id, asset, amount, block_number, block_hash, confirmations, status, orphaned_at_block, credited_at, correlation_id, version, created_at, updated_at
+RETURNING id, tenant_id, chain_id, tx_hash, log_index, address, account_id, asset, amount, block_number, block_hash, confirmations, status, orphaned_at_block, credited_at, correlation_id, version, created_at, updated_at, fee, credited_amount, reorged_at_block, reversal_requested_by, reversal_requested_at, reversal_note, reversal_error, reversed_at
 `
 
 type MarkDepositsOrphanedParams struct {
@@ -628,6 +886,88 @@ func (q *Queries) MarkDepositsOrphaned(ctx context.Context, arg MarkDepositsOrph
 			&i.Version,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Fee,
+			&i.CreditedAmount,
+			&i.ReorgedAtBlock,
+			&i.ReversalRequestedBy,
+			&i.ReversalRequestedAt,
+			&i.ReversalNote,
+			&i.ReversalError,
+			&i.ReversedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const markDepositsReorged = `-- name: MarkDepositsReorged :many
+UPDATE chain.deposits
+SET reorged_at_block = $4, version = version + 1, updated_at = now()
+WHERE tenant_id = $1 AND chain_id = $2 AND block_number >= $3
+  AND status = 'credited' AND reorged_at_block IS NULL
+RETURNING id, tenant_id, chain_id, tx_hash, log_index, address, account_id, asset, amount, block_number, block_hash, confirmations, status, orphaned_at_block, credited_at, correlation_id, version, created_at, updated_at, fee, credited_amount, reorged_at_block, reversal_requested_by, reversal_requested_at, reversal_note, reversal_error, reversed_at
+`
+
+type MarkDepositsReorgedParams struct {
+	TenantID       string
+	ChainID        int64
+	BlockNumber    int64
+	ReorgedAtBlock *int64
+}
+
+// Credited deposits whose block was abandoned by a reorg. The status stays
+// 'credited' -- the ledger still holds the credit and must until a reversing
+// entry is posted -- so this only stamps the height, which is what puts the
+// row in the operator's queue. Already-stamped rows are left alone: the first
+// reorg is the one that matters, and a later, shallower one must not move the
+// mark to a height the deposit was never valid at.
+func (q *Queries) MarkDepositsReorged(ctx context.Context, arg MarkDepositsReorgedParams) ([]ChainDeposit, error) {
+	rows, err := q.db.Query(ctx, markDepositsReorged,
+		arg.TenantID,
+		arg.ChainID,
+		arg.BlockNumber,
+		arg.ReorgedAtBlock,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ChainDeposit{}
+	for rows.Next() {
+		var i ChainDeposit
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.ChainID,
+			&i.TxHash,
+			&i.LogIndex,
+			&i.Address,
+			&i.AccountID,
+			&i.Asset,
+			&i.Amount,
+			&i.BlockNumber,
+			&i.BlockHash,
+			&i.Confirmations,
+			&i.Status,
+			&i.OrphanedAtBlock,
+			&i.CreditedAt,
+			&i.CorrelationID,
+			&i.Version,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Fee,
+			&i.CreditedAmount,
+			&i.ReorgedAtBlock,
+			&i.ReversalRequestedBy,
+			&i.ReversalRequestedAt,
+			&i.ReversalNote,
+			&i.ReversalError,
+			&i.ReversedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -658,12 +998,92 @@ func (q *Queries) PruneBlocksBelow(ctx context.Context, arg PruneBlocksBelowPara
 	return result.RowsAffected(), nil
 }
 
+const recordDepositReversalError = `-- name: RecordDepositReversalError :exec
+UPDATE chain.deposits
+SET reversal_requested_at = NULL, reversal_error = $3,
+    version = version + 1, updated_at = now()
+WHERE id = $1 AND tenant_id = $2
+`
+
+type RecordDepositReversalErrorParams struct {
+	ID            string
+	TenantID      string
+	ReversalError *string
+}
+
+// The reversal could not be posted -- almost always because the account has
+// already spent the money. The request is cleared so the worker does not spin
+// on it, and the reason stays for the person who asked.
+func (q *Queries) RecordDepositReversalError(ctx context.Context, arg RecordDepositReversalErrorParams) error {
+	_, err := q.db.Exec(ctx, recordDepositReversalError, arg.ID, arg.TenantID, arg.ReversalError)
+	return err
+}
+
+const requestDepositReversal = `-- name: RequestDepositReversal :one
+UPDATE chain.deposits
+SET reversal_requested_by = $3, reversal_requested_at = now(), reversal_note = $4,
+    version = version + 1, updated_at = now()
+WHERE id = $1 AND tenant_id = $2
+  AND status = 'credited' AND reorged_at_block IS NOT NULL
+  AND reversal_requested_at IS NULL
+RETURNING id, tenant_id, chain_id, tx_hash, log_index, address, account_id, asset, amount, block_number, block_hash, confirmations, status, orphaned_at_block, credited_at, correlation_id, version, created_at, updated_at, fee, credited_amount, reorged_at_block, reversal_requested_by, reversal_requested_at, reversal_note, reversal_error, reversed_at
+`
+
+type RequestDepositReversalParams struct {
+	ID                  string
+	TenantID            string
+	ReversalRequestedBy *string
+	ReversalNote        *string
+}
+
+// The admin role's only write to this table. It records a decision; it cannot
+// move money, change the status, or touch a deposit the scanner has not marked.
+func (q *Queries) RequestDepositReversal(ctx context.Context, arg RequestDepositReversalParams) (ChainDeposit, error) {
+	row := q.db.QueryRow(ctx, requestDepositReversal,
+		arg.ID,
+		arg.TenantID,
+		arg.ReversalRequestedBy,
+		arg.ReversalNote,
+	)
+	var i ChainDeposit
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.ChainID,
+		&i.TxHash,
+		&i.LogIndex,
+		&i.Address,
+		&i.AccountID,
+		&i.Asset,
+		&i.Amount,
+		&i.BlockNumber,
+		&i.BlockHash,
+		&i.Confirmations,
+		&i.Status,
+		&i.OrphanedAtBlock,
+		&i.CreditedAt,
+		&i.CorrelationID,
+		&i.Version,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Fee,
+		&i.CreditedAmount,
+		&i.ReorgedAtBlock,
+		&i.ReversalRequestedBy,
+		&i.ReversalRequestedAt,
+		&i.ReversalNote,
+		&i.ReversalError,
+		&i.ReversedAt,
+	)
+	return i, err
+}
+
 const updateDepositSighting = `-- name: UpdateDepositSighting :one
 UPDATE chain.deposits
 SET block_number = $3, block_hash = $4, confirmations = $5, status = $6,
     orphaned_at_block = NULL, version = version + 1, updated_at = now()
 WHERE id = $1 AND tenant_id = $2
-RETURNING id, tenant_id, chain_id, tx_hash, log_index, address, account_id, asset, amount, block_number, block_hash, confirmations, status, orphaned_at_block, credited_at, correlation_id, version, created_at, updated_at
+RETURNING id, tenant_id, chain_id, tx_hash, log_index, address, account_id, asset, amount, block_number, block_hash, confirmations, status, orphaned_at_block, credited_at, correlation_id, version, created_at, updated_at, fee, credited_amount, reorged_at_block, reversal_requested_by, reversal_requested_at, reversal_note, reversal_error, reversed_at
 `
 
 type UpdateDepositSightingParams struct {
@@ -708,6 +1128,14 @@ func (q *Queries) UpdateDepositSighting(ctx context.Context, arg UpdateDepositSi
 		&i.Version,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Fee,
+		&i.CreditedAmount,
+		&i.ReorgedAtBlock,
+		&i.ReversalRequestedBy,
+		&i.ReversalRequestedAt,
+		&i.ReversalNote,
+		&i.ReversalError,
+		&i.ReversedAt,
 	)
 	return i, err
 }

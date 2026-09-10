@@ -419,6 +419,12 @@ paths:
         `to_address` may be given in any casing, but a mixed-case address must
         pass its EIP-55 checksum: that casing *is* a checksum, and accepting a
         wrong one would send funds to a mistyped address.
+
+        `amount` is what the destination receives. The account is debited
+        `amount + fee`, and the response says what `fee` was quoted. The
+        available-balance check covers the total, so a balance that covers the
+        amount but not the fee is rejected here rather than minutes later.
+        The asset's minimum withdrawal is compared against `amount` alone.
       security:
         - bearerAuth: []
         - apiKeyAuth: []
@@ -1151,6 +1157,24 @@ components:
         asset: { type: string, example: ETH }
         amount:
           $ref: "#/components/schemas/Amount"
+        fee:
+          allOf:
+            - $ref: "#/components/schemas/Amount"
+          nullable: true
+          description: >
+            What was deducted from `amount` before crediting, or null until
+            the deposit is credited -- unlike a withdrawal fee this one is
+            computed when the money is credited, not when it is first seen.
+            `0` unless the operator has set a rate; deposits are free by
+            default.
+        credited_amount:
+          allOf:
+            - $ref: "#/components/schemas/Amount"
+          nullable: true
+          description: >
+            What became the account's balance: `amount - fee`. Null until
+            credited. `amount` stays what the chain delivered, so the two can
+            be reconciled independently.
         address:
           type: string
           description: >
@@ -1199,12 +1223,33 @@ components:
 
     Withdrawal:
       type: object
-      required: [id, asset, amount, to_address, chain_id, status, created_at]
+      required: [id, asset, amount, fee, fee_asset, to_address, chain_id, status, created_at]
       properties:
         id: { type: string }
         asset: { type: string, example: ETH }
         amount:
           $ref: "#/components/schemas/Amount"
+        fee:
+          allOf:
+            - $ref: "#/components/schemas/Amount"
+          description: >
+            What this withdrawal is charged, on top of `amount`. The
+            destination receives `amount`; the account is debited
+            `amount + fee`. Quoted when the request was accepted and never
+            recomputed, so changing the rate does not reprice a withdrawal
+            already in flight.
+
+            It is the account's money until the transaction is confirmed. On
+            every path that does not confirm -- a broadcast that failed, a
+            withdrawal displaced by a cancellation, an operator refund -- it
+            goes back to the available balance. `0` unless the operator has
+            set a rate.
+        fee_asset:
+          type: string
+          description: >
+            The asset `fee` is denominated in, which is `asset`. A USDC
+            withdrawal is charged in USDC even though its gas is paid in ETH.
+          example: ETH
         to_address:
           type: string
           description: The destination, lower-case.
@@ -1337,6 +1382,8 @@ components:
         - min_deposit
         - min_withdrawal
         - withdrawal_fee
+        - withdrawal_fee_bps
+        - deposit_fee_bps
         - deposit_enabled
         - withdraw_enabled
         - status
@@ -1381,7 +1428,36 @@ components:
         min_withdrawal:
           $ref: "#/components/schemas/Amount"
         withdrawal_fee:
-          $ref: "#/components/schemas/Amount"
+          allOf:
+            - $ref: "#/components/schemas/Amount"
+          description: >
+            The flat part of the withdrawal fee. The total charged is
+            `withdrawal_fee + ceil(amount * withdrawal_fee_bps / 10000)`,
+            rounded up at `scale`, and it is added to the amount rather than
+            taken out of it: the destination receives `amount` and the
+            account is debited the sum.
+        withdrawal_fee_bps:
+          type: integer
+          format: int32
+          minimum: 0
+          maximum: 10000
+          description: >
+            The proportional part of the withdrawal fee, in basis points of
+            the amount. `0` unless the operator has set a rate.
+          example: 0
+        deposit_fee_bps:
+          type: integer
+          format: int32
+          minimum: 0
+          maximum: 10000
+          description: >
+            Basis points taken out of an arriving deposit, rounded up at
+            `scale`. Unlike the withdrawal fee this one is deducted from what
+            arrives rather than added to it, so a deposit of `x` credits
+            `x - ceil(x * deposit_fee_bps / 10000)`. `0` unless the operator
+            has set a rate, and expected to stay there. Published so a
+            depositor can know the rate before sending rather than after.
+          example: 0
         deposit_enabled:
           type: boolean
         withdraw_enabled:

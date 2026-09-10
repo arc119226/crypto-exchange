@@ -233,6 +233,28 @@ func (w *Worker) pinNonce(ctx context.Context, row sqlcgen.ChainWithdrawal) (uin
 	return nonce, err
 }
 
+// attemptKey is an idempotency key for something that happens once per SEND
+// ATTEMPT rather than once per withdrawal.
+//
+// A withdrawal can legitimately be sent more than once: resolve(retry) puts a
+// reverted one back to funds_locked with a fresh nonce, and the money has to
+// move out of hold again for the new transaction. Keying that posting by the
+// withdrawal id alone made the second broadcast a replay -- ledger.Post found
+// the key, wrote nothing, and the worker marked the row broadcast anyway. The
+// amount then stayed frozen in the account's hold while confirmation debited
+// pending_withdrawal for it, so the exchange's books owed the account money
+// that was never released and no later state could release it. The trial
+// balance still netted to zero, which is why nothing caught it.
+//
+// row.Replacements is the attempt counter the signing log already keys on, so
+// this reuses it rather than inventing a second one. It is safe to change on a
+// live deployment: every posting keyed this way is written in the same
+// transaction as the state change that follows it, so a row that has already
+// passed the posting is in a state that cannot reach it again.
+func attemptKey(prefix string, row sqlcgen.ChainWithdrawal) string {
+	return fmt.Sprintf("%s:%s:%d", prefix, row.ID, row.Replacements)
+}
+
 // broadcast sends the stored bytes and moves hold -> pending_withdrawal
 // (§6.1.4 e).
 //
@@ -262,7 +284,7 @@ func (w *Worker) broadcast(ctx context.Context, row sqlcgen.ChainWithdrawal) err
 	}
 	return inTx(ctx, w.db, func(tx pgx.Tx) error {
 		if _, _, err := w.ledger.Post(ctx, tx, ledger.Entry{
-			IdempotencyKey: "withdrawal:broadcast:" + row.ID, Kind: "withdrawal",
+			IdempotencyKey: attemptKey("withdrawal:broadcast", row), Kind: ledger.KindWithdrawal,
 			RefType: "withdrawal", RefID: row.ID, Reason: "broadcast to the chain",
 			CorrelationID: deref(row.CorrelationID),
 			Postings: []ledger.Posting{
@@ -315,13 +337,16 @@ func (w *Worker) broadcastFailed(ctx context.Context, row sqlcgen.ChainWithdrawa
 			slog.String("withdrawal_id", row.ID), slog.Uint64("nonce", nonce), slog.String("err", cause.Error()))
 		return nil
 	}
-	amount, err := pg.AmountFromNumeric(row.Amount)
+	amount, fee, err := amountAndFee(row)
 	if err != nil {
 		return err
 	}
 	if err := inTx(ctx, w.db, func(tx pgx.Tx) error {
+		// Both come back. The transaction never reached the chain, so the
+		// exchange sent nothing and charges nothing (§23.3: the fee's
+		// ownership moves at confirmation, not before).
 		if _, _, err := w.ledger.Release(ctx, tx, ledger.HoldParams{
-			AccountID: row.AccountID, Asset: row.Asset, Amount: amount,
+			AccountID: row.AccountID, Asset: row.Asset, Amount: amount.Add(fee),
 			IdempotencyKey: "release:withdrawal:" + row.ID,
 			Ref:            ledger.Ref{Type: "withdrawal", ID: row.ID},
 			CorrelationID:  deref(row.CorrelationID),
@@ -403,7 +428,11 @@ func (w *Worker) track(ctx context.Context, row sqlcgen.ChainWithdrawal) error {
 // produces one USDC entry and one ETH entry. Merging them would make a single
 // entry that does not balance per asset.
 func (w *Worker) confirm(ctx context.Context, row sqlcgen.ChainWithdrawal, block uint64, gas money.Amount) error {
-	amount, err := pg.AmountFromNumeric(row.Amount)
+	amount, fee, err := amountAndFee(row)
+	if err != nil {
+		return err
+	}
+	feeRevenue, err := w.ledger.HouseAccount(ledger.HouseFeeRevenue)
 	if err != nil {
 		return err
 	}
@@ -421,7 +450,7 @@ func (w *Worker) confirm(ctx context.Context, row sqlcgen.ChainWithdrawal, block
 	}
 	return inTx(ctx, w.db, func(tx pgx.Tx) error {
 		if _, _, err := w.ledger.Post(ctx, tx, ledger.Entry{
-			IdempotencyKey: "withdrawal:confirm:" + row.ID, Kind: "withdrawal",
+			IdempotencyKey: "withdrawal:confirm:" + row.ID, Kind: ledger.KindWithdrawal,
 			RefType: "withdrawal", RefID: row.ID, Reason: "confirmed on chain",
 			CorrelationID: deref(row.CorrelationID),
 			Postings: []ledger.Posting{
@@ -430,6 +459,29 @@ func (w *Worker) confirm(ctx context.Context, row sqlcgen.ChainWithdrawal, block
 			},
 		}); err != nil {
 			return fmt.Errorf("withdrawal: post confirm %s: %w", row.ID, err)
+		}
+		// The fee, and only now (§6.1.4 h). Until this posting it was the
+		// user's money sitting on hold; this is the single moment in the
+		// whole state machine where it changes hands, and it happens only
+		// because the transaction is mined. A separate entry from the one
+		// above so the revenue is attributable to its own reference -- the
+		// revenue report reads `withdrawal:fee:*` entries by name (§23.5).
+		//
+		// Skipped entirely when the fee is zero, which is every withdrawal
+		// until an operator sets a rate: the ledger refuses zero-amount
+		// postings, and an empty entry would be noise in the journal.
+		if fee.IsPositive() {
+			if _, _, err := w.ledger.Post(ctx, tx, ledger.Entry{
+				IdempotencyKey: "withdrawal:fee:" + row.ID, Kind: ledger.KindFee,
+				RefType: "withdrawal", RefID: row.ID, Reason: "withdrawal fee",
+				CorrelationID: deref(row.CorrelationID),
+				Postings: []ledger.Posting{
+					{AccountID: row.AccountID, Asset: row.Asset, Bucket: ledger.BucketHold, Direction: ledger.Debit, Amount: fee},
+					{AccountID: feeRevenue, Asset: row.Asset, Bucket: ledger.BucketHouse, Direction: ledger.Credit, Amount: fee},
+				},
+			}); err != nil {
+				return fmt.Errorf("withdrawal: post fee %s: %w", row.ID, err)
+			}
 		}
 		if err := w.postGas(ctx, tx, row, gasAccount, hot, gas); err != nil {
 			return err
@@ -497,7 +549,9 @@ func (w *Worker) postGas(ctx context.Context, tx pgx.Tx, row sqlcgen.ChainWithdr
 		return nil // a scripted chain, or a receipt with no effective price
 	}
 	if _, _, err := w.ledger.Post(ctx, tx, ledger.Entry{
-		IdempotencyKey: "withdrawal:gas:" + row.ID, Kind: "gas",
+		// Per attempt as well: a withdrawal that reverted, was retried and
+		// then confirmed burned gas twice, and the exchange paid for both.
+		IdempotencyKey: attemptKey("withdrawal:gas", row), Kind: ledger.KindGas,
 		RefType: "withdrawal", RefID: row.ID, Reason: "withdrawal gas",
 		CorrelationID: deref(row.CorrelationID),
 		Postings: []ledger.Posting{

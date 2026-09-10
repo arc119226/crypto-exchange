@@ -603,16 +603,31 @@ type AdminDeposit struct {
 	// Amount Decimal serialized as a string (NUMERIC(36,18)); never a JSON number.
 	//
 	// Example: 1990.00
-	Amount        Amount             `json:"amount"`
-	Asset         string             `json:"asset"`
-	BlockNumber   int64              `json:"block_number"`
-	Confirmations int32              `json:"confirmations"`
-	CreatedAt     time.Time          `json:"created_at"`
-	CreditedAt    *time.Time         `json:"credited_at,omitempty"`
-	ID            string             `json:"id"`
-	LogIndex      int32              `json:"log_index"`
-	Status        AdminDepositStatus `json:"status"`
-	TxHash        string             `json:"tx_hash"`
+	Amount        Amount    `json:"amount"`
+	Asset         string    `json:"asset"`
+	BlockNumber   int64     `json:"block_number"`
+	Confirmations int32     `json:"confirmations"`
+	CreatedAt     time.Time `json:"created_at"`
+
+	// CreditedAmount What became the account's balance: `amount - fee`. Null until credited.
+	CreditedAmount *Amount    `json:"credited_amount,omitempty"`
+	CreditedAt     *time.Time `json:"credited_at,omitempty"`
+
+	// Fee Taken out of the amount at credit time, so it is null until the deposit is credited. Unlike a withdrawal fee it is not charged on top: `amount` stays what the chain delivered.
+	Fee      *Amount `json:"fee,omitempty"`
+	ID       string  `json:"id"`
+	LogIndex int32   `json:"log_index"`
+
+	// ReorgedAtBlock The height a reorg rewound to after this deposit had been credited. Set means the chain no longer shows it and it is waiting for a decision; the status stays `credited` until the reversing entry is posted.
+	ReorgedAtBlock *int64 `json:"reorged_at_block,omitempty"`
+
+	// ReversalError Why the last attempt could not be posted. In practice there is one reason: the account has already spent what it was credited.
+	ReversalError       *string            `json:"reversal_error,omitempty"`
+	ReversalNote        *string            `json:"reversal_note,omitempty"`
+	ReversalRequestedBy *string            `json:"reversal_requested_by,omitempty"`
+	ReversedAt          *time.Time         `json:"reversed_at,omitempty"`
+	Status              AdminDepositStatus `json:"status"`
+	TxHash              string             `json:"tx_hash"`
 }
 
 // AdminDepositStatus defines model for AdminDeposit.Status.
@@ -630,17 +645,23 @@ type AdminWithdrawal struct {
 	// Amount Decimal serialized as a string (NUMERIC(36,18)); never a JSON number.
 	//
 	// Example: 1990.00
-	Amount        Amount     `json:"amount"`
-	Asset         string     `json:"asset"`
-	ChainID       int64      `json:"chain_id"`
-	CreatedAt     time.Time  `json:"created_at"`
-	FailureReason *string    `json:"failure_reason,omitempty"`
-	ID            string     `json:"id"`
-	ReviewNote    *string    `json:"review_note,omitempty"`
-	ReviewedAt    *time.Time `json:"reviewed_at,omitempty"`
-	ReviewedBy    *string    `json:"reviewed_by,omitempty"`
-	Status        string     `json:"status"`
-	ToAddress     string     `json:"to_address"`
+	Amount        Amount    `json:"amount"`
+	Asset         string    `json:"asset"`
+	ChainID       int64     `json:"chain_id"`
+	CreatedAt     time.Time `json:"created_at"`
+	FailureReason *string   `json:"failure_reason,omitempty"`
+
+	// Fee What was quoted when the request was accepted, charged on top of the amount. It stays in the account's hold until the transaction confirms, and comes back on every path that does not confirm, so a withdrawal in the review queue can still be refunded in full after a rate change.
+	Fee Amount `json:"fee"`
+
+	// FeeAsset The asset the fee is charged in, which today is `asset`.
+	FeeAsset   string     `json:"fee_asset"`
+	ID         string     `json:"id"`
+	ReviewNote *string    `json:"review_note,omitempty"`
+	ReviewedAt *time.Time `json:"reviewed_at,omitempty"`
+	ReviewedBy *string    `json:"reviewed_by,omitempty"`
+	Status     string     `json:"status"`
+	ToAddress  string     `json:"to_address"`
 
 	// TxHash The transaction now representing this withdrawal: the displacement while a cancellation is in flight, otherwise the withdrawal's own.
 	TxHash    *string    `json:"tx_hash,omitempty"`
@@ -665,9 +686,15 @@ type Asset struct {
 	ContractAddress *string   `json:"contract_address,omitempty"`
 	CreatedAt       time.Time `json:"created_at"`
 	DepositEnabled  bool      `json:"deposit_enabled"`
-	DisplayScale    int32     `json:"display_scale"`
-	ID              string    `json:"id"`
-	IsNative        bool      `json:"is_native"`
+
+	// DepositFeeBps Basis points taken out of an arriving deposit. There is no flat part: a flat deposit fee makes small deposits arbitrarily expensive. 10000 is refused for this one -- it would credit a depositor nothing. Deposits are the inlet and this ships at 0; the column exists in case sweep gas ever exceeds what trading brings in.
+	//
+	//
+	// Example: 0
+	DepositFeeBps int32  `json:"deposit_fee_bps"`
+	DisplayScale  int32  `json:"display_scale"`
+	ID            string `json:"id"`
+	IsNative      bool   `json:"is_native"`
 
 	// MinDeposit Decimal serialized as a string (NUMERIC(36,18)); never a JSON number.
 	//
@@ -696,6 +723,12 @@ type Asset struct {
 	//
 	// Example: 1990.00
 	WithdrawalFee Amount `json:"withdrawal_fee"`
+
+	// WithdrawalFeeBps The proportional part of the withdrawal fee, in basis points of the amount. The total charged is `withdrawal_fee + ceil(amount * withdrawal_fee_bps / 10000)`, rounded up at the asset's scale, and it is charged on top of the amount rather than taken out of it.
+	//
+	//
+	// Example: 0
+	WithdrawalFeeBps int32 `json:"withdrawal_fee_bps"`
 }
 
 // AssetList defines model for AssetList.
@@ -708,8 +741,14 @@ type AssetRequest struct {
 	ChainID         int64   `json:"chain_id"`
 	ContractAddress *string `json:"contract_address,omitempty"`
 	DepositEnabled  bool    `json:"deposit_enabled"`
-	DisplayScale    int32   `json:"display_scale"`
-	IsNative        bool    `json:"is_native"`
+
+	// DepositFeeBps Basis points taken out of an arriving deposit. There is no flat part: a flat deposit fee makes small deposits arbitrarily expensive. 10000 is refused for this one -- it would credit a depositor nothing. Deposits are the inlet and this ships at 0; the column exists in case sweep gas ever exceeds what trading brings in.
+	//
+	//
+	// Example: 0
+	DepositFeeBps int32 `json:"deposit_fee_bps"`
+	DisplayScale  int32 `json:"display_scale"`
+	IsNative      bool  `json:"is_native"`
 
 	// MinDeposit Decimal serialized as a string (NUMERIC(36,18)); never a JSON number.
 	//
@@ -736,6 +775,12 @@ type AssetRequest struct {
 	//
 	// Example: 1990.00
 	WithdrawalFee Amount `json:"withdrawal_fee"`
+
+	// WithdrawalFeeBps The proportional part of the withdrawal fee, in basis points of the amount. The total charged is `withdrawal_fee + ceil(amount * withdrawal_fee_bps / 10000)`, rounded up at the asset's scale, and it is charged on top of the amount rather than taken out of it.
+	//
+	//
+	// Example: 0
+	WithdrawalFeeBps int32 `json:"withdrawal_fee_bps"`
 }
 
 // AssetStatus defines model for AssetStatus.
@@ -853,8 +898,14 @@ type CreateAssetRequest struct {
 	ChainID         int64   `json:"chain_id"`
 	ContractAddress *string `json:"contract_address,omitempty"`
 	DepositEnabled  bool    `json:"deposit_enabled"`
-	DisplayScale    int32   `json:"display_scale"`
-	IsNative        bool    `json:"is_native"`
+
+	// DepositFeeBps Basis points taken out of an arriving deposit. There is no flat part: a flat deposit fee makes small deposits arbitrarily expensive. 10000 is refused for this one -- it would credit a depositor nothing. Deposits are the inlet and this ships at 0; the column exists in case sweep gas ever exceeds what trading brings in.
+	//
+	//
+	// Example: 0
+	DepositFeeBps int32 `json:"deposit_fee_bps"`
+	DisplayScale  int32 `json:"display_scale"`
+	IsNative      bool  `json:"is_native"`
 
 	// MinDeposit Decimal serialized as a string (NUMERIC(36,18)); never a JSON number.
 	//
@@ -884,6 +935,12 @@ type CreateAssetRequest struct {
 	//
 	// Example: 1990.00
 	WithdrawalFee Amount `json:"withdrawal_fee"`
+
+	// WithdrawalFeeBps The proportional part of the withdrawal fee, in basis points of the amount. The total charged is `withdrawal_fee + ceil(amount * withdrawal_fee_bps / 10000)`, rounded up at the asset's scale, and it is charged on top of the amount rather than taken out of it.
+	//
+	//
+	// Example: 0
+	WithdrawalFeeBps int32 `json:"withdrawal_fee_bps"`
 }
 
 // CreateFeeScheduleRequest defines model for CreateFeeScheduleRequest.
@@ -1284,6 +1341,58 @@ type ReloadRequest struct {
 	Reason string `json:"reason"`
 }
 
+// RevenueLine One asset's revenue and cost. Every amount is denominated in `asset` and nothing is converted between assets.
+type RevenueLine struct {
+	Asset string `json:"asset"`
+
+	// DepositFees Taken out of arriving deposits. Zero unless a rate is set.
+	DepositFees Amount `json:"deposit_fees"`
+
+	// Deposits Deposits that paid a fee.
+	Deposits int64 `json:"deposits"`
+
+	// GasExpense Every `gas_expense` debit in the period: withdrawals, sweeps and nonce fills alike. It is what the exchange paid the chain, whatever the reason, and it is always in the native coin.
+	GasExpense Amount `json:"gas_expense"`
+
+	// MakerFees Summed from the trade rows, which are the only record that knows which side was the maker.
+	MakerFees Amount `json:"maker_fees"`
+
+	// Net All the fees above minus `gas_expense`, within this asset only.
+	Net Amount `json:"net"`
+
+	// OtherFees Anything else credited to `fee_revenue` -- an operator adjustment posted against the account, or a fee source added later that this report does not know about yet. Zero in normal operation; it exists so revenue can never be silently missing from `net`.
+	OtherFees Amount `json:"other_fees"`
+
+	// TakerFees Decimal serialized as a string (NUMERIC(36,18)); never a JSON number.
+	//
+	// Example: 1990.00
+	TakerFees Amount `json:"taker_fees"`
+
+	// Trades Trades charged in this asset, including those charged zero -- which is every trade until an operator sets a rate.
+	Trades int64 `json:"trades"`
+
+	// WithdrawalFees Credited to `fee_revenue` when a withdrawal confirmed. A withdrawal that was refunded or never broadcast contributes nothing, because its fee went back to the account.
+	WithdrawalFees Amount `json:"withdrawal_fees"`
+
+	// Withdrawals Withdrawals that paid a fee. Zero-fee withdrawals post nothing and so cannot be counted here. Note that `gas_expense` divided by this is NOT the cost of a withdrawal: that column is every gas debit in the period, sweeps and nonce fills included. Pricing the fee against per-withdrawal gas needs the `withdrawal:gas:*` entries alone (§23.3).
+	Withdrawals int64 `json:"withdrawals"`
+}
+
+// RevenueReport defines model for RevenueReport.
+type RevenueReport struct {
+	From  time.Time     `json:"from"`
+	Lines []RevenueLine `json:"lines"`
+
+	// To Exclusive.
+	To time.Time `json:"to"`
+}
+
+// ReverseDepositRequest defines model for ReverseDepositRequest.
+type ReverseDepositRequest struct {
+	// Reason Why this deposit is being undone. Recorded in the audit trail and carried on the reversing journal entry, which is where somebody reading the ledger a year later will find it.
+	Reason string `json:"reason"`
+}
+
 // RotateSecretRequest defines model for RotateSecretRequest.
 type RotateSecretRequest struct {
 	// GraceHours How long the old secret keeps signing alongside the new one.
@@ -1580,6 +1689,9 @@ type AssetPath = string
 // AssetSymbol Example: USDC
 type AssetSymbol = string
 
+// DepositID defines model for DepositID.
+type DepositID = string
+
 // FeeScheduleName Example: default
 type FeeScheduleName = string
 
@@ -1594,6 +1706,15 @@ type MarketSymbol = string
 
 // Offset defines model for Offset.
 type Offset = int32
+
+// RevenueAsset defines model for RevenueAsset.
+type RevenueAsset = string
+
+// RevenueFrom defines model for RevenueFrom.
+type RevenueFrom = time.Time
+
+// RevenueTo defines model for RevenueTo.
+type RevenueTo = time.Time
 
 // UserID defines model for UserID.
 type UserID = string
@@ -1654,6 +1775,12 @@ type ListDepositsParams struct {
 // ListDepositsParamsStatus defines parameters for ListDeposits.
 type ListDepositsParamsStatus string
 
+// ListDepositsAwaitingReversalParams defines parameters for ListDepositsAwaitingReversal.
+type ListDepositsAwaitingReversalParams struct {
+	Limit  *Limit  `form:"limit,omitempty" json:"limit,omitempty"`
+	Offset *Offset `form:"offset,omitempty" json:"offset,omitempty"`
+}
+
 // ListEntriesParams defines parameters for ListEntries.
 type ListEntriesParams struct {
 	AccountID *string `form:"account_id,omitempty" json:"account_id,omitempty"`
@@ -1673,6 +1800,30 @@ type ListReconciliationBreaksParams struct {
 type ListReconciliationReportsParams struct {
 	Limit  *Limit  `form:"limit,omitempty" json:"limit,omitempty"`
 	Offset *Offset `form:"offset,omitempty" json:"offset,omitempty"`
+}
+
+// GetRevenueReportParams defines parameters for GetRevenueReport.
+type GetRevenueReportParams struct {
+	// From Start of the period, inclusive. Defaults to 30 days before `to`.
+	From *RevenueFrom `form:"from,omitempty" json:"from,omitempty"`
+
+	// To End of the period, exclusive. Defaults to now, so a report asked for twice in one day covers slightly different windows -- the boundary is the request, not the calendar.
+	To *RevenueTo `form:"to,omitempty" json:"to,omitempty"`
+
+	// Asset Narrow to one asset. Omit for every asset that had activity. Note that narrowing to an ERC-20 hides the gas its withdrawals cost, because gas is booked against the chain's native coin.
+	Asset *RevenueAsset `form:"asset,omitempty" json:"asset,omitempty"`
+}
+
+// GetRevenueReportCsvParams defines parameters for GetRevenueReportCsv.
+type GetRevenueReportCsvParams struct {
+	// From Start of the period, inclusive. Defaults to 30 days before `to`.
+	From *RevenueFrom `form:"from,omitempty" json:"from,omitempty"`
+
+	// To End of the period, exclusive. Defaults to now, so a report asked for twice in one day covers slightly different windows -- the boundary is the request, not the calendar.
+	To *RevenueTo `form:"to,omitempty" json:"to,omitempty"`
+
+	// Asset Narrow to one asset. Omit for every asset that had activity. Note that narrowing to an ERC-20 hides the gas its withdrawals cost, because gas is booked against the chain's native coin.
+	Asset *RevenueAsset `form:"asset,omitempty" json:"asset,omitempty"`
 }
 
 // ListSweepsParams defines parameters for ListSweeps.
@@ -1711,6 +1862,9 @@ type CreateAssetJSONRequestBody = CreateAssetRequest
 
 // UpdateAssetJSONRequestBody defines body for UpdateAsset for application/json ContentType.
 type UpdateAssetJSONRequestBody = AssetRequest
+
+// ReverseDepositJSONRequestBody defines body for ReverseDeposit for application/json ContentType.
+type ReverseDepositJSONRequestBody = ReverseDepositRequest
 
 // RequestReloadJSONRequestBody defines body for RequestReload for application/json ContentType.
 type RequestReloadJSONRequestBody = ReloadRequest
@@ -1939,6 +2093,59 @@ type ClientInterface interface {
 	//
 	// Corresponds with GET /admin/v1/deposits (the `ListDeposits` operationId).
 	ListDeposits(ctx context.Context, params *ListDepositsParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ListDepositsAwaitingReversal Credited deposits a reorg took away, waiting for a decision
+	//
+	// A deposit the ledger credited whose block was later abandoned by a reorg deeper than the asset's confirmations (docs/plan-v1.0.md §6.4.1). The status is still `credited` and the account still holds the balance -- the ledger cannot un-say it on its own, because the money may already have been spent. Each of these is a decision waiting for a person. In a healthy exchange this list is empty; anything in it means an account holds a balance the chain does not back, and reconciliation will report the difference as a break.
+	//
+	// Corresponds with GET /admin/v1/deposits/awaiting-reversal (the `ListDepositsAwaitingReversal` operationId).
+	ListDepositsAwaitingReversal(ctx context.Context, params *ListDepositsAwaitingReversalParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ReverseDepositWithBody Confirm that a reorged deposit should be undone
+	//
+	// Records the decision; it moves no money. The admin role has no node and
+	// no view of the chain, so the chain role posts the reversing entry on
+	// its next tick -- the exact mirror of the three postings that credited
+	// it, including the fee.
+	//
+	// There is no matching reject: leaving a reorged deposit alone is what
+	// happens if nobody acts, so asking is the whole decision. The reason is
+	// required and is recorded in the audit trail and on the entry.
+	//
+	// The reversal can still be refused after this returns, for one reason:
+	// the account no longer has what it was credited. Balances may not go
+	// negative, and an account that owes the exchange is not something this
+	// system can represent. The deposit then stays in the queue with
+	// `reversal_error` explaining, and the choice goes back to a person --
+	// `docs/runbooks/reorg-alert.md` has the options.
+	//
+	// Takes any type of body and a specified content type.
+	//
+	// Corresponds with POST /admin/v1/deposits/{id}/reverse (the `ReverseDeposit` operationId).
+	ReverseDepositWithBody(ctx context.Context, id DepositID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ReverseDeposit Confirm that a reorged deposit should be undone
+	//
+	// Records the decision; it moves no money. The admin role has no node and
+	// no view of the chain, so the chain role posts the reversing entry on
+	// its next tick -- the exact mirror of the three postings that credited
+	// it, including the fee.
+	//
+	// There is no matching reject: leaving a reorged deposit alone is what
+	// happens if nobody acts, so asking is the whole decision. The reason is
+	// required and is recorded in the audit trail and on the entry.
+	//
+	// The reversal can still be refused after this returns, for one reason:
+	// the account no longer has what it was credited. Balances may not go
+	// negative, and an account that owes the exchange is not something this
+	// system can represent. The deposit then stays in the queue with
+	// `reversal_error` explaining, and the choice goes back to a person --
+	// `docs/runbooks/reorg-alert.md` has the options.
+	//
+	// Takes a body of the `application/json` content type.
+	//
+	// Corresponds with POST /admin/v1/deposits/{id}/reverse (the `ReverseDeposit` operationId).
+	ReverseDeposit(ctx context.Context, id DepositID, body ReverseDepositJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// RequestReloadWithBody Ask every engine to reload its registry cache
 	//
@@ -2190,6 +2397,41 @@ type ClientInterface interface {
 	//
 	// Corresponds with GET /admin/v1/reconciliation/reports (the `ListReconciliationReports` operationId).
 	ListReconciliationReports(ctx context.Context, params *ListReconciliationReportsParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetRevenueReport What the exchange earned and what it paid the chain, per asset
+	//
+	// The three fee sources and the gas they cost, over a half-open period
+	// `[from, to)`, one row per asset (docs/plan-v1.0.md §23.5).
+	//
+	// **Trading fees come from the trade rows, not the ledger.** A settle
+	// entry credits `fee_revenue` with the same two numbers each trade
+	// carries, so counting both would double them -- and only the trade row
+	// records which side was the maker. Withdrawal and deposit fees are read
+	// from `fee_revenue` instead, because those have no other record.
+	//
+	// **Nothing is converted between assets.** Gas is paid in the chain's
+	// native coin whatever was withdrawn, so a USDC row shows fee revenue
+	// with no gas beneath it and the ETH row carries the gas for every
+	// withdrawal on the chain. `net` is the subtraction within one asset and
+	// means nothing across two; converting would need a price source, which
+	// v1.1 does not have.
+	//
+	// **Two clocks.** A trade is counted at the engine's command timestamp; a
+	// withdrawal or deposit fee at the moment the ledger booked it. A
+	// withdrawal is therefore counted when it *confirmed*, not when the user
+	// asked, so one that spans the end of the period lands in the next one.
+	//
+	// Omitting both bounds reports the last 30 days ending now.
+	//
+	// Corresponds with GET /admin/v1/reports/revenue (the `GetRevenueReport` operationId).
+	GetRevenueReport(ctx context.Context, params *GetRevenueReportParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetRevenueReportCsv The same report as a CSV download
+	//
+	// Identical numbers to `GET /admin/v1/reports/revenue`, one header row and one row per asset, amounts as the same decimal strings. Provided because a revenue report is something an operator takes somewhere else.
+	//
+	// Corresponds with GET /admin/v1/reports/revenue.csv (the `GetRevenueReportCsv` operationId).
+	GetRevenueReportCsv(ctx context.Context, params *GetRevenueReportCsvParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// ListSweeps Recent collections into the hot wallet
 	//
@@ -2710,6 +2952,89 @@ func (c *Client) ListDeposits(ctx context.Context, params *ListDepositsParams, r
 	return c.Client.Do(req)
 }
 
+// ListDepositsAwaitingReversal Credited deposits a reorg took away, waiting for a decision
+//
+// A deposit the ledger credited whose block was later abandoned by a reorg deeper than the asset's confirmations (docs/plan-v1.0.md §6.4.1). The status is still `credited` and the account still holds the balance -- the ledger cannot un-say it on its own, because the money may already have been spent. Each of these is a decision waiting for a person. In a healthy exchange this list is empty; anything in it means an account holds a balance the chain does not back, and reconciliation will report the difference as a break.
+//
+// Corresponds with GET /admin/v1/deposits/awaiting-reversal (the `ListDepositsAwaitingReversal` operationId).
+func (c *Client) ListDepositsAwaitingReversal(ctx context.Context, params *ListDepositsAwaitingReversalParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListDepositsAwaitingReversalRequest(c.Server, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// ReverseDepositWithBody Confirm that a reorged deposit should be undone
+//
+// Records the decision; it moves no money. The admin role has no node and
+// no view of the chain, so the chain role posts the reversing entry on
+// its next tick -- the exact mirror of the three postings that credited
+// it, including the fee.
+//
+// There is no matching reject: leaving a reorged deposit alone is what
+// happens if nobody acts, so asking is the whole decision. The reason is
+// required and is recorded in the audit trail and on the entry.
+//
+// The reversal can still be refused after this returns, for one reason:
+// the account no longer has what it was credited. Balances may not go
+// negative, and an account that owes the exchange is not something this
+// system can represent. The deposit then stays in the queue with
+// `reversal_error` explaining, and the choice goes back to a person --
+// `docs/runbooks/reorg-alert.md` has the options.
+//
+// Takes any type of body and a specified content type.
+//
+// Corresponds with POST /admin/v1/deposits/{id}/reverse (the `ReverseDeposit` operationId).
+func (c *Client) ReverseDepositWithBody(ctx context.Context, id DepositID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewReverseDepositRequestWithBody(c.Server, id, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// ReverseDeposit Confirm that a reorged deposit should be undone
+//
+// Records the decision; it moves no money. The admin role has no node and
+// no view of the chain, so the chain role posts the reversing entry on
+// its next tick -- the exact mirror of the three postings that credited
+// it, including the fee.
+//
+// There is no matching reject: leaving a reorged deposit alone is what
+// happens if nobody acts, so asking is the whole decision. The reason is
+// required and is recorded in the audit trail and on the entry.
+//
+// The reversal can still be refused after this returns, for one reason:
+// the account no longer has what it was credited. Balances may not go
+// negative, and an account that owes the exchange is not something this
+// system can represent. The deposit then stays in the queue with
+// `reversal_error` explaining, and the choice goes back to a person --
+// `docs/runbooks/reorg-alert.md` has the options.
+//
+// Takes a body of the `application/json` content type.
+//
+// Corresponds with POST /admin/v1/deposits/{id}/reverse (the `ReverseDeposit` operationId).
+func (c *Client) ReverseDeposit(ctx context.Context, id DepositID, body ReverseDepositJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewReverseDepositRequest(c.Server, id, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
 // RequestReloadWithBody Ask every engine to reload its registry cache
 //
 // Publishes registry.reload with no row changed: after a seed, or when in doubt. 202: the request is in the outbox; the engine's reload consumer acts on it.
@@ -3201,6 +3526,61 @@ func (c *Client) ListReconciliationBreaks(ctx context.Context, params *ListRecon
 // Corresponds with GET /admin/v1/reconciliation/reports (the `ListReconciliationReports` operationId).
 func (c *Client) ListReconciliationReports(ctx context.Context, params *ListReconciliationReportsParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewListReconciliationReportsRequest(c.Server, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// GetRevenueReport What the exchange earned and what it paid the chain, per asset
+//
+// The three fee sources and the gas they cost, over a half-open period
+// `[from, to)`, one row per asset (docs/plan-v1.0.md §23.5).
+//
+// **Trading fees come from the trade rows, not the ledger.** A settle
+// entry credits `fee_revenue` with the same two numbers each trade
+// carries, so counting both would double them -- and only the trade row
+// records which side was the maker. Withdrawal and deposit fees are read
+// from `fee_revenue` instead, because those have no other record.
+//
+// **Nothing is converted between assets.** Gas is paid in the chain's
+// native coin whatever was withdrawn, so a USDC row shows fee revenue
+// with no gas beneath it and the ETH row carries the gas for every
+// withdrawal on the chain. `net` is the subtraction within one asset and
+// means nothing across two; converting would need a price source, which
+// v1.1 does not have.
+//
+// **Two clocks.** A trade is counted at the engine's command timestamp; a
+// withdrawal or deposit fee at the moment the ledger booked it. A
+// withdrawal is therefore counted when it *confirmed*, not when the user
+// asked, so one that spans the end of the period lands in the next one.
+//
+// Omitting both bounds reports the last 30 days ending now.
+//
+// Corresponds with GET /admin/v1/reports/revenue (the `GetRevenueReport` operationId).
+func (c *Client) GetRevenueReport(ctx context.Context, params *GetRevenueReportParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetRevenueReportRequest(c.Server, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// GetRevenueReportCsv The same report as a CSV download
+//
+// Identical numbers to `GET /admin/v1/reports/revenue`, one header row and one row per asset, amounts as the same decimal strings. Provided because a revenue report is something an operator takes somewhere else.
+//
+// Corresponds with GET /admin/v1/reports/revenue.csv (the `GetRevenueReportCsv` operationId).
+func (c *Client) GetRevenueReportCsv(ctx context.Context, params *GetRevenueReportCsvParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetRevenueReportCsvRequest(c.Server, params)
 	if err != nil {
 		return nil, err
 	}
@@ -4343,6 +4723,119 @@ func NewListDepositsRequest(server string, params *ListDepositsParams) (*http.Re
 	return req, nil
 }
 
+// NewListDepositsAwaitingReversalRequest constructs an http.Request for the ListDepositsAwaitingReversal method
+func NewListDepositsAwaitingReversalRequest(server string, params *ListDepositsAwaitingReversalParams) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/admin/v1/deposits/awaiting-reversal")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		// queryValues collects non-styled parameters (passthrough, JSON)
+		// that are safe to round-trip through url.Values.Encode().
+		queryValues := queryURL.Query()
+		// rawQueryFragments collects pre-encoded query fragments from
+		// styled parameters, preserving literal commas as delimiters
+		// per the OpenAPI spec (e.g. "color=blue,black,brown").
+		var rawQueryFragments []string
+
+		if params.Limit != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "limit", *params.Limit, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "integer", Format: "int32"}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.Offset != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "offset", *params.Offset, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "integer", Format: "int32"}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if encoded := queryValues.Encode(); encoded != "" {
+			rawQueryFragments = append(rawQueryFragments, encoded)
+		}
+		queryURL.RawQuery = strings.Join(rawQueryFragments, "&")
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewReverseDepositRequest calls the generic ReverseDeposit builder with application/json body
+func NewReverseDepositRequest(server string, id DepositID, body ReverseDepositJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewReverseDepositRequestWithBody(server, id, "application/json", bodyReader)
+}
+
+// NewReverseDepositRequestWithBody constructs an http.Request for the ReverseDeposit method, with any body, and a specified content type
+func NewReverseDepositRequestWithBody(server string, id DepositID, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "id", id, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/admin/v1/deposits/%s/reverse", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
 // NewRequestReloadRequest calls the generic RequestReload builder with application/json body
 func NewRequestReloadRequest(server string, body RequestReloadJSONRequestBody) (*http.Request, error) {
 	var bodyReader io.Reader
@@ -5064,6 +5557,162 @@ func NewListReconciliationReportsRequest(server string, params *ListReconciliati
 		if params.Offset != nil {
 
 			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "offset", *params.Offset, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "integer", Format: "int32"}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if encoded := queryValues.Encode(); encoded != "" {
+			rawQueryFragments = append(rawQueryFragments, encoded)
+		}
+		queryURL.RawQuery = strings.Join(rawQueryFragments, "&")
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewGetRevenueReportRequest constructs an http.Request for the GetRevenueReport method
+func NewGetRevenueReportRequest(server string, params *GetRevenueReportParams) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/admin/v1/reports/revenue")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		// queryValues collects non-styled parameters (passthrough, JSON)
+		// that are safe to round-trip through url.Values.Encode().
+		queryValues := queryURL.Query()
+		// rawQueryFragments collects pre-encoded query fragments from
+		// styled parameters, preserving literal commas as delimiters
+		// per the OpenAPI spec (e.g. "color=blue,black,brown").
+		var rawQueryFragments []string
+
+		if params.From != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "from", *params.From, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: "date-time"}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.To != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "to", *params.To, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: "date-time"}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.Asset != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "asset", *params.Asset, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if encoded := queryValues.Encode(); encoded != "" {
+			rawQueryFragments = append(rawQueryFragments, encoded)
+		}
+		queryURL.RawQuery = strings.Join(rawQueryFragments, "&")
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewGetRevenueReportCsvRequest constructs an http.Request for the GetRevenueReportCsv method
+func NewGetRevenueReportCsvRequest(server string, params *GetRevenueReportCsvParams) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/admin/v1/reports/revenue.csv")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		// queryValues collects non-styled parameters (passthrough, JSON)
+		// that are safe to round-trip through url.Values.Encode().
+		queryValues := queryURL.Query()
+		// rawQueryFragments collects pre-encoded query fragments from
+		// styled parameters, preserving literal commas as delimiters
+		// per the OpenAPI spec (e.g. "color=blue,black,brown").
+		var rawQueryFragments []string
+
+		if params.From != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "from", *params.From, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: "date-time"}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.To != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "to", *params.To, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: "date-time"}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.Asset != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "asset", *params.Asset, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
 				return nil, err
 			} else {
 				for _, qp := range strings.Split(queryFrag, "&") {
@@ -6110,6 +6759,61 @@ type ClientWithResponsesInterface interface {
 	// Corresponds with GET /admin/v1/deposits (the `ListDeposits` operationId).
 	ListDepositsWithResponse(ctx context.Context, params *ListDepositsParams, reqEditors ...RequestEditorFn) (*ListDepositsResponse, error)
 
+	// ListDepositsAwaitingReversalWithResponse Credited deposits a reorg took away, waiting for a decision
+	//
+	// A deposit the ledger credited whose block was later abandoned by a reorg deeper than the asset's confirmations (docs/plan-v1.0.md §6.4.1). The status is still `credited` and the account still holds the balance -- the ledger cannot un-say it on its own, because the money may already have been spent. Each of these is a decision waiting for a person. In a healthy exchange this list is empty; anything in it means an account holds a balance the chain does not back, and reconciliation will report the difference as a break.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /admin/v1/deposits/awaiting-reversal (the `ListDepositsAwaitingReversal` operationId).
+	ListDepositsAwaitingReversalWithResponse(ctx context.Context, params *ListDepositsAwaitingReversalParams, reqEditors ...RequestEditorFn) (*ListDepositsAwaitingReversalResponse, error)
+
+	// ReverseDepositWithBodyWithResponse Confirm that a reorged deposit should be undone
+	//
+	// Records the decision; it moves no money. The admin role has no node and
+	// no view of the chain, so the chain role posts the reversing entry on
+	// its next tick -- the exact mirror of the three postings that credited
+	// it, including the fee.
+	//
+	// There is no matching reject: leaving a reorged deposit alone is what
+	// happens if nobody acts, so asking is the whole decision. The reason is
+	// required and is recorded in the audit trail and on the entry.
+	//
+	// The reversal can still be refused after this returns, for one reason:
+	// the account no longer has what it was credited. Balances may not go
+	// negative, and an account that owes the exchange is not something this
+	// system can represent. The deposit then stays in the queue with
+	// `reversal_error` explaining, and the choice goes back to a person --
+	// `docs/runbooks/reorg-alert.md` has the options.
+	//
+	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /admin/v1/deposits/{id}/reverse (the `ReverseDeposit` operationId).
+	ReverseDepositWithBodyWithResponse(ctx context.Context, id DepositID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ReverseDepositResponse, error)
+
+	// ReverseDepositWithResponse Confirm that a reorged deposit should be undone
+	//
+	// Records the decision; it moves no money. The admin role has no node and
+	// no view of the chain, so the chain role posts the reversing entry on
+	// its next tick -- the exact mirror of the three postings that credited
+	// it, including the fee.
+	//
+	// There is no matching reject: leaving a reorged deposit alone is what
+	// happens if nobody acts, so asking is the whole decision. The reason is
+	// required and is recorded in the audit trail and on the entry.
+	//
+	// The reversal can still be refused after this returns, for one reason:
+	// the account no longer has what it was credited. Balances may not go
+	// negative, and an account that owes the exchange is not something this
+	// system can represent. The deposit then stays in the queue with
+	// `reversal_error` explaining, and the choice goes back to a person --
+	// `docs/runbooks/reorg-alert.md` has the options.
+	//
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /admin/v1/deposits/{id}/reverse (the `ReverseDeposit` operationId).
+	ReverseDepositWithResponse(ctx context.Context, id DepositID, body ReverseDepositJSONRequestBody, reqEditors ...RequestEditorFn) (*ReverseDepositResponse, error)
+
 	// RequestReloadWithBodyWithResponse Ask every engine to reload its registry cache
 	//
 	// Publishes registry.reload with no row changed: after a seed, or when in doubt. 202: the request is in the outbox; the engine's reload consumer acts on it.
@@ -6378,6 +7082,45 @@ type ClientWithResponsesInterface interface {
 	//
 	// Corresponds with GET /admin/v1/reconciliation/reports (the `ListReconciliationReports` operationId).
 	ListReconciliationReportsWithResponse(ctx context.Context, params *ListReconciliationReportsParams, reqEditors ...RequestEditorFn) (*ListReconciliationReportsResponse, error)
+
+	// GetRevenueReportWithResponse What the exchange earned and what it paid the chain, per asset
+	//
+	// The three fee sources and the gas they cost, over a half-open period
+	// `[from, to)`, one row per asset (docs/plan-v1.0.md §23.5).
+	//
+	// **Trading fees come from the trade rows, not the ledger.** A settle
+	// entry credits `fee_revenue` with the same two numbers each trade
+	// carries, so counting both would double them -- and only the trade row
+	// records which side was the maker. Withdrawal and deposit fees are read
+	// from `fee_revenue` instead, because those have no other record.
+	//
+	// **Nothing is converted between assets.** Gas is paid in the chain's
+	// native coin whatever was withdrawn, so a USDC row shows fee revenue
+	// with no gas beneath it and the ETH row carries the gas for every
+	// withdrawal on the chain. `net` is the subtraction within one asset and
+	// means nothing across two; converting would need a price source, which
+	// v1.1 does not have.
+	//
+	// **Two clocks.** A trade is counted at the engine's command timestamp; a
+	// withdrawal or deposit fee at the moment the ledger booked it. A
+	// withdrawal is therefore counted when it *confirmed*, not when the user
+	// asked, so one that spans the end of the period lands in the next one.
+	//
+	// Omitting both bounds reports the last 30 days ending now.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /admin/v1/reports/revenue (the `GetRevenueReport` operationId).
+	GetRevenueReportWithResponse(ctx context.Context, params *GetRevenueReportParams, reqEditors ...RequestEditorFn) (*GetRevenueReportResponse, error)
+
+	// GetRevenueReportCsvWithResponse The same report as a CSV download
+	//
+	// Identical numbers to `GET /admin/v1/reports/revenue`, one header row and one row per asset, amounts as the same decimal strings. Provided because a revenue report is something an operator takes somewhere else.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /admin/v1/reports/revenue.csv (the `GetRevenueReportCsv` operationId).
+	GetRevenueReportCsvWithResponse(ctx context.Context, params *GetRevenueReportCsvParams, reqEditors ...RequestEditorFn) (*GetRevenueReportCsvResponse, error)
 
 	// ListSweepsWithResponse Recent collections into the hot wallet
 	//
@@ -7332,6 +8075,130 @@ func (r ListDepositsResponse) StatusCode() int {
 
 // ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
 func (r ListDepositsResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type ListDepositsAwaitingReversalResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *AdminDepositList
+	// ApplicationProblemJSON401 the response for an HTTP 401 `application/problem+json` response
+	ApplicationProblemJSON401 *Unauthorized
+	// ApplicationProblemJSON500 the response for an HTTP 500 `application/problem+json` response
+	ApplicationProblemJSON500 *InternalError
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r ListDepositsAwaitingReversalResponse) GetJSON200() *AdminDepositList {
+	return r.JSON200
+}
+
+// GetApplicationProblemJSON401 returns the response for an HTTP 401 `application/problem+json` response
+func (r ListDepositsAwaitingReversalResponse) GetApplicationProblemJSON401() *Unauthorized {
+	return r.ApplicationProblemJSON401
+}
+
+// GetApplicationProblemJSON500 returns the response for an HTTP 500 `application/problem+json` response
+func (r ListDepositsAwaitingReversalResponse) GetApplicationProblemJSON500() *InternalError {
+	return r.ApplicationProblemJSON500
+}
+
+// GetBody returns the raw response body bytes
+func (r ListDepositsAwaitingReversalResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r ListDepositsAwaitingReversalResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListDepositsAwaitingReversalResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r ListDepositsAwaitingReversalResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type ReverseDepositResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON202 the response for an HTTP 202 `application/json` response
+	JSON202 *AdminDeposit
+	// ApplicationProblemJSON400 the response for an HTTP 400 `application/problem+json` response
+	ApplicationProblemJSON400 *BadRequest
+	// ApplicationProblemJSON401 the response for an HTTP 401 `application/problem+json` response
+	ApplicationProblemJSON401 *Unauthorized
+	// ApplicationProblemJSON409 the response for an HTTP 409 `application/problem+json` response
+	ApplicationProblemJSON409 *Problem
+	// ApplicationProblemJSON500 the response for an HTTP 500 `application/problem+json` response
+	ApplicationProblemJSON500 *InternalError
+}
+
+// GetJSON202 returns the response for an HTTP 202 `application/json` response
+func (r ReverseDepositResponse) GetJSON202() *AdminDeposit {
+	return r.JSON202
+}
+
+// GetApplicationProblemJSON400 returns the response for an HTTP 400 `application/problem+json` response
+func (r ReverseDepositResponse) GetApplicationProblemJSON400() *BadRequest {
+	return r.ApplicationProblemJSON400
+}
+
+// GetApplicationProblemJSON401 returns the response for an HTTP 401 `application/problem+json` response
+func (r ReverseDepositResponse) GetApplicationProblemJSON401() *Unauthorized {
+	return r.ApplicationProblemJSON401
+}
+
+// GetApplicationProblemJSON409 returns the response for an HTTP 409 `application/problem+json` response
+func (r ReverseDepositResponse) GetApplicationProblemJSON409() *Problem {
+	return r.ApplicationProblemJSON409
+}
+
+// GetApplicationProblemJSON500 returns the response for an HTTP 500 `application/problem+json` response
+func (r ReverseDepositResponse) GetApplicationProblemJSON500() *InternalError {
+	return r.ApplicationProblemJSON500
+}
+
+// GetBody returns the raw response body bytes
+func (r ReverseDepositResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r ReverseDepositResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ReverseDepositResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r ReverseDepositResponse) ContentType() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Header.Get("Content-Type")
 	}
@@ -8414,6 +9281,123 @@ func (r ListReconciliationReportsResponse) StatusCode() int {
 
 // ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
 func (r ListReconciliationReportsResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type GetRevenueReportResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *RevenueReport
+	// ApplicationProblemJSON400 the response for an HTTP 400 `application/problem+json` response
+	ApplicationProblemJSON400 *BadRequest
+	// ApplicationProblemJSON401 the response for an HTTP 401 `application/problem+json` response
+	ApplicationProblemJSON401 *Unauthorized
+	// ApplicationProblemJSON500 the response for an HTTP 500 `application/problem+json` response
+	ApplicationProblemJSON500 *InternalError
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r GetRevenueReportResponse) GetJSON200() *RevenueReport {
+	return r.JSON200
+}
+
+// GetApplicationProblemJSON400 returns the response for an HTTP 400 `application/problem+json` response
+func (r GetRevenueReportResponse) GetApplicationProblemJSON400() *BadRequest {
+	return r.ApplicationProblemJSON400
+}
+
+// GetApplicationProblemJSON401 returns the response for an HTTP 401 `application/problem+json` response
+func (r GetRevenueReportResponse) GetApplicationProblemJSON401() *Unauthorized {
+	return r.ApplicationProblemJSON401
+}
+
+// GetApplicationProblemJSON500 returns the response for an HTTP 500 `application/problem+json` response
+func (r GetRevenueReportResponse) GetApplicationProblemJSON500() *InternalError {
+	return r.ApplicationProblemJSON500
+}
+
+// GetBody returns the raw response body bytes
+func (r GetRevenueReportResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r GetRevenueReportResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetRevenueReportResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r GetRevenueReportResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type GetRevenueReportCsvResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// ApplicationProblemJSON400 the response for an HTTP 400 `application/problem+json` response
+	ApplicationProblemJSON400 *BadRequest
+	// ApplicationProblemJSON401 the response for an HTTP 401 `application/problem+json` response
+	ApplicationProblemJSON401 *Unauthorized
+	// ApplicationProblemJSON500 the response for an HTTP 500 `application/problem+json` response
+	ApplicationProblemJSON500 *InternalError
+}
+
+// GetApplicationProblemJSON400 returns the response for an HTTP 400 `application/problem+json` response
+func (r GetRevenueReportCsvResponse) GetApplicationProblemJSON400() *BadRequest {
+	return r.ApplicationProblemJSON400
+}
+
+// GetApplicationProblemJSON401 returns the response for an HTTP 401 `application/problem+json` response
+func (r GetRevenueReportCsvResponse) GetApplicationProblemJSON401() *Unauthorized {
+	return r.ApplicationProblemJSON401
+}
+
+// GetApplicationProblemJSON500 returns the response for an HTTP 500 `application/problem+json` response
+func (r GetRevenueReportCsvResponse) GetApplicationProblemJSON500() *InternalError {
+	return r.ApplicationProblemJSON500
+}
+
+// GetBody returns the raw response body bytes
+func (r GetRevenueReportCsvResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r GetRevenueReportCsvResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetRevenueReportCsvResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r GetRevenueReportCsvResponse) ContentType() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Header.Get("Content-Type")
 	}
@@ -9785,6 +10769,79 @@ func (c *ClientWithResponses) ListDepositsWithResponse(ctx context.Context, para
 	return ParseListDepositsResponse(rsp)
 }
 
+// ListDepositsAwaitingReversalWithResponse Credited deposits a reorg took away, waiting for a decision
+//
+// A deposit the ledger credited whose block was later abandoned by a reorg deeper than the asset's confirmations (docs/plan-v1.0.md §6.4.1). The status is still `credited` and the account still holds the balance -- the ledger cannot un-say it on its own, because the money may already have been spent. Each of these is a decision waiting for a person. In a healthy exchange this list is empty; anything in it means an account holds a balance the chain does not back, and reconciliation will report the difference as a break.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /admin/v1/deposits/awaiting-reversal (the `ListDepositsAwaitingReversal` operationId).
+func (c *ClientWithResponses) ListDepositsAwaitingReversalWithResponse(ctx context.Context, params *ListDepositsAwaitingReversalParams, reqEditors ...RequestEditorFn) (*ListDepositsAwaitingReversalResponse, error) {
+	rsp, err := c.ListDepositsAwaitingReversal(ctx, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListDepositsAwaitingReversalResponse(rsp)
+}
+
+// ReverseDepositWithBodyWithResponse Confirm that a reorged deposit should be undone
+//
+// Records the decision; it moves no money. The admin role has no node and
+// no view of the chain, so the chain role posts the reversing entry on
+// its next tick -- the exact mirror of the three postings that credited
+// it, including the fee.
+//
+// There is no matching reject: leaving a reorged deposit alone is what
+// happens if nobody acts, so asking is the whole decision. The reason is
+// required and is recorded in the audit trail and on the entry.
+//
+// The reversal can still be refused after this returns, for one reason:
+// the account no longer has what it was credited. Balances may not go
+// negative, and an account that owes the exchange is not something this
+// system can represent. The deposit then stays in the queue with
+// `reversal_error` explaining, and the choice goes back to a person --
+// `docs/runbooks/reorg-alert.md` has the options.
+//
+// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /admin/v1/deposits/{id}/reverse (the `ReverseDeposit` operationId).
+func (c *ClientWithResponses) ReverseDepositWithBodyWithResponse(ctx context.Context, id DepositID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ReverseDepositResponse, error) {
+	rsp, err := c.ReverseDepositWithBody(ctx, id, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseReverseDepositResponse(rsp)
+}
+
+// ReverseDepositWithResponse Confirm that a reorged deposit should be undone
+//
+// Records the decision; it moves no money. The admin role has no node and
+// no view of the chain, so the chain role posts the reversing entry on
+// its next tick -- the exact mirror of the three postings that credited
+// it, including the fee.
+//
+// There is no matching reject: leaving a reorged deposit alone is what
+// happens if nobody acts, so asking is the whole decision. The reason is
+// required and is recorded in the audit trail and on the entry.
+//
+// The reversal can still be refused after this returns, for one reason:
+// the account no longer has what it was credited. Balances may not go
+// negative, and an account that owes the exchange is not something this
+// system can represent. The deposit then stays in the queue with
+// `reversal_error` explaining, and the choice goes back to a person --
+// `docs/runbooks/reorg-alert.md` has the options.
+//
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /admin/v1/deposits/{id}/reverse (the `ReverseDeposit` operationId).
+func (c *ClientWithResponses) ReverseDepositWithResponse(ctx context.Context, id DepositID, body ReverseDepositJSONRequestBody, reqEditors ...RequestEditorFn) (*ReverseDepositResponse, error) {
+	rsp, err := c.ReverseDeposit(ctx, id, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseReverseDepositResponse(rsp)
+}
+
 // RequestReloadWithBodyWithResponse Ask every engine to reload its registry cache
 //
 // Publishes registry.reload with no row changed: after a seed, or when in doubt. 202: the request is in the outbox; the engine's reload consumer acts on it.
@@ -10202,6 +11259,57 @@ func (c *ClientWithResponses) ListReconciliationReportsWithResponse(ctx context.
 		return nil, err
 	}
 	return ParseListReconciliationReportsResponse(rsp)
+}
+
+// GetRevenueReportWithResponse What the exchange earned and what it paid the chain, per asset
+//
+// The three fee sources and the gas they cost, over a half-open period
+// `[from, to)`, one row per asset (docs/plan-v1.0.md §23.5).
+//
+// **Trading fees come from the trade rows, not the ledger.** A settle
+// entry credits `fee_revenue` with the same two numbers each trade
+// carries, so counting both would double them -- and only the trade row
+// records which side was the maker. Withdrawal and deposit fees are read
+// from `fee_revenue` instead, because those have no other record.
+//
+// **Nothing is converted between assets.** Gas is paid in the chain's
+// native coin whatever was withdrawn, so a USDC row shows fee revenue
+// with no gas beneath it and the ETH row carries the gas for every
+// withdrawal on the chain. `net` is the subtraction within one asset and
+// means nothing across two; converting would need a price source, which
+// v1.1 does not have.
+//
+// **Two clocks.** A trade is counted at the engine's command timestamp; a
+// withdrawal or deposit fee at the moment the ledger booked it. A
+// withdrawal is therefore counted when it *confirmed*, not when the user
+// asked, so one that spans the end of the period lands in the next one.
+//
+// Omitting both bounds reports the last 30 days ending now.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /admin/v1/reports/revenue (the `GetRevenueReport` operationId).
+func (c *ClientWithResponses) GetRevenueReportWithResponse(ctx context.Context, params *GetRevenueReportParams, reqEditors ...RequestEditorFn) (*GetRevenueReportResponse, error) {
+	rsp, err := c.GetRevenueReport(ctx, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetRevenueReportResponse(rsp)
+}
+
+// GetRevenueReportCsvWithResponse The same report as a CSV download
+//
+// Identical numbers to `GET /admin/v1/reports/revenue`, one header row and one row per asset, amounts as the same decimal strings. Provided because a revenue report is something an operator takes somewhere else.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /admin/v1/reports/revenue.csv (the `GetRevenueReportCsv` operationId).
+func (c *ClientWithResponses) GetRevenueReportCsvWithResponse(ctx context.Context, params *GetRevenueReportCsvParams, reqEditors ...RequestEditorFn) (*GetRevenueReportCsvResponse, error) {
+	rsp, err := c.GetRevenueReportCsv(ctx, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetRevenueReportCsvResponse(rsp)
 }
 
 // ListSweepsWithResponse Recent collections into the hot wallet
@@ -11159,6 +12267,100 @@ func ParseListDepositsResponse(rsp *http.Response) (*ListDepositsResponse, error
 	return response, nil
 }
 
+// ParseListDepositsAwaitingReversalResponse parses an HTTP response from a ListDepositsAwaitingReversalWithResponse call
+func ParseListDepositsAwaitingReversalResponse(rsp *http.Response) (*ListDepositsAwaitingReversalResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListDepositsAwaitingReversalResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest AdminDepositList
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON500 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseReverseDepositResponse parses an HTTP response from a ReverseDepositWithResponse call
+func ParseReverseDepositResponse(rsp *http.Response) (*ReverseDepositResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ReverseDepositResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 202:
+		var dest AdminDeposit
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON202 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest BadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest Problem
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON409 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON500 = &dest
+
+	}
+
+	return response, nil
+}
+
 // ParseRequestReloadResponse parses an HTTP response from a RequestReloadWithResponse call
 func ParseRequestReloadResponse(rsp *http.Response) (*RequestReloadResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
@@ -11966,6 +13168,93 @@ func ParseListReconciliationReportsResponse(rsp *http.Response) (*ListReconcilia
 			return nil, err
 		}
 		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON500 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetRevenueReportResponse parses an HTTP response from a GetRevenueReportWithResponse call
+func ParseGetRevenueReportResponse(rsp *http.Response) (*GetRevenueReportResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetRevenueReportResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest RevenueReport
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest BadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON500 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetRevenueReportCsvResponse parses an HTTP response from a GetRevenueReportCsvWithResponse call
+func ParseGetRevenueReportCsvResponse(rsp *http.Response) (*GetRevenueReportCsvResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetRevenueReportCsvResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest BadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationProblemJSON400 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
 		var dest Unauthorized

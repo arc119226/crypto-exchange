@@ -37,9 +37,15 @@ type Payload struct {
 	AccountID    string       `json:"account_id"`
 	Asset        string       `json:"asset"`
 	Amount       money.Amount `json:"amount"`
-	ToAddress    string       `json:"to_address"`
-	ChainID      int64        `json:"chain_id"`
-	Status       string       `json:"status"`
+	// Fee is what the account is charged on top of Amount, quoted when the
+	// request was accepted and never recomputed. It is carried on every
+	// event rather than only the terminal one because a consumer reading
+	// state_changed alone must be able to tell what the withdrawal costs.
+	Fee       money.Amount `json:"fee"`
+	FeeAsset  string       `json:"fee_asset"`
+	ToAddress string       `json:"to_address"`
+	ChainID   int64        `json:"chain_id"`
+	Status    string       `json:"status"`
 	// PreviousStatus is empty on withdrawal.requested. On state_changed it is
 	// what the row moved away from, so a consumer can tell an approval from a
 	// re-delivery without keeping its own copy of the machine.

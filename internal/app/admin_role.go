@@ -106,6 +106,7 @@ func newAdminServer(cfg Config, log *slog.Logger, m *telemetry.HTTPMetrics, reg 
 		WithWebhooks(webhooks).
 		// Read-only: what the chain role has seen and not yet credited.
 		WithDeposits(deposit.NewReader(pool, cfg.TenantID)).
+		WithDepositReviewer(deposit.NewReviewer(pool, cfg.TenantID, rec)).
 		// People: the directory, KYC levels, freezes.
 		WithUsers(sessions).
 		// The backup sidecar's record, as the gauge the BackupStale alert reads.

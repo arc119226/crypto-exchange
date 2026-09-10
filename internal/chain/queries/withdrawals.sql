@@ -7,8 +7,8 @@ WHERE tenant_id = $1 AND account_id = $2 AND idempotency_key = $3;
 -- name: InsertWithdrawal :one
 INSERT INTO chain.withdrawals (
     tenant_id, account_id, asset, amount, to_address, chain_id,
-    idempotency_key, request_hash, status, correlation_id
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'requested', $9)
+    idempotency_key, request_hash, status, correlation_id, fee, fee_asset
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'requested', $9, $10, $11)
 RETURNING *;
 
 -- name: GetWithdrawal :one

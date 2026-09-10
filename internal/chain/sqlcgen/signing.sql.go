@@ -38,7 +38,7 @@ const allocateWithdrawalNonce = `-- name: AllocateWithdrawalNonce :one
 UPDATE chain.withdrawals
 SET nonce = $3, version = version + 1, updated_at = now()
 WHERE tenant_id = $1 AND id = $2
-RETURNING id, tenant_id, account_id, asset, amount, to_address, chain_id, idempotency_key, request_hash, status, failure_reason, reviewed_by, reviewed_at, review_note, hold_entry_id, correlation_id, version, created_at, updated_at, nonce, raw_tx, tx_hash, broadcast_at, replacements, block_number, gas_cost, cancel_tx_hash, resolve_action, resolve_note, resolve_requested_by, resolve_requested_at, resolve_error
+RETURNING id, tenant_id, account_id, asset, amount, to_address, chain_id, idempotency_key, request_hash, status, failure_reason, reviewed_by, reviewed_at, review_note, hold_entry_id, correlation_id, version, created_at, updated_at, nonce, raw_tx, tx_hash, broadcast_at, replacements, block_number, gas_cost, cancel_tx_hash, resolve_action, resolve_note, resolve_requested_by, resolve_requested_at, resolve_error, fee, fee_asset
 `
 
 type AllocateWithdrawalNonceParams struct {
@@ -87,6 +87,8 @@ func (q *Queries) AllocateWithdrawalNonce(ctx context.Context, arg AllocateWithd
 		&i.ResolveRequestedBy,
 		&i.ResolveRequestedAt,
 		&i.ResolveError,
+		&i.Fee,
+		&i.FeeAsset,
 	)
 	return i, err
 }
@@ -292,7 +294,7 @@ func (q *Queries) ListAllocatedNonces(ctx context.Context, arg ListAllocatedNonc
 }
 
 const listCancellingWithdrawals = `-- name: ListCancellingWithdrawals :many
-SELECT id, tenant_id, account_id, asset, amount, to_address, chain_id, idempotency_key, request_hash, status, failure_reason, reviewed_by, reviewed_at, review_note, hold_entry_id, correlation_id, version, created_at, updated_at, nonce, raw_tx, tx_hash, broadcast_at, replacements, block_number, gas_cost, cancel_tx_hash, resolve_action, resolve_note, resolve_requested_by, resolve_requested_at, resolve_error FROM chain.withdrawals
+SELECT id, tenant_id, account_id, asset, amount, to_address, chain_id, idempotency_key, request_hash, status, failure_reason, reviewed_by, reviewed_at, review_note, hold_entry_id, correlation_id, version, created_at, updated_at, nonce, raw_tx, tx_hash, broadcast_at, replacements, block_number, gas_cost, cancel_tx_hash, resolve_action, resolve_note, resolve_requested_by, resolve_requested_at, resolve_error, fee, fee_asset FROM chain.withdrawals
 WHERE tenant_id = $1 AND status = 'broadcast' AND cancel_tx_hash IS NOT NULL
 ORDER BY updated_at
 LIMIT $2
@@ -345,6 +347,8 @@ func (q *Queries) ListCancellingWithdrawals(ctx context.Context, arg ListCancell
 			&i.ResolveRequestedBy,
 			&i.ResolveRequestedAt,
 			&i.ResolveError,
+			&i.Fee,
+			&i.FeeAsset,
 		); err != nil {
 			return nil, err
 		}
@@ -403,7 +407,7 @@ const markWithdrawalBroadcast = `-- name: MarkWithdrawalBroadcast :one
 UPDATE chain.withdrawals
 SET status = 'broadcast', broadcast_at = now(), version = version + 1, updated_at = now()
 WHERE tenant_id = $1 AND id = $2
-RETURNING id, tenant_id, account_id, asset, amount, to_address, chain_id, idempotency_key, request_hash, status, failure_reason, reviewed_by, reviewed_at, review_note, hold_entry_id, correlation_id, version, created_at, updated_at, nonce, raw_tx, tx_hash, broadcast_at, replacements, block_number, gas_cost, cancel_tx_hash, resolve_action, resolve_note, resolve_requested_by, resolve_requested_at, resolve_error
+RETURNING id, tenant_id, account_id, asset, amount, to_address, chain_id, idempotency_key, request_hash, status, failure_reason, reviewed_by, reviewed_at, review_note, hold_entry_id, correlation_id, version, created_at, updated_at, nonce, raw_tx, tx_hash, broadcast_at, replacements, block_number, gas_cost, cancel_tx_hash, resolve_action, resolve_note, resolve_requested_by, resolve_requested_at, resolve_error, fee, fee_asset
 `
 
 type MarkWithdrawalBroadcastParams struct {
@@ -447,6 +451,8 @@ func (q *Queries) MarkWithdrawalBroadcast(ctx context.Context, arg MarkWithdrawa
 		&i.ResolveRequestedBy,
 		&i.ResolveRequestedAt,
 		&i.ResolveError,
+		&i.Fee,
+		&i.FeeAsset,
 	)
 	return i, err
 }
@@ -455,7 +461,7 @@ const markWithdrawalCancelling = `-- name: MarkWithdrawalCancelling :one
 UPDATE chain.withdrawals
 SET cancel_tx_hash = $3, version = version + 1, updated_at = now()
 WHERE tenant_id = $1 AND id = $2
-RETURNING id, tenant_id, account_id, asset, amount, to_address, chain_id, idempotency_key, request_hash, status, failure_reason, reviewed_by, reviewed_at, review_note, hold_entry_id, correlation_id, version, created_at, updated_at, nonce, raw_tx, tx_hash, broadcast_at, replacements, block_number, gas_cost, cancel_tx_hash, resolve_action, resolve_note, resolve_requested_by, resolve_requested_at, resolve_error
+RETURNING id, tenant_id, account_id, asset, amount, to_address, chain_id, idempotency_key, request_hash, status, failure_reason, reviewed_by, reviewed_at, review_note, hold_entry_id, correlation_id, version, created_at, updated_at, nonce, raw_tx, tx_hash, broadcast_at, replacements, block_number, gas_cost, cancel_tx_hash, resolve_action, resolve_note, resolve_requested_by, resolve_requested_at, resolve_error, fee, fee_asset
 `
 
 type MarkWithdrawalCancellingParams struct {
@@ -503,6 +509,8 @@ func (q *Queries) MarkWithdrawalCancelling(ctx context.Context, arg MarkWithdraw
 		&i.ResolveRequestedBy,
 		&i.ResolveRequestedAt,
 		&i.ResolveError,
+		&i.Fee,
+		&i.FeeAsset,
 	)
 	return i, err
 }
@@ -512,7 +520,7 @@ UPDATE chain.withdrawals
 SET status = 'confirmed', block_number = $3, gas_cost = $4,
     version = version + 1, updated_at = now()
 WHERE tenant_id = $1 AND id = $2
-RETURNING id, tenant_id, account_id, asset, amount, to_address, chain_id, idempotency_key, request_hash, status, failure_reason, reviewed_by, reviewed_at, review_note, hold_entry_id, correlation_id, version, created_at, updated_at, nonce, raw_tx, tx_hash, broadcast_at, replacements, block_number, gas_cost, cancel_tx_hash, resolve_action, resolve_note, resolve_requested_by, resolve_requested_at, resolve_error
+RETURNING id, tenant_id, account_id, asset, amount, to_address, chain_id, idempotency_key, request_hash, status, failure_reason, reviewed_by, reviewed_at, review_note, hold_entry_id, correlation_id, version, created_at, updated_at, nonce, raw_tx, tx_hash, broadcast_at, replacements, block_number, gas_cost, cancel_tx_hash, resolve_action, resolve_note, resolve_requested_by, resolve_requested_at, resolve_error, fee, fee_asset
 `
 
 type MarkWithdrawalConfirmedParams struct {
@@ -563,6 +571,8 @@ func (q *Queries) MarkWithdrawalConfirmed(ctx context.Context, arg MarkWithdrawa
 		&i.ResolveRequestedBy,
 		&i.ResolveRequestedAt,
 		&i.ResolveError,
+		&i.Fee,
+		&i.FeeAsset,
 	)
 	return i, err
 }
@@ -572,7 +582,7 @@ UPDATE chain.withdrawals
 SET broadcast_at = now(), replacements = replacements + 1,
     version = version + 1, updated_at = now()
 WHERE tenant_id = $1 AND id = $2
-RETURNING id, tenant_id, account_id, asset, amount, to_address, chain_id, idempotency_key, request_hash, status, failure_reason, reviewed_by, reviewed_at, review_note, hold_entry_id, correlation_id, version, created_at, updated_at, nonce, raw_tx, tx_hash, broadcast_at, replacements, block_number, gas_cost, cancel_tx_hash, resolve_action, resolve_note, resolve_requested_by, resolve_requested_at, resolve_error
+RETURNING id, tenant_id, account_id, asset, amount, to_address, chain_id, idempotency_key, request_hash, status, failure_reason, reviewed_by, reviewed_at, review_note, hold_entry_id, correlation_id, version, created_at, updated_at, nonce, raw_tx, tx_hash, broadcast_at, replacements, block_number, gas_cost, cancel_tx_hash, resolve_action, resolve_note, resolve_requested_by, resolve_requested_at, resolve_error, fee, fee_asset
 `
 
 type MarkWithdrawalReplacementFailedParams struct {
@@ -629,6 +639,8 @@ func (q *Queries) MarkWithdrawalReplacementFailed(ctx context.Context, arg MarkW
 		&i.ResolveRequestedBy,
 		&i.ResolveRequestedAt,
 		&i.ResolveError,
+		&i.Fee,
+		&i.FeeAsset,
 	)
 	return i, err
 }
@@ -637,7 +649,7 @@ const recordWithdrawalGas = `-- name: RecordWithdrawalGas :one
 UPDATE chain.withdrawals
 SET block_number = $3, gas_cost = $4, version = version + 1, updated_at = now()
 WHERE tenant_id = $1 AND id = $2
-RETURNING id, tenant_id, account_id, asset, amount, to_address, chain_id, idempotency_key, request_hash, status, failure_reason, reviewed_by, reviewed_at, review_note, hold_entry_id, correlation_id, version, created_at, updated_at, nonce, raw_tx, tx_hash, broadcast_at, replacements, block_number, gas_cost, cancel_tx_hash, resolve_action, resolve_note, resolve_requested_by, resolve_requested_at, resolve_error
+RETURNING id, tenant_id, account_id, asset, amount, to_address, chain_id, idempotency_key, request_hash, status, failure_reason, reviewed_by, reviewed_at, review_note, hold_entry_id, correlation_id, version, created_at, updated_at, nonce, raw_tx, tx_hash, broadcast_at, replacements, block_number, gas_cost, cancel_tx_hash, resolve_action, resolve_note, resolve_requested_by, resolve_requested_at, resolve_error, fee, fee_asset
 `
 
 type RecordWithdrawalGasParams struct {
@@ -690,6 +702,8 @@ func (q *Queries) RecordWithdrawalGas(ctx context.Context, arg RecordWithdrawalG
 		&i.ResolveRequestedBy,
 		&i.ResolveRequestedAt,
 		&i.ResolveError,
+		&i.Fee,
+		&i.FeeAsset,
 	)
 	return i, err
 }
@@ -699,7 +713,7 @@ UPDATE chain.withdrawals
 SET raw_tx = $3, tx_hash = $4, broadcast_at = now(), replacements = replacements + 1,
     version = version + 1, updated_at = now()
 WHERE tenant_id = $1 AND id = $2
-RETURNING id, tenant_id, account_id, asset, amount, to_address, chain_id, idempotency_key, request_hash, status, failure_reason, reviewed_by, reviewed_at, review_note, hold_entry_id, correlation_id, version, created_at, updated_at, nonce, raw_tx, tx_hash, broadcast_at, replacements, block_number, gas_cost, cancel_tx_hash, resolve_action, resolve_note, resolve_requested_by, resolve_requested_at, resolve_error
+RETURNING id, tenant_id, account_id, asset, amount, to_address, chain_id, idempotency_key, request_hash, status, failure_reason, reviewed_by, reviewed_at, review_note, hold_entry_id, correlation_id, version, created_at, updated_at, nonce, raw_tx, tx_hash, broadcast_at, replacements, block_number, gas_cost, cancel_tx_hash, resolve_action, resolve_note, resolve_requested_by, resolve_requested_at, resolve_error, fee, fee_asset
 `
 
 type ReplaceWithdrawalTxParams struct {
@@ -752,6 +766,8 @@ func (q *Queries) ReplaceWithdrawalTx(ctx context.Context, arg ReplaceWithdrawal
 		&i.ResolveRequestedBy,
 		&i.ResolveRequestedAt,
 		&i.ResolveError,
+		&i.Fee,
+		&i.FeeAsset,
 	)
 	return i, err
 }
@@ -763,7 +779,7 @@ SET status = 'funds_locked', failure_reason = NULL,
     block_number = NULL, cancel_tx_hash = NULL,
     replacements = replacements + 1, version = version + 1, updated_at = now()
 WHERE tenant_id = $1 AND id = $2
-RETURNING id, tenant_id, account_id, asset, amount, to_address, chain_id, idempotency_key, request_hash, status, failure_reason, reviewed_by, reviewed_at, review_note, hold_entry_id, correlation_id, version, created_at, updated_at, nonce, raw_tx, tx_hash, broadcast_at, replacements, block_number, gas_cost, cancel_tx_hash, resolve_action, resolve_note, resolve_requested_by, resolve_requested_at, resolve_error
+RETURNING id, tenant_id, account_id, asset, amount, to_address, chain_id, idempotency_key, request_hash, status, failure_reason, reviewed_by, reviewed_at, review_note, hold_entry_id, correlation_id, version, created_at, updated_at, nonce, raw_tx, tx_hash, broadcast_at, replacements, block_number, gas_cost, cancel_tx_hash, resolve_action, resolve_note, resolve_requested_by, resolve_requested_at, resolve_error, fee, fee_asset
 `
 
 type RetryWithdrawalParams struct {
@@ -810,6 +826,8 @@ func (q *Queries) RetryWithdrawal(ctx context.Context, arg RetryWithdrawalParams
 		&i.ResolveRequestedBy,
 		&i.ResolveRequestedAt,
 		&i.ResolveError,
+		&i.Fee,
+		&i.FeeAsset,
 	)
 	return i, err
 }
@@ -838,7 +856,7 @@ UPDATE chain.withdrawals
 SET status = 'signed', nonce = $3, raw_tx = $4, tx_hash = $5,
     version = version + 1, updated_at = now()
 WHERE tenant_id = $1 AND id = $2
-RETURNING id, tenant_id, account_id, asset, amount, to_address, chain_id, idempotency_key, request_hash, status, failure_reason, reviewed_by, reviewed_at, review_note, hold_entry_id, correlation_id, version, created_at, updated_at, nonce, raw_tx, tx_hash, broadcast_at, replacements, block_number, gas_cost, cancel_tx_hash, resolve_action, resolve_note, resolve_requested_by, resolve_requested_at, resolve_error
+RETURNING id, tenant_id, account_id, asset, amount, to_address, chain_id, idempotency_key, request_hash, status, failure_reason, reviewed_by, reviewed_at, review_note, hold_entry_id, correlation_id, version, created_at, updated_at, nonce, raw_tx, tx_hash, broadcast_at, replacements, block_number, gas_cost, cancel_tx_hash, resolve_action, resolve_note, resolve_requested_by, resolve_requested_at, resolve_error, fee, fee_asset
 `
 
 type SignWithdrawalParams struct {
@@ -894,6 +912,8 @@ func (q *Queries) SignWithdrawal(ctx context.Context, arg SignWithdrawalParams) 
 		&i.ResolveRequestedBy,
 		&i.ResolveRequestedAt,
 		&i.ResolveError,
+		&i.Fee,
+		&i.FeeAsset,
 	)
 	return i, err
 }

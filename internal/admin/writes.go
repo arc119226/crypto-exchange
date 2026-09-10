@@ -571,7 +571,8 @@ func assetFields(a registry.Asset) map[string]any {
 	return map[string]any{
 		"name": a.Name, "chain_id": a.ChainID, "contract_address": a.ContractAddress, "is_native": a.IsNative,
 		"scale": a.Scale, "display_scale": a.DisplayScale, "required_confirmations": a.RequiredConfirmations,
-		"min_deposit": a.MinDeposit, "min_withdrawal": a.MinWithdrawal, "withdrawal_fee": a.WithdrawalFee, "sweep_threshold": a.SweepThreshold,
+		"min_deposit": a.MinDeposit, "min_withdrawal": a.MinWithdrawal, "withdrawal_fee": a.WithdrawalFee,
+		"withdrawal_fee_bps": a.WithdrawalFeeBps, "deposit_fee_bps": a.DepositFeeBps, "sweep_threshold": a.SweepThreshold,
 		"deposit_enabled": a.DepositEnabled, "withdraw_enabled": a.WithdrawEnabled, "status": a.Status, "version": a.Version,
 	}
 }
@@ -593,6 +594,8 @@ func assetChanges(b, a registry.Asset) []string {
 	add("min_deposit", b.MinDeposit.Equal(a.MinDeposit))
 	add("min_withdrawal", b.MinWithdrawal.Equal(a.MinWithdrawal))
 	add("withdrawal_fee", b.WithdrawalFee.Equal(a.WithdrawalFee))
+	add("withdrawal_fee_bps", b.WithdrawalFeeBps == a.WithdrawalFeeBps)
+	add("deposit_fee_bps", b.DepositFeeBps == a.DepositFeeBps)
 	add("sweep_threshold", b.SweepThreshold.Equal(a.SweepThreshold))
 	add("deposit_enabled", b.DepositEnabled == a.DepositEnabled)
 	add("withdraw_enabled", b.WithdrawEnabled == a.WithdrawEnabled)

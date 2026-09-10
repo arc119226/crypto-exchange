@@ -1,0 +1,59 @@
+{{define "content"}}
+<h1>{{T "revenue.title"}}</h1>
+{{with .Data}}
+<form method="get" action="/admin/revenue" class="row">
+  <label>{{T "revenue.from"}} <input type="date" name="from" value="{{.Filter.From}}"></label>
+  <label>{{T "revenue.to"}} <input type="date" name="to" value="{{.Filter.To}}"></label>
+  <label>{{T "col.asset"}}
+    <select name="asset">
+      <option value="">{{T "filter.any"}}</option>
+      {{$a := .Filter.Asset}}
+      {{range .Assets}}<option value="{{.Symbol}}"{{if eq .Symbol $a}} selected{{end}}>{{.Symbol}}</option>{{end}}
+    </select>
+  </label>
+  <button type="submit" class="quiet">{{T "filter.apply"}}</button>
+  <a class="quiet" href="/admin/revenue.csv{{.Query}}">{{T "revenue.download"}}</a>
+</form>
+{{if .Invalid}}
+<p class="muted">{{T "revenue.not_run"}}</p>
+{{else}}
+<p class="muted">{{T "revenue.note"}}</p>
+<section id="list">
+<table>
+  <thead><tr>
+    <th>{{T "col.asset"}}</th>
+    <th class="num">{{T "revenue.maker"}}</th>
+    <th class="num">{{T "revenue.taker"}}</th>
+    <th class="num">{{T "revenue.withdrawal"}}</th>
+    <th class="num">{{T "revenue.deposit"}}</th>
+    <th class="num">{{T "revenue.other"}}</th>
+    <th class="num">{{T "revenue.gas"}}</th>
+    <th class="num">{{T "revenue.net"}}</th>
+    <th class="num">{{T "revenue.trades"}}</th>
+    <th class="num">{{T "revenue.withdrawals"}}</th>
+    <th class="num">{{T "revenue.deposits"}}</th>
+  </tr></thead>
+  <tbody>
+  {{range .Lines}}
+  <tr>
+    <td><strong>{{.Asset}}</strong></td>
+    <td class="num">{{amount .MakerFees}}</td>
+    <td class="num">{{amount .TakerFees}}</td>
+    <td class="num">{{amount .WithdrawalFees}}</td>
+    <td class="num">{{amount .DepositFees}}</td>
+    <td class="num">{{amount .OtherFees}}</td>
+    <td class="num">{{amount .GasExpense}}</td>
+    <td class="num"><strong>{{amount .Net}}</strong></td>
+    <td class="num">{{.Trades}}</td>
+    <td class="num">{{.Withdrawals}}</td>
+    <td class="num">{{.Deposits}}</td>
+  </tr>
+  {{else}}
+  <tr><td colspan="11" class="muted">{{T "revenue.empty"}}</td></tr>
+  {{end}}
+  </tbody>
+</table>
+</section>
+{{end}}
+{{end}}
+{{end}}

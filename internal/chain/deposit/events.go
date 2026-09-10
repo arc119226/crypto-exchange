@@ -54,6 +54,13 @@ type Payload struct {
 	BlockHash     string       `json:"block_hash"`
 	Confirmations int32        `json:"confirmations"`
 	Status        string       `json:"status"`
+	// Fee and Credited exist only once the deposit has been credited: the
+	// fee is taken out of what arrived (§6.1.4 i), so Amount stays what the
+	// chain delivered and Credited is what became the balance. They are
+	// absent on detected, orphaned and dropped rather than zero, because a
+	// zero fee and no fee yet are different facts.
+	Fee      *money.Amount `json:"fee,omitempty"`
+	Credited *money.Amount `json:"credited_amount,omitempty"`
 	// Required is the asset's required_confirmations at the time, so a client
 	// can render progress without reading the registry.
 	Required int32 `json:"required_confirmations"`

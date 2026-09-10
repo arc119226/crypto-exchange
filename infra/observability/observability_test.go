@@ -276,7 +276,12 @@ func TestAlertRules(t *testing.T) {
 	// the seven of docs/plan-v1.0.md §15, plus what Phase 7 added for the
 	// backups (docs/runbooks/backup-restore.md)
 	want := []string{"ExchangeNotReady", "LedgerTrialBalanceBroken", "ChainScannerLagging", "OutboxBacklog", "HotWalletLow", "WithdrawalsPendingReview", "ReconciliationBreak",
-		"BackupStale", "WalArchiveStale", "BackupNeverTaken", "DiskAlmostFull"}
+		"BackupStale", "WalArchiveStale", "BackupNeverTaken", "DiskAlmostFull",
+		// Phase 8 (docs/plan-v1.0.md §23.3): the withdrawal fee is priced to
+		// cover gas, and this is what says it stopped doing so.
+		"WithdrawalGasExceedsFee",
+		// §6.4.1's reversed path: a credited deposit the chain took back.
+		"DepositAwaitingReversal"}
 	assert.Equal(t, len(want), n, "every alert is listed here so a new one is a deliberate addition")
 	for _, w := range want {
 		assert.True(t, seen[w], "missing alert %s", w)

@@ -4,7 +4,7 @@ import { useAuth } from '../auth/session'
 import { useResource } from '../hooks/useRefetch'
 import { enumLabel } from '../i18n/enums'
 import { useLocale } from '../i18n/LocaleProvider'
-import { trimZeros } from '../lib/decimal'
+import { add, format, mustDec, parseDec, trimZeros, withdrawalFee } from '../lib/decimal'
 import { formatDateTime, idempotencyKey, shortId } from '../lib/format'
 import { useAccountEvents, usePrivateFeed } from '../ws/PrivateFeedProvider'
 
@@ -211,6 +211,19 @@ function WithdrawPanel({ assets, onCreated }: { assets: Asset[]; onCreated: () =
   }, [assets, asset])
   const info = assets.find((a) => a.symbol === asset)
 
+  // What the account will actually be debited, once the typed amount parses.
+  // The fee is charged on top (§23.3), so the destination receives `amount`
+  // and the balance falls by amount + fee. The server snapshots its own
+  // quote on the row; this is the same formula, shown before the click.
+  const parsed = info ? parseDec(amount.trim()) : null
+  const quote =
+    info && parsed && parsed.n > 0n
+      ? (() => {
+          const fee = withdrawalFee(parsed, mustDec(info.withdrawal_fee), info.withdrawal_fee_bps, info.scale)
+          return { fee: trimZeros(format(fee)), total: trimZeros(format(add(parsed, fee))) }
+        })()
+      : null
+
   const submit = async (e: FormEvent) => {
     e.preventDefault()
     setError(null)
@@ -249,9 +262,16 @@ function WithdrawPanel({ assets, onCreated }: { assets: Asset[]; onCreated: () =
       </div>
       <div className="field">
         <label htmlFor="withdraw-amount">
-          {info ? t('wallet.amount_label', { min: trimZeros(info.min_withdrawal), fee: trimZeros(info.withdrawal_fee), asset: info.symbol }) : t('wallet.amount')}
+          {info ? t('wallet.amount_label', { min: trimZeros(info.min_withdrawal), asset: info.symbol }) : t('wallet.amount')}
         </label>
         <input id="withdraw-amount" inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} required />
+        {info && (
+          <p className="muted" data-testid="withdraw-cost">
+            {quote
+              ? t('wallet.fee_total', { fee: quote.fee, total: quote.total, asset: info.symbol })
+              : t('wallet.fee_rate', { fee: trimZeros(info.withdrawal_fee), bps: String(info.withdrawal_fee_bps), asset: info.symbol })}
+          </p>
+        )}
       </div>
       <div className="field">
         <label htmlFor="withdraw-to">{t('wallet.to_address')}</label>

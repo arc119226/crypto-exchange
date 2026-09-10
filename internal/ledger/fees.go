@@ -2,7 +2,6 @@ package ledger
 
 import (
 	"fmt"
-	"math/big"
 
 	"github.com/arc119226/crypto-exchange/internal/money"
 )
@@ -40,17 +39,10 @@ func ComputeFee(amount money.Amount, bps int32, scale int32) (money.Amount, erro
 	if bps < 0 || amount.IsNegative() {
 		return money.Zero, fmt.Errorf("%w: negative fee input", ErrInvalidSettlement)
 	}
-	numerator := amount.Mul(money.FromInt64(int64(bps)))
-	q, err := numerator.DivRoundDown(money.FromInt64(10000), scale)
-	if err != nil {
-		return money.Zero, err
-	}
-	if !q.Mul(money.FromInt64(10000)).Equal(numerator) {
-		unit, err := money.FromBigInt(big.NewInt(1), -scale)
-		if err != nil {
-			return money.Zero, err
-		}
-		q = q.Add(unit)
-	}
-	return q, nil
+	// money.DivRoundUp is this rounding: the remainder has to be detected at
+	// the division, because dividing first and rounding after loses the digits
+	// the ceiling would look at. The withdrawal and deposit fees in
+	// internal/registry go through the same primitive, so the three fee paths
+	// cannot round differently from each other.
+	return amount.Mul(money.FromInt64(int64(bps))).DivRoundUp(money.FromInt64(10000), scale)
 }

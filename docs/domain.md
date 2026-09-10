@@ -103,6 +103,21 @@ B 最終:available = 2000 − 2000 + 4 + 1200 = 1204 USDC、0.3992 ETH;hold = 0 
 
 每一列借貸相等;每個狀態下 X 恰好在一個桶裡 ✓。**ERC-20 提現:資產列用 USDC 科目,gas 列永遠是 ETH** ✓。
 
+**Phase 8 之後手續費 F 也在同一張表上跑**(§6.1.4 h、§27)。它跟 X **不在同一個桶**,這是整個退費設計的支點:
+
+| 狀態(轉移後) | `user:B:available` | `user:B:hold` | `fee_revenue` |
+|---|---|---|---|
+| `funds_locked`(Hold X + F) | −F | +F | |
+| `broadcast`(只搬 X) | | F 不動 | |
+| `confirmed` | | −F | +F |
+| `failed(broadcast)` | +F | −F | |
+| `failed(on_chain)` | | F 留著等人決定 | |
+| `resolve(refund)` | +F | −F | |
+| `resolve(retry)` | | F 不動,下一次嘗試沿用 | |
+| `resolve(cancel_nonce)` | +F | −F | |
+
+F 在 `confirmed` 那一刻才易主,所以**沒有任何結局會出現「沒送出去卻收了費」**;F = 0 時整張表退化成上面那張。
+
 **(f) 歸集**
 
 | 情境 | debit | credit | 合計 |
@@ -272,7 +287,7 @@ E1 是計畫的實質錯誤(會讓一條人工處置路徑在資料庫層失敗)
 4. **(Phase 2)** 手續費是否允許 0 bps 的市場(做市優惠)?`fee_schedules` CHECK 允許 0,ceil(0) = 0,守恆不受影響 → 可以。
 5. **(Phase 3)** `order.accepted` 對「同交易內立刻全部成交」的單也要發(§6.2 規則),事件順序 accepted → executed×n → filled 在 outbox 內以 `id` 排序即可;跨市場順序不保證 → 客戶端只能依 `account_seq`。
 6. **(Phase 4)** ERC-20 歸集第 1 步「精確 gas」G′ 的估算若低於實際,第 2 步失敗;建議 G′ = estimate × 1.2 並接受少量 ETH 灰塵留在充值地址(第 6 節)。
-7. **(Phase 4)** `withdrawal_fee`(v1 = 0)一旦非零,應在 `funds_locked` 時一併 Hold(X + fee),`confirmed` 時 fee 進 `fee_revenue`;計畫沒有這筆分錄,v1.1 補。→ 已補進計畫 v1.1 §6.1.4 (h)(外加、`confirmed` 入帳、請求時快照、失敗退回)與 §12 Phase 8;決策在 ADR-0011。程式仍未收費,Phase 8 實作。
+7. **(Phase 4)** `withdrawal_fee`(v1 = 0)一旦非零,應在 `funds_locked` 時一併 Hold(X + fee),`confirmed` 時 fee 進 `fee_revenue`;計畫沒有這筆分錄,v1.1 補。→ 已補進計畫 v1.1 §6.1.4 (h)(外加、`confirmed` 入帳、請求時快照、失敗退回)與 §12 Phase 8;決策在 ADR-0011。**Phase 8 已實作**(§27):費率出廠仍是 0,但程式會收了。
 8. **(Phase 5)** 對帳報表的 `external` 明細如何呈現「已知原因」?建議 `journal_entries.kind ∈ {faucet, adjustment, write_off}` + `reason`。→ **Phase 5 答**:不加 kind。對帳頁把最近的 house adjustments(`ref_type = 'house_adjustment'`,含 `reason` 與分錄)列在 breaks 正下方,「已知原因」就是操作者在 `reason` 寫下的那句話;要分類的話是 Phase 6 報表的事(§24)。
 
 ---
@@ -1105,3 +1120,69 @@ Phase 7 是把系統交給營運方:一份在 kind 上每個 PR 都裝一次的 
 - **bind mount 的 secret 檔,主機上的 owner/mode 就是容器裡的。** distroless 是 uid 65532、postgres 是 999,同一份 `gen-prod-secrets.sh` 要分兩個 group 寫檔;compose 的 `uid`/`gid`/`mode` 只在 swarm 有效。
 - **靜默 skip 的測試等於沒有測試。** chart 測試在沒有 helm 的機器上 skip 是對的,但 CI 沒有 helm 也 skip 就永遠不會紅——`CI=true` 時改成 fail,`unit` job 裝 helm 與 kubeconform。
 - **文件也能有測試,而且抓得到東西。** runbooks 測試第一次跑就抓到三個引用了不存在指標的名字(`sweeps_total`、`withdrawals_total`、`webhook_deliveries_total`)——都是「聽起來應該有」的名字。
+
+---
+
+## 27. Phase 8 程式碼與 §6.1.4 (h)(i) / §12 / §23 的對應(提現與充值手續費、營收報表、指標與告警)
+
+Phase 8 是讓交易所在每一筆出入金上不再虧錢,而且看得到自己有沒有賺。在此之前 `registry.assets.withdrawal_fee` 這個欄位從 0002 就存在、後台改得動、API 看得到,**但提現路徑從頭到尾沒有一行程式讀它**(§9 第 7 項)。現在讀了。
+
+設計的支點是一句話:**手續費的所有權在 `confirmed` 那一刻才轉移**,在那之前它一直是使用者的 hold。§1.3(e) 底下那張表就是它的逐狀態驗證。表格是對應,小節是為什麼。
+
+| 項目 | 實作 | 備註 |
+|---|---|---|
+| 兩個費率與三份快照(§23.3、§23.4) | migration 0023:`registry.assets.withdrawal_fee_bps` / `deposit_fee_bps`(整數 0..10000,預設 0);`chain.withdrawals.fee` / `fee_asset`;`chain.deposits.fee` / `credited_amount`,兩者用 CHECK 綁在 `credited_at` 上 | 基點而不是小數費率:整數不會是 0.1 + 0.2。**`api` 角色對 `chain.withdrawals` 只有 INSERT、沒有任何 UPDATE**(0010 的 grant),所以快照必須在 INSERT 當下寫進去 —— 這正好就是「快照」的語意,但也代表沒有事後補救的餘地 |
+| 費用計算(§6.1.4 h、i) | `internal/registry/fees.go` 兩個純函式;`fee = withdrawal_fee + ceil(amount × bps / 10000)`,提現**外加**、充值**內扣**,一律以該資產的最小單位無條件進位(§6.5) | 進位必須發生在**除法內部**,見 §27.1 第 1 條 |
+| 提現的四條結束路徑 | `service.Create` 算 fee、預檢 `available ≥ amount + fee`、快照;`worker.lockFunds` 持有 `amount + fee`;`broadcast` **只搬 amount**;`confirm` 另發一筆 `withdrawal:fee:{id}`(kind `fee`)把 fee 從 hold 轉給 `fee_revenue`;`failed(broadcast)` Release `amount + fee`;`failed(replaced)` 與 `resolve(refund)` 另加一對 hold → available;`resolve(retry)` 不動 | `min_withdrawal` 與限額**刻意只看 amount**:最小提領額問的是「值不值得送」,不是「送出去要多少錢」 |
+| 充值(§6.1.4 i) | `deposit/scan.go` 的 credit 從兩個 posting 變成三個:custody 借記**到帳全額**、使用者貸記 `amount − fee`、`fee_revenue` 貸記 fee(fee 為 0 時不加第三筆) | custody 借記全額不是小事:歸集上限(`sweeps.sql`)與對帳(`reconcile.sql`)都是 SUM `d.amount`,借記入帳金額會讓分錄**平衡而兩者安靜出錯** |
+| 太小而收不了費的充值 | `DepositFeeFor` 拒絕會吃掉整筆的手續費;`Scanner.depositFee` 收到拒絕就記 warning 並全額入帳 | 兩個方向都更糟:入帳 0 是沒收,拒絕入帳會讓使用者的錢卡在一筆掃描器永遠重試的充值裡。金額是該資產的一個最小單位,交易所讓掉這個進位誤差並在日誌說出來 |
+| 契約(§7.2) | 公開與後台 OpenAPI 的 `Asset` / `Withdrawal` / `Deposit` 加欄;`withdrawal.*` 兩個事件**必帶** `fee` / `fee_asset`;五個 `deposit.*` 共用的 payload 加**選填**的 `fee` / `credited_amount` | 充值的兩欄入帳前**缺席而不是 0**:「沒收費」與「還沒算」是兩件事。後台 `AssetRequest` 的兩個新欄位設成 required,舊客戶端漏填會**大聲失敗**而不是安靜把費率歸零 |
+| 前台 | 錢包頁的提現表單:沒填金額時顯示費率,填了就顯示**算出來的 fee 與總額**;算術是 `lib/decimal.ts` 的 scaled BigInt | 瀏覽器裡也不准浮點數。兩邊的公式必須一致,而它們曾經不一致 —— 見 §27.1 第 1 條 |
+| 營收報表(§23.5) | `internal/admin/queries/reports.sql` 三支查詢 + `revenue.go` 每資產合成一列;`GET /admin/v1/reports/revenue(.csv)`、後台「營收」頁、`exchangectl admin revenue` | **交易手續費從 `trading.trades` 讀,不從帳本讀**:settle 分錄本來就會把同一筆手續費 credit 進 `fee_revenue`,兩邊都加就是重複計算,而且只有成交列知道哪一方是 maker。帳本那半邊因此排除 `kind = 'settle'`。`ledger.postings` **沒有時間欄也沒有 tenant 欄**,兩個條件都得 join `journal_entries` |
+| 指標與告警(§15) | `ledger_fee_revenue_total{asset,source}`、`ledger_gas_expense_total{asset}`,在 `PendingEntry.Finish` 觀測;`WithdrawalGasExceedsFee`;Grafana Ledger 板的「手續費 vs gas」面板 | 觀測點是 `Finish` **不是 `Post`**:撮合的 runner 自己驅動各階段、從不呼叫 `Post`。計數器帶金額而不是次數(§15 的淨額定義要求),代價是這條路上唯一一次 float 轉換,理由與 reconcile 的熱錢包 gauge 相同 |
+
+### 27.1 設計審查抓到的四個 High
+
+Phase 8 的程式寫完之後跑了一輪對抗式檢查:七個面向各一位審查者,每一則發現再由三位持不同視角的人嘗試**推翻**,兩票以上認為推翻不了才算數。23 則候選裡 14 則成立,其中四則是 High,而**最嚴重的那一則不是 Phase 8 造成的**。
+
+1. **進位其實是捨去,而且只在 18 位小數的資產上。** `ceil(amount × bps / 10000)` 原本寫成「先除、再 `RoundUp`」,而除法在給定的位數上就截斷了 —— 除的位數是 18,ETH 的 scale 也是 18,所以 `RoundUp(18)` 是空操作。結果是 ETH 的手續費被**無條件捨去**,一筆夠小的提現收費為 0。1 wei 收 1 個基點應該是 1 wei,實際回 0。前台的 TypeScript 用 BigInt 精確計算,所以**反而是對的**,兩邊因此不一致 —— 註解卻寫著「兩者逐行對應」。修法是把進位搬進除法本身:`money.DivRoundUp` 除完之後乘回去比對,有餘數才加一個最小單位。交易手續費的 `ledger.ComputeFee` 早就是這樣做的,現在三條路徑共用同一個原語,不可能再分歧。
+2. **`resolve(retry)` 之後成功送出,金額會永遠凍在使用者的 hold 裡。** 這一條**在這個分支之前就存在**,Phase 8 只是動到同一行的 `Kind`。`signed → broadcast` 的分錄用 `withdrawal:broadcast:{id}` 當冪等鍵,一筆提現一把;但 retry 會把金額從 `pending_withdrawal` 搬回 hold、狀態退回 `funds_locked`,於是它會被**再簽一次、再廣播一次**,而第二次撞上同一把鍵 —— `Post` 回傳 replayed、什麼都不寫,`broadcast()` 沒看那個旗標就把狀態標成 broadcast。金額於是沒有再離開 hold,而 `withdrawal:confirm:{id}`(另一把鍵)照樣從 `pending_withdrawal` 借記它。結局:提現 confirmed、使用者的 hold 裡永遠躺著那筆錢、`pending_withdrawal` 短少同一筆,而**試算平衡仍然是 0**,所以 §6.1.5 的不變量抓不到。同一把鍵也讓 retry 之後那次嘗試的 gas 永遠記不進帳。修法:`withdrawal:broadcast`、`withdrawal:gas` 與 `withdrawal:{action}` 三把鍵加上 `replacements`(簽章日誌本來就用它當嘗試序號)。既有的 retry 測試停在「再簽一次」那一步,從來沒跑到第二次廣播 —— 這一輪的 fee 測試會跑完整條,所以它會紅。
+3. **權限測試用了不是 UUID 的字串,所以三個斷言都在檢查權限之前就失敗。** 新加的「chain 角色不能改寫 fee 快照」測試用 `WHERE id = 'no-such-withdrawal'`,而 `chain.withdrawals.id` 是 `uuid`;型別轉換發生在**權限檢查之前**,所以三句都拿到 22P02,測試通過的理由完全不是它宣稱的那個。
+4. **營收報表測試斷言了一個算不出來的負數。** `assert.True(t, eth.Net.IsNegative())` —— 但那個情境收了 0.001125 ETH 手續費、只記了約 0.000105 ETH 的 gas,淨額是正的。淨額是正是負是一個關於 gas 價格的問題,不是關於這段程式的問題,所以斷言改成恆等式本身。
+
+另外十則(中低)也都修了:報表欄位的說明自相矛盾(叫營運方拿 `gas_expense` 除以提現筆數,而那一欄包含歸集的 gas)、期間填反時頁面同時說「參數錯誤」和「這段期間沒有任何進出」還把資產篩選丟掉、公開 API 少了 `deposit_fee_bps`、固定手續費的小數位數沒有驗證、`beta-checklist` 與本文件第 9 節仍然寫著「程式還沒收費」。
+
+### 27.2 與計畫書的偏離,以及刻意不做的
+
+- **`reversed` 這條路徑本來不存在,補在同一個 PR 裡。** §12 Phase 8 的充值任務後半要求「已入帳的充值被深度 reorg 之後,反向分錄要連 fee 一起反向」,但查證的結果是:`reversed` 這個狀態在 0009 的 CHECK 裡、在後台的篩選清單裡、有事件 schema 也有 golden envelope,**卻沒有任何程式寫得出這個狀態**,掃描器的 `rewind` 刻意跳過已入帳的充值。偵測那一半蓋好了,反應那一半不存在——那是 **Phase 4 的缺口**,不是 Phase 8 的,但「反向要含 fee」在沒有反向的情況下無從談起,所以整條做完了(§27.4)。
+- **`exchangectl e2e` 的手續費斷言寫在 `scripts/e2e.sh`。** 計畫寫的是前者,但 `cmd/exchangectl/e2e.go` 只跑交易,提現那一整段本來就在 shell 裡。斷言用的是精確字串比對而不是差額 —— jq 的 `tonumber` 是浮點數,不能碰錢。
+- **「reorg 反向」的測試改成斷言今天實際會發生的事**:已入帳的充值在 reorg 之後仍然是 `credited`、fee 與入帳金額不變。它釘住現況,所以反向路徑實作的那一天會是一個看得見的改動。
+- **報表多了一欄 `other`**,計畫的六類沒有它。任何進到 `fee_revenue` 而不屬於三種來源的錢會落在這裡,正常為 0;它存在是為了讓「營收安靜地不見」變得不可能。
+- **筆數是三個而不是一個**,因為它們數的是不同母體:成交筆數含零手續費的成交(設費率之前那就是全部),而零手續費的提現與充值**根本不產生 posting**,所以只數得到收費的那些。§23.3 的定價指引要的正是提現筆數本身。
+- **告警在費率為 0 時也會響。** §15 的原文是裸比較,而裸比較在沒有 fee series 時是靜音的 —— 那正好是 §23.3 要提醒營運方的情況。所以規則加了 `or ... * 0`。副作用是任何跑久了又沒設費率的 stack 會一直亮著這條 warning。
+
+### 27.3 這一輪學到的事
+
+- **「先算、再進位」在十進位上是錯的。** 除法在給定的位數截斷,進位看不到已經被丟掉的位數。這件事只在「除的位數 = 資產的位數」時才爆炸,也就是**只在 18 位小數的資產上**,所以任何拿 6 位小數的 USDC 寫的測試都會過。抓到它的是「兩邊公式必須一致」這個問題 —— 前台用 BigInt 精確計算,反而變成揭穿後端的對照組。
+- **冪等鍵的粒度是設計,不是實作細節。** 一把「每筆提現一個」的鍵,在提現只會被送出一次的假設下是對的;retry 打破了那個假設,而錯誤的形態是**沉默**:分錄沒寫、狀態照樣前進、試算平衡照樣是 0。會抓到它的不是不變量,是「同一筆錢在哪個桶」的逐狀態表。
+- **測試可以因為錯的理由通過。** 兩個新測試各自因為一個與它們宣稱無關的原因而通過:一個把非 UUID 字串餵給 uuid 欄位,在權限檢查之前就失敗;另一個因為進位的 bug 而走了「不收費」那條路,剛好符合它斷言的結果。兩個都是在**推翻它**的時候才發現的,不是在寫它的時候。
+- **拿不到執行環境時,對抗式檢查是唯一的替代品。** 這一輪的整合測試在沒有 Docker 的環境裡寫成,只能編譯不能執行。七個面向 76 個 agent 讀出來的四個 High 裡有兩個是「這個測試在 CI 上會紅」,而那兩個原本要等 CI 跑完才會知道。
+
+### 27.4 補完的 Phase 4 缺口:`reversed`
+
+Phase 8 的充值任務要求「反向分錄要連 fee 一起反向」,而查下去發現**沒有反向分錄可以加 fee**:`reversed` 從 0009 起就宣告在 CHECK 裡、在後台的篩選清單裡、`api/events/v1/deposit.reversed.json` 有 schema 也有 golden envelope,但整棵樹裡沒有一行程式寫得出這個狀態。`rewind` 的註解自己說得很清楚——已入帳的充值不動,因為錢可能已經被花掉——然後故事就停在那裡。**偵測那一半蓋好了,反應那一半沒有。**
+
+後果不是抽象的:一次比確認數更深的 reorg 之後,使用者手上有一筆鏈上不再背書的餘額,對帳會把差額報成 break,而產品裡沒有任何東西能結掉它。
+
+補法照**提現 resolve 的邊界**(§6.4.2),因為那是同一個問題:admin 角色有人的決定,但沒有節點、沒有鏈的視野。
+
+| 項目 | 實作 | 備註 |
+|---|---|---|
+| 佇列 | migration 0024 的 `reorged_at_block`:掃描器 `rewind` 時對已入帳的充值蓋上回退到的高度,**狀態維持 `credited`**;`MarkDepositsReorged` 只蓋沒蓋過的列 | 狀態不能動:帳本還握著那筆貸記,在反向真的貼出來之前必須維持。第一次 reorg 才算數——後來一次比較淺的不該把記號改到那筆充值從來沒有效過的高度 |
+| 告警 | `deposits_awaiting_reversal` gauge + `DepositAwaitingReversal`(critical、`for: 0m`) | gauge 不是 counter,因為它會降回去:有人確認就是讓它降的動作 |
+| 人的決定 | `POST /admin/v1/deposits/{id}/reverse`(理由必填)、後台鏈頁最上面那一區、`exchangectl admin deposits reverse` | 沒有對應的「駁回」:不處理就是不處理,所以「問」本身就是全部的決定 |
+| 權限 | 0024 只給 `ex_admin` 三個欄位的 UPDATE | 記錄決定與執行決定是不同角色。`privileges_test` 釘住這件事,因為其他測試全都用 `ex_all` 連,看不見這條線 |
+| 執行 | chain 角色每一輪 `applyReversals`:入帳那三個 posting 的**精確鏡像**——custody 貸記到帳全額、使用者 `available` 借記入帳金額、`fee_revenue` 借記 fee——狀態改 `reversed`、清 `credited_at`、發 `deposit.reversed`,冪等鍵 `deposit:reversal:{id}` | **fee 也退**:交易所收的是「把錢送到」的費用,而鏈把那筆錢收回去了 |
+| 餘額不足 | `ledger.Post` 回 `ErrInsufficient` → 清掉請求、把差額寫進 `reversal_error`、**留在佇列裡**,告警繼續亮 | 這是 §6.1.5「餘額不能為負」存在的理由本身。硬做的替代品是一個欠交易所錢的帳戶,而這套系統沒有科目表示它,也沒有辦法收。所以決定回到人身上,`docs/runbooks/reorg-alert.md` 寫了三個選項——等、凍結、或用 house 調帳認列損失,而最後那個是營運決定不是維運動作 |
+
+**一個 schema 上的取捨值得記下來。** 0023 把 `fee` 與 `credited_amount` 綁在 `credited_at` 上,而 0009 把 `credited_at` 綁死在 `status = 'credited'`,所以反向必須清掉 `credited_at`——那會把兩個 fee 欄位一起帶走,正好在它們最值得留的那一刻抹掉反向所依據的數字。0024 把它們改綁在「帳本動過這筆充值」上。`credited_at` 本身還是清掉了:充值表是掃描器對鏈的記憶,而「什麼時候入帳的」權威紀錄是那筆日記帳分錄,那是永久的。

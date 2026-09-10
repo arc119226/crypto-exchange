@@ -2,13 +2,15 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/arc119226/crypto-exchange/api/events/v1/withdrawal.state_changed.json",
   "title": "withdrawal.state_changed",
-  "description": "A withdrawal moved from one state to another (docs/plan-v1.0.md \u00a76.4.2). One event covers every transition, with previous_status and status naming the move, because the state machine is still growing and a type per state would multiply the contract by its length.",
+  "description": "A withdrawal moved from one state to another (docs/plan-v1.0.md §6.4.2). One event covers every transition, with previous_status and status naming the move, because the state machine is still growing and a type per state would multiply the contract by its length.",
   "type": "object",
   "required": [
     "withdrawal_id",
     "account_id",
     "asset",
     "amount",
+    "fee",
+    "fee_asset",
     "to_address",
     "chain_id",
     "status"
@@ -28,6 +30,15 @@
       "type": "string",
       "pattern": "^-?\\d{1,18}(\\.\\d{1,18})?$",
       "description": "Decimal amount in the asset's own units, never wei."
+    },
+    "fee": {
+      "type": "string",
+      "pattern": "^-?\\d{1,18}(\\.\\d{1,18})?$",
+      "description": "What the account is charged on top of amount: the destination receives amount, the account is debited amount + fee. Quoted when the request was accepted and never recomputed, so a rate change does not reprice a withdrawal already in flight. It is the account's money until the transaction confirms, and comes back on every path that does not. 0 unless the operator has set a rate."
+    },
+    "fee_asset": {
+      "type": "string",
+      "description": "The asset the fee is denominated in, which today is always asset: a USDC withdrawal is charged in USDC even though its gas is paid in ETH."
     },
     "to_address": {
       "type": "string",

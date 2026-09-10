@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/arc119226/crypto-exchange/api/events/v1/deposit.reversed.json",
   "title": "deposit.reversed",
-  "description": "A credited deposit was reorged away past the confirmation depth. The reversing ledger entry is made by hand after an operator confirms it, so this event is an alert, not a completed reversal.",
+  "description": "A credited deposit was undone after a reorg took its block away past the confirmation depth. The reversing entry has been posted -- the exact mirror of the three postings that credited it, fee included -- so this event reports a completed reversal, not a warning about one. It is rare and it is never automatic: the scanner marks the deposit and an operator confirms, because the account may already have spent the money.",
   "type": "object",
   "required": [
     "deposit_id",
@@ -33,6 +33,16 @@
       "type": "string",
       "pattern": "^-?\\d{1,18}(\\.\\d{1,18})?$",
       "description": "Decimal amount in the asset's own units, never wei."
+    },
+    "fee": {
+      "type": "string",
+      "pattern": "^-?\\d{1,18}(\\.\\d{1,18})?$",
+      "description": "What was taken out of amount before crediting. Unlike a withdrawal fee this one is deducted from what arrived rather than added to it, so amount stays what the chain delivered. Absent until the deposit is credited -- a zero fee and no fee yet are different facts. 0 unless the operator has set a rate; deposits ship free."
+    },
+    "credited_amount": {
+      "type": "string",
+      "pattern": "^-?\\d{1,18}(\\.\\d{1,18})?$",
+      "description": "What became the account's balance: amount minus fee. Absent until the deposit is credited."
     },
     "address": {
       "type": "string",

@@ -251,3 +251,43 @@ func TestDivRoundDown(t *testing.T) {
 	_, err = MustParse("1").DivRoundDown(MustParse("3"), -1)
 	assert.ErrorIs(t, err, ErrPrecision)
 }
+
+// DivRoundUp exists because a ceiling cannot be applied after a division:
+// DivRoundDown truncates at the scale it is given, so by the time a RoundUp
+// could run the digits it would have looked at are already gone. The fee paths
+// all round up, so getting this wrong charges nothing where it should charge
+// the smallest unit there is.
+func TestDivRoundUpRoundsAtTheDivisionNotAfterIt(t *testing.T) {
+	for _, tc := range []struct {
+		a, b  string
+		scale int32
+		want  string
+	}{
+		// The case that broke: the quotient needs 22 digits and the scale is
+		// 18, so every digit the ceiling cares about is below the scale.
+		{"0.000000000000000001", "10000", 18, "0.000000000000000001"},
+		// Exact division must not be nudged upward.
+		{"1", "4", 18, "0.25"},
+		{"100", "10000", 6, "0.01"},
+		{"0", "10000", 18, "0"},
+		// One unit past exact rounds to the next unit, at any scale.
+		{"0.0000001", "1", 6, "0.000001"},
+		{"1.0000001", "1", 6, "1.000001"},
+		{"2", "3", 2, "0.67"},
+	} {
+		got, err := MustParse(tc.a).DivRoundUp(MustParse(tc.b), tc.scale)
+		require.NoError(t, err, "%s / %s at %d", tc.a, tc.b, tc.scale)
+		assert.Equal(t, tc.want, got.String(), "%s / %s at %d", tc.a, tc.b, tc.scale)
+	}
+}
+
+// Up and away-from-zero are the same direction only for non-negative values,
+// so the ambiguous cases are refused rather than guessed at.
+func TestDivRoundUpRefusesWhatItCannotMean(t *testing.T) {
+	_, err := MustParse("-1").DivRoundUp(MustParse("3"), 18)
+	require.Error(t, err)
+	_, err = MustParse("1").DivRoundUp(MustParse("-3"), 18)
+	require.Error(t, err)
+	_, err = MustParse("1").DivRoundUp(Zero, 18)
+	require.ErrorIs(t, err, ErrDivisionByZero)
+}

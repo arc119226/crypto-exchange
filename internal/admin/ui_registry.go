@@ -86,7 +86,9 @@ func assetForm(f *form, symbol string) registry.AssetInput {
 		ContractAddress: f.optStr("contract_address"), IsNative: f.boolean("is_native"),
 		Scale: f.i32("scale"), DisplayScale: f.i32("display_scale"), RequiredConfirmations: f.i32("required_confirmations"),
 		MinDeposit: f.amount("min_deposit"), MinWithdrawal: f.amount("min_withdrawal"),
-		WithdrawalFee: f.amount("withdrawal_fee"), SweepThreshold: f.amount("sweep_threshold"),
+		WithdrawalFee:    f.amount("withdrawal_fee"),
+		WithdrawalFeeBps: f.i32("withdrawal_fee_bps"), DepositFeeBps: f.i32("deposit_fee_bps"),
+		SweepThreshold: f.amount("sweep_threshold"),
 		DepositEnabled: f.boolean("deposit_enabled"), WithdrawEnabled: f.boolean("withdraw_enabled"), Status: f.str("status"),
 	}
 }

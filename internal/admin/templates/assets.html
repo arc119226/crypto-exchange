@@ -20,6 +20,11 @@
     <label>{{T "assets.sweep_threshold"}} <input type="text" name="sweep_threshold" value="{{amount .SweepThreshold}}" required></label>
   </div>
   <div class="row">
+    <label>{{T "assets.withdrawal_fee_bps"}} <input type="number" name="withdrawal_fee_bps" value="{{.WithdrawalFeeBps}}" min="0" max="10000" required></label>
+    <label>{{T "assets.deposit_fee_bps"}} <input type="number" name="deposit_fee_bps" value="{{.DepositFeeBps}}" min="0" max="10000" required></label>
+    <p class="muted">{{T "assets.fee_bps.hint"}}</p>
+  </div>
+  <div class="row">
     <label class="inline"><input type="checkbox" name="deposit_enabled"{{if .DepositEnabled}} checked{{end}}> {{T "assets.deposits"}}</label>
     <label class="inline"><input type="checkbox" name="withdraw_enabled"{{if .WithdrawEnabled}} checked{{end}}> {{T "assets.withdrawals"}}</label>
     <label>{{T "form.reason"}} <input type="text" name="reason" required placeholder="{{T "form.reason.placeholder"}}"></label>
@@ -41,7 +46,7 @@
     <td class="num">{{.Scale}}/{{.DisplayScale}}</td>
     <td class="num">{{.RequiredConfirmations}}</td>
     <td class="num">{{amount .MinWithdrawal}}</td>
-    <td class="num">{{amount .WithdrawalFee}}</td>
+    <td class="num">{{amount .WithdrawalFee}}{{if .WithdrawalFeeBps}} + {{.WithdrawalFeeBps}}bp{{end}}</td>
     <td class="num">{{amount .SweepThreshold}}</td>
     <td><span class="badge {{if .DepositEnabled}}ok{{else}}bad{{end}}">{{if .DepositEnabled}}{{status "on"}}{{else}}{{status "off"}}{{end}}</span></td>
     <td><span class="badge {{if .WithdrawEnabled}}ok{{else}}bad{{end}}">{{if .WithdrawEnabled}}{{status "on"}}{{else}}{{status "off"}}{{end}}</span></td>

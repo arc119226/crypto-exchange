@@ -299,19 +299,48 @@ func (s *Scanner) credit(ctx context.Context, row sqlcgen.ChainDeposit, confirma
 	if err != nil {
 		return fmt.Errorf("deposit: amount of %s: %w", row.ID, err)
 	}
+	fee, err := s.depositFee(ctx, row, amount)
+	if err != nil {
+		return err
+	}
+	custody, err := s.ledger.HouseAccount(ledger.HouseCustodyDepositAddresses)
+	if err != nil {
+		return err
+	}
+	feeRevenue, err := s.ledger.HouseAccount(ledger.HouseFeeRevenue)
+	if err != nil {
+		return err
+	}
+	// The chain delivered amount; the user receives what is left after the
+	// fee (§6.1.4 i). One entry with three postings rather than two entries,
+	// because there is one event here -- money arrived -- and splitting it
+	// would let a reader see a deposit credited without its fee.
+	//
+	// At the seeded rate of zero this is exactly the two postings
+	// ledger.Credit would have made, which is what keeps every existing
+	// deposit test unchanged.
+	credit := amount.Sub(fee)
+	postings := []ledger.Posting{
+		{AccountID: custody, Asset: row.Asset, Bucket: ledger.BucketHouse, Direction: ledger.Debit, Amount: amount},
+		{AccountID: row.AccountID, Asset: row.Asset, Bucket: ledger.BucketAvailable, Direction: ledger.Credit, Amount: credit},
+	}
+	if fee.IsPositive() {
+		postings = append(postings,
+			ledger.Posting{AccountID: feeRevenue, Asset: row.Asset, Bucket: ledger.BucketHouse, Direction: ledger.Credit, Amount: fee})
+	}
 	return s.inTx(ctx, func(tx pgx.Tx) error {
-		if _, _, err := s.ledger.Credit(ctx, tx, ledger.CreditParams{
-			AccountID: row.AccountID, Asset: row.Asset, Amount: amount,
-			Source: ledger.HouseCustodyDepositAddresses, Kind: "deposit",
+		if _, _, err := s.ledger.Post(ctx, tx, ledger.Entry{
 			IdempotencyKey: fmt.Sprintf("deposit:%d:%s:%d", row.ChainID, row.TxHash, row.LogIndex),
-			Ref:            ledger.Ref{Type: "deposit", ID: row.ID},
-			Reason:         "on-chain deposit",
-			CorrelationID:  deref(row.CorrelationID),
+			Kind:           ledger.KindDeposit,
+			RefType:        "deposit", RefID: row.ID, Reason: "on-chain deposit",
+			CorrelationID: deref(row.CorrelationID),
+			Postings:      postings,
 		}); err != nil {
 			return fmt.Errorf("deposit: credit %s: %w", row.ID, err)
 		}
 		credited, err := sqlcgen.New(tx).MarkDepositCredited(ctx, sqlcgen.MarkDepositCreditedParams{
 			ID: row.ID, TenantID: s.cfg.Tenant, Confirmations: confirmations,
+			Fee: pg.NumericFromAmount(fee), CreditedAmount: pg.NumericFromAmount(credit),
 		})
 		if err != nil {
 			return fmt.Errorf("deposit: mark credited %s: %w", row.ID, err)
@@ -319,10 +348,39 @@ func (s *Scanner) credit(ctx context.Context, row sqlcgen.ChainDeposit, confirma
 		s.log.Info("deposit credited",
 			slog.String("deposit_id", row.ID), slog.String("account_id", row.AccountID),
 			slog.String("asset", row.Asset), slog.String("amount", amount.String()),
+			slog.String("fee", fee.String()), slog.String("credited", credit.String()),
 			slog.Int("confirmations", int(confirmations)), slog.Int("required", int(required)))
 		s.metrics.credited.WithLabelValues(row.Asset).Inc()
 		return s.emit(ctx, tx, EventCredited, credited)
 	})
+}
+
+// depositFee is what this deposit is charged (§23.4). It is zero for every
+// asset the seed ships, so the common path is a registry read and an
+// immediate zero.
+//
+// A deposit small enough that the fee would round up to the whole amount is
+// credited in full instead. The alternative is worse in both directions:
+// crediting zero is confiscation, and refusing to credit strands a user's
+// money in a deposit the scanner would retry forever. The amounts involved
+// are one unit of the asset -- the situation only arises from rounding -- so
+// the exchange forgoes a rounding error and says so in the log.
+func (s *Scanner) depositFee(ctx context.Context, row sqlcgen.ChainDeposit, amount money.Amount) (money.Amount, error) {
+	asset, err := s.registry.GetAsset(ctx, s.cfg.Tenant, row.Asset)
+	if err != nil {
+		return money.Zero, fmt.Errorf("deposit: asset %s of %s: %w", row.Asset, row.ID, err)
+	}
+	if asset.DepositFeeBps == 0 {
+		return money.Zero, nil
+	}
+	fee, err := asset.DepositFeeFor(amount)
+	if err != nil {
+		s.log.Warn("deposit is too small to charge a fee on; crediting it in full",
+			slog.String("deposit_id", row.ID), slog.String("asset", row.Asset),
+			slog.String("amount", amount.String()), slog.String("err", err.Error()))
+		return money.Zero, nil
+	}
+	return fee, nil
 }
 
 // expireOrphans drops deposits that never came back (§6.4.1).
@@ -380,11 +438,20 @@ func (s *Scanner) emit(ctx context.Context, tx pgx.Tx, eventType string, row sql
 	if err != nil {
 		return err
 	}
+	fee, err := pg.NullableAmountFromNumeric(row.Fee)
+	if err != nil {
+		return err
+	}
+	credited, err := pg.NullableAmountFromNumeric(row.CreditedAmount)
+	if err != nil {
+		return err
+	}
 	env, err := Event(eventType, s.cfg.Tenant, Payload{
 		DepositID: row.ID, AccountID: row.AccountID, Asset: row.Asset, Amount: amount,
 		Address: row.Address, TxHash: row.TxHash, LogIndex: row.LogIndex,
 		BlockNumber: uint64(row.BlockNumber), BlockHash: row.BlockHash, //nolint:gosec // CHECKed >= 0
 		Confirmations: row.Confirmations, Status: row.Status,
+		Fee: fee, Credited: credited,
 	}, seq, time.Now().UTC().Truncate(time.Microsecond))
 	if err != nil {
 		return err

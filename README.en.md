@@ -266,6 +266,7 @@ Still stuck: paste the last 30 lines of the terminal and the output of `make ps`
 | fee, bps | Basis point, one ten-thousandth. 10 bps = 0.1% |
 | anvil | The pretend Ethereum blockchain running on your computer. Instant blocks, free coins, gone when you stop it |
 | deposit / withdrawal | Moving coins from the blockchain into the exchange / out of the exchange to an address on the blockchain |
+| withdrawal fee / deposit fee | The exchange may charge for either, but **both ship at zero**, so none of the numbers above are different because of them. A withdrawal fee is charged **on top**: the destination receives exactly what you typed and the account is debited the amount plus the fee. A deposit fee comes out of what arrived. An operator sets them on the Assets page, and a change only affects later requests |
 | sweep | The exchange gathering coins scattered across deposit addresses into its own vault (the hot wallet) |
 | reconciliation | Comparing the ledger's numbers with the real numbers on the blockchain; they may not differ by a cent |
 | back office | The management web page the exchange's staff use |

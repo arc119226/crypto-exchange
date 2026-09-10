@@ -11,7 +11,7 @@ import (
 
 func newAdminDepositsCmd() *cobra.Command {
 	c := &cobra.Command{Use: "deposits", Short: "Deposits the chain role has seen (/admin/v1/deposits)"}
-	c.AddCommand(newAdminDepositsListCmd())
+	c.AddCommand(newAdminDepositsListCmd(), newAdminDepositsAwaitingReversalCmd(), newAdminDepositsReverseCmd())
 	return c
 }
 
@@ -67,6 +67,105 @@ func newAdminDepositsListCmd() *cobra.Command {
 	c.Flags().StringVar(&asset, "asset", "", "asset symbol")
 	c.Flags().Int32Var(&limit, "limit", 100, "page size")
 	c.Flags().Int32Var(&offset, "offset", 0, "page offset")
+	return c
+}
+
+func newAdminDepositsAwaitingReversalCmd() *cobra.Command {
+	var limit, offset int32
+	c := &cobra.Command{
+		Use:   "awaiting-reversal",
+		Short: "Credited deposits a reorg took away (GET /admin/v1/deposits/awaiting-reversal)",
+		Long: "A deposit the ledger credited whose block was later abandoned by a reorg deeper\n" +
+			"than the asset's confirmations. The status is still credited and the account still\n" +
+			"holds the balance: the ledger cannot un-say it on its own, and the money may\n" +
+			"already have been spent.\n\n" +
+			"In a healthy exchange this is empty. Anything in it means an account holds a\n" +
+			"balance the chain does not back, and reconciliation will report the difference.",
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			format, err := outputFormat(cmd)
+			if err != nil {
+				return err
+			}
+			client, base, err := newAdminClient(cmd)
+			if err != nil {
+				return err
+			}
+			resp, err := client.ListDepositsAwaitingReversalWithResponse(cmd.Context(),
+				&adminclient.ListDepositsAwaitingReversalParams{Limit: &limit, Offset: &offset})
+			if err != nil {
+				return transportError(base, err)
+			}
+			if resp.JSON200 == nil {
+				return adminError(resp.HTTPResponse, resp.Body)
+			}
+			if format == "json" {
+				return printJSON(cmd.OutOrStdout(), resp.JSON200)
+			}
+			rows := make([][]string, 0, len(resp.JSON200.Deposits))
+			for _, d := range resp.JSON200.Deposits {
+				credited, reorged := "", ""
+				if d.CreditedAmount != nil {
+					credited = d.CreditedAmount.String()
+				}
+				if d.ReorgedAtBlock != nil {
+					reorged = strconv.FormatInt(*d.ReorgedAtBlock, 10)
+				}
+				rows = append(rows, []string{
+					d.ID, d.AccountID, d.Asset, d.Amount.String(), credited,
+					strconv.FormatInt(d.BlockNumber, 10), reorged, optText(d.ReversalError),
+				})
+			}
+			return printTable(cmd.OutOrStdout(),
+				[]string{"ID", "ACCOUNT", "ASSET", "ARRIVED", "CREDITED", "BLOCK", "REWOUND_TO", "LAST_ERROR"}, rows)
+		},
+	}
+	c.Flags().Int32Var(&limit, "limit", 50, "page size")
+	c.Flags().Int32Var(&offset, "offset", 0, "page offset")
+	return c
+}
+
+func newAdminDepositsReverseCmd() *cobra.Command {
+	var reason string
+	c := &cobra.Command{
+		Use:   "reverse <id> --reason <why>",
+		Short: "Confirm that a reorged deposit should be undone (POST /admin/v1/deposits/{id}/reverse)",
+		Long: "Records the decision and returns; it moves no money. The chain role posts the\n" +
+			"reversing entry on its next tick -- the exact mirror of the three postings that\n" +
+			"credited the deposit, fee included.\n\n" +
+			"There is no matching reject: leaving a reorged deposit alone is what happens if\n" +
+			"nobody acts, so asking is the whole decision.\n\n" +
+			"It can still be refused afterwards, for one reason: the account no longer has\n" +
+			"what it was credited. `awaiting-reversal` then shows why in LAST_ERROR, and the\n" +
+			"choice goes back to a person -- docs/runbooks/reorg-alert.md has the options.",
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			format, err := outputFormat(cmd)
+			if err != nil {
+				return err
+			}
+			client, base, err := newAdminClient(cmd)
+			if err != nil {
+				return err
+			}
+			resp, err := client.ReverseDepositWithResponse(cmd.Context(), args[0],
+				adminclient.ReverseDepositJSONRequestBody{Reason: reason})
+			if err != nil {
+				return transportError(base, err)
+			}
+			if resp.JSON202 == nil {
+				return adminError(resp.HTTPResponse, resp.Body)
+			}
+			if format == "json" {
+				return printJSON(cmd.OutOrStdout(), resp.JSON202)
+			}
+			_, err = fmt.Fprintf(cmd.OutOrStdout(),
+				"recorded; the chain role will reverse deposit %s on its next tick\n", resp.JSON202.ID)
+			return err
+		},
+	}
+	c.Flags().StringVar(&reason, "reason", "", "why (recorded in the audit trail and on the entry)")
+	_ = c.MarkFlagRequired("reason")
 	return c
 }
 
@@ -168,4 +267,12 @@ func newAdminBreaksCmd() *cobra.Command {
 	c.Flags().Int32Var(&limit, "limit", 100, "page size, per kind")
 	c.Flags().Int32Var(&offset, "offset", 0, "page offset, per kind")
 	return c
+}
+
+// optText renders a nullable string column as an empty cell.
+func optText(p *string) string {
+	if p == nil {
+		return ""
+	}
+	return *p
 }

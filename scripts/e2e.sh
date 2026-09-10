@@ -213,6 +213,28 @@ usdc_contract=$("$CTL" assets list --output json \
 
 balance_of() { "$CTL" balances --output json | jq -r --arg a "$1" '[.balances[] | select(.asset==$a) | .available][0] // empty'; }
 
+# fee_credit REF-TYPE REF-ID — every fee_revenue credit the entries of kind
+# "fee" made for one thing, as decimal strings. Read rather than computed:
+# jq's tonumber is floating point, which must not touch a money path, so the
+# assertions below compare exact strings against numbers worked out by hand.
+fee_credit() {
+  "$CTL" admin entries --ref-type "$1" --ref-id "$2" --output json \
+    | jq -r '[.entries[] | select(.kind=="fee") | .postings[] | select(.direction=="credit") | .amount] | join(",")'
+}
+
+# set_eth_fees FLAT WITHDRAWAL-BPS DEPOSIT-BPS — a full-body PUT, because that
+# is what the endpoint is. Every field has to be present: nothing validates the
+# body against the spec at runtime, so an omitted rate silently writes zero.
+set_eth_fees() {
+  "$CTL" admin assets get ETH --output json \
+    | jq --arg wf "$1" --argjson wb "$2" --argjson db "$3" \
+        '{name, chain_id, contract_address, is_native, scale, display_scale,
+          required_confirmations, min_deposit, min_withdrawal,
+          withdrawal_fee: $wf, withdrawal_fee_bps: $wb, deposit_fee_bps: $db,
+          sweep_threshold, deposit_enabled, withdraw_enabled, status}' \
+    | "$CTL" admin assets set ETH --file - --reason "e2e fee rates" >/dev/null
+}
+
 # wait_for_credit ASSET BEFORE — polls until the balance moves
 wait_for_credit() {
   for _ in $(seq 1 45); do
@@ -280,6 +302,13 @@ payout=$(printf '0x%040x' "$STAMP")
 # first field either way.
 on_chain() { cast_run "$@" | awk 'NR==1 {print $1}'; }
 
+# Phase 8: everything above ran at the shipped rates of zero, which is the DoD's
+# first half -- the existing numbers are unchanged by the fee code being there.
+# From here the ETH rate is non-zero, which is the second half: the machine has
+# to stay green while it is actually charging.
+log "an operator sets a withdrawal fee"
+set_eth_fees 0.001 25 0
+
 log "a withdrawal inside the limits is signed, sent and confirmed"
 # Only terminal states are waited on. `funds_locked` and the hold that goes
 # with it last a tick or two before the machine moves on, so polling for them
@@ -307,6 +336,18 @@ received=$(on_chain balance "$payout")
   "$CTL" withdrawals list; exit 1
 }
 log "the destination really received 0.05 ETH"
+
+# The fee is charged on top, so the destination got the whole 0.05 while the
+# account paid 0.051125: 0.001 flat plus 25 basis points of 0.05. One entry,
+# one credit, and it exists only because the transaction confirmed -- every
+# other ending gives it back.
+charged=$(fee_credit withdrawal "$auto")
+[ "$charged" = "0.001125" ] || {
+  echo "the withdrawal fee credited to fee_revenue was '$charged', want 0.001125"
+  "$CTL" admin entries --ref-type withdrawal --ref-id "$auto" || true
+  exit 1
+}
+log "and the exchange charged 0.001125 ETH for sending it"
 
 # The transaction hash is on the withdrawal, and the chain has mined it.
 tx=$("$CTL" withdrawals list --output json | jq -r --arg id "$auto" '.withdrawals[] | select(.id==$id) | .tx_hash')

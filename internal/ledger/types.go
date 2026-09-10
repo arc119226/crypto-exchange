@@ -111,12 +111,24 @@ func (c HouseCode) Valid() bool {
 func (t AccountType) DebitNormal() bool { return t == TypeAsset || t == TypeExpense }
 
 // Entry kinds recorded on journal_entries.kind.
+//
+// The revenue report (docs/plan-v1.0.md 23.5) tells the three fee sources
+// apart by this column: a fee_revenue credit inside a KindSettle entry is a
+// trading fee, one inside KindFee is a withdrawal fee, and one inside
+// KindDeposit is a deposit fee. That makes the strings load-bearing -- renaming
+// one would silently zero a column of the report with no test failing -- so
+// every producer names them from here rather than writing the literal.
 const (
 	KindHold       = "hold"
 	KindRelease    = "release"
 	KindSettle     = "settle"
 	KindCredit     = "credit"
 	KindAdjustment = "adjustment"
+	KindDeposit    = "deposit"
+	KindWithdrawal = "withdrawal"
+	KindSweep      = "sweep"
+	KindGas        = "gas"
+	KindFee        = "fee"
 )
 
 // Errors. ErrInsufficient and ErrUnbalanced are business outcomes the caller

@@ -239,6 +239,8 @@ func toAsset(a registry.Asset) gen.Asset {
 		MinDeposit:            a.MinDeposit,
 		MinWithdrawal:         a.MinWithdrawal,
 		WithdrawalFee:         a.WithdrawalFee,
+		WithdrawalFeeBps:      a.WithdrawalFeeBps,
+		DepositFeeBps:         a.DepositFeeBps,
 		DepositEnabled:        a.DepositEnabled,
 		WithdrawEnabled:       a.WithdrawEnabled,
 		Status:                gen.AssetStatus(a.Status),

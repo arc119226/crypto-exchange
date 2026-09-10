@@ -148,6 +148,47 @@ func (a Amount) DivRoundDown(b Amount, scale int32) (Amount, error) {
 	return Amount{d: q}, nil
 }
 
+// DivRoundUp returns a/b rounded AWAY from zero to scale decimal places: the
+// smallest multiple of 10^-scale that is at least a/b.
+//
+// It exists because rounding up cannot be done by dividing and then rounding.
+// DivRoundDown truncates at the scale it is given, so a quotient that needs
+// more digits than that has already lost them by the time a ceiling could be
+// applied, and the ceiling silently becomes a no-op. Dividing at a wider scale
+// is not available either -- 18 is the widest there is. So the remainder has
+// to be detected at the division itself, which is what this does: divide down,
+// multiply back, and add one unit if anything was lost.
+//
+// This is the rounding every fee uses, because rounding a fee up is what
+// rounding in the exchange's favour means (docs/plan-v1.0.md §6.5).
+//
+// It refuses a negative dividend rather than guessing: away from zero and up
+// are the same direction only for non-negative values, and every caller here
+// is charging a fee.
+func (a Amount) DivRoundUp(b Amount, scale int32) (Amount, error) {
+	if a.IsNegative() {
+		return Amount{}, fmt.Errorf("%w: rounding up a negative quotient is ambiguous", ErrPrecision)
+	}
+	if !b.IsPositive() {
+		if b.IsZero() {
+			return Amount{}, ErrDivisionByZero
+		}
+		return Amount{}, fmt.Errorf("%w: rounding up by a negative divisor is ambiguous", ErrPrecision)
+	}
+	q, err := a.DivRoundDown(b, scale)
+	if err != nil {
+		return Amount{}, err
+	}
+	if q.Mul(b).Equal(a) {
+		return q, nil // exact: nothing was lost, so there is nothing to round
+	}
+	unit, err := FromBigInt(big.NewInt(1), -scale)
+	if err != nil {
+		return Amount{}, err
+	}
+	return q.Add(unit), nil
+}
+
 // IsMultipleOf reports whether a is an integer multiple of step. A step that
 // is not strictly positive yields false.
 func (a Amount) IsMultipleOf(step Amount) bool {

@@ -24,7 +24,22 @@ type Record struct {
 	BlockNumber   int64
 	Confirmations int32
 	Status        string
-	CreditedAt    *time.Time
+	// Fee and Credited exist only once the deposit has been credited: the
+	// fee comes out of Amount rather than being added to it, so Amount stays
+	// what the chain delivered and Credited is what became the balance.
+	Fee        *money.Amount
+	Credited   *money.Amount
+	CreditedAt *time.Time
+	// ReorgedAtBlock is set when a reorg took this deposit's block away after
+	// it was credited (§6.4.1). The status stays credited until somebody
+	// confirms the reversal, so this is what tells the two apart.
+	ReorgedAtBlock      *int64
+	ReversalRequestedBy string
+	ReversalNote        string
+	// ReversalError is why the last attempt could not be posted, which in
+	// practice means the account has already spent the money.
+	ReversalError string
+	ReversedAt    *time.Time
 	CreatedAt     time.Time
 }
 
@@ -67,11 +82,27 @@ func records(rows []sqlcgen.ChainDeposit) ([]Record, error) {
 		if err != nil {
 			return nil, fmt.Errorf("deposit: amount of %s: %w", row.ID, err)
 		}
+		fee, err := pg.NullableAmountFromNumeric(row.Fee)
+		if err != nil {
+			return nil, fmt.Errorf("deposit: fee of %s: %w", row.ID, err)
+		}
+		credited, err := pg.NullableAmountFromNumeric(row.CreditedAmount)
+		if err != nil {
+			return nil, fmt.Errorf("deposit: credited amount of %s: %w", row.ID, err)
+		}
 		rec := Record{
 			ID: row.ID, AccountID: row.AccountID, Asset: row.Asset, Amount: amount,
 			Address: row.Address, TxHash: row.TxHash, LogIndex: row.LogIndex,
 			BlockNumber: row.BlockNumber, Confirmations: row.Confirmations,
-			Status: row.Status, CreatedAt: row.CreatedAt,
+			Status: row.Status, Fee: fee, Credited: credited, CreatedAt: row.CreatedAt,
+			ReorgedAtBlock:      row.ReorgedAtBlock,
+			ReversalRequestedBy: deref(row.ReversalRequestedBy),
+			ReversalNote:        deref(row.ReversalNote),
+			ReversalError:       deref(row.ReversalError),
+		}
+		if row.ReversedAt.Valid {
+			at := row.ReversedAt.Time
+			rec.ReversedAt = &at
 		}
 		if row.CreditedAt.Valid {
 			at := row.CreditedAt.Time

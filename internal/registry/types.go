@@ -25,14 +25,22 @@ type Asset struct {
 	RequiredConfirmations int32
 	MinDeposit            money.Amount
 	MinWithdrawal         money.Amount
-	WithdrawalFee         money.Amount
-	SweepThreshold        money.Amount
-	DepositEnabled        bool
-	WithdrawEnabled       bool
-	Status                string
-	Version               int32
-	CreatedAt             time.Time
-	UpdatedAt             time.Time
+	// WithdrawalFee is the flat part of the withdrawal fee and
+	// WithdrawalFeeBps the proportional part; Fees computes what a given
+	// amount is charged (§23.3). DepositFeeBps is the deposit fee, which is
+	// deducted from what arrives rather than added to it (§23.4) and is 0 in
+	// the seed because a deposit is the inlet -- charging for it turns money
+	// away at the door.
+	WithdrawalFee    money.Amount
+	WithdrawalFeeBps int32
+	DepositFeeBps    int32
+	SweepThreshold   money.Amount
+	DepositEnabled   bool
+	WithdrawEnabled  bool
+	Status           string
+	Version          int32
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
 }
 
 // Money returns the money.Asset view (symbol + scale).
@@ -99,7 +107,8 @@ func assetFromRow(r sqlcgen.RegistryAsset) (Asset, error) {
 		ID: r.ID, TenantID: r.TenantID, Symbol: r.Symbol, Name: r.Name, ChainID: r.ChainID,
 		ContractAddress: r.ContractAddress, IsNative: r.IsNative,
 		Scale: int32(r.Scale), DisplayScale: int32(r.DisplayScale), RequiredConfirmations: r.RequiredConfirmations,
-		MinDeposit: minDeposit, MinWithdrawal: minWithdrawal, WithdrawalFee: withdrawalFee, SweepThreshold: sweep,
+		MinDeposit: minDeposit, MinWithdrawal: minWithdrawal, WithdrawalFee: withdrawalFee,
+		WithdrawalFeeBps: r.WithdrawalFeeBps, DepositFeeBps: r.DepositFeeBps, SweepThreshold: sweep,
 		DepositEnabled: r.DepositEnabled, WithdrawEnabled: r.WithdrawEnabled, Status: r.Status,
 		Version: r.Version, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt,
 	}, nil

@@ -128,6 +128,8 @@ func (s *Store) UpsertAsset(ctx context.Context, tx pgx.Tx, tenantID string, in 
 		MinDeposit:            pg.NumericFromAmount(in.MinDeposit),
 		MinWithdrawal:         pg.NumericFromAmount(in.MinWithdrawal),
 		WithdrawalFee:         pg.NumericFromAmount(in.WithdrawalFee),
+		WithdrawalFeeBps:      in.WithdrawalFeeBps,
+		DepositFeeBps:         in.DepositFeeBps,
 		SweepThreshold:        pg.NumericFromAmount(in.SweepThreshold),
 		DepositEnabled:        in.DepositEnabled, WithdrawEnabled: in.WithdrawEnabled, Status: in.Status,
 	})

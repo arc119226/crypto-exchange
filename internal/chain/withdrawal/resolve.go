@@ -14,7 +14,6 @@ import (
 	"github.com/arc119226/crypto-exchange/internal/chain/sqlcgen"
 	"github.com/arc119226/crypto-exchange/internal/ledger"
 	"github.com/arc119226/crypto-exchange/internal/money"
-	"github.com/arc119226/crypto-exchange/internal/platform/pg"
 )
 
 // Action is what an operator asks for on a withdrawal that needs a person
@@ -267,7 +266,7 @@ func (w *Worker) cancelNonce(ctx context.Context, row sqlcgen.ChainWithdrawal, p
 // puts it back on hold and returns the row to funds_locked, so the machine
 // signs and sends it again with a fresh nonce.
 func (w *Worker) settleFailed(ctx context.Context, row sqlcgen.ChainWithdrawal, p ResolveParams) error {
-	amount, err := pg.AmountFromNumeric(row.Amount)
+	amount, fee, err := amountAndFee(row)
 	if err != nil {
 		return err
 	}
@@ -279,15 +278,31 @@ func (w *Worker) settleFailed(ctx context.Context, row sqlcgen.ChainWithdrawal, 
 	if p.Action == ActionRetry {
 		bucket, action = ledger.BucketHold, "withdrawal.retry"
 	}
+	// The fee never entered pending_withdrawal -- only the amount was sent --
+	// so it is still on hold, and the two are refunded from different places.
+	//
+	// A retry does not touch it at all: the withdrawal is going to be signed
+	// and sent again, and the fee it was quoted still applies to that attempt.
+	// A refund ends the withdrawal, so the fee goes back with the amount
+	// (§6.1.4 h).
+	postings := []ledger.Posting{
+		{AccountID: pending, Asset: row.Asset, Bucket: ledger.BucketHouse, Direction: ledger.Debit, Amount: amount},
+		{AccountID: row.AccountID, Asset: row.Asset, Bucket: bucket, Direction: ledger.Credit, Amount: amount},
+	}
+	if p.Action == ActionRefund && fee.IsPositive() {
+		postings = append(postings,
+			ledger.Posting{AccountID: row.AccountID, Asset: row.Asset, Bucket: ledger.BucketHold, Direction: ledger.Debit, Amount: fee},
+			ledger.Posting{AccountID: row.AccountID, Asset: row.Asset, Bucket: ledger.BucketAvailable, Direction: ledger.Credit, Amount: fee},
+		)
+	}
 	return inTx(ctx, w.db, func(tx pgx.Tx) error {
 		if _, _, err := w.ledger.Post(ctx, tx, ledger.Entry{
-			IdempotencyKey: fmt.Sprintf("withdrawal:%s:%s", p.Action, row.ID), Kind: "withdrawal",
+			// Per attempt: retry can happen more than once, and each one has
+			// to move the amount out of pending_withdrawal again.
+			IdempotencyKey: attemptKey("withdrawal:"+string(p.Action), row), Kind: ledger.KindWithdrawal,
 			RefType: "withdrawal", RefID: row.ID, Reason: string(p.Action) + " after an on-chain failure",
 			CorrelationID: deref(row.CorrelationID),
-			Postings: []ledger.Posting{
-				{AccountID: pending, Asset: row.Asset, Bucket: ledger.BucketHouse, Direction: ledger.Debit, Amount: amount},
-				{AccountID: row.AccountID, Asset: row.Asset, Bucket: bucket, Direction: ledger.Credit, Amount: amount},
-			},
+			Postings:      postings,
 		}); err != nil {
 			return fmt.Errorf("withdrawal: post %s %s: %w", p.Action, row.ID, err)
 		}
@@ -322,6 +337,28 @@ func (w *Worker) settleFailed(ctx context.Context, row sqlcgen.ChainWithdrawal, 
 	})
 }
 
+// cancellationPostings returns the refund for a displaced withdrawal. The
+// amount comes back from pending_withdrawal, where broadcasting put it; the
+// fee comes back from hold, which it never left. Two sources, one entry, and
+// it balances because both sides credit the same account.
+//
+// The user's own transaction was displaced, so the exchange sent nothing on
+// their behalf and charges nothing -- the gas the displacement burned is the
+// exchange's cost, booked separately by the caller.
+func cancellationPostings(row sqlcgen.ChainWithdrawal, pending string, amount, fee money.Amount) []ledger.Posting {
+	p := []ledger.Posting{
+		{AccountID: pending, Asset: row.Asset, Bucket: ledger.BucketHouse, Direction: ledger.Debit, Amount: amount},
+		{AccountID: row.AccountID, Asset: row.Asset, Bucket: ledger.BucketAvailable, Direction: ledger.Credit, Amount: amount},
+	}
+	if fee.IsPositive() {
+		p = append(p,
+			ledger.Posting{AccountID: row.AccountID, Asset: row.Asset, Bucket: ledger.BucketHold, Direction: ledger.Debit, Amount: fee},
+			ledger.Posting{AccountID: row.AccountID, Asset: row.Asset, Bucket: ledger.BucketAvailable, Direction: ledger.Credit, Amount: fee},
+		)
+	}
+	return p
+}
+
 // settleCancelled refunds a withdrawal whose cancellation has been mined
 // (§6.1.4 e failed(replaced)).
 //
@@ -329,7 +366,7 @@ func (w *Worker) settleFailed(ctx context.Context, row sqlcgen.ChainWithdrawal, 
 // than a Release. That distinction is the 2026-09-05 erratum: releasing would
 // move funds out of a bucket they left when the withdrawal was broadcast.
 func (w *Worker) settleCancelled(ctx context.Context, row sqlcgen.ChainWithdrawal, gas money.Amount) error {
-	amount, err := pg.AmountFromNumeric(row.Amount)
+	amount, fee, err := amountAndFee(row)
 	if err != nil {
 		return err
 	}
@@ -347,13 +384,10 @@ func (w *Worker) settleCancelled(ctx context.Context, row sqlcgen.ChainWithdrawa
 	}
 	return inTx(ctx, w.db, func(tx pgx.Tx) error {
 		if _, _, err := w.ledger.Post(ctx, tx, ledger.Entry{
-			IdempotencyKey: "withdrawal:cancelled:" + row.ID, Kind: "withdrawal",
+			IdempotencyKey: "withdrawal:cancelled:" + row.ID, Kind: ledger.KindWithdrawal,
 			RefType: "withdrawal", RefID: row.ID, Reason: "cancelled by a same-nonce transaction",
 			CorrelationID: deref(row.CorrelationID),
-			Postings: []ledger.Posting{
-				{AccountID: pending, Asset: row.Asset, Bucket: ledger.BucketHouse, Direction: ledger.Debit, Amount: amount},
-				{AccountID: row.AccountID, Asset: row.Asset, Bucket: ledger.BucketAvailable, Direction: ledger.Credit, Amount: amount},
-			},
+			Postings:      cancellationPostings(row, pending, amount, fee),
 		}); err != nil {
 			return fmt.Errorf("withdrawal: post cancellation refund %s: %w", row.ID, err)
 		}

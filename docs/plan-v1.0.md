@@ -1410,14 +1410,14 @@ scripts/backup.sh && scripts/restore-drill.sh
 **範圍**:做 — §6.1.4 (h)(i) 的分錄、§6.4.2 的 fee 快照與預檢、registry 的兩個新欄位、OpenAPI 與事件加欄、後台資產頁 / 提現頁 / 新「營收」頁、`GET /admin/v1/reports/revenue(.csv)`、兩個指標與一條告警。不做 — 用戶等級費率、動態 gas 計價、法幣換算(§23.6)。
 
 **任務**:
-- [ ] migration:`registry.assets.withdrawal_fee_bps`、`deposit_fee_bps`(0–10000,預設 0);`chain.withdrawals.fee`、`fee_asset`;`chain.deposits.fee`、`credited_amount`;sqlc(1 d)
-- [ ] 提現:`POST /v1/withdrawals` 算 fee 並快照、`available ≥ amount + fee` 預檢;`funds_locked` 的 `Hold(amount + fee)`;`confirmed` 的 `withdrawal:fee:{id}` 分錄;`failed(broadcast)` / `failed(replaced)` / `resolve(refund)` 的 fee 退回;`retry` 不動(1.5 d)
-- [ ] 充值:`deposit.Credit` 拆成 `X − fee` 給用戶、`fee` 進 `fee_revenue`;`reversed` 反向含 fee(0.5 d)
-- [ ] OpenAPI:`Asset` 加兩欄、`Withdrawal` 加 `fee` / `fee_asset`、`Deposit` 加 `fee` / `credited_amount`、`POST /v1/withdrawals` 回應帶 fee;事件 schema 加欄;`make gen`;前台提現表單顯示「將扣 amount + fee」(0.5 d)
-- [ ] 後台:資產頁的三個費率欄位、提現頁顯示 fee、新「營收」頁(期間、資產篩選、六欄、CSV 下載)、`exchangectl admin revenue`(1.5 d)
-- [ ] 指標與告警:`ledger_fee_revenue_total{asset,source=trade|withdrawal|deposit}`、`ledger_gas_expense_total{asset}`;Grafana Ledger 板加「手續費 vs gas」面板;`WithdrawalGasExceedsFee`(§15);`observability_test` 的指標名檢查(0.5 d)
-- [ ] 測試:ledger 不變量「同一 entry 內扣方的 fee = `fee_revenue` 的 credit」;提現每條路徑的 fee 分錄(scripted chain);充值 fee 與 reorg 反向;`exchangectl e2e` 斷言提現後 `fee_revenue` 增加 fee、`gas_expense` 增加 G、用戶少 amount + fee;營收報表的數字 = 直接 SUM `trading.trades` 與 `ledger.postings`(測試比對);restore-checks 不受影響(1.5 d)
-- [ ] 文件:`docs/domain.md` 對應段落、`docs/runbooks/stuck-withdrawal.md` 的 fee 處置、README 第 8 步的餘額(只有營運方設非零時才不同)(0.5 d)
+- [x] migration:`registry.assets.withdrawal_fee_bps`、`deposit_fee_bps`(0–10000,預設 0);`chain.withdrawals.fee`、`fee_asset`;`chain.deposits.fee`、`credited_amount`;sqlc(1 d)
+- [x] 提現:`POST /v1/withdrawals` 算 fee 並快照、`available ≥ amount + fee` 預檢;`funds_locked` 的 `Hold(amount + fee)`;`confirmed` 的 `withdrawal:fee:{id}` 分錄;`failed(broadcast)` / `failed(replaced)` / `resolve(refund)` 的 fee 退回;`retry` 不動(1.5 d)
+- [x] 充值:`deposit.Credit` 拆成 `X − fee` 給用戶、`fee` 進 `fee_revenue`;`reversed` 反向含 fee(0.5 d)——後半原本**做不了**:`reversed` 這條路徑在程式裡根本不存在(狀態在 0009 的 CHECK 裡、事件 schema 與 golden 都在,但沒有任何程式寫得出這個狀態,scanner 的 `rewind` 刻意跳過已入帳的充值)。那是 Phase 4 的缺口,補在同一個 PR 裡:migration 0024 的佇列與請求欄位、scanner 的標記、`deposits_awaiting_reversal` 與 `DepositAwaitingReversal`、後台與 CLI 的確認、chain 角色貼出的鏡像分錄(含 fee)。餘額不足時拒絕而不是硬做,處置寫在 `docs/runbooks/reorg-alert.md`
+- [x] OpenAPI:`Asset` 加兩欄、`Withdrawal` 加 `fee` / `fee_asset`、`Deposit` 加 `fee` / `credited_amount`、`POST /v1/withdrawals` 回應帶 fee;事件 schema 加欄;`make gen`;前台提現表單顯示「將扣 amount + fee」(0.5 d)
+- [x] 後台:資產頁的三個費率欄位、提現頁顯示 fee、新「營收」頁(期間、資產篩選、六欄、CSV 下載)、`exchangectl admin revenue`(1.5 d)
+- [x] 指標與告警:`ledger_fee_revenue_total{asset,source=trade|withdrawal|deposit}`、`ledger_gas_expense_total{asset}`;Grafana Ledger 板加「手續費 vs gas」面板;`WithdrawalGasExceedsFee`(§15);`observability_test` 的指標名檢查(0.5 d)
+- [x] 測試:ledger 不變量「同一 entry 內扣方的 fee = `fee_revenue` 的 credit」;提現每條路徑的 fee 分錄(scripted chain);充值 fee 與 reorg 反向;`exchangectl e2e` 斷言提現後 `fee_revenue` 增加 fee、`gas_expense` 增加 G、用戶少 amount + fee;營收報表的數字 = 直接 SUM `trading.trades` 與 `ledger.postings`(測試比對);restore-checks 不受影響(1.5 d)——兩處偏離:提現的 fee/gas 斷言寫在 `scripts/e2e.sh`(`exchangectl e2e` 只跑交易,提現那一段本來就在 shell 裡),「reorg 反向」現在有兩層:一層仍然斷言掃描器**不會**自己反向(已入帳的充值在 reorg 之後仍是 credited、fee 不變),一層斷言人確認之後的鏡像分錄與餘額不足時的拒絕;restore-checks 只數列數,不受新欄位影響
+- [x] 文件:`docs/domain.md` 對應段落、`docs/runbooks/stuck-withdrawal.md` 的 fee 處置、README 第 8 步的餘額(只有營運方設非零時才不同)(0.5 d)
 
 **DoD**:seed 費率全為 0 時所有既有測試與 e2e 數字不變;把 `withdrawal_fee` 與 `deposit_fee_bps` 設非零後 e2e 全綠、試算平衡為 0、營收報表與直接 SUM 一致;後台改費率後下一筆提現用新費率、在途的用舊費率(快照)。
 

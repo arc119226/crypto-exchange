@@ -374,6 +374,41 @@ Cannot install dependencies for ubuntu26.04-x64 with Playwright 1.56.1!
 
 這是第 2 節指定 **24.04** 而不是最新版的原因。想用更新的 Ubuntu,得先確認你釘的 Playwright 版本支援它。
 
+### 第二件裝一次的事:foundry
+
+`checks` 要 `forge build` 與 `forge test`,`helm` 要 `cast` 派生一把用完即丟的熱錢包私鑰。兩個 job 都需要 foundry,而版本釘在 `.env.example` 的 `FOUNDRY_TAG`:
+
+```sh
+curl -L https://foundry.paradigm.xyz | bash
+"$HOME/.foundry/bin/foundryup" --install "$(sed -n 's/^FOUNDRY_TAG=//p' .env.example)"
+"$HOME/.foundry/bin/forge" --version
+```
+
+最後一行要印出的版本必須和 `FOUNDRY_TAG` 對得上,因為 CI 每次都會檢查這件事(下面說明)。
+
+**為什麼這一步不能交給 CI**——理由和 Playwright 那一段不同,而且是踩到才知道的:
+
+`foundry-rs/foundry-toolchain@v1` 底下的 `foundryup` 會把每一次下載的二進位檔拿去比對 **GitHub 的 artifact attestation**,也就是要多打一通對外的網路請求。2026-09-10,那個端點連續十五分鐘回 HTTP 500:
+
+```
+foundryup: found attestation for v1.8.1 version, downloading attestation artifact, checking...
+Error:
+   0: failed to download https://github.com/foundry-rs/foundry/attestations/43723610/download: HTTP 500 Internal Server Error
+```
+
+`checks` 和 `helm` 一起紅,而且**紅在跟 Solidity 完全無關的分支上**——那台機器上明明已經有正確版本的 forge,卻因為要重新下載一次而被外面的故障拖下水。GitHub 當時沒有宣告任何事故,所以也沒有人會來通知你。
+
+所以 workflow 改成:`vars.CI_RUNNER` 有值時**不跑那個 action**,只確認機器上已經有釘住的那個版本,然後把 `~/.foundry/bin` 加進 `PATH`。托管 runner(也就是 `release`)照舊完整安裝與驗證。
+
+**版本釘沒有消失,它換了地方。** 以前由安裝器保證,現在由那個斷言保證,而且它失敗時會直接印出要打的指令:
+
+```
+forge on this runner is not the pinned v1.8.1. Reinstall it:
+    foundryup --install v1.8.1
+```
+
+換句話說,升 `FOUNDRY_TAG` 之後,**這台機器要手動跟上**,否則 `checks` 會紅——這是刻意的,總比安靜地用舊版編譯合約好。
+
 ---
 
 ## 7. 裝 runner(裝兩個)
@@ -695,7 +730,7 @@ checks ─┬─► integration ─┬─► e2e  ─┐
 
 **gitleaks 掃的是整個 git 歷史,不是工作目錄。** 所以 checkout 用 `fetch-depth: 0`——淺 checkout 會讓它幾乎什麼都沒掃到,而且不會報錯。
 
-**這台機器要有:** gcc(`-race` 需要 cgo)、Node 22、foundry(自己裝)。**不需要 Docker。**
+**這台機器要有:** gcc(`-race` 需要 cgo)、Node 22、foundry(第 6 節末尾裝一次,CI 在自建 runner 上不再自己裝)。**不需要 Docker。**
 
 **最容易在這裡踩到的:** 缺 `build-essential` 時,前十二步全過,到 `-race` 那一步**零秒失敗**——零秒代表指令根本沒啟動,不是測試沒過。第 6A 節有完整說明。
 
@@ -856,6 +891,16 @@ sudo -iu ghrunner        # 之後第 7 節的指令都在這個身分下做
 **Q: `Cannot connect to the Docker daemon` / `permission denied ... docker.sock`。**
 路線 6A:`sudo systemctl status docker`;`groups` 裡有沒有 `docker`(加完群組要登出再登入);服務是 running 卻還是連不上的話,`readlink -f /var/run` 要印 `/run`(見第 6A 節)。
 路線 6B:Docker Desktop 有沒有開;WSL Integration 有沒有打開;`readlink -f /var/run/docker.sock` 是不是還指向 `/mnt/wsl/docker-desktop/...`(那個回歸問題)。
+
+**Q: `checks` 或 `helm` 死在 `foundryup`,錯誤只有 `failed to download ... /attestations/... HTTP 500`。**
+不是你的機器,也不是這個分支。`foundryup` 會把下載的二進位檔比對 GitHub 的 artifact attestation,而那個端點會壞——2026-09-10 連壞十五分鐘,`githubstatus.com` 上什麼都沒宣告。它死在安裝階段,`forge` 一次都還沒跑,所以任何測試結果都不能怪。
+
+自建 runner 上現在不該再看到它:workflow 只在托管 runner 才跑那個 action。如果你還是看到了,表示 `CI_RUNNER` 這個倉庫變數沒設或設錯(第 8 節),job 落回了 `ubuntu-latest`。
+
+真的落在托管 runner 而又非過不可時,只能等它自己好——`foundry-toolchain@v1` 沒有任何 input 可以傳 `--force` 進去跳過驗證,而繞過驗證本來也不該當成常態。
+
+**Q: `forge on this runner is not the pinned v...`。**
+有人升了 `.env.example` 的 `FOUNDRY_TAG`,而這台機器還停在舊版。照它印出來的那行打一次就好:`foundryup --install <tag>`。這個斷言是刻意會擋的——第 6 節末尾說明了為什麼版本釘從安裝器搬到了這裡。
 
 **Q: C 槽滿了。**
 看 10.3 節。路線 6A:先在 Ubuntu 裡 `docker system prune -af --volumes`(記得先停 runner),再 PowerShell `wsl --shutdown` + `wsl --manage Ubuntu-24.04 --compact`。路線 6B:只能用 Docker Desktop 的「Clean up data」。

@@ -1,7 +1,7 @@
 {
   "uid": "exchange-ledger",
   "title": "Exchange / Ledger",
-  "description": "Trial balance, entries per second, reconciliation and the money-moving flows (docs/plan-v1.0.md §6.1, §15).",
+  "description": "Trial balance, entries per second, reconciliation and the money-moving flows (docs/plan-v1.0.md \u00a76.1, \u00a715).",
   "tags": [
     "exchange"
   ],
@@ -670,6 +670,71 @@
           },
           "expr": "sum by (action) (increase(withdrawals_resolutions_total{instance=~\"$instance\"}[$__rate_interval]))",
           "legendFormat": "resolved {{action}}",
+          "range": true
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Fees vs gas",
+      "description": "What the exchange earned against what it paid the chain, per asset over the dashboard's window. Nothing is converted between assets: gas is always the chain's native coin, so an ERC-20 has fee revenue and no gas line while the native coin carries the gas for every withdrawal. The exact figures are the admin revenue report; these counters are float approximations. When the gas line sits above the withdrawal-fee line for a day, WithdrawalGasExceedsFee fires.",
+      "id": 12,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 26
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "lineWidth": 1,
+            "fillOpacity": 8,
+            "showPoints": "never",
+            "spanNulls": true
+          },
+          "unit": "short",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (asset, source) (increase(ledger_fee_revenue_total{instance=~\"$instance\"}[$__rate_interval]))",
+          "legendFormat": "fee {{asset}} {{source}}",
+          "range": true
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (asset) (increase(ledger_gas_expense_total{instance=~\"$instance\"}[$__rate_interval]))",
+          "legendFormat": "gas {{asset}}",
           "range": true
         }
       ]
