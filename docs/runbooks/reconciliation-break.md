@@ -106,6 +106,16 @@ exchangectl admin house-adjust \
 - `DIFF < 0` 走到外洩流程的:提現已停(`withdrawals` 沒有新的 `broadcast`)、新種子的 `hot_wallet` 在 signer log 出現、剩餘資產搬走的交易在鏈上確認。
 - 對帳自己不動的:`finished_at` 重新前進,chain role log 沒有 `reconciliation pass failed`。
 
+## 邊界:這份對帳只在一條鏈的時候成立
+
+上面每一條處置都預設了一件事:**這個部署只服務一條鏈**。
+
+`internal/chain/reconcile/reconcile.go` 的套件註解把它寫得很直接:租戶的 house 餘額是**跨所有鏈加總**的,只有一條鏈時那個加總才等於這條鏈上的持有量。接上第二條鏈之後,`custody_deposit_addresses + custody_hot` 會把兩條鏈的錢加在一起,而鏈那一側仍然只讀得到其中一條——**`DIFF` 照樣算得出來,狀態照樣是 `ok` 或 `break`,只是那個數字沒有意義。**
+
+這件事值得寫在這裡,是因為它的失敗方式跟這份手冊處理的每一種都相反:它不會讓對帳停下來、不會讓 `reconciliation pass failed` 出現、也不會讓 `ReconciliationBreak` 用一個看得出來的理由亮起。它會安靜地給出一個看起來正常的錯數字,而拿它去查的人會沿著錯的方向找一筆不存在的錢。
+
+先決條件是 custody 科目要按鏈拆開,這個比較才重新有意義——在那之前,**加第二條鏈就是讓對帳失效**。單鏈是 v1 明示的邊界(`docs/plan-v1.0.md` §0),不是還沒做完的東西。
+
 ## 相關指標
 
 `reconciliation_diff{asset}`(`ReconciliationBreak`)、`ledger_trial_balance_diff{asset}`(`LedgerTrialBalanceBroken`)、`hot_wallet_balance{asset}`、`chain_scanner_lag_blocks`。

@@ -23,6 +23,8 @@ psql "$DATABASE_URL" -c "SELECT created_at, action, actor_type, actor_id, ip FRO
 docker compose logs exchange-admin 2>/dev/null | grep -o 'admin_totp_key_set=[a-z]*' | tail -1
 ```
 
+上面兩句查詢的 `ip` 欄在 beta 上**認不出是誰**:後台沒有掛在 edge 上,operator 是用 `ssh -L` 進來的,所以每一位 operator 的來源位址都是同一個固定值。要分辨人看 `actor_id`。理由與其他部署約束一起寫在 `docs/runbooks/beta-deploy.md` 的「部署約束」那一節。
+
 ## 處置
 
 ### 第一次啟用
@@ -49,7 +51,7 @@ docker compose logs exchange-admin 2>/dev/null | grep -o 'admin_totp_key_set=[a-
 ### 被鎖住
 
 - 連續輸錯 5 次碼 → `totp_locked_until = now + 15 分鐘`,鎖定期間**正確的碼也拒絕**。等 15 分鐘;不需要任何人介入。
-- 鎖定只計 TOTP 錯誤。密碼階段錯誤不鎖帳號(否則知道 email 的人每 15 分鐘就能把 admin 鎖一次),改用每個來源 IP 的節流(`LOGIN_PER_IP`,預設 10/分鐘),超過回 429。
+- 鎖定只計 TOTP 錯誤。密碼階段錯誤不鎖帳號(否則知道 email 的人每 15 分鐘就能把 admin 鎖一次),改用每個來源 IP 的節流(`LOGIN_PER_IP`,預設 10/分鐘),超過回 429。那個桶在**行程的記憶體裡**,前提是後台只有一個副本(`deploy/helm/exchange/values.yaml` 的 `roles.admin.replicas` 是 1);副本開成 N,額度就是 N 倍。鎖定不受影響,它記在資料庫。
 - 同一個 30 秒窗口內用同一個碼登入兩次,第二次會被拒(`totp_last_step`:配中的那一步記下來,不再接受它或更早的步)。這不是鎖定,等下一個碼就好。
 - 一直被鎖而且不是自己按的:有人拿到密碼在猜碼。用另一個管理員把這個帳號凍結(`exchangectl admin users freeze <id> --reason ...`,或後台的 Users 頁),換密碼,再 enroll。
 
