@@ -192,7 +192,7 @@
 | `signer` | `chain/signer`、`chain/hdwallet`(私鑰派生)、`audit` | 無(ops 9100) | **恰好 1** | 唯一掛載 keystore 的 role;`chain` 以 NATS request-reply `cmd.signer.sign.{tenant}`(逾時 10 s)送 `SignRequest`,`signer` 自行查 DB 驗證後回 raw tx;`role=all` 時為 in-proc 呼叫(ADR-0007) |
 | `stream` | `marketdata`、`stream`(WS)、`auth`(驗證) | 8081 | 1..n | 無狀態訂閱者;深度快照放 Redis |
 | `admin` | `admin`(htmx UI + admin REST)、`registry`(寫)、`audit`、`webhook`(設定) | 8082 | 1 | admin role 強制 TOTP |
-| `worker` | `webhook` dispatcher、對帳 job、kline 聚合、outbox 清理 | 無 | 1 | 全部是事件消費者或排程 |
+| `worker` | `webhook` dispatcher、kline 聚合、outbox 清理 | 無 | 1 | 全部是事件消費者或排程。**對帳 job 不在這裡**:它要讀鏈上餘額,只有 `chain` 有節點,所以 Phase 4c-2 把它放在 `chain`(§12 Phase 5、`docs/domain.md` §20.1) |
 | `all` | 以上全部在同一進程 | 8080/8081/8082 | 1 | dev、E2E、beta 最小部署 |
 
 子命令:`exchange serve`、`exchange version`、`exchange migrate up|status`、`exchange seed --fixtures`、`exchange healthcheck --url`、`exchange keys gen-jwt|import-mnemonic`、`exchange admin bootstrap`。
@@ -563,7 +563,7 @@ v1 實作 `KeystoreSigner`,預留 `KMSSigner` 空實作。**種子儲存**:go-et
 | `EX_CHAIN` | `ex.v1.deposit.*.*.*`、`ex.v1.withdrawal.*.*.*`、`ex.v1.sweep.*.*.*`、`ex.v1.alert.*.*.*` | 30 天 |
 | `EX_REGISTRY` | `ex.v1.market.*.*.*`、`ex.v1.asset.*.*.*`、`ex.v1.fee_schedule.*.*.*`、`ex.v1.user.*.*.*`、`ex.v1.reconciliation.*.*.*` | 90 天 |
 
-- 消費者分兩類:**扇出型**(`stream` role 的 marketdata / private,1..n 副本):每個實例用 ephemeral **ordered consumer**(`jetstream.OrderedConsumer`),不 ack、不寫 `processed_events`,以 `seq` / `account_seq` 去重——若多副本共用同一 durable consumer,JetStream 會把它當 work queue 分流,每台 WS 伺服器只收到一部分事件。**處理型**(`worker-webhook`、`worker-kline`、`admin-projection`、`engine-registry`):durable consumer + 顯式 ack;「業務寫入 + `processed_events(consumer, event_id)`」同一交易後才 ack,唯一鍵衝突視為重複直接 ack。
+- 消費者分兩類:**扇出型**(`stream` role 的 marketdata / private,1..n 副本):每個實例用 ephemeral **ordered consumer**(`jetstream.OrderedConsumer`),不 ack、不寫 `processed_events`,以 `seq` / `account_seq` 去重——若多副本共用同一 durable consumer,JetStream 會把它當 work queue 分流,每台 WS 伺服器只收到一部分事件。**處理型**(`worker-webhook`、`admin-projection`、`engine-registry`):durable consumer + 顯式 ack;「業務寫入 + `processed_events(consumer, event_id)`」同一交易後才 ack,唯一鍵衝突視為重複直接 ack。
 - `internal/eventbus` 介面:`Publisher`、`Subscriber(consumer, subjects, handler)`,JetStream 是第一個實作;Kafka 換實作不動業務碼。
 
 ### 7.4 OpenAPI 端點清單
@@ -602,7 +602,7 @@ Admin(`api/admin/v1/openapi.yaml`,前綴 `/admin/v1`;所有寫入寫 `audit_even
 - 端點:`wss://host/ws/v1/public`、`wss://host/ws/v1/private`(連線後第一則 `{"op":"auth","token":"<jwt>"}` 或 API key 簽章)。
 - 訊息:`{"op":"subscribe","channel":"depth","market":"ETH-USDC"}`;伺服器 `{"channel":"depth","type":"snapshot","market":"ETH-USDC","seq":18234,"bids":[["1990.00","0.4000"]],"asks":[]}`,之後 `{"type":"delta","seq":18235,"bids":[["1990.00","0"]],"asks":[...]}`(qty `"0"` = 移除價位)。
 - 客戶端規則:取 snapshot(WS 或 `GET /depth`,含 `last_seq`)→ 丟棄 `seq ≤ last_seq` 的 delta → 之後 seq 必須連續,缺號即重抓 snapshot。
-- 公開頻道:`depth`、`trades`、`ticker`、`kline.{1m|5m|15m|1h|1d}`。私有頻道:`orders`、`fills`、`balances`;每則帶 `account_seq`;重連時送 `{"op":"resume","since_seq":N}`,伺服器從 `eventbus.outbox`(保留 30 天)補齊 `account_id = X AND account_seq > N` 的事件後接上即時流。
+- 公開頻道:`depth`、`trades`、`ticker`、`kline.{1m|5m|15m|1h|1d}`。私有頻道:`orders`、`fills`、`balances`,Phase 6 實作時多了 `deposits` 與 `withdrawals`,共五個(§12 Phase 6);每則帶 `account_seq`;重連時送 `{"op":"resume","since_seq":N}`,伺服器從 `eventbus.outbox`(保留 30 天)補齊 `account_id = X AND account_seq > N` 的事件後接上即時流。
 - 心跳:伺服器每 15 s `ping`,30 s 無回應斷線。每連線一個 writer goroutine + 有界 buffer(256),塞滿即斷線(慢客戶端不得拖垮廣播)。
 
 ### 7.6 Webhook(`docs/webhooks.md`)
@@ -666,11 +666,11 @@ Admin(`api/admin/v1/openapi.yaml`,前綴 `/admin/v1`;所有寫入寫 `audit_even
 | WebSocket | `github.com/coder/websocket`(原 nhooyr) | context 原生、簡潔 | 每連線 writer goroutine + 有界 buffer |
 | CLI | `spf13/cobra` | 子命令多 | `exchange` 與 `exchangectl` 共用 cobra 慣例 |
 | 設定 | `caarlos0/env/v11` typed struct + `*_FILE` | 12-factor | 啟動時驗證必填並 log 非密鑰設定 |
-| 後台 UI | `html/template` + htmx + `embed` | 嵌入 binary,零前端建置 | 表單 CSRF token;所有寫入走 admin OpenAPI handler |
-| 前台 | React 18 + Vite + TypeScript(`web/trade`);OpenAPI 產生 TS client | 可替換參考實作 | 只呼叫 public API + WS;不進 Go binary |
-| 建置 | multi-stage Dockerfile(`golang:1.23` → `gcr.io/distroless/static`),`-ldflags -X main.version` | 一個 image | distroless 無 shell,healthcheck 用 `exchange healthcheck` |
+| 後台 UI | `html/template` + htmx + `embed` | 嵌入 binary,零前端建置 | CSRF 用 Go 1.25 的 `http.CrossOriginProtection` + `SameSite=Lax`,不做每張表單的 token(§12 Phase 5);所有寫入走 admin OpenAPI handler |
+| 前台 | React 19 + Vite 8 + TypeScript 5.9(`web/trade`;計畫原寫 React 18);OpenAPI 產生 TS client | 可替換參考實作 | 只呼叫 public API + WS;不進 Go binary |
+| 建置 | multi-stage Dockerfile(`golang:1.26.8-bookworm` → `gcr.io/distroless/static-debian12:nonroot`;計畫原寫 1.23),`-ldflags -X main.version` | 一個 image | distroless 無 shell,healthcheck 用 `exchange healthcheck` |
 | 任務 | `Makefile` | 通用 | 每個目標一行說明 |
-| CI | GitHub Actions | 現成 | job 分層(lint → unit → integration → e2e → image) |
+| CI | GitHub Actions | 現成 | job 分層,實際的 job 與相依圖見 §13.3 指向的 `.github/workflows/ci.yml` |
 | ADR | `docs/adr/NNNN-title.md`(背景/選項/決定/後果) | 決策可追溯 | 第一批 8 份見第 20 節 |
 
 ## 10. Repo 結構
@@ -679,7 +679,7 @@ Admin(`api/admin/v1/openapi.yaml`,前綴 `/admin/v1`;所有寫入寫 `audit_even
 crypto-exchange/
 ├── go.mod  go.sum  Makefile  .golangci.yml  .env.example  README.md  LICENSE
 ├── .github/
-│   └── workflows/ci.yml            # lint, unit, fuzz-smoke, integration, e2e, image, helm(kind)
+│   └── workflows/ci.yml            # 七個 job,清單見檔案本身(§13.3)
 ├── api/
 │   ├── public/v1/openapi.yaml
 │   ├── admin/v1/openapi.yaml
@@ -1070,7 +1070,7 @@ Makefile 目標:
 
 **範圍**:做 — `docs/domain.md`、ADR ×8、`internal/money`、`internal/app`、`internal/telemetry`、registry 表與 `GET /v1/markets`、compose infra + migrate + seed、CI、`exchangectl` 骨架、`make gen-dev-secrets`。不做 — 撮合、帳本、auth、任何鏈上程式碼(compose 裡的 anvil 與 deployer 要能跑,但沒有 Go 程式碼碰它)。
 
-**產出物**:可 `make up --wait` 全綠的 compose;`GET /v1/markets` 回 seed 的 `ETH-USDC`;`exchangectl markets list`;CI 五個 job(lint、unit、integration、compose-config、image)+ gen-check 綠燈;文件與 ADR。
+**產出物**:可 `make up --wait` 全綠的 compose;`GET /v1/markets` 回 seed 的 `ETH-USDC`;`exchangectl markets list`;CI 全綠(當時是 `lint`、`unit`、`integration`、`compose-config`、`image` 五個 job 加 `gen-check`;後來合併成 §13.3 描述的形狀);文件與 ADR。
 
 **需要的 Go 能力**:module 與 `internal/`、struct/method、值型別設計、table-driven test、`context` 基礎、`signal.NotifyContext`、`net/http` + chi、`embed.FS`、`go:generate`、slog、Dockerfile。
 
@@ -1090,11 +1090,11 @@ Makefile 目標:
 - [ ] goose `0001_bootstrap.sql`(schemas、`tenant` 慣例、house accounts seed 留給 Phase 2)、`0002_registry.sql`(assets、markets、fee_schedules、withdrawal_limits);`sqlc.yaml` + `registry` 查詢;`exchange seed`(讀 `addresses.json` upsert ETH、USDC、ETH-USDC、預設 fee schedule)(1 d)
 - [ ] `api/public/v1/openapi.yaml` 初版(`GET /v1/assets`、`GET /v1/markets`、`GET /v1/markets/{symbol}`、問題型別、金額 string pattern + `x-go-type`);`oapi-codegen` chi strict-server;`internal/api` 實作(1 d)
 - [ ] `test/integration`:testcontainers Postgres → 跑完整 migration → seed → HTTP 呼叫 `GET /v1/markets`(1 d)
-- [ ] `.github/workflows/ci.yml`:lint、unit、integration、`docker compose config`、image build;`make gen && git diff --exit-code` 檢查產物同步(0.5 d)
+- [ ] `.github/workflows/ci.yml`:靜態檢查、單元、整合、`docker compose config`、image build;`make gen && git diff --exit-code` 檢查產物同步(0.5 d)
 - [ ] `cmd/exchangectl`(cobra + 產生的 client):`markets list`、`assets list`(0.5 d)
 - [ ] `README.md`:產品邊界一段、`make up` 快速開始(0.5 d)
 
-**DoD(CI job)**:`lint`(depguard 與 forbidigo 生效並有一個故意違規的測試檔證明會被擋,合併前移除)、`unit`(`internal/money` 覆蓋率 ≥ 95%)、`integration`(migration + seed + `GET /v1/markets` 回 `ETH-USDC`,`price_tick = "0.01"`)、`compose-config`、`image`;`docker compose --profile infra --profile single up --wait` 全部 healthy(含 anvil、contracts-deployer 完成、`addresses.json` 存在);`docs/domain.md` 與 8 份 ADR 合併。
+**DoD(CI)**——按能力寫,不按 job 名寫,因為 job 後來合併過(§13.3):depguard 與 forbidigo 生效並有一個故意違規的測試檔證明會被擋(合併前移除)、`internal/money` 覆蓋率 ≥ 95%、migration + seed 後 `GET /v1/markets` 回 `ETH-USDC`(`price_tick = "0.01"`)、`docker compose config` 三種 profile 都算得出來、三個 image build 得起來;`docker compose --profile infra --profile single up --wait` 全部 healthy(含 anvil、contracts-deployer 完成、`addresses.json` 存在);`docs/domain.md` 與 8 份 ADR 合併。
 
 **展示腳本**:
 
@@ -1314,7 +1314,7 @@ exchangectl admin reconcile                                              # diff 
 - [x] `docs/webhooks.md`、`exchangectl webhook-sink`(本機接收並驗簽的測試工具)(0.5 d)——5c 的 secret 輪替(`0020`、`POST /webhooks/{id}/rotate-secret`、寬限期雙簽)一併完成
 - [x] 測試:對帳能抓出人為植入的錯帳(直接 SQL 插一筆 posting 破壞平衡 → break);提現審核狀態機每個轉移;webhook 重試與簽名驗證;TOTP 錯碼鎖定(1.5 d)——錯帳進的是 `admin.ledger_breaks`(帳本自檢,跑在 admin role),不是鏈上對帳的 `reconciliation_breaks`,理由見 `docs/domain.md` §24
 
-**DoD(CI)**:`integration` 新增:植入錯帳 → `admin.ledger_breaks` 有一筆(帳本自檢;`reconciliation_breaks` 是鏈上對帳的表,要節點才寫得到——見 `docs/domain.md` §24);webhook 端點回 500 兩次後第三次成功,deliveries 有 3 筆;`kyc_level` 改變後提現限額生效;`unit`:template 渲染測試;E2E 增加「超額提現 → 後台 approve(透過 admin API)→ confirmed」。手動:後台 12 個頁面截圖進 `docs/screenshots/`(實際 14 張:登入、TOTP 與用戶詳情也各一張;`make screenshots` 產生)。
+**DoD(CI)**:`integration` 新增:植入錯帳 → `admin.ledger_breaks` 有一筆(帳本自檢;`reconciliation_breaks` 是鏈上對帳的表,要節點才寫得到——見 `docs/domain.md` §24);webhook 端點回 500 兩次後第三次成功,deliveries 有 3 筆;`kyc_level` 改變後提現限額生效;`unit`:template 渲染測試;E2E 增加「超額提現 → 後台 approve(透過 admin API)→ confirmed」。手動:後台 12 個頁面截圖進 `docs/screenshots/`(實際 15 張後台 + 2 張前台 = 17 個檔;`make screenshots` 產生)。
 
 **展示腳本**:
 
@@ -1393,7 +1393,7 @@ open http://localhost:16686   # Jaeger:一張單從 api 到 consumer 的 trace
 - [x] runbooks:engine 重啟、卡住的提現、reorg 告警、熱錢包低水位、備份還原(1 d)——九本四段(加 key-rotation、beta-deploy、reconciliation-break、admin-totp),`test/docs/runbooks_test.go` 守住;`sepolia.md` 搬到 `docs/guides/`
 - [x] 發布流程:`git tag vX.Y.Z` → GitHub Actions 推 image + chart package + release notes(0.5 d)——`release` job(chart 到 `oci://ghcr.io/<owner>/charts`、版本斷言、exchangectl 二進位、GitHub Release)、`make release-check`、`docs/release.md`
 - [x] beta checklist:`docs/beta-checklist.md`(限制清單、監控、告警接收人、對帳頻率)(0.5 d)
-- [x] (§5 壓測要求,Phase 7 先做)cmdbus 並行派送、ledger 兩趟、runner pipelining + group commit:純掛單 17 → 3 次往返、單市場 165 → 266 orders/s(`docs/loadtest.md` §8);關機順序、retention job、0022
+- [x] (`docs/loadtest.md` §5 指出的瓶頸,Phase 7 先做——原文的裸「§5」看起來像指本文件的 §5 系統架構,那裡沒有效能要求)cmdbus 並行派送、ledger 兩趟、runner pipelining + group commit:純掛單 17 → 3 次往返、單市場 165 → 266 orders/s(`docs/loadtest.md` §8),代價是飽和時的推播延遲(§3.3);關機順序、retention job、0022
 
 **DoD(CI)**:`helm` job 綠(kind 安裝 + E2E);`helm lint` 綠;還原演練文件含實測時間;`exchange version` 與 chart appVersion 一致(CI 檢查);所有 runbook 有「症狀 / 檢查指令 / 處置 / 驗證」四段。**達成**:`helm` job 每個 PR 跑;`helm lint` 在 `helm_test.go`;`docs/runbooks/backup-restore.md` 的演練表(本機 8 秒,CI 每個 PR 一次);版本相等在 `helm-e2e.sh` 與 `release` job 各驗一次;四段由 `test/docs/runbooks_test.go` 守住。細節與偏離在 `docs/domain.md` §26、ADR-0009。
 
@@ -1457,7 +1457,7 @@ scripts/backup.sh && scripts/restore-drill.sh
 | 單元 | money、matching、ledger 計算、policy、狀態機純函式、template | `testing` + testify、golden files | `make test`,每次 push |
 | 屬性 / 模糊 | matching 不變量、ledger 隨機序列、money 捨入、事件 envelope 序列化 | `rapid`、`go test -fuzz` | `make test`(rapid)、`fuzz-smoke` job 30–60 s |
 | 整合 | ledger + PG、trading + PG + NATS、chain + anvil、webhook、stream | `testcontainers-go`,build tag `integration`,每個測試獨立 schema 或 truncate | `make test-integration`,PR |
-| E2E | compose 全起 + `exchangectl e2e`、kill/restart、前台冒煙 | compose、Playwright(nightly) | `make e2e`,PR(main)與 nightly |
+| E2E | compose 全起 + `exchangectl e2e`、kill/restart、前台冒煙 | compose、Playwright | `make e2e`,**每個 PR 都跑**(計畫原寫 nightly,實際沒有夜間排程) |
 | 部署 | Helm on kind | kind、helm | Phase 7 起,PR |
 | 壓測 | `loadgen` | 自製 | 手動 / nightly,結果進 docs |
 
@@ -1550,7 +1550,7 @@ scripts/backup.sh && scripts/restore-drill.sh
 |---|---|---|---|
 | dev / E2E | 本機、CI | compose `infra + single` 或 `infra + app`;anvil | Phase 0 |
 | beta(自營封閉) | 單台 VM(4 vCPU / 8 GB)compose `compose.prod.yaml`;或單節點 k3s 用 Helm | `role` 分容器、Sepolia RPC provider、每日備份、prometheus/grafana、告警接收人、`.env` 由密鑰管理工具產生 | Phase 5 全部 DoD、Phase 6 dashboards、Phase 7 備份演練 |
-| Helm(kind 驗證) | CI | chart + subchart 依賴 | Phase 7 |
+| Helm(kind 驗證) | CI | chart 內建最小依賴,只在 `dev.enabled=true` render;**不用 subchart**(ADR-0009,§12 Phase 7) | Phase 7 |
 | managed K8s(beta 後段,可選) | GKE / EKS / AKS 單 region | 同一 chart,外部 managed Postgres / NATS(或 subchart)、K8s Secret / external-secrets、Ingress + TLS、NetworkPolicy | chart 在 kind 通過;engine / chain / signer Deployment `replicas: 1` + `Recreate`;PITR 備份;`terminationGracePeriodSeconds` ≥ engine drain 時間 |
 | 正式(主網,v2;§22) | 單 region managed K8s 或 VM(依 beta 的結論) | 同上,加 KMS/HSM/MPC signer、付費 RPC ×2、冷熱錢包分離、24/7 on-call | §22.1 九道閘門全部通過(Phase 9 DoD);§22.2 放量從內部帳戶開始 |
 
@@ -1638,7 +1638,7 @@ scripts/backup.sh && scripts/restore-drill.sh
 | Day 2 | 寫 ADR:0001 modular monolith 單一 binary 多角色;0002 Postgres 為唯一真相 + outbox + JetStream;0003 單租戶但預留 tenant_id;0004 決策數值(decimal + scale,禁 float);0005 帳本模型(複式、hold 為分錄、house 科目);0006 認證(EdDSA JWT + JWKS、API key HMAC、admin TOTP);0007 簽名隔離(keystore + Signer 介面,KMS 預留);0008 工具鏈版本釘住(Go、foundry tag、go-ethereum、nats、postgres) | `docs/adr/0001–0008` |
 | Day 3 | `go mod init`;`cmd/exchange`(cobra);`internal/app`(config、run loop、healthz/readyz/metrics、SIGTERM);`internal/telemetry`;`internal/money` + 測試;`.golangci.yml`;Makefile 骨架 | `make lint test` 綠 |
 | Day 4 | `build/Dockerfile`;`deploy/compose/compose.yaml` infra profile(postgres/redis/nats/anvil/contracts-deployer)+ `infra/contracts` + `initdb` + `gen-dev-secrets`;goose `0001`、`0002`;`exchange migrate`、`exchange seed` | `make up` 全 healthy,`addresses.json` 產生,registry 有 ETH-USDC |
-| Day 5 | `api/public/v1/openapi.yaml`(markets/assets)→ oapi-codegen → handler → sqlc;testcontainers 整合測試;GitHub Actions(lint/unit/integration/compose-config/image);`exchangectl markets list`;README 產品邊界段 | CI 綠;第一個 PR 合併 |
+| Day 5 | `api/public/v1/openapi.yaml`(markets/assets)→ oapi-codegen → handler → sqlc;testcontainers 整合測試;GitHub Actions(當時五個 job,現況見 §13.3);`exchangectl markets list`;README 產品邊界段 | CI 綠;第一個 PR 合併 |
 
 第一週不寫任何撮合或帳本程式碼。若 Day 1–2 發現本文件的分錄或狀態機有錯,先改文件、再改 ADR、再開工。
 
