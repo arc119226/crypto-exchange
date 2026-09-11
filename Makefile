@@ -48,14 +48,17 @@ KIND          ?= kind
 KIND_CLUSTER  ?= exchange
 KIND_IMAGE    := crypto-exchange:ci
 
-.PHONY: help tools gen gen-check fmt tidy lint secrets-scan test docs-test test-fuzz test-integration e2e cover-money build image \
+.PHONY: help tools gen gen-check fmt tidy tidy-check lint scripts-syntax check secrets-scan test docs-test test-fuzz test-integration e2e cover-money build image \
 	    up up-single up-sepolia down down-sepolia logs logs-sepolia ps ps-sepolia reset infra-up run migrate seed artifacts compose-config contracts-test \
 	    gen-dev-secrets faucet totp-enroll trace loadgen web-gen web-check web-build web-e2e \
 	    helm-lint helm-template kind-up helm-e2e kind-down backup-drill \
 	    image-edge image-backup images up-prod down-prod logs-prod ps-prod gen-prod-secrets release-check
 
 help: ## Show this help
-	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
+	@# The character class needs 0-9: without it this silently dropped e2e,
+	@# helm-e2e and web-e2e -- the whole end-to-end path -- from the default
+	@# goal, which is the only map a newcomer has.
+	@grep -E '^[a-zA-Z0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
 
 tools: ## Show pinned tool versions (tools/go.mod)
 	$(GOTOOL) oapi-codegen -version
@@ -96,6 +99,37 @@ lint: ## go vet + golangci-lint + gitleaks (all pinned in tools/go.mod)
 	go vet ./...
 	$(GOTOOL) golangci-lint run ./...
 	$(MAKE) --no-print-directory secrets-scan
+
+tidy-check: ## Fail if go.mod / go.sum are not tidy (what CI asserts)
+	$(MAKE) --no-print-directory tidy
+	git diff --exit-code -- go.mod go.sum $(TOOLS_MOD) tools/go.sum
+
+# Same list the checks job parses, for the same reason: this takes
+# milliseconds, and a syntax error found twelve minutes into a container run is
+# twelve minutes wasted.
+scripts-syntax: ## bash -n over every shell script CI parses
+	@for f in scripts/gen-dev-secrets.sh scripts/e2e.sh scripts/e2e-web.sh scripts/kind-secrets.sh \
+	          scripts/helm-e2e.sh scripts/backup.sh scripts/restore-drill.sh scripts/gen-prod-secrets.sh \
+	          deploy/vm/bootstrap.sh; do \
+	  bash -n "$$f" || exit 1; \
+	done
+	@echo "scripts parse"
+
+# One command for "am I ready to open a pull request". Before this existed the
+# nearest thing was `make lint && make test`, which is two of the checks job's
+# twelve steps, and the rest were written down only in docs/README.md, in
+# Traditional Chinese.
+#
+# Two honest gaps, because a target that claims more than it does is worse than
+# no target. It does NOT run the Docker-backed suites -- integration, e2e,
+# helm-e2e, backup-drill -- which is where most of this project's evidence
+# actually lives; run `make test-integration` and `make e2e` separately, and
+# budget about twelve minutes. And deploy/helm/helm_test.go skips the chart
+# lint and the kubeconform render when helm is not on PATH, while CI fails on
+# it, so a green run here can still meet a red `checks`: set HELM or install
+# helm to close that one.
+check: lint tidy-check scripts-syntax gen-check docs-test test cover-money compose-config web-check contracts-test ## Everything a PR must pass that runs without the Docker suites
+	@echo "check: all green"
 
 # Scans git history, not the working tree. A --no-git scan walks everything on
 # disk, which means a developer's own .env and secrets/jwt/ed25519.pem -- real
