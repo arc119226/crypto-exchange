@@ -81,7 +81,12 @@ func (e *Engine) WithMetrics(m *Metrics) *Engine {
 	return e
 }
 
-// WithPolicy replaces the order policy (tests, later phases).
+// WithPolicy swaps the OrderPolicy NewEngine installs. It has no callers, in
+// this repository or its tests: internal/policy ships one implementation,
+// policy.Basic{}, and NewEngine takes it directly. The comment here used to
+// claim tests used it, which one grep disproves -- so it said the opposite of
+// what it should, which is that this is a seam kept open on purpose for a
+// deployment that needs different order admission rules.
 func (e *Engine) WithPolicy(p policy.OrderPolicy) *Engine {
 	e.policy = p
 	return e
