@@ -276,6 +276,21 @@ func TestLoadConfigRefusesAKnownMainnet(t *testing.T) {
 			map[string]string{"ETH_CHAIN_ID": "42161"},
 			"42161 is Arbitrum One mainnet",
 		},
+		{
+			// README.md and README.en.md §7 used to say no code path
+			// reached mainnet at all. The list was five ids, so BNB Smart
+			// Chain and Avalanche started cleanly and made that sentence
+			// false. These two are here to keep the sentence and the list
+			// honest with each other.
+			"BNB Smart Chain",
+			map[string]string{"ETH_CHAIN_ID": "56"},
+			"56 is BNB Smart Chain mainnet",
+		},
+		{
+			"Avalanche C-Chain",
+			map[string]string{"ETH_CHAIN_ID": "43114"},
+			"43114 is Avalanche C-Chain mainnet",
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			clearEnv(t)

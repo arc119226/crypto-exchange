@@ -208,12 +208,30 @@ type AdminConfig struct {
 // means "refuse unless every condition in §22.1 gate 1 holds"; being off it
 // means nothing, so a mainnet not listed here is caught by the other gates,
 // not by this one (docs/plan-v1.0.md §22.1).
+//
+// The list cannot be complete -- anyone can stand up an EVM chain and pick an
+// id -- so it is deliberately not the thing the project's safety rests on. It
+// is worth keeping wide anyway: every id added here is one more way for an
+// operator to be stopped by the binary rather than by a document. README.md
+// and README.en.md §7 state this boundary in the same terms; if this list
+// moves, check that they still agree.
 var knownMainnets = map[int64]string{
-	1:     "Ethereum",
-	10:    "Optimism",
-	137:   "Polygon",
-	8453:  "Base",
-	42161: "Arbitrum One",
+	1:      "Ethereum",
+	10:     "Optimism",
+	56:     "BNB Smart Chain",
+	100:    "Gnosis",
+	137:    "Polygon",
+	250:    "Fantom Opera",
+	324:    "zkSync Era",
+	1101:   "Polygon zkEVM",
+	5000:   "Mantle",
+	8453:   "Base",
+	42161:  "Arbitrum One",
+	42220:  "Celo",
+	43114:  "Avalanche C-Chain",
+	59144:  "Linea",
+	81457:  "Blast",
+	534352: "Scroll",
 }
 
 // validateMainnetGate refuses to start against a known mainnet unless all
