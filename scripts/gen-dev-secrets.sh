@@ -6,7 +6,8 @@
 #   HOT_WALLET_ADDRESS          m/44'/60'/1'/0/0 of that mnemonic, written into .env
 #   secrets/keystore/hd-seed.json  that mnemonic encrypted for the signer role
 # Idempotent: existing files are kept; FORCE=1 regenerates everything.
-# Requires bash, openssl, go; docker is needed for the mnemonic step (foundry image).
+# Requires bash, openssl and docker. Go is used when the host has it and run in a
+# container when it does not -- both READMEs promise a reader needs no Go.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -25,6 +26,43 @@ set_var() {
   mv "$tmp" "$1"
 }
 cast() { docker run --rm --entrypoint cast "$FOUNDRY_IMAGE" "$@"; }
+
+# exchange_keys runs `exchange keys ...`, with the host's Go when there is one
+# and in a container when there is not.
+#
+# The second half is the point. README.md and README.en.md both list Go under
+# "you do not need", and this script is step 2 of their quick start, so a
+# reader on the machine those guides describe -- Docker Desktop, git, make, no
+# toolchain -- used to hit `go: command not found` with set -e and no
+# troubleshooting row to look up. CI never saw it: every job runs setup-go
+# first, and scripts/e2e.sh calls this same script on a runner that has Go.
+#
+# The image is the one build/Dockerfile builds with, read from there so the two
+# cannot drift. Caches live outside the repository and outside the container so
+# the second call does not re-download the module graph, and --user keeps the
+# files this writes into secrets/ owned by the caller rather than by root --
+# the chmod lines below would fail otherwise.
+GO_IMAGE="$(sed -n 's/^FROM \(golang:[^ ]*\) AS build.*/\1/p' build/Dockerfile | head -1)"
+GO_CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/crypto-exchange-go"
+exchange_keys() {
+  if command -v go >/dev/null 2>&1; then
+    go run ./cmd/exchange keys "$@"
+    return
+  fi
+  if ! docker info >/dev/null 2>&1; then
+    log "this step needs either Go on PATH or a running Docker daemon, and neither is available"
+    exit 1
+  fi
+  mkdir -p "$GO_CACHE_DIR/build" "$GO_CACHE_DIR/mod"
+  docker run --rm \
+    --user "$(id -u):$(id -g)" \
+    -v "$PWD:/src" -w /src \
+    -v "$GO_CACHE_DIR:/gocache" \
+    -e HOME=/tmp -e GOFLAGS=-modcacherw \
+    -e GOCACHE=/gocache/build -e GOMODCACHE=/gocache/mod \
+    -e WALLET_KEYSTORE_PASSPHRASE \
+    "$GO_IMAGE" go run ./cmd/exchange keys "$@"
+}
 
 mkdir -p secrets/jwt secrets/keystore
 
@@ -90,7 +128,7 @@ fi
 if [[ -f secrets/jwt/ed25519.pem && "$FORCE" != 1 ]]; then
   log "secrets/jwt/ed25519.pem exists, keeping it"
 else
-  go run ./cmd/exchange keys gen-jwt --out secrets/jwt/ed25519.pem --force >/dev/null
+  exchange_keys gen-jwt --out secrets/jwt/ed25519.pem --force >/dev/null
   log "wrote secrets/jwt/ed25519.pem"
 fi
 # `keys gen-jwt` writes 0600, which is right for a real deployment where the
@@ -134,7 +172,7 @@ passphrase="$(sed -n 's/^WALLET_KEYSTORE_PASSPHRASE=//p' .env)"
 if [[ -f secrets/keystore/hd-seed.json && "$FORCE" != 1 ]]; then
   log "secrets/keystore/hd-seed.json exists, keeping it"
 else
-  out="$(WALLET_KEYSTORE_PASSPHRASE="$passphrase" go run ./cmd/exchange keys import-mnemonic \
+  out="$(WALLET_KEYSTORE_PASSPHRASE="$passphrase" exchange_keys import-mnemonic \
     --from secrets/dev-mnemonic.txt --keystore-dir secrets/keystore --force)"
   derived="$(printf '%s' "$out" | sed -n 's/^hot wallet: //p' | tr -d '[:space:]')"
   if [[ "$derived" != "$hot" ]]; then
