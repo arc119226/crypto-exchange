@@ -1,0 +1,33 @@
+# Generated code. These are the same paths the Makefile regenerates (GEN_DIRS)
+# and the linter skips (.golangci.yml exclusions.paths); keep the three in step.
+#
+# linguist-generated has two effects that matter here. It keeps 49,329 lines of
+# generated Go out of the repository's language statistics -- more than the 44,839
+# lines of hand-written non-test Go, so without this the front page misreports
+# what the project is. And it collapses these files in pull request diffs, so a
+# change that regenerates a client or a query set does not bury its real diff
+# under a few thousand lines.
+internal/api/gen/**                                linguist-generated=true
+internal/admin/gen/**                              linguist-generated=true
+internal/admin/sqlcgen/**                          linguist-generated=true
+internal/audit/sqlcgen/**                          linguist-generated=true
+internal/auth/sqlcgen/**                           linguist-generated=true
+internal/chain/sqlcgen/**                          linguist-generated=true
+internal/eventbus/sqlcgen/**                       linguist-generated=true
+internal/ledger/sqlcgen/**                         linguist-generated=true
+internal/marketdata/sqlcgen/**                     linguist-generated=true
+internal/registry/sqlcgen/**                       linguist-generated=true
+internal/trading/sqlcgen/**                        linguist-generated=true
+internal/webhook/sqlcgen/**                        linguist-generated=true
+cmd/exchangectl/internal/apiclient/client.gen.go   linguist-generated=true
+cmd/exchangectl/internal/adminclient/client.gen.go linguist-generated=true
+web/trade/src/api/schema.d.ts                      linguist-generated=true
+web/trade/package-lock.json                        linguist-generated=true
+
+# Development happens on Windows under WSL and the index is 716 LF files with
+# no CRLF today. This keeps it that way rather than relying on everyone's
+# core.autocrlf.
+* text=auto eol=lf
+
+# Binary, so git never tries to normalise them.
+*.png binary

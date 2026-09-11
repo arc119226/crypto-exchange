@@ -70,6 +70,28 @@ on:
 # <merge>^{tree} <merge>^2^{tree}` is how to check whether the premise still
 # holds.
 #
+# THAT CONDITION IS NO LONGER THE MAINTAINER'S ALONE TO KEEP. Dependabot
+# security updates are enabled on this repository -- no .github/dependabot.yml
+# is needed for them -- and they open pull requests on their own schedule.
+# #41 was the first: branched from 1011275 and merged back into 1011275, so
+# the trees still matched, but only because nothing else happened to be open.
+# The next one can arrive while a branch is in flight, and then a merge to
+# main ships a combination no run ever saw. Tags are cut from main, so the
+# first untested main is also the first untested release.
+#
+# Two ways to close it, and they are not equivalent:
+#
+#   1. A ruleset on main requiring the checks, integration and e2e status
+#      checks AND "Require branches to be up to date before merging". The
+#      second half is the one that matters: it forces a pull request to
+#      contain current main and re-run before it can merge, which makes the
+#      tree equality above true again under concurrency. Costs nothing here,
+#      and needs no change to this file.
+#   2. Delete the five `if` lines and pay the full suite on every merge.
+#
+# Until one of them is in place, this block describes an assumption rather
+# than a guarantee.
+#
 # Tags are untouched: a release is verified on its own, in full.
 
 # Where the jobs run.

@@ -45,7 +45,7 @@ PR #28 之後、打 `v0.1.0` 之前,使用者提出兩個計畫書層級的問�
 
 計畫書 §2.1、§3.2、§4 原則 0 改成「v1 不接主網;v2 接,但只在 §22.1 的九道閘門全部通過之後」。閘門:程式閘門、密鑰託管(KMS/HSM/MPC、冷熱分離)、外部審計、法遵(KYC/AML、地址篩查、牌照)、風控(法幣等值限額、全站上限、雙人審核、kill switch)、鏈基礎設施(RPC ×2、確認數、gas 上限)、真實資產(token allowlist、真 USDC)、營運(on-call、事件響應 runbook、PITR、準備金)、放量計畫(內部帳戶 → 白名單 → 開放)。程式閘門——已知主網 id 命中時要求 `MAINNET_ACKNOWLEDGED=true`、`EXCHANGE_ENV=prod`、非 keystore signer,缺一拒絕啟動——半天的工,可以在 v1.1 就做,讓「不接主網」從文件變成測試斷言。
 
-**v1.1 做了。** `internal/app/config.go` 有五個已知主網 id(1、10、137、8453、42161)與 `validateMainnetGate`,`internal/app/config_test.go` 的 `TestLoadConfigRefusesAKnownMainnet` 斷言每一種缺一的情況都被拒。三個條件的第三個需要一個原本不存在的概念,所以新增了 `WALLET_SIGNER_KIND`(`keystore` / `kms`)——而 `kms` **在設定驗證階段就被拒絕**,因為 `internal/chain/signer/kms.go` 只是編譯得過的 stub。
+**v1.1 做了。** `internal/app/config.go` 有一份已知主網 id 清單(`knownMainnets`;一開始是五個,後來擴到十六個,因為兩份 README §7 原本宣稱「程式裡沒有任何接主網的設定」,而 BNB Smart Chain 與 Avalanche 當時是啟動得起來的)與 `validateMainnetGate`,`internal/app/config_test.go` 的 `TestLoadConfigRefusesAKnownMainnet` 斷言每一種缺一的情況都被拒。三個條件的第三個需要一個原本不存在的概念,所以新增了 `WALLET_SIGNER_KIND`(`keystore` / `kms`)——而 `kms` **在設定驗證階段就被拒絕**,因為 `internal/chain/signer/kms.go` 只是編譯得過的 stub。
 
 這個選擇是刻意的:讓 `kms` 通過驗證會產生一種「啟動得起來但簽不了名」的部署,營運人員為了通過閘門設了它,系統照常開機,第一筆提現才死在簽名。現在的結果是**三個條件全部滿足仍然啟動不了**,主網在 v1.1 是結構上到不了的。接上真的 KMS(閘門 2)時,把驗證裡的那一句拒絕拿掉、在 `signer_role.go` 的 switch 加一個 case,並刪掉那個「全部滿足仍然拒絕」的測試斷言。
 

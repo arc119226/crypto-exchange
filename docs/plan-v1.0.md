@@ -1695,7 +1695,7 @@ v1 的底線是「不接主網、不碰真錢」(§2.1、§4 原則 0)。那不�
 
 | # | 閘門 | 產出 | 誰負責 |
 |---|---|---|---|
-| 1 | **程式閘門** | 已知主網 id 清單寫進 `internal/app/config.go`(1 Ethereum、10 Optimism、137 Polygon、8453 Base、42161 Arbitrum One;這是「已知主網」不是「支援清單」,v1.1 仍只支援單一 EVM 鏈);命中時要求 `MAINNET_ACKNOWLEDGED=true`、`EXCHANGE_ENV=prod`、signer 種類 ≠ keystore 三者同時成立,否則啟動即失敗並印出未通過的項目;測試斷言三種缺一的情況都拒絕 | 引擎(可提前到 v1.1) |
+| 1 | **程式閘門** | 已知主網 id 清單寫進 `internal/app/config.go`(以 `knownMainnets` 為準,目前十六條:Ethereum、Optimism、BNB Smart Chain、Gnosis、Polygon、Fantom、zkSync Era、Polygon zkEVM、Mantle、Base、Arbitrum One、Celo、Avalanche、Linea、Blast、Scroll;這是「已知主網」不是「支援清單」,v1.1 仍只支援單一 EVM 鏈,而且這份清單**永遠不可能完整**——任何人都能架一條 EVM 鏈自己挑 id,所以沒列到的主網是由第 3 到第 9 道閘門擋,不是由這一道);命中時要求 `MAINNET_ACKNOWLEDGED=true`、`EXCHANGE_ENV=prod`、signer 種類 ≠ keystore 三者同時成立,否則啟動即失敗並印出未通過的項目;測試斷言三種缺一的情況都拒絕 | 引擎(可提前到 v1.1) |
 | 2 | **密鑰託管** | `KMSSigner`(AWS KMS / GCP KMS / HSM / MPC 擇一)實作 `Signer` 介面(ADR-0007);熱錢包私鑰不落任何主機檔案;HD 種子只用於派生充值地址,充值地址的私鑰同樣不落地(或改用 CREATE2 forwarder 讓充值地址不持鑰,§3.1 backlog);冷錢包(多簽)+ 熱錢包上限 `HOT_WALLET_MAX`,超過自動轉冷、低於 `HOT_WALLET_MIN` 告警人工補 | 引擎 + 營運方 |
 | 3 | **安全審計與滲透測試** | 外部審計報告,範圍至少:簽名路徑、提現政策與 resolve、admin 登入與 TOTP、公開 API 與限流;高風險項全部關閉並複測 | 營運方委外 |
 | 4 | **法遵** | KYC/AML 供應商整合(`kyc_level` 由驗證來源透過 admin API 寫入,不再是人工欄位);提現地址篩查(制裁名單)以 hook 接進 `policy.WithdrawalPolicy`;Travel Rule 依轄區;營運方持有該轄區牌照或豁免——這是營運方的責任,引擎只提供 hook 與審計 | 營運方;引擎提供 policy hook |

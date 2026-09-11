@@ -433,6 +433,8 @@ make infra-up && make migrate && make seed && make run ROLE=api
 | [`docs/guides/web-walkthrough.md`](guides/web-walkthrough.md) | **用網頁把整個流程跑一遍**:開機三行指令,之後全部用滑鼠。開戶、後台入帳、掛單成交、提現的自動核准與人工審核、看錢離開熱錢包、對帳與稽核 |
 | [`docs/system-overview.md`](system-overview.md) | **不看程式碼的系統總覽**:七個角色像哪些部門、錢與資料怎麼跑、CI 全綠代表什麼、以後怎麼擴充 |
 | [`docs/plan-v1.0.md`](plan-v1.0.md) | **分階段可執行計畫 v1.1**(定位、範圍、領域模型、契約、模組、選型、Phase 0~9、測試/CI、安全、觀測、部署、風險;v1.1 加 §22 v2 主網閘門、§23 營收模型。檔名維持 v1.0) |
+| [`docs/limitations.md`](limitations.md) | **這套軟體不做什麼、擋不住什麼、做不好什麼**(English)。plan §18 的英文版,並改正了已經被進度推翻的部分。四項效能目標的實測差距、單鏈對帳的邊界、代理後面限流會塌、admin 單副本假設,全部列在一頁上 |
+| [`SECURITY.md`](../SECURITY.md) | 漏洞回報管道,以及這個 repo 唯一一份**威脅模型**(English):內部服務互信、簽名金鑰是一個檔案、後台預期不對外、客戶端位址不被信任、營運人員被信任 |
 
 ### 設計與決策
 
