@@ -291,7 +291,12 @@ The design documents are written in Traditional Chinese; the code, its comments 
 
 ## 7. A word on safety
 
-- This project **only ever talks to a pretend blockchain or a testnet**; nothing in the code knows how to reach mainnet. Please keep it that way.
+**This software has never had a security audit or a penetration test. It has no KYC, AML, sanctions-screening or Travel Rule capability. It is provided with no warranty of any kind. Do not operate it with real customer funds.** [`docs/limitations.md`](docs/limitations.md) is the whole list, written down rather than implied.
+
+With that said, here is what protects you while you follow this guide:
+
+- **Testnet only, and the binary enforces part of that.** What you start here talks to a pretend blockchain running on your own computer. Point it at a real network and it refuses to start against the mainnets it knows by chain id -- Ethereum, Base, Arbitrum One, BNB Smart Chain, Avalanche and a dozen more -- unless three separate conditions hold, and one of them cannot be satisfied in this build. That list can never be complete, though: anyone can stand up an EVM chain and choose an id, so pointing this at a mainnet the list does not name is **not** blocked by code. Past that line it is your discipline, not the software's.
 - `.env` and `secrets/` hold this computer's keys. Do not share them, do not screenshot them, do not commit them (they are already in `.gitignore`).
 - The back office is bound to `127.0.0.1` only, so only your own computer can reach it.
 - The "money" here has no value. If you break something, `make reset`.
+- **Running an exchange is a regulated activity nearly everywhere.** Licensing, sanctions screening and Travel Rule reporting belong to whoever operates a deployment, not to this project.
