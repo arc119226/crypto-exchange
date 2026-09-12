@@ -6,7 +6,12 @@
 ARG POSTGRES_TAG=16.4
 ARG MC_TAG=RELEASE.2025-08-13T08-35-41Z
 
-FROM minio/mc:${MC_TAG} AS mc
+# quay.io, not Docker Hub: MinIO deleted both minio/mc and minio/minio from
+# Docker Hub, and this build started failing with "pull access denied,
+# repository does not exist" on a pin that had never changed. quay.io/minio
+# is MinIO's own registry and still serves this exact tag, so only the host
+# moved. Do not shorten it back to minio/mc.
+FROM quay.io/minio/mc:${MC_TAG} AS mc
 
 FROM postgres:${POSTGRES_TAG}
 COPY --from=mc /usr/bin/mc /usr/local/bin/mc
