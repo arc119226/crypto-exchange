@@ -298,3 +298,15 @@ make reset
 - 管理後台只綁在 `127.0.0.1`,只有你自己這台電腦連得到。
 - 這裡的「錢」沒有任何價值。玩壞了就 `make reset`。
 - **經營一家交易所在絕大多數地方都是特許行業。** 牌照、制裁名單篩查與 Travel Rule 申報屬於實際營運某個部署的那個人,不屬於這個專案。
+
+---
+
+## 8. 授權,以及怎麼參與
+
+Apache-2.0,全文在 [`LICENSE`](LICENSE)。你可以商業使用、修改、閉源發布;第 3 條的專利授權跟著你走,條件是把 [`NOTICE`](NOTICE) 一起帶著。
+
+有一個依賴不是寬鬆授權:`exchange` 這支執行檔靜態連結了 go-ethereum 的函式庫,那些是 LGPL-3.0。`NOTICE` 寫明它涵蓋什麼,`THIRD-PARTY-NOTICES.md` 列出全部 80 個模組與各自的授權全文。
+
+想改東西的話,[`CONTRIBUTING.md`](CONTRIBUTING.md) 有完整流程:開 PR 之前跑 `make check`,每個 commit 用 `git commit -s` 帶上 Developer Certificate of Origin 的一行 sign-off。沒有要簽的協議。附一個會紅的測試的錯誤回報,是全世界最好合併的東西。
+
+任何跟安全有關的走 [`SECURITY.md`](SECURITY.md) 的私密管道,不要開公開 issue。開之前值得先讀 [`docs/limitations.md`](docs/limitations.md):看起來缺的東西,有不少是刻意不做的。
