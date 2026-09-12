@@ -96,9 +96,19 @@ curl -s https://$EDGE_DOMAIN/v1/markets | jq .
 
 ### admin 是單副本,而且是從 tunnel 進來的
 
-`deploy/helm/exchange/values.yaml` 的 `roles.admin.replicas` 是 1,compose 也只有一個容器。後台的登入節流是**行程內記憶體**的權杖桶(`internal/app/admin_role.go` 的註解說明了理由,預設在 `internal/admin/ui.go`),所以把副本數調成 N,那個節流的額度就變成 N 倍,而且沒有任何訊號會告訴你。
+`deploy/helm/exchange/values.yaml` 的 `roles.admin.replicas` 是 1,compose 也只有一個容器。**這不是一個可以調的預設值:chart 會拒絕。** `helm upgrade --set roles.admin.replicas=2` 直接失敗,訊息是
 
-不受副本數影響的是 TOTP:鎖定記在 `auth.users.totp_locked_until`,那是共用的資料庫。**真正擋住人的是那一道**,登入節流只是不讓對方用 argon2 全速猜密碼。所以多開副本削弱的是節流,不是驗證。
+```
+roles.admin.replicas must be 1: the admin role holds state that one process at a time may own
+```
+
+而且 admin 的更新策略是 `Recreate` 而不是 `RollingUpdate`——升級時不會有兩個 admin pod 同時活著,代價是後台有幾秒鐘連不上。
+
+**為什麼管這麼嚴:一個第二行程會讓 webhook 的簽章密鑰永久消失。** 簽章密鑰只顯示一次(`docs/webhooks.md`),而後台網頁在「建立」或「輪替」之後會轉址,密鑰是放在**那個行程的記憶體**裡跨過那次轉址的(`internal/admin/ui_webhooks.go`)。兩個 pod 又沒有 session affinity,轉址後的請求可能落到另一個,那邊什麼都沒有——頁面照常渲染出來,只是沒有密鑰。密鑰加密儲存、事後任何呼叫都拿不回來,所以那個 endpoint 只能刪掉重建。
+
+**但 CLI 那條路不受影響**,遇到的人第一個問題通常是這個:`exchangectl admin webhooks create` 與 `POST /admin/v1/webhooks` 把密鑰直接放在回應主體裡,沒有轉址也沒有記憶體暫存。
+
+比較輕的那個理由是登入節流:它是**行程內記憶體**的權杖桶(預設在 `internal/admin/ui.go`),副本開成 N 額度就是 N 倍。不受副本數影響的是 TOTP:鎖定記在 `auth.users.totp_locked_until`,那是共用的資料庫。**真正擋住人的是那一道**,登入節流只是不讓對方用 argon2 全速猜密碼。所以多開副本削弱的是節流,不是驗證。
 
 另一件是 `ip` 欄:admin 不在 edge 後面(`ports: !override ["127.0.0.1:8082:8082"]`),operator 是用 `ssh -L` 進來的,所以 `auth.admin_sessions.ip` 與 `audit.audit_events.ip` 對每一位 operator 都是同一個固定值。`docs/runbooks/admin-totp.md` 那句「誰什麼時候從哪裡登入過」在 beta 上只答得出前半;要知道是誰,看 `actor_id`,不要看 `ip`。
 

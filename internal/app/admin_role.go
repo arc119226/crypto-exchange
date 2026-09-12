@@ -111,8 +111,13 @@ func newAdminServer(cfg Config, log *slog.Logger, m *telemetry.HTTPMetrics, reg 
 		WithUsers(sessions).
 		// The backup sidecar's record, as the gauge the BackupStale alert reads.
 		WithBackupMetrics(admin.NewBackupMetrics(reg))
-	// One admin replica (docs/plan-v1.0.md §5.2), so the login throttle can
-	// live in memory: a second replica would only double the allowance.
+	// One admin replica, so the login throttle can live in memory: a second
+	// replica would only double the allowance. It is enforced rather than
+	// assumed -- the chart refuses roles.admin.replicas > 1
+	// (exchange.isSingleton in deploy/helm/exchange/templates/_helpers.tpl).
+	// The throttle is the milder reason for that rule; the sharp one is the
+	// webhook secret reveal in internal/admin/ui_webhooks.go, which a second
+	// process loses permanently.
 	ui, err := admin.NewUI(h, sessions, admin.UIConfig{
 		Cookies: admin.Cookies{Secure: cfg.SecureCookies()}, LoginLimit: loginLimit, Registerer: reg,
 	})

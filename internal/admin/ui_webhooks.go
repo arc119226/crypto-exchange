@@ -23,6 +23,16 @@ import (
 // resubmit on refresh; the secret rides across that redirect in a
 // server-side stash keyed by a random token, read once and forgotten. Not
 // in the flash cookie: a cookie is written to disk by the browser.
+//
+// That stash is this process's memory, which puts a constraint on the
+// deployment rather than on this file: a second admin process answering the
+// redirect finds nothing, and the secret is stored encrypted with nothing
+// able to produce it again -- it is gone, and the page renders as though
+// nothing happened. So the chart refuses more than one admin replica and
+// gives the role Recreate rather than RollingUpdate (exchange.isSingleton in
+// deploy/helm/exchange/templates/_helpers.tpl, asserted by
+// deploy/helm/helm_test.go). The JSON API does not go through here: it
+// returns the secret in the response body, so it has no such constraint.
 
 type revealed struct {
 	EndpointID string
