@@ -18,6 +18,18 @@ permissions:
 jobs:
   dco:
     name: commits are signed off
+    # Dependabot is exempt, and not as a convenience: the DCO is a statement by
+    # a PERSON that they wrote the code or otherwise have the right to submit
+    # it under this licence (developercertificate.org). A bot moving a version
+    # number in go.mod is not making that claim and has nobody to make it. The
+    # alternative is the maintainer rebasing every security update by hand with
+    # --signoff, which is exactly the time this project does not have, so the
+    # gate would end up teaching people to skip security pull requests.
+    # .github/dependabot.yml and ADR-0015 are the other half of this.
+    #
+    # pull_request.user.login rather than github.actor: the actor changes when
+    # a human re-runs the job, the pull request's author does not.
+    if: github.event.pull_request.user.login != 'dependabot[bot]'
     # A public repository's pull requests go hosted, because they can come
     # from forks and a self-hosted runner has no business executing those.
     # While the repository is private there are no forks and no spare

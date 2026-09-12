@@ -1,0 +1,45 @@
+# Security updates only. See docs/adr/0015-vulnerability-scanning-and-dependabot.md.
+#
+# The limit of 0 is the whole configuration, and it needs explaining because it
+# looks like the file is switched off. It disables ROUTINE VERSION UPDATES --
+# the weekly "bump x from 1.2.3 to 1.2.4" pull requests. It does not touch
+# Dependabot SECURITY updates, which are a repository setting (Settings -> Code
+# security) rather than anything in this file, and which keep opening pull
+# requests for advisories against the dependencies declared here.
+#
+# That is the trade this project wants. One maintainer working evenings cannot
+# triage a weekly stream of version bumps, and a stream nobody reads is how a
+# real security pull request ends up scrolled past. `make vuln` (govulncheck,
+# in the checks job) is what says which advisories actually reach this code --
+# today, 1 of the 11 GitHub reports, because GitHub compares every module in
+# go.sum while govulncheck compares only what is linked and called.
+#
+# github-actions and docker are deliberately absent: with routine updates off,
+# those ecosystems have essentially no security advisories to deliver, so
+# listing them would add configuration that does nothing. And note what
+# Dependabot cannot do for the pinned images either -- it reports advisories,
+# not disappearances. When MinIO deleted minio/mc from Docker Hub, the pin was
+# still the newest release; nothing was out of date, the registry was simply
+# gone, and only a build caught it.
+version: 2
+updates:
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 0
+
+  # Build-time only -- golangci-lint, sqlc, oapi-codegen, gitleaks,
+  # kubeconform, govulncheck. None of it links into a shipped binary, but an
+  # advisory here still runs on this machine and on every contributor's.
+  - package-ecosystem: gomod
+    directory: /tools
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 0
+
+  - package-ecosystem: npm
+    directory: /web/trade
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 0
