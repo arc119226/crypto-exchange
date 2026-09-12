@@ -1,6 +1,6 @@
 # ADR-0012:CI 跑在自建 runner 上,GitHub 托管只當退路
 
-- 狀態:已採納(Accepted)
+- 狀態:已採納(Accepted),2026-09-12 修訂(Amended)——見文末「修訂:倉庫公開之後」
 - 日期:2026-09-09
 - 相關:`.github/workflows/ci.yml`、`.github/actions/reclaim-disk/action.yml`、`docs/guides/self-hosted-runner.md`、`docs/plan-v1.0.md` §13.3(CI 的 DoD);ADR-0008(工具鏈釘版)、ADR-0009(beta 形態)
 
@@ -205,3 +205,23 @@ Error:
 - **安全邊界變了**:自建 runner 執行的是分支上的任意程式碼。私有倉庫 + 單人提交風險可控,但 `docs/guides/self-hosted-runner.md` 把三件事寫成必做:機器上不放別的東西、fork PR 全關、機器當拋棄式的看待。Windows 路線還多一條——自動登入代表實體接觸就等於登入。
 - **本機沒有 Docker,`e2e` / `integration` / `helm` 的改動只能靠 CI 驗證**。這反過來是自建 runner 最大的附帶價值:驗證這類改動的邊際成本會變成零。
 - 沒做但值得做的兩件事留在後面:app image 一次 run 建兩次(`image` 與 `helm` 各一次,約 7 分鐘、佔牆鐘 28%;e2e 走 compose 用既有的)應該改成建一次、多處載入;`test/integration/` 約 185 次 Postgres 容器啟動應該改成共用一個容器、每個測試一個 database。兩件都要動測試碼或 compose,風險與這次的 workflow 改動不同量級,而且搬到自建 runner 之後它們只影響牆鐘、不影響帳單。
+
+---
+
+## 修訂:倉庫公開之後(2026-09-12)
+
+這份 ADR 的整套論證建立在第一句上——「倉庫是私有的,私有倉庫的 GitHub Actions 每一分鐘都計費」。倉庫在 ADR-0014 之後公開,那句話不再成立,連帶兩件事跟著變。
+
+**一、成本理由消失,時間理由留著。** 公開倉庫的標準 runner 免費且不計量,所以本文那張「45 → 44 計費分鐘」的表與 3,000 分鐘額度的算術,從此只是歷史紀錄。自建 runner 現在買到的是**牆鐘**:兩台自建 17m21 對托管 31 分鐘(見「後果」),大約 13 分鐘。省時間,不省錢。就這樣把它退役也是合理的選擇。
+
+**二、pull request 不再走自建 runner,而且這件事寫進了程式而不是設定。** `ci.yml` 用的是 `pull_request` 而不是 `pull_request_target`,所以 GitHub 執行的是 **PR head 自己那份 workflow 檔**。公開之後任何人都能 fork、改寫 `runs-on`、刪光步驟、換成自己的一行。而這些 runner 是同一個互動式 WSL 使用者的兩個行程,那個使用者在 `docker` 群組裡(透過 `docker run -v /:/host` 等同 root),`/mnt/c` 掛著整顆 Windows 硬碟。GitHub 自己的文件就說不要在公開倉庫用自建 runner。
+
+所以 `runs-on` 變成:
+
+```yaml
+runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || vars.CI_RUNNER || 'ubuntu-latest' }}
+```
+
+**刻意不是「請記得把 `CI_RUNNER` 變數刪掉」。** 那是一個人要記得的設定;這是程式的性質,之後誰再把變數設回去也重新打不開那扇門。合併到 main 與 `v*` tag 仍然吃 `CI_RUNNER`——只有推得動 main 的人才觸發得了,程式本來就是可信的。
+
+**三、決定 2 的那個代理被這次改動弄壞,一起修了。** 本文「留下來的一件事」記著:步驟層用 `vars.CI_RUNNER != ''` 當作「這個 job 在自建機器上」的代理,只有在 `runs-on` 就是那個開關時才成立。現在不成立了。17 處步驟條件收斂成 workflow 層的一個 `SELF_HOSTED`,而且 `checks` 印出它解析後的值——這類條件算錯不會紅,只會安靜地重裝一次 foundry,或者安靜地不清磁碟直到幾週後滿掉。
