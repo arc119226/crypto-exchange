@@ -118,7 +118,7 @@ spec:
             - name: admin
               containerPort: 8082
             {{- end }}
-          {{- if or $singleton (eq $role "stream") (eq $role "worker") }}
+          {{- if ne (include "exchange.answersAtOnce" $role) "true" }}
           startupProbe:
             httpGet: { path: /readyz, port: ops }
             periodSeconds: 5

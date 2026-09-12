@@ -7,9 +7,13 @@
 #   * It ships no Postgres, NATS or Redis for real use. With dev.enabled=true
 #     it renders throwaway single-replica copies on emptyDir, as Helm hooks,
 #     for a kind cluster (CI). Production points config.* at managed services.
-#   * engine, chain and signer never scale past one replica (the engine holds
-#     a database advisory lock, the chain role owns the scanner cursor and the
-#     hot-wallet nonce, the signer the keystore); the templates refuse more.
+#   * engine, chain, signer and admin never scale past one replica; the
+#     templates refuse more. The first three each own one piece of external
+#     state (a database advisory lock, the scanner cursor and the hot-wallet
+#     nonce, the keystore). admin is different: a webhook signing secret is
+#     shown exactly once, and the back-office UI holds it in one process's
+#     memory across a redirect, so a second process answering that redirect
+#     loses it permanently.
 
 image:
   repository: ghcr.io/arc119226/crypto-exchange
@@ -134,6 +138,9 @@ roles:
       limits: { memory: 512Mi }
   admin:
     enabled: true
+    # Not a default to tune: the chart refuses anything but 1, and renders
+    # this role Recreate rather than RollingUpdate. See exchange.isSingleton
+    # in templates/_helpers.tpl for what a second admin process loses.
     replicas: 1
     resources:
       requests: { cpu: 50m, memory: 128Mi }

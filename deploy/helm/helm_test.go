@@ -139,7 +139,7 @@ func TestChartInvariants(t *testing.T) {
 		assert.EqualValues(t, 37, path(d, "spec", "template", "spec", "terminationGracePeriodSeconds"), "%s: drain 2 + engine 10 + timeout 20 + 5", role)
 		strategy := path(d, "spec", "strategy", "type")
 		switch role {
-		case "engine", "chain", "signer":
+		case "engine", "chain", "signer", "admin":
 			assert.EqualValues(t, 1, path(d, "spec", "replicas"), "%s is a singleton", role)
 			assert.Equal(t, "Recreate", strategy, "%s never runs twice at once", role)
 		default:
@@ -189,9 +189,14 @@ func TestChartInvariants(t *testing.T) {
 	assert.Empty(t, byKind(docs, "Ingress"), "ingress is off by default")
 }
 
-func TestChartRefusesASecondEngine(t *testing.T) {
+// The singleton roles are refused a second replica by the templates rather
+// than by a note in values.yaml. admin is in the list for a reason unlike the
+// other three: it loses a webhook signing secret, permanently and silently,
+// when a second process answers the redirect that reveals it
+// (internal/admin/ui_webhooks.go, exchange.isSingleton in _helpers.tpl).
+func TestChartRefusesASecondSingleton(t *testing.T) {
 	helm := helmBinary(t)
-	for _, role := range []string{"engine", "chain", "signer"} {
+	for _, role := range []string{"engine", "chain", "signer", "admin"} {
 		cmd := exec.Command(helm, "template", "exchange", chartDir, "--set", "roles."+role+".replicas=2")
 		out, err := cmd.CombinedOutput()
 		require.Error(t, err, role)

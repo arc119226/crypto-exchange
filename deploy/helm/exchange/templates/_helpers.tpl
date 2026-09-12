@@ -61,9 +61,41 @@ a margin.
 {{- add .Values.shutdown.drainDelaySeconds 10 .Values.shutdown.timeoutSeconds 5 -}}
 {{- end -}}
 
-{{/* The singleton roles: one replica, Recreate. */}}
+{{/*
+The singleton roles: one replica, Recreate. deployment.yaml refuses more.
+
+engine, chain and signer are here because each owns one piece of external
+state that exactly one process may hold -- a database advisory lock, the
+scanner cursor and the hot-wallet nonce, the keystore.
+
+admin is here for a different reason and a worse failure. A webhook signing
+secret is shown exactly once (docs/webhooks.md), and the back-office UI
+carries it across the post-create redirect in a stash that lives in one
+process's memory (internal/admin/ui_webhooks.go). A second admin process
+serving that redirect finds nothing there, and the secret is stored encrypted
+with nothing able to produce it again: it is gone, while the page renders as
+though nothing happened. The Recreate strategy matters as much as the replica
+count for this one -- RollingUpdate runs two admin pods for a few seconds on
+every upgrade, which is the same bug through a narrower window.
+*/}}
 {{- define "exchange.isSingleton" -}}
-{{- if or (eq . "engine") (eq . "chain") (eq . "signer") -}}true{{- end -}}
+{{- if or (eq . "engine") (eq . "chain") (eq . "signer") (eq . "admin") -}}true{{- end -}}
+{{- end -}}
+
+{{/*
+Roles that answer as soon as the process is up, so a startup probe would only
+postpone the first readiness check. Every other role opens a database pool,
+joins NATS or waits on the engine before /readyz can pass, and wants the
+longer startup grace.
+
+This is deliberately its own list rather than "whatever is not a singleton".
+They are two different questions, and answering one with the other is exactly
+how the admin role silently acquired a startup probe the moment it was added
+to exchange.isSingleton -- caught by deploy/helm/helm_test.go, which asserts
+that api and admin answer at once.
+*/}}
+{{- define "exchange.answersAtOnce" -}}
+{{- if or (eq . "api") (eq . "admin") -}}true{{- end -}}
 {{- end -}}
 
 {{/* Where the mounted secrets live inside a pod. */}}
