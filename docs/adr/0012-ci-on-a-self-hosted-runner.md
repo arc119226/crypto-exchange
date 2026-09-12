@@ -222,10 +222,31 @@ Error:
 runs-on: ${{ (github.event_name == 'pull_request' && github.event.repository.private == false) && 'ubuntu-latest' || vars.CI_RUNNER || 'ubuntu-latest' }}
 ```
 
-**刻意不是「請記得把 `CI_RUNNER` 變數刪掉」。** 那是一個人要記得的設定;這是程式的性質,之後誰再把變數設回去也重新打不開那扇門。合併到 main 與 `v*` tag 仍然吃 `CI_RUNNER`——只有推得動 main 的人才觸發得了,程式本來就是可信的。
+(這一版只切 `pull_request`。下面第四點把它收斂成整個倉庫跟著可見性走,現行的式子在那裡。)
 
-**`.private == false` 那一半是實測換來的,不是嚴謹過頭。** 第一版把所有 pull request 無條件釘在托管 runner 上,結果每個托管 job 在三秒內失敗、沒有任何 log,而同一次推送裡仍然跑在 MSI 上的 `docs` 正常通過——那是額度用盡的特徵,也正是本文第一節那張表在講的事(3.2 天 2,492 計費分鐘 / 每月 3,000)。所以這個開關跟著**可見性**走而不是靠人在對的那一天扳:私有時繼續用那台機器(看不到的倉庫沒有人 fork 得了,而且只有協作者開得了 PR),公開的那一刻每個 pull request 自己改走托管,那裡的分鐘免費且不計量。
+**刻意不是「請記得把 `CI_RUNNER` 變數刪掉」。** 那是一個人要記得的設定;這是程式的性質,之後誰再把變數設回去也重新打不開那扇門。
+
+**`.private == false` 那一半是實測換來的,不是嚴謹過頭。** 第一版把所有 pull request 無條件釘在托管 runner 上,結果每個托管 job 在三秒內失敗、沒有任何 log,而同一次推送裡仍然跑在 MSI 上的 `docs` 正常通過——那是額度用盡的特徵,也正是本文第一節那張表在講的事(3.2 天 2,492 計費分鐘 / 每月 3,000)。所以這個開關跟著**可見性**走而不是靠人在對的那一天扳:私有時繼續用那台機器(看不到的倉庫沒有人 fork 得了,而且只有協作者開得了 PR),公開的那一刻自己改走托管,那裡的分鐘免費且不計量。
 
 同一條式子也套進 `docs.yml` 與新的 `dco.yml`。`docs.yml` 尤其要:它沒有 `if`、沒有 `needs`、沒有任何閘門,所以公開之後它會是 fork 把程式送上自建 runner 最便宜的一條路——一個只改 markdown 的 pull request。
 
 **三、決定 2 的那個代理被這次改動弄壞,一起修了。** 本文「留下來的一件事」記著:步驟層用 `vars.CI_RUNNER != ''` 當作「這個 job 在自建機器上」的代理,只有在 `runs-on` 就是那個開關時才成立。現在不成立了。17 處步驟條件收斂成 workflow 層的一個 `SELF_HOSTED`,而且 `checks` 印出它解析後的值——這類條件算錯不會紅,只會安靜地重裝一次 foundry,或者安靜地不清磁碟直到幾週後滿掉。
+
+**四、2026-09-12 收斂:開關從「只切 pull request」變成「整個倉庫跟著可見性」。**
+
+第一版只把 `pull_request` 切走,合併到 main 與 `v*` tag 不論公開與否都留在那台機器上。當時的理由成立:那兩者只有推得動 main 的人觸發得了,跑的是已經合併的程式,沒有不可信程式碼的問題,而機器比較快。
+
+推翻它的是兩件事:
+
+- **公開之後那台機器只買到速度。** 公開倉庫的托管分鐘免費且不計量,所以它省的不是錢,是約 13 分鐘牆鐘(兩台自建 17m21 對托管 31 分,見上面的表)。
+- **而留著它會讓 `release` 的釘死變成半套。** `release` 寫死 `runs-on: ubuntu-latest`,理由正是本文的原則「發布不該依賴一台家用機器有沒有開著」。但它 `needs: [image, helm, e2e]`,而那三個當時都在機器上——**推一個 `v*` tag 時機器沒開,那三個會排隊到 `timeout-minutes` 逾時,release 根本走不到。** 那個釘死保護的只有最後一步,而卡住發布的是前三步。
+
+所以 `runs-on` 收斂成只看可見性,不再看事件種類:
+
+```yaml
+runs-on: ${{ github.event.repository.private == false && 'ubuntu-latest' || vars.CI_RUNNER || 'ubuntu-latest' }}
+```
+
+`SELF_HOSTED` 同步成 `vars.CI_RUNNER != '' && github.event.repository.private != false`,而且是精確的鏡像:六種組合(私有 / 公開 / payload 缺 `repository`,乘上變數有值 / 無值)逐一模擬過,`SELF_HOSTED` 為真的情況與 `runs-on` 解析成 `CI_RUNNER` 的情況完全重合。用 `!= false` 而不是 `== true`,是因為 `repository` 缺席時 `private` 是 null 而 `runs-on` 會落回 `CI_RUNNER`——兩邊必須對同一種 null 做同一件事,否則就是第三點剛修好的那種安靜的不一致。
+
+**代價:公開之後那台機器完全閒置。** 這是接受的——它的價值本來就只剩速度,而一台沒有人需要開著的機器,也就沒有「忘了開」這個故障模式。`CI_RUNNER` 變數不必刪:公開時它不起作用,留著是為了萬一轉回私有時自己接回去。

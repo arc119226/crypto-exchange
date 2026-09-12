@@ -480,10 +480,12 @@ echo '$nrconf{override_rc}{qr(^actions\.runner\..*\.service$)} = 0;' | \
 `.github/workflows/ci.yml` 裡每個 job 寫的是:
 
 ```yaml
-runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+runs-on: ${{ github.event.repository.private == false && 'ubuntu-latest' || vars.CI_RUNNER || 'ubuntu-latest' }}
 ```
 
-也就是:**有設變數就用你的機器,沒設就用 GitHub 的。** 開關只是一個倉庫變數:
+讀法是兩層。第一層是**倉庫可見性**:公開的倉庫一律走 GitHub 托管,不看變數——理由見第 11 節,那不是偏好而是這條式子存在的原因。第二層才是這個變數:**私有倉庫有設變數就用你的機器,沒設就用 GitHub 的。**
+
+所以這個開關**跟著可見性自己切,不用在翻開關那天改任何設定**;而且翻回私有它也自己切回來。變數在公開之後不必刪——那時它不起作用,留著是為了萬一再轉回私有。開關本身只是一個倉庫變數:
 
 > **Settings** → **Secrets and variables** → **Actions** → **Variables** 分頁 → **New repository variable**
 >
@@ -508,7 +510,9 @@ runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
 
 (同一區塊還有 "Send write tokens to workflows from pull requests"、"Send secrets to workflows from pull requests"、"Require approval for fork pull request workflows",要關的是第一個。)
 
-GitHub 的官方警告是:「Self-hosted runners should almost never be used for public repositories, because any user can open pull requests against the repository and compromise the environment.」私有倉庫本來就只有協作者能觸發,但明確關掉比較安心。另外要記得 `pull_request_target` 觸發的 workflow 是在**基底分支**的脈絡下執行,而且**不受核准設定約束**——這個倉庫沒有用它,以後也別用。
+GitHub 的官方警告是:「Self-hosted runners should almost never be used for public repositories, because any user can open pull requests against the repository and compromise the environment.」私有倉庫本來就只有協作者能觸發,但明確關掉比較安心。
+
+**這個警告現在由程式擋住,不靠人記得。** 第 8 節那條 `runs-on` 的第一層就是倉庫可見性:公開的倉庫一律走托管,而且因為 `ci.yml` 用的是 `pull_request`(GitHub 執行的是 PR head 自己那份 workflow 檔),把判斷寫在式子裡才有意義——靠「記得刪掉 `CI_RUNNER`」是一個人要記得的設定,而且誰再設回去就重新打開那扇門。詳見 ADR-0012 的修訂段與 ADR-0014 決定 3。另外要記得 `pull_request_target` 觸發的 workflow 是在**基底分支**的脈絡下執行,而且**不受核准設定約束**——這個倉庫沒有用它,以後也別用。
 
 ---
 
@@ -1003,7 +1007,7 @@ for i in $(seq 1 20); do getent hosts ghcr.io >/dev/null && printf . || printf X
 修法是給 `helm` 自己的 tag(`crypto-exchange:ci-helm`)。看到類似的症狀時,先問的不是「這個 job 壞了嗎」,而是「這一輪還有誰在用同一個 daemon 上的同一個名字」。
 
 **Q: 想暫時全部回到 GitHub 的機器上。**
-刪掉倉庫變數 `CI_RUNNER`。一秒生效,不用改 code。
+刪掉倉庫變數 `CI_RUNNER`。一秒生效,不用改 code。倉庫轉成公開的話不必做這件事——那時每個 job 自己就走托管了(第 8 節)。
 
 **Q: 那 timeout 呢?**
 每個 job 都有 `timeout-minutes`(15~30 分鐘)。這在自己的機器上一樣重要:一個卡住的 job 會佔住三分之一的 runner 容量,直到有人發現。

@@ -44,9 +44,10 @@ jobs:
     # Same shape as ci.yml, and for the same reason: this workflow has no
     # `if`, no `needs` and no gate, so on a public repository it is the
     # cheapest way for a fork to get code onto a self-hosted runner --
-    # a markdown-only pull request. Public pull requests go hosted; while
-    # the repository is private, hosted minutes are the scarce thing.
-    runs-on: ${{ (github.event_name == 'pull_request' && github.event.repository.private == false) && 'ubuntu-latest' || vars.CI_RUNNER || 'ubuntu-latest' }}
+    # a markdown-only pull request. So it follows visibility like everything
+    # else: public goes hosted, private uses the machine, where the hosted
+    # minutes this project does not have are not spent.
+    runs-on: ${{ github.event.repository.private == false && 'ubuntu-latest' || vars.CI_RUNNER || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5

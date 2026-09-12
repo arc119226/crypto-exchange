@@ -30,11 +30,12 @@ jobs:
     # pull_request.user.login rather than github.actor: the actor changes when
     # a human re-runs the job, the pull request's author does not.
     if: github.event.pull_request.user.login != 'dependabot[bot]'
-    # A public repository's pull requests go hosted, because they can come
-    # from forks and a self-hosted runner has no business executing those.
-    # While the repository is private there are no forks and no spare
-    # hosted minutes, so it uses the machine. Same expression as ci.yml.
-    runs-on: ${{ (github.event_name == 'pull_request' && github.event.repository.private == false) && 'ubuntu-latest' || vars.CI_RUNNER || 'ubuntu-latest' }}
+    # Follows the repository's visibility: public goes hosted, because a pull
+    # request can come from a fork and a self-hosted runner has no business
+    # executing that; private uses the machine, where there are no forks and
+    # where the hosted minutes this project does not have are not spent. Same
+    # expression as ci.yml, which explains it in full.
+    runs-on: ${{ github.event.repository.private == false && 'ubuntu-latest' || vars.CI_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4

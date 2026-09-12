@@ -37,11 +37,13 @@
 
 這正是選 AGPL 時必須配 CLA 的原因,而 CLA 的成本是真的:要架 CLA assistant、寫一份協議、每個新貢獻者第一次 PR 多一道手續。對一個時間有限的維護者,那道手續會直接換算成更少的貢獻者。
 
-## 決定 3:fork 的 pull request 永遠跑在托管 runner 上,而且寫在程式裡
+## 決定 3:公開的倉庫一律跑在托管 runner 上,而且寫在程式裡
 
 `ci.yml` 用的是 `pull_request` 而非 `pull_request_target`,所以 GitHub 執行的是 PR head 自己那份 workflow 檔。公開之後任何人都能 fork、改寫 `runs-on`、刪光步驟、只留自己一行。詳見 ADR-0012 的修訂段。
 
-`runs-on` 因此對 `pull_request` 硬性指向 `ubuntu-latest`,而不是靠「記得把 `CI_RUNNER` 變數刪掉」。設定要人記得,程式不用。
+`runs-on` 因此跟著 `github.event.repository.private` 走,而不是靠「記得把 `CI_RUNNER` 變數刪掉」。設定要人記得,程式不用;而且誰之後再把變數設回去,也重新打不開那扇門。
+
+**這則決定當初只切 `pull_request`,後來收斂成整個倉庫。** 理由與代價記在 ADR-0012 的修訂段第四點——簡短版是:公開之後托管分鐘免費且不計量,所以那台機器只買到約 13 分鐘牆鐘,而把合併與 tag 留在上面會讓 `release` 那個「發布不該依賴一台家用機器」的釘死變成半套。
 
 ## 決定 4:合併到 main 跑完整的 pipeline
 
