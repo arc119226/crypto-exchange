@@ -48,7 +48,7 @@ KIND          ?= kind
 KIND_CLUSTER  ?= exchange
 KIND_IMAGE    := crypto-exchange:ci
 
-.PHONY: help tools gen gen-check fmt tidy tidy-check lint scripts-syntax check secrets-scan test docs-test test-fuzz test-integration e2e cover-money build image \
+.PHONY: help tools gen gen-check fmt tidy tidy-check lint scripts-syntax check notices secrets-scan test docs-test test-fuzz test-integration e2e cover-money build image \
 	    up up-single up-sepolia down down-sepolia logs logs-sepolia ps ps-sepolia reset infra-up run migrate seed artifacts compose-config contracts-test \
 	    gen-dev-secrets faucet totp-enroll trace loadgen web-gen web-check web-build web-e2e \
 	    helm-lint helm-template kind-up helm-e2e kind-down backup-drill \
@@ -100,6 +100,12 @@ lint: ## go vet + golangci-lint + gitleaks (all pinned in tools/go.mod)
 	$(GOTOOL) golangci-lint run ./...
 	$(MAKE) --no-print-directory secrets-scan
 
+# Regenerated rather than maintained: a hand-written attribution file drifts
+# the moment a dependency moves, and drifts silently. scripts/gen-notices.sh
+# explains why this is not go-licenses.
+notices: ## Regenerate THIRD-PARTY-NOTICES.md from the module cache
+	./scripts/gen-notices.sh
+
 tidy-check: ## Fail if go.mod / go.sum are not tidy (what CI asserts)
 	$(MAKE) --no-print-directory tidy
 	git diff --exit-code -- go.mod go.sum $(TOOLS_MOD) tools/go.sum
@@ -108,7 +114,7 @@ tidy-check: ## Fail if go.mod / go.sum are not tidy (what CI asserts)
 # milliseconds, and a syntax error found twelve minutes into a container run is
 # twelve minutes wasted.
 scripts-syntax: ## bash -n over every shell script CI parses
-	@for f in scripts/gen-dev-secrets.sh scripts/e2e.sh scripts/e2e-web.sh scripts/kind-secrets.sh \
+	@for f in scripts/gen-dev-secrets.sh scripts/gen-notices.sh scripts/e2e.sh scripts/e2e-web.sh scripts/kind-secrets.sh \
 	          scripts/helm-e2e.sh scripts/backup.sh scripts/restore-drill.sh scripts/gen-prod-secrets.sh \
 	          deploy/vm/bootstrap.sh; do \
 	  bash -n "$$f" || exit 1; \

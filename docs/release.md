@@ -13,7 +13,7 @@
 1. `needs: [image, helm, e2e]`:三個 image 已推上 ghcr(`image` job 在 push 事件推;tag 是 push 事件),chart 在 kind 上裝過並跑過 e2e,compose e2e 與備份演練通過。
 2. `helm package deploy/helm/exchange --version X.Y.Z --app-version vX.Y.Z` → `helm push` 到 `oci://ghcr.io/arc119226/charts`(chart 名 `exchange`)。
 3. **版本斷言**(DoD):`docker run ghcr.io/arc119226/crypto-exchange:X.Y.Z version --json` 的 `.version` 等於 `vX.Y.Z`;`helm show chart` 的 `appVersion` 等於 `vX.Y.Z`。任何一個不等,job 紅、不開 Release。
-4. `softprops/action-gh-release`:自動 release notes、附 chart 的 `.tgz` 與 `exchangectl` 的 linux/amd64、darwin/arm64 二進位。
+4. `softprops/action-gh-release`:自動 release notes,附七個檔案——chart 的 `.tgz`、`exchangectl` 的 linux/amd64 與 darwin/arm64 二進位、`SHA256SUMS`,以及 `LICENSE`、`NOTICE`、`THIRD-PARTY-NOTICES.md`。後三個是因為 Release 是一條獨立的散布管道:image 裡有的東西不會自動出現在這裡,而 `exchange` 靜態連結了 LGPL-3.0 的 go-ethereum 函式庫。
 
 ## 事前檢查(筆電)
 
@@ -43,7 +43,7 @@ make release-check TAG=v0.1.0
 | `release` 跑在哪 | GitHub 托管的機器,照第 1 節釘的——發布不依賴自建 runner |
 | 版本斷言 | 通過。它是**把已經推上去的 image 拉下來**跑 `version --json` 比對,不是拿本機 build 的結果推論 |
 | chart | `helm push` 成功,`appVersion` 等於 tag |
-| GitHub Release | 四個附件:chart 的 `.tgz`、`exchangectl` 的 linux-amd64 與 darwin-arm64、`SHA256SUMS` |
+| GitHub Release | 當時四個附件:chart 的 `.tgz`、`exchangectl` 的 linux-amd64 與 darwin-arm64、`SHA256SUMS`。開源之後變七個(加 `LICENSE`、`NOTICE`、`THIRD-PARTY-NOTICES.md`),所以下一次 tag 的數字會不一樣 |
 
 唯一一次紅燈是 `integration` 掉在一個 flaky 的 WebSocket 測試(慢速客戶端被斷線之後,連線數的斷言沒有等伺服器回收),重跑就過,**tag 沒有換**。那個競態已經修掉了;它出現在發布這一次,正好說明上面那張表為什麼要把「程式的問題」和「不是這個 commit 的問題」分開寫——在發布當下最不該做的事,就是花時間判斷一個紅燈是不是真的。
 

@@ -9,6 +9,10 @@ test/
 bin/
 dist/
 *.md
+# ...except the attribution for what is inside the image. build/Dockerfile
+# COPYs this into the final stage, and *.md above would otherwise keep it out
+# of the build context and fail the COPY.
+!THIRD-PARTY-NOTICES.md
 .env
 .env.*
 coverage.out
