@@ -219,9 +219,13 @@ Error:
 所以 `runs-on` 變成:
 
 ```yaml
-runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || vars.CI_RUNNER || 'ubuntu-latest' }}
+runs-on: ${{ (github.event_name == 'pull_request' && github.event.repository.private == false) && 'ubuntu-latest' || vars.CI_RUNNER || 'ubuntu-latest' }}
 ```
 
 **刻意不是「請記得把 `CI_RUNNER` 變數刪掉」。** 那是一個人要記得的設定;這是程式的性質,之後誰再把變數設回去也重新打不開那扇門。合併到 main 與 `v*` tag 仍然吃 `CI_RUNNER`——只有推得動 main 的人才觸發得了,程式本來就是可信的。
+
+**`.private == false` 那一半是實測換來的,不是嚴謹過頭。** 第一版把所有 pull request 無條件釘在托管 runner 上,結果每個托管 job 在三秒內失敗、沒有任何 log,而同一次推送裡仍然跑在 MSI 上的 `docs` 正常通過——那是額度用盡的特徵,也正是本文第一節那張表在講的事(3.2 天 2,492 計費分鐘 / 每月 3,000)。所以這個開關跟著**可見性**走而不是靠人在對的那一天扳:私有時繼續用那台機器(看不到的倉庫沒有人 fork 得了,而且只有協作者開得了 PR),公開的那一刻每個 pull request 自己改走托管,那裡的分鐘免費且不計量。
+
+同一條式子也套進 `docs.yml` 與新的 `dco.yml`。`docs.yml` 尤其要:它沒有 `if`、沒有 `needs`、沒有任何閘門,所以公開之後它會是 fork 把程式送上自建 runner 最便宜的一條路——一個只改 markdown 的 pull request。
 
 **三、決定 2 的那個代理被這次改動弄壞,一起修了。** 本文「留下來的一件事」記著:步驟層用 `vars.CI_RUNNER != ''` 當作「這個 job 在自建機器上」的代理,只有在 `runs-on` 就是那個開關時才成立。現在不成立了。17 處步驟條件收斂成 workflow 層的一個 `SELF_HOSTED`,而且 `checks` 印出它解析後的值——這類條件算錯不會紅,只會安靜地重裝一次 foundry,或者安靜地不清磁碟直到幾週後滿掉。

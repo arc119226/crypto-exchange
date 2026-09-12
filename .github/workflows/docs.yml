@@ -41,7 +41,12 @@ jobs:
   docs:
     name: docs
     timeout-minutes: 10
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    # Same shape as ci.yml, and for the same reason: this workflow has no
+    # `if`, no `needs` and no gate, so on a public repository it is the
+    # cheapest way for a fork to get code onto a self-hosted runner --
+    # a markdown-only pull request. Public pull requests go hosted; while
+    # the repository is private, hosted minutes are the scarce thing.
+    runs-on: ${{ (github.event_name == 'pull_request' && github.event.repository.private == false) && 'ubuntu-latest' || vars.CI_RUNNER || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5

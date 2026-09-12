@@ -18,10 +18,11 @@ permissions:
 jobs:
   dco:
     name: commits are signed off
-    # Pinned to a hosted runner rather than vars.CI_RUNNER on purpose. It reads
-    # git and nothing else, it runs on every pull request including from forks,
-    # and a self-hosted runner should not be executing fork branches at all.
-    runs-on: ubuntu-latest
+    # A public repository's pull requests go hosted, because they can come
+    # from forks and a self-hosted runner has no business executing those.
+    # While the repository is private there are no forks and no spare
+    # hosted minutes, so it uses the machine. Same expression as ci.yml.
+    runs-on: ${{ (github.event_name == 'pull_request' && github.event.repository.private == false) && 'ubuntu-latest' || vars.CI_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4

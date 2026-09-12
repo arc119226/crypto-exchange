@@ -64,10 +64,12 @@ on:
 
 # Where the jobs run.
 #
-# A pull request always runs on GitHub's hosted runners. That is not a
-# preference, it is the whole reason this expression is shaped the way it is.
+# A pull request on a PUBLIC repository always runs on GitHub's hosted runners.
+# That is not a preference, it is the whole reason this expression is shaped the
+# way it is -- and the `.private == false` half of it is not decoration either,
+# see the second note below.
 #
-# This repository is public, and `pull_request` (not `pull_request_target`)
+# Once public, `pull_request` (not `pull_request_target`)
 # means GitHub executes the workflow file from the pull request head -- the
 # contributor's copy. Anyone who forks can rewrite `runs-on`, delete every
 # step, and put one line of their own in its place. If that lands on a
@@ -80,6 +82,19 @@ on:
 # Pinning the pull_request case in the workflow -- rather than relying on the
 # CI_RUNNER variable being unset -- makes it a property of the code instead of
 # a setting someone has to remember. Setting CI_RUNNER again cannot re-arm it.
+#
+# Why it is gated on `.private == false` rather than pinning every pull request:
+# while the repository is private, hosted minutes are the thing this project
+# does not have. ADR-0012 measured 2,492 billable minutes over 3.2 days against
+# a 3,000/month allowance, which is why the self-hosted runner exists at all.
+# The first version of this expression pinned pull requests unconditionally and
+# every hosted job died in three seconds with no log -- the signature of an
+# exhausted allowance -- while docs.yml, still on the self-hosted runner,
+# passed. So the switch follows visibility instead of being thrown by hand:
+# private keeps using the machine (nobody can fork what they cannot see, and
+# only collaborators open pull requests), and the day the repository goes
+# public every pull request moves to hosted by itself, where the minutes are
+# free and unmetered. Nothing to remember on the day.
 #
 # Everything else (a merge to main, a `v*` tag) still honours CI_RUNNER:
 #
@@ -124,7 +139,7 @@ env:
   # it reinstalls foundry that is already there, or skips a disk prune until
   # the machine fills up weeks later. The checks job prints the resolved value
   # so a wrong answer shows up on the first run instead of eventually.
-  SELF_HOSTED: ${{ github.event_name != 'pull_request' && vars.CI_RUNNER != '' }}
+  SELF_HOSTED: ${{ vars.CI_RUNNER != '' && !(github.event_name == 'pull_request' && github.event.repository.private == false) }}
   # helm is not a Go module, so its pin lives here; kind's is on the helm job
   HELM_VERSION: v3.16.4
   # docker/build-push-action@v6 writes a job summary and uploads a
@@ -158,7 +173,7 @@ jobs:
   checks:
     name: checks
     timeout-minutes: 30
-    runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || vars.CI_RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ (github.event_name == 'pull_request' && github.event.repository.private == false) && 'ubuntu-latest' || vars.CI_RUNNER || 'ubuntu-latest' }}
     permissions:
       contents: read
     steps:
@@ -344,7 +359,7 @@ jobs:
     # function -- removed the implicit gate, and it needed to tolerate checks
     # being skipped on a merge to main. Nothing is skipped on main any more.
     if: ${{ success() && github.event_name == 'push' }}
-    runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || vars.CI_RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ (github.event_name == 'pull_request' && github.event.repository.private == false) && 'ubuntu-latest' || vars.CI_RUNNER || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -361,7 +376,7 @@ jobs:
     name: integration
     timeout-minutes: 30
     needs: [checks]
-    runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || vars.CI_RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ (github.event_name == 'pull_request' && github.event.repository.private == false) && 'ubuntu-latest' || vars.CI_RUNNER || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -386,7 +401,7 @@ jobs:
     name: e2e
     timeout-minutes: 25
     needs: [integration]
-    runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || vars.CI_RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ (github.event_name == 'pull_request' && github.event.repository.private == false) && 'ubuntu-latest' || vars.CI_RUNNER || 'ubuntu-latest' }}
     steps:
       # buildx keeps its instances -- and the pointer to the selected one -- in
       # $BUILDX_CONFIG, which defaults to ~/.docker/buildx. The two self-hosted
@@ -500,7 +515,7 @@ jobs:
     name: helm
     timeout-minutes: 25
     needs: [integration]
-    runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || vars.CI_RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ (github.event_name == 'pull_request' && github.event.repository.private == false) && 'ubuntu-latest' || vars.CI_RUNNER || 'ubuntu-latest' }}
     env:
       KIND_CLUSTER: exchange
     steps:
@@ -672,7 +687,7 @@ jobs:
     # query went unanswered and the resolver spent 17 seconds giving up. Fixed
     # on the machine, so this is back to the ordinary switch. ADR-0012
     # decision 1 has the elimination chain.
-    runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || vars.CI_RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ (github.event_name == 'pull_request' && github.event.repository.private == false) && 'ubuntu-latest' || vars.CI_RUNNER || 'ubuntu-latest' }}
     permissions:
       contents: read
       packages: write
