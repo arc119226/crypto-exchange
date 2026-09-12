@@ -1,0 +1,74 @@
+name: Bug report
+description: Something behaves differently from what the documentation says
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before filing, please check [`docs/limitations.md`](https://github.com/arc119226/crypto-exchange/blob/main/docs/limitations.md).
+        Several things that look like bugs are recorded decisions -- no security
+        audit, no KYC/AML, single engine instance, one chain per deployment,
+        per-IP rate limits collapsing behind a proxy, four performance targets
+        that are missed at saturation.
+
+        **Do not file anything security-sensitive here.** Anything that would let
+        someone move money they do not own, read another account's data, or
+        bypass authentication goes through
+        [`SECURITY.md`](https://github.com/arc119226/crypto-exchange/blob/main/SECURITY.md),
+        privately.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what did you expect instead
+      description: If a document says otherwise, link the line -- that is the most useful thing you can give us.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: How to reproduce
+      description: |
+        Ideally from a clean `make reset`, as numbered steps. If you have a failing
+        test, paste it -- a red test is the fastest possible bug report.
+      placeholder: |
+        1. make gen-dev-secrets && make up-single
+        2. ...
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Output of `exchange version` or `bin/exchange version --json`, or the commit you are on.
+    validations:
+      required: true
+  - type: dropdown
+    id: role
+    attributes:
+      label: Which role
+      description: One binary, `serve --role=<name>`. Pick the one that misbehaved; `all` if you ran it single-process.
+      options: [api, engine, chain, signer, stream, admin, worker, all, "not sure"]
+    validations:
+      required: true
+  - type: dropdown
+    id: how
+    attributes:
+      label: How are you running it
+      options:
+        - "make up-single (one process, anvil)"
+        - "make up (split containers)"
+        - "Helm chart"
+        - "compose.prod"
+        - "Sepolia"
+        - other
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: |
+        `make logs`, or `kubectl logs` for the chart. Please check for keys,
+        mnemonics and tokens before pasting -- the log lines around the signer
+        and the keystore are the ones to look at twice.
+      render: text
