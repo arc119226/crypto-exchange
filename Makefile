@@ -100,6 +100,21 @@ lint: ## go vet + golangci-lint + gitleaks (all pinned in tools/go.mod)
 	$(GOTOOL) golangci-lint run ./...
 	$(MAKE) --no-print-directory secrets-scan
 
+# Reachability-aware, which is the whole point: it reports a vulnerability only
+# when this code can actually call into it. Findings under "Module Results"
+# -- a module in the graph carries an advisory but nothing here reaches it --
+# are printed and do NOT affect the exit code, which is what makes this usable
+# as a gate: golang.org/x/crypto's openpgp advisory has "Fixed in: N/A", so a
+# gate that counted it would be red forever with nothing to do about it.
+#
+# Two things to know when it fails. It downloads the advisory database from
+# vuln.go.dev, so a network failure here is a network failure, not a defect
+# (this project has two DNS incidents on record -- ADR-0012). And the database
+# moves daily, so it can turn red on a pull request that changed nothing
+# related: that is accepted, not a bug. docs/adr/0015 has the reasoning.
+vuln: ## Report known vulnerabilities this code can actually reach (needs network)
+	$(GOTOOL) govulncheck ./...
+
 # Regenerated rather than maintained: a hand-written attribution file drifts
 # the moment a dependency moves, and drifts silently. scripts/gen-notices.sh
 # explains why this is not go-licenses.
@@ -134,7 +149,7 @@ scripts-syntax: ## bash -n over every shell script CI parses
 # lint and the kubeconform render when helm is not on PATH, while CI fails on
 # it, so a green run here can still meet a red `checks`: set HELM or install
 # helm to close that one.
-check: lint tidy-check scripts-syntax gen-check docs-test test cover-money compose-config web-check contracts-test ## Everything a PR must pass that runs without the Docker suites
+check: lint vuln tidy-check scripts-syntax gen-check docs-test test cover-money compose-config web-check contracts-test ## Everything a PR must pass that runs without the Docker suites
 	@echo "check: all green"
 
 # Scans git history, not the working tree. A --no-git scan walks everything on

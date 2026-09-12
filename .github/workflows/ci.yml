@@ -209,6 +209,20 @@ jobs:
         run: |
           make tidy
           git diff --exit-code -- go.mod go.sum tools/go.mod tools/go.sum
+      # Reachability-aware, so it is red only when this code can actually call
+      # into the vulnerable symbol; a module in the graph carrying an advisory
+      # nothing here reaches is printed and does not fail (proved against
+      # golang.org/x/crypto's openpgp advisory, whose "Fixed in" is N/A -- a
+      # gate that counted that would be red forever with nothing to do).
+      #
+      # Two failures here are not defects in the pull request. It downloads the
+      # advisory database from vuln.go.dev, so a network error is a network
+      # error (ADR-0012 records two DNS incidents on this machine). And the
+      # database moves daily, so a pull request that changed nothing related
+      # can go red when a new advisory lands on a path this code reaches: that
+      # is the accepted cost of a blocking gate, reasoned about in ADR-0015.
+      - name: known vulnerabilities
+        run: make vuln
       - name: dev scripts parse
         # e2e.sh is checked here rather than only by the e2e job: this takes
         # milliseconds, and a syntax error found twelve minutes into a
