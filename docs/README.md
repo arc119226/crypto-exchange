@@ -445,7 +445,7 @@ make infra-up && make migrate && make seed && make run ROLE=api
 
 | 文件 | 內容 |
 |---|---|
-| [`docs/adr/`](adr/) | ADR-0000 需求訪談決策(8 輪 32 題);ADR-0001~0014 架構決策(單體、真相來源、租戶、數值、帳本、認證、簽名、工具鏈、beta 形態與備份政策、介面語言與新手 README、營收模型與主網路線、CI 跑在自建 runner、三種讀者的文件、以 Apache-2.0 開源) |
+| [`docs/adr/`](adr/) | ADR-0000 需求訪談決策(8 輪 32 題);ADR-0001~0015 架構決策(單體、真相來源、租戶、數值、帳本、認證、簽名、工具鏈、beta 形態與備份政策、介面語言與新手 README、營收模型與主網路線、CI 跑在自建 runner、三種讀者的文件、以 Apache-2.0 開源、漏洞掃描與 Dependabot) |
 | [`docs/domain.md`](domain.md) | 領域文件:科目表、分錄、狀態機、撮合語意的逐項驗算;各 Phase 程式碼與計畫的對應表與事後檢討 |
 | [`docs/changelog-by-phase.md`](changelog-by-phase.md) | 逐階段的變更記錄:每個 Phase 合併了什麼、**在那個 Phase 抓到什麼真缺陷、怎麼修的** |
 | [`docs/review/plan-review-2026-09.md`](review/plan-review-2026-09.md) | v0.1 規劃書審查報告(28 條合併後發現、不採納的意見、對 v1.0 的結構性要求) |

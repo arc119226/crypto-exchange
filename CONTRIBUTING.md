@@ -47,9 +47,15 @@ make check
 ```
 
 One command. It runs lint (including gitleaks over the whole history), the
-module tidiness assertion, shell syntax, the generated-code sync check, the
-documentation tests, unit and property tests with the race detector, the
-coverage gate, compose rendering, the front-end checks and the contracts.
+module tidiness assertion, a scan for known vulnerabilities, shell syntax,
+the generated-code sync check, the documentation tests, unit and property tests
+with the race detector, the coverage gate, compose rendering, the front-end
+checks and the contracts.
+
+It needs the network for one step: `make vuln` downloads the advisory database
+from `vuln.go.dev`. That step reports a vulnerability only where this code can
+actually reach it, so an advisory on a module nothing here calls is printed and
+does not fail.
 
 Two things it does **not** do, on purpose:
 
@@ -70,14 +76,14 @@ plus `dco`; a pull request that touches only markdown skips `ci.yml` entirely
 
 | Job | What it proves |
 |---|---|
-| `checks` | lint, secrets, generated code, unit and property tests, coverage, both binaries start, front end builds, contracts compile and pass |
+| `checks` | lint, secrets, known vulnerabilities, generated code, unit and property tests, coverage, both binaries start, front end builds, contracts compile and pass |
 | `integration` | real Postgres and NATS in containers: migrations, ledger, admin API, matching, the outbox relay |
 | `e2e` | the split deployment -- api, engine and admin in separate containers talking over NATS -- from an on-chain deposit through to a withdrawal, plus `kill -9` on the engine and a backup restore drill |
 | `helm` | installs the chart into a real kind cluster and runs an in-cluster end-to-end, then deletes the engine pod and checks the order book comes back identical |
 | `image` | the three images build and the binaries inside them actually run |
 | `fuzz-smoke` | `FuzzApply` against the matching engine; push only |
 | `release` | tag only |
-| `dco` | every commit in the pull request carries a `Signed-off-by` line (own workflow, always on GitHub's runners) |
+| `dco` | every commit in the pull request carries a `Signed-off-by` line (own workflow; Dependabot's pull requests are exempt, see `docs/adr/0015-vulnerability-scanning-and-dependabot.md`) |
 | `docs` | `make docs-test` on markdown-only pull requests, which `ci.yml` declines |
 
 ## Commits
