@@ -6,7 +6,9 @@
 
 ## 這是什麼
 
-一套**白牌交易所引擎**(white-label exchange engine)。「白牌」的意思是:引擎是我們寫的,品牌是客戶的。客戶拿去掛上自己的名字開一家交易所,不必自己重寫撮合、帳本、充提與後台。
+一套**開源的現貨交易所引擎**,Apache-2.0。拿去掛上自己的名字開一家交易所,不必自己重寫撮合、帳本、充提與後台。
+
+它原本的定位是「可授權給他人的白牌引擎商業化原型」。那個定位在 2026-09 開源時作廢了——Apache-2.0 之下任何人都可以拿走、閉源、掛自己的品牌賣,而那正是這個選擇的內容而不是它的副作用。理由寫在 ADR-0014。
 
 它包含一家交易所螢幕後面的那一整套:現貨撮合、複式記帳帳本、EVM 鏈上的充值與提現與歸集、行情推播、管理後台。
 
@@ -434,13 +436,16 @@ make infra-up && make migrate && make seed && make run ROLE=api
 | [`docs/system-overview.md`](system-overview.md) | **不看程式碼的系統總覽**:七個角色像哪些部門、錢與資料怎麼跑、CI 全綠代表什麼、以後怎麼擴充 |
 | [`docs/plan-v1.0.md`](plan-v1.0.md) | **分階段可執行計畫 v1.1**(定位、範圍、領域模型、契約、模組、選型、Phase 0~9、測試/CI、安全、觀測、部署、風險;v1.1 加 §22 v2 主網閘門、§23 營收模型。檔名維持 v1.0) |
 | [`docs/limitations.md`](limitations.md) | **這套軟體不做什麼、擋不住什麼、做不好什麼**(English)。plan §18 的英文版,並改正了已經被進度推翻的部分。四項效能目標的實測差距、單鏈對帳的邊界、代理後面限流會塌、admin 單副本假設,全部列在一頁上 |
+| [`LICENSE`](../LICENSE) | Apache-2.0。`NOTICE` 交代連進二進位的 LGPL-3.0 go-ethereum,`THIRD-PARTY-NOTICES.md`(由 `make notices` 產生)是 80 個模組的完整歸屬 |
+| [`CONTRIBUTING.md`](../CONTRIBUTING.md) | 怎麼參與(English):開 PR 之前跑 `make check`、commit 訊息慣例、DCO 的一行 sign-off、七個 CI job 各在證明什麼、什麼會被合併什麼會先被討論 |
+| [`CODE_OF_CONDUCT.md`](../CODE_OF_CONDUCT.md) | Contributor Covenant 2.1(English) |
 | [`SECURITY.md`](../SECURITY.md) | 漏洞回報管道,以及這個 repo 唯一一份**威脅模型**(English):內部服務互信、簽名金鑰是一個檔案、後台預期不對外、客戶端位址不被信任、營運人員被信任 |
 
 ### 設計與決策
 
 | 文件 | 內容 |
 |---|---|
-| [`docs/adr/`](adr/) | ADR-0000 需求訪談決策(8 輪 32 題);ADR-0001~0013 架構決策(單體、真相來源、租戶、數值、帳本、認證、簽名、工具鏈、beta 形態與備份政策、介面語言與新手 README、營收模型與主網路線、CI 跑在自建 runner、三種讀者的文件) |
+| [`docs/adr/`](adr/) | ADR-0000 需求訪談決策(8 輪 32 題);ADR-0001~0014 架構決策(單體、真相來源、租戶、數值、帳本、認證、簽名、工具鏈、beta 形態與備份政策、介面語言與新手 README、營收模型與主網路線、CI 跑在自建 runner、三種讀者的文件、以 Apache-2.0 開源) |
 | [`docs/domain.md`](domain.md) | 領域文件:科目表、分錄、狀態機、撮合語意的逐項驗算;各 Phase 程式碼與計畫的對應表與事後檢討 |
 | [`docs/changelog-by-phase.md`](changelog-by-phase.md) | 逐階段的變更記錄:每個 Phase 合併了什麼、**在那個 Phase 抓到什麼真缺陷、怎麼修的** |
 | [`docs/review/plan-review-2026-09.md`](review/plan-review-2026-09.md) | v0.1 規劃書審查報告(28 條合併後發現、不採納的意見、對 v1.0 的結構性要求) |

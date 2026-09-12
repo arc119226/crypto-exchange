@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/arc119226/crypto-exchange/security/advisories/new
+    about: Report privately, never as an issue. See SECURITY.md for the threat model first -- several things that look like findings are documented positions.
+  - name: Question about how something works
+    url: https://github.com/arc119226/crypto-exchange/blob/main/docs/README.md
+    about: The documentation index. docs/system-overview.md explains the whole thing without code; docs/domain.md works through every ledger entry and order state.

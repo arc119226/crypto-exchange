@@ -126,7 +126,8 @@ services:
   # deploy/compose/compose.prod.yaml expects an external store and only runs
   # this under --profile backup-local.
   minio:
-    image: minio/minio:RELEASE.2025-09-07T16-13-09Z
+    # quay.io, not Docker Hub -- build/backup/Dockerfile says why.
+    image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
     profiles: [backup]
     command: ["server", "/data", "--console-address", ":9001"]
     environment:

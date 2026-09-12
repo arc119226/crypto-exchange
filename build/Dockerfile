@@ -26,6 +26,10 @@ LABEL org.opencontainers.image.source="https://github.com/arc119226/crypto-excha
       org.opencontainers.image.revision="${COMMIT}" \
       org.opencontainers.image.created="${DATE}"
 COPY --from=build /out/exchange /out/exchangectl /
+# Apache-2.0 §4(a) wants the licence to travel with the work, and the LGPL
+# notice in NOTICE is about the go-ethereum libraries linked into /exchange --
+# so it belongs in the image that carries them, not only in the repository.
+COPY LICENSE NOTICE THIRD-PARTY-NOTICES.md /
 USER nonroot:nonroot
 EXPOSE 8080 8081 8082 9100
 # distroless has no shell: exec form only, and the binary must live at /exchange.

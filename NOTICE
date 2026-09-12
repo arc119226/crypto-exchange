@@ -1,0 +1,30 @@
+crypto-exchange
+Copyright 2026 The crypto-exchange Authors
+
+This product is licensed under the Apache License, Version 2.0. See LICENSE.
+
+--------------------------------------------------------------------------
+go-ethereum (LGPL-3.0)
+--------------------------------------------------------------------------
+
+The `exchange` binary, and the container images published from this
+repository, statically link libraries from go-ethereum
+(https://github.com/ethereum/go-ethereum), which are licensed under the GNU
+Lesser General Public License version 3.0. Only library packages are used --
+`common`, `core/types`, `crypto`, `ethclient` and the root package -- and
+nothing under go-ethereum's own `cmd/`, which carries GPL-3.0.
+
+The version linked is recorded in go.mod. Its complete corresponding source
+is available from the upstream repository at that version, and a copy of the
+LGPL-3.0 text ships alongside it there.
+
+`exchangectl` does not link go-ethereum and is Apache-2.0 throughout.
+
+--------------------------------------------------------------------------
+Everything else
+--------------------------------------------------------------------------
+
+The remaining dependencies are Apache-2.0, BSD, MIT, ISC or MPL-2.0. The
+full list, with versions and licence texts, is in THIRD-PARTY-NOTICES.md,
+which is generated from go.mod by `make notices` rather than maintained by
+hand.

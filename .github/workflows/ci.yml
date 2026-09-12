@@ -42,78 +42,78 @@ on:
       - '**/*.md'
       - 'docs/**'
 
-# What a merge to main runs, and why it is almost nothing.
+# A merge to main runs the full pipeline, the same as a pull request.
 #
-# This repository is developed one pull request at a time, from a branch cut
-# off the current main and merged as soon as it is green. Under that rule main
-# does not move between the branch point and the merge, so the merge commit's
-# tree is the pull request head's tree -- not equivalent, identical. Measured
-# on the last three merges: 45d3dc4d, 430e8ac9 and f768d745 each appear as
-# both the merge commit's tree and its second parent's.
+# It did not always. Until this repository was opened up, checks, integration,
+# e2e and helm carried `if: github.event_name != 'push' || github.ref !=
+# 'refs/heads/main'` and were skipped on every merge, on two premises that were
+# both true at the time and are both now false:
 #
-# So checks, integration and e2e on main re-test a tree that
-# passed minutes earlier, for about 28 billable minutes a merge. They are
-# skipped there. Two jobs are not, because they are the only things a merge
-# does that the pull request did not:
+#   Cost.        A private repository bills every hosted minute, and the
+#                skipped jobs were about 28 of them per merge. Public
+#                repositories get standard hosted runners free and unmetered,
+#                so the saving is zero.
+#   Correctness. The skip was only sound because one pull request was in
+#                flight at a time, which made the merge commit's tree identical
+#                to the pull request head's. Dependabot broke that first (#41);
+#                outside contributors end it entirely. A merge can now carry a
+#                combination no run has seen.
 #
-#   fuzz-smoke  the only place fuzzing runs at all; pull requests skip it
-#   image       its ghcr login and push steps are push-only
-#
-# Both keep their `needs`, with an `if` that accepts a skipped dependency --
-# without it the skip would cascade and the merge would run nothing.
-#
-# THE CONDITION THIS RESTS ON: one pull request in flight at a time. Merge a
-# second one while the first is open and the merge commit's tree stops
-# matching what CI saw, and nothing on main would test the combination. If
-# this repository ever gains concurrent branches, delete the five `if` lines
-# rather than reasoning about which merges are still safe. `git rev-parse
-# <merge>^{tree} <merge>^2^{tree}` is how to check whether the premise still
-# holds.
-#
-# THAT CONDITION IS NO LONGER THE MAINTAINER'S ALONE TO KEEP. Dependabot
-# security updates are enabled on this repository -- no .github/dependabot.yml
-# is needed for them -- and they open pull requests on their own schedule.
-# #41 was the first: branched from 1011275 and merged back into 1011275, so
-# the trees still matched, but only because nothing else happened to be open.
-# The next one can arrive while a branch is in flight, and then a merge to
-# main ships a combination no run ever saw. Tags are cut from main, so the
-# first untested main is also the first untested release.
-#
-# Two ways to close it, and they are not equivalent:
-#
-#   1. A ruleset on main requiring the checks, integration and e2e status
-#      checks AND "Require branches to be up to date before merging". The
-#      second half is the one that matters: it forces a pull request to
-#      contain current main and re-run before it can merge, which makes the
-#      tree equality above true again under concurrency. Costs nothing here,
-#      and needs no change to this file.
-#   2. Delete the five `if` lines and pay the full suite on every merge.
-#
-# Until one of them is in place, this block describes an assumption rather
-# than a guarantee.
-#
-# Tags are untouched: a release is verified on its own, in full.
+# Nothing replaces them. main gets the whole suite, and `v*` tags -- which are
+# cut from main -- are therefore cut from a tree that was actually tested.
 
 # Where the jobs run.
 #
-# This repository is private, so every minute of a GitHub-hosted runner is
-# billed. Measured over the first 3.2 days, 88 runs: 2,492 billable minutes,
-# which annualises to about 23,400 a month against a 3,000-minute allowance.
-# The arithmetic does not work at any optimisation level -- 810 runs a month
-# into 3,000 minutes is 3.7 minutes per run, and one `go build -race` plus a
-# testcontainers suite is already past that. So the default is a self-hosted
-# runner, and the workflow only needs a repository variable to say so:
+# A pull request on a PUBLIC repository always runs on GitHub's hosted runners.
+# That is not a preference, it is the whole reason this expression is shaped the
+# way it is -- and the `.private == false` half of it is not decoration either,
+# see the second note below.
+#
+# Once public, `pull_request` (not `pull_request_target`)
+# means GitHub executes the workflow file from the pull request head -- the
+# contributor's copy. Anyone who forks can rewrite `runs-on`, delete every
+# step, and put one line of their own in its place. If that lands on a
+# self-hosted runner it lands on a person's own machine: this project's runners
+# are two processes under one interactive WSL user who is in the `docker` group
+# (root-equivalent through `docker run -v /:/host`) on a Windows host with the
+# whole C: drive mounted at /mnt/c. GitHub says not to use self-hosted runners
+# with public repositories, and that is why.
+#
+# Pinning the pull_request case in the workflow -- rather than relying on the
+# CI_RUNNER variable being unset -- makes it a property of the code instead of
+# a setting someone has to remember. Setting CI_RUNNER again cannot re-arm it.
+#
+# Why it is gated on `.private == false` rather than pinning every pull request:
+# while the repository is private, hosted minutes are the thing this project
+# does not have. ADR-0012 measured 2,492 billable minutes over 3.2 days against
+# a 3,000/month allowance, which is why the self-hosted runner exists at all.
+# The first version of this expression pinned pull requests unconditionally and
+# every hosted job died in three seconds with no log -- the signature of an
+# exhausted allowance -- while docs.yml, still on the self-hosted runner,
+# passed. So the switch follows visibility instead of being thrown by hand:
+# private keeps using the machine (nobody can fork what they cannot see, and
+# only collaborators open pull requests), and the day the repository goes
+# public every pull request moves to hosted by itself, where the minutes are
+# free and unmetered. Nothing to remember on the day.
+#
+# Everything else (a merge to main, a `v*` tag) still honours CI_RUNNER:
 #
 #   Settings -> Secrets and variables -> Actions -> Variables
 #   CI_RUNNER = exchange-ci        (the label given to the runner)
 #
-# Unset the variable and every job falls back to ubuntu-latest, so a dead
-# VPS costs money rather than a red X, and recovery is one click with no
-# commit. docs/guides/self-hosted-runner.md has the machine setup.
+# Only people who can push to main can trigger those, so the code being run is
+# already trusted. Unset the variable and everything falls back to
+# ubuntu-latest, so a dead machine costs a slower run rather than a red X.
+# docs/guides/self-hosted-runner.md has the machine setup.
 #
-# release stays pinned to ubuntu-latest: it publishes to ghcr and cuts the
-# GitHub Release, it runs a handful of times a month, and a release should
-# not depend on one person's spare machine being awake.
+# What the self-hosted runner is still worth, now that public repositories get
+# hosted minutes free and unmetered: about 13 minutes of wall clock per run
+# (17m21 on two self-hosted runners against 31 minutes hosted, ADR-0012). It
+# saves time, not money. Retiring it entirely is a reasonable choice.
+#
+# release stays pinned to ubuntu-latest outright: it publishes to ghcr and cuts
+# the GitHub Release, and a release should not depend on one person's spare
+# machine being awake.
 
 # Every job carries a timeout-minutes about 2.5x its measured average. The
 # default is 360 minutes, and this workflow waits on things that have no upper
@@ -130,6 +130,16 @@ permissions:
   contents: read
 
 env:
+  # "is this job running on the self-hosted runner", in one place.
+  #
+  # Steps used to ask `vars.CI_RUNNER != ''` directly, which was a proxy for
+  # the same question and stopped being equivalent the moment runs-on started
+  # pinning pull requests to hosted runners. ADR-0012 called that proxy out as
+  # fragile before it broke. A step that gets this wrong does not fail loudly:
+  # it reinstalls foundry that is already there, or skips a disk prune until
+  # the machine fills up weeks later. The checks job prints the resolved value
+  # so a wrong answer shows up on the first run instead of eventually.
+  SELF_HOSTED: ${{ vars.CI_RUNNER != '' && !(github.event_name == 'pull_request' && github.event.repository.private == false) }}
   # helm is not a Go module, so its pin lives here; kind's is on the helm job
   HELM_VERSION: v3.16.4
   # docker/build-push-action@v6 writes a job summary and uploads a
@@ -163,10 +173,7 @@ jobs:
   checks:
     name: checks
     timeout-minutes: 30
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
-    # Not run on a merge to main -- see "what a merge to main runs" at the
-    # top of this file. Tags still run everything.
-    if: ${{ github.event_name != 'push' || github.ref != 'refs/heads/main' }}
+    runs-on: ${{ (github.event_name == 'pull_request' && github.event.repository.private == false) && 'ubuntu-latest' || vars.CI_RUNNER || 'ubuntu-latest' }}
     permissions:
       contents: read
     steps:
@@ -175,6 +182,12 @@ jobs:
           # make lint runs gitleaks over the whole history, so a shallow
           # checkout would silently scan almost nothing.
           fetch-depth: 0
+      - name: where this is running
+        # One line, so that SELF_HOSTED resolving to the wrong thing is visible
+        # in the log of every run rather than showing up as a machine that
+        # quietly stopped pruning its disk. See the env block at the top.
+        run: |
+          echo "event=${{ github.event_name }} self_hosted=${{ env.SELF_HOSTED }} runner=$RUNNER_NAME os=$RUNNER_OS"
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
@@ -186,7 +199,7 @@ jobs:
           # buys nothing and costs a minute of wall time per job. On a hosted
           # runner the VM is new every time and the cache is the only thing
           # standing between this job and a cold module download.
-          cache: ${{ vars.CI_RUNNER == '' }}
+          cache: ${{ env.SELF_HOSTED != 'true' }}
 
       # --- the cheap checks first: a failure here costs seconds, not minutes
 
@@ -201,7 +214,7 @@ jobs:
         # milliseconds, and a syntax error found twelve minutes into a
         # container run is twelve minutes wasted.
         run: |
-          for f in scripts/gen-dev-secrets.sh scripts/e2e.sh scripts/e2e-web.sh scripts/kind-secrets.sh scripts/helm-e2e.sh scripts/backup.sh scripts/restore-drill.sh scripts/gen-prod-secrets.sh deploy/vm/bootstrap.sh; do
+          for f in scripts/gen-dev-secrets.sh scripts/gen-notices.sh scripts/e2e.sh scripts/e2e-web.sh scripts/kind-secrets.sh scripts/helm-e2e.sh scripts/backup.sh scripts/restore-drill.sh scripts/gen-prod-secrets.sh deploy/vm/bootstrap.sh; do
             bash -n "$f"
           done
       - name: generated code is in sync (oapi-codegen, sqlc)
@@ -258,7 +271,7 @@ jobs:
         with:
           node-version: 22
           # see the note on setup-go above
-          cache: ${{ vars.CI_RUNNER == '' && 'npm' || '' }}
+          cache: ${{ env.SELF_HOSTED != 'true' && 'npm' || '' }}
           cache-dependency-path: web/trade/package-lock.json
       # the committed TypeScript client must match the OpenAPI document, and
       # the SPA must type-check and build; the browser smoke runs in e2e.
@@ -272,7 +285,7 @@ jobs:
         id: foundry
         run: echo "tag=$(sed -n 's/^FOUNDRY_TAG=//p' .env.example)" >> "$GITHUB_OUTPUT"
       - uses: foundry-rs/foundry-toolchain@v1
-        if: ${{ vars.CI_RUNNER == '' }}
+        if: ${{ env.SELF_HOSTED != 'true' }}
         with:
           version: ${{ steps.foundry.outputs.tag }}
       # A machine that already carries the pinned toolchain is not asked to
@@ -289,7 +302,7 @@ jobs:
       # assertion below enforces it now, and it fails loudly with the command
       # to run rather than quietly building against whatever is on the disk.
       - name: foundry is already on this machine
-        if: ${{ vars.CI_RUNNER != '' }}
+        if: ${{ env.SELF_HOSTED == 'true' }}
         run: |
           bin="$HOME/.foundry/bin"
           tag='${{ steps.foundry.outputs.tag }}'
@@ -339,10 +352,14 @@ jobs:
     name: fuzz-smoke
     timeout-minutes: 20
     needs: [checks]
-    # checks is skipped on a merge to main, and a skipped dependency would
-    # otherwise skip this too -- which is the one job the merge exists for.
-    if: ${{ !cancelled() && github.event_name == 'push' && (needs.checks.result == 'success' || needs.checks.result == 'skipped') }}
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    # An `if` with no status check function still gets an implicit `success()`,
+    # so this would be gated on checks either way; it is spelled out because
+    # the version this replaces was not, and had to name needs.checks.result by
+    # hand. That was necessary only because its `!cancelled()` -- a status check
+    # function -- removed the implicit gate, and it needed to tolerate checks
+    # being skipped on a merge to main. Nothing is skipped on main any more.
+    if: ${{ success() && github.event_name == 'push' }}
+    runs-on: ${{ (github.event_name == 'pull_request' && github.event.repository.private == false) && 'ubuntu-latest' || vars.CI_RUNNER || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -351,7 +368,7 @@ jobs:
           cache-dependency-path: |
             go.sum
             tools/go.sum
-          cache: ${{ vars.CI_RUNNER == '' }}
+          cache: ${{ env.SELF_HOSTED != 'true' }}
       - name: FuzzApply for 30s (docs/plan-v1.0.md §13.3)
         run: make test-fuzz FUZZ_TIME=30s
 
@@ -359,10 +376,7 @@ jobs:
     name: integration
     timeout-minutes: 30
     needs: [checks]
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
-    # Not run on a merge to main -- see "what a merge to main runs" at the
-    # top of this file. Tags still run everything.
-    if: ${{ github.event_name != 'push' || github.ref != 'refs/heads/main' }}
+    runs-on: ${{ (github.event_name == 'pull_request' && github.event.repository.private == false) && 'ubuntu-latest' || vars.CI_RUNNER || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -373,24 +387,21 @@ jobs:
             tools/go.sum
           # see the note on the checks job: a self-hosted runner already has
           # the module and build caches on its own disk
-          cache: ${{ vars.CI_RUNNER == '' }}
+          cache: ${{ env.SELF_HOSTED != 'true' }}
       - name: testcontainers (postgres, nats) — migrate, seed, registry API, ledger, admin API, trading engine, outbox relay
         env:
           CI: "true" # a missing Docker daemon fails instead of skipping
         run: make test-integration
       # a self-hosted runner keeps everything this job built; see the action
       - name: reclaim disk
-        if: ${{ always() && vars.CI_RUNNER != '' }}
+        if: ${{ always() && env.SELF_HOSTED == 'true' }}
         uses: ./.github/actions/reclaim-disk
 
   e2e:
     name: e2e
     timeout-minutes: 25
     needs: [integration]
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
-    # Not run on a merge to main -- see "what a merge to main runs" at the
-    # top of this file. Tags still run everything.
-    if: ${{ github.event_name != 'push' || github.ref != 'refs/heads/main' }}
+    runs-on: ${{ (github.event_name == 'pull_request' && github.event.repository.private == false) && 'ubuntu-latest' || vars.CI_RUNNER || 'ubuntu-latest' }}
     steps:
       # buildx keeps its instances -- and the pointer to the selected one -- in
       # $BUILDX_CONFIG, which defaults to ~/.docker/buildx. The two self-hosted
@@ -418,7 +429,7 @@ jobs:
             tools/go.sum
           # see the note on the checks job: a self-hosted runner already has
           # the module and build caches on its own disk
-          cache: ${{ vars.CI_RUNNER == '' }}
+          cache: ${{ env.SELF_HOSTED != 'true' }}
       # api, engine and admin run as separate containers, so every order has
       # to travel over the NATS command bus to reach the engine. This is the
       # only job that exercises the split deployment (docs/plan-v1.0.md §13.3).
@@ -430,7 +441,7 @@ jobs:
         with:
           node-version: 22
           # see the note on the checks job
-          cache: ${{ vars.CI_RUNNER == '' && 'npm' || '' }}
+          cache: ${{ env.SELF_HOSTED != 'true' && 'npm' || '' }}
           cache-dependency-path: web/trade/package-lock.json
       # the stack from `make e2e` is still up (KEEP=1): register in the
       # browser, fund through the admin faucet, trade, watch both streams
@@ -453,7 +464,7 @@ jobs:
           # alone. Asking for the browser every run rather than skipping the
           # step entirely is deliberate: a runner whose cache was wiped heals
           # itself instead of going red.
-          PLAYWRIGHT_INSTALL_DEPS: ${{ vars.CI_RUNNER == '' && '1' || '0' }}
+          PLAYWRIGHT_INSTALL_DEPS: ${{ env.SELF_HOSTED != 'true' && '1' || '0' }}
         run: make web-e2e
       # the stack is still up: back it up into the compose MinIO, restore the
       # dump into a throwaway database, check it, and print the RTO
@@ -497,17 +508,14 @@ jobs:
         run: docker compose -f deploy/compose/compose.yaml --env-file .env --profile infra --profile app --profile backup down -v --remove-orphans || true
       # a self-hosted runner keeps everything this job built; see the action
       - name: reclaim disk
-        if: ${{ always() && vars.CI_RUNNER != '' }}
+        if: ${{ always() && env.SELF_HOSTED == 'true' }}
         uses: ./.github/actions/reclaim-disk
 
   helm:
     name: helm
     timeout-minutes: 25
     needs: [integration]
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
-    # Not run on a merge to main -- see "what a merge to main runs" at the
-    # top of this file. Tags still run everything.
-    if: ${{ github.event_name != 'push' || github.ref != 'refs/heads/main' }}
+    runs-on: ${{ (github.event_name == 'pull_request' && github.event.repository.private == false) && 'ubuntu-latest' || vars.CI_RUNNER || 'ubuntu-latest' }}
     env:
       KIND_CLUSTER: exchange
     steps:
@@ -526,13 +534,13 @@ jobs:
             tools/go.sum
           # see the note on the checks job: a self-hosted runner already has
           # the module and build caches on its own disk
-          cache: ${{ vars.CI_RUNNER == '' }}
+          cache: ${{ env.SELF_HOSTED != 'true' }}
       - name: read pinned foundry version
         id: foundry
         run: echo "tag=$(sed -n 's/^FOUNDRY_TAG=//p' .env.example)" >> "$GITHUB_OUTPUT"
       # kind-secrets.sh derives the throwaway hot wallet with cast
       - uses: foundry-rs/foundry-toolchain@v1
-        if: ${{ vars.CI_RUNNER == '' }}
+        if: ${{ env.SELF_HOSTED != 'true' }}
         with:
           version: ${{ steps.foundry.outputs.tag }}
       # A machine that already carries the pinned toolchain is not asked to
@@ -549,7 +557,7 @@ jobs:
       # assertion below enforces it now, and it fails loudly with the command
       # to run rather than quietly building against whatever is on the disk.
       - name: foundry is already on this machine
-        if: ${{ vars.CI_RUNNER != '' }}
+        if: ${{ env.SELF_HOSTED == 'true' }}
         run: |
           bin="$HOME/.foundry/bin"
           tag='${{ steps.foundry.outputs.tag }}'
@@ -663,7 +671,7 @@ jobs:
         run: kind delete cluster --name "$KIND_CLUSTER" || true
       # a self-hosted runner keeps everything this job built; see the action
       - name: reclaim disk
-        if: ${{ always() && vars.CI_RUNNER != '' }}
+        if: ${{ always() && env.SELF_HOSTED == 'true' }}
         uses: ./.github/actions/reclaim-disk
 
   image:
@@ -673,14 +681,13 @@ jobs:
     # Runs when integration passed, and when it was skipped because this is
     # a merge to main. A real integration failure still stops it, and
     # !cancelled() rather than always() so a cancelled run cannot publish.
-    if: ${{ !cancelled() && (needs.integration.result == 'success' || needs.integration.result == 'skipped') }}
     # This job spent 2026-09-09 pinned to ubuntu-latest on push events,
     # because the metadata step below could not reach api.github.com from the
     # self-hosted runner. The cause was DNS, not the network: one name's AAAA
     # query went unanswered and the resolver spent 17 seconds giving up. Fixed
     # on the machine, so this is back to the ordinary switch. ADR-0012
     # decision 1 has the elimination chain.
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ (github.event_name == 'pull_request' && github.event.repository.private == false) && 'ubuntu-latest' || vars.CI_RUNNER || 'ubuntu-latest' }}
     permissions:
       contents: read
       packages: write
@@ -827,7 +834,7 @@ jobs:
           cache-from: type=gha,scope=backup
       # a self-hosted runner keeps everything this job built; see the action
       - name: reclaim disk
-        if: ${{ always() && vars.CI_RUNNER != '' }}
+        if: ${{ always() && env.SELF_HOSTED == 'true' }}
         uses: ./.github/actions/reclaim-disk
 
   # A v* tag is a release (docs/release.md): the images are already on ghcr
@@ -854,7 +861,8 @@ jobs:
             tools/go.sum
           # see the note on the checks job: a self-hosted runner already has
           # the module and build caches on its own disk
-          cache: ${{ vars.CI_RUNNER == '' }}
+          # release always runs hosted (see runs-on), so always cache.
+          cache: true
       - uses: azure/setup-helm@v4
         with:
           version: ${{ env.HELM_VERSION }}
@@ -911,3 +919,6 @@ jobs:
             dist/exchange-*.tgz
             dist/exchangectl-*
             dist/SHA256SUMS
+            LICENSE
+            NOTICE
+            THIRD-PARTY-NOTICES.md

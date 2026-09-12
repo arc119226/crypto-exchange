@@ -1,0 +1,37 @@
+name: Idea or feature request
+description: Something the engine should be able to do and cannot
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please read [`docs/limitations.md`](https://github.com/arc119226/crypto-exchange/blob/main/docs/limitations.md)
+        first. A lot of what is missing is missing on purpose, and the file says
+        which: no external liquidity, no promotions, no multi-chain, no KYC, one
+        engine instance, single tenant.
+
+        That is not a no. It means the useful version of this issue argues with
+        the decision rather than reporting its consequence.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do that you cannot
+      description: The problem, not the solution. What were you building when you hit this?
+    validations:
+      required: true
+  - type: textarea
+    id: shape
+    attributes:
+      label: What would it look like
+      description: |
+        Rough is fine. If it touches money, say how it books -- the ledger is
+        double-entry and every posting has to balance, so "where does the other
+        side of this entry go" is the question that decides whether an idea is
+        cheap or expensive here.
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: Scope
+      options:
+        - label: I have read docs/limitations.md and this is not already listed there as a deliberate omission
+        - label: I would be willing to work on this

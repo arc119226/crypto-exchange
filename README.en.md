@@ -300,3 +300,26 @@ With that said, here is what protects you while you follow this guide:
 - The back office is bound to `127.0.0.1` only, so only your own computer can reach it.
 - The "money" here has no value. If you break something, `make reset`.
 - **Running an exchange is a regulated activity nearly everywhere.** Licensing, sanctions screening and Travel Rule reporting belong to whoever operates a deployment, not to this project.
+
+---
+
+## 8. License, and joining in
+
+Apache-2.0. See [`LICENSE`](LICENSE). You can use this commercially, change it,
+and ship it closed-source; you keep the patent grant in section 3, and you
+carry [`NOTICE`](NOTICE) along with it.
+
+One dependency is not permissive: the `exchange` binary statically links
+libraries from go-ethereum, which are LGPL-3.0. `NOTICE` says what that covers
+and `THIRD-PARTY-NOTICES.md` lists all 80 modules with their licence texts.
+
+If you want to change something, [`CONTRIBUTING.md`](CONTRIBUTING.md) has the
+whole loop: `make check` before you open a pull request, and `git commit -s` on
+every commit so it carries a Developer Certificate of Origin sign-off. There is
+no agreement to sign. Bug reports with a failing test are the easiest thing in
+the world to merge.
+
+Anything security-sensitive goes through [`SECURITY.md`](SECURITY.md) privately,
+never a public issue. [`docs/limitations.md`](docs/limitations.md) is worth
+reading before you file anything: a fair amount of what looks missing is missing
+on purpose.
